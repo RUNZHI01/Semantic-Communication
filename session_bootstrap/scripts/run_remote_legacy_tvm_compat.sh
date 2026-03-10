@@ -218,9 +218,19 @@ try:
         runtime.tensor = lambda arr, dev: runtime_ndarray.array(arr, dev)
     if artifact_path:
         lib = tvm.runtime.load_module(artifact_path)
+        type_key = getattr(lib, "type_key", "NA")
         dev = tvm.cpu(0)
-        relax.VirtualMachine(lib, dev)
-        print(f"[legacy-compat] probe_ok artifact={artifact_path} type_key={getattr(lib, 'type_key', 'NA')}")
+        try:
+            relax.VirtualMachine(lib, dev)
+        except AttributeError as err:
+            if "vm_load_executable" not in str(err):
+                raise
+            print(
+                f"[legacy-compat] probe_non_vm_executable artifact={artifact_path} "
+                f"type_key={type_key} reason=missing_vm_load_executable"
+            )
+        else:
+            print(f"[legacy-compat] probe_ok artifact={artifact_path} type_key={type_key}")
 except Exception:
     print(f"[legacy-compat] probe_failed artifact={artifact_path}", file=sys.stderr)
     traceback.print_exc()
