@@ -1,0 +1,5 @@
+session_bootstrap/logs/
+session_bootstrap/tmp/
+session_bootstrap/scripts/__pycache__/
+__pycache__/
+*.py[cod]
