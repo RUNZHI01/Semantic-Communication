@@ -271,6 +271,7 @@ BUILD_INPUT_DTYPE="${TUNE_INPUT_DTYPE:-float32}"
 BUILD_TOTAL_TRIALS="${TOTAL_TRIALS_OVERRIDE:-${TUNE_TOTAL_TRIALS:-0}}"
 BUILD_NUM_TRIALS_PER_ITER="${TUNE_NUM_TRIALS_PER_ITER:-64}"
 BUILD_MAX_TRIALS_PER_TASK="${TUNE_MAX_TRIALS_PER_TASK:-}"
+BUILD_OP_NAMES="${TUNE_OP_NAMES:-${FULL_HOTSPOT_TASKS:-}}"
 BUILD_RUNNER="${RUNNER_OVERRIDE:-${TUNE_RUNNER:-$DEFAULT_TUNE_RUNNER}}"
 BUILD_SESSION_TIMEOUT="${TUNE_SESSION_TIMEOUT:-120}"
 BUILD_TIMEOUT_SEC="${TUNE_TIMEOUT_SEC:-7200}"
@@ -471,6 +472,10 @@ if [[ -n "$BUILD_MAX_TRIALS_PER_TASK" ]]; then
   TUNE_CMD+=(--max-trials-per-task "$BUILD_MAX_TRIALS_PER_TASK")
 fi
 
+if [[ -n "$BUILD_OP_NAMES" ]]; then
+  TUNE_CMD+=(--op-names "$BUILD_OP_NAMES")
+fi
+
 log "step=rebuild_current_safe start"
 set +e
 run_with_optional_timeout "$BUILD_TIMEOUT_SEC" "${TUNE_CMD[@]}" 2>&1 | tee -a "$LOG_FILE"
@@ -506,7 +511,7 @@ import sys
 with open(sys.argv[1], 'r', encoding='utf-8') as infile:
     report = json.load(infile)
 
-for key in ("total_trials", "runner", "tuning_logs_dir"):
+for key in ("total_trials", "runner", "tuning_logs_dir", "task_summary_json"):
     value = report.get(key, "NA")
     if value in (None, ""):
         value = "NA"
@@ -516,6 +521,7 @@ PY
 TUNE_TOTAL_TRIALS="${TUNE_REPORT_META[0]:-NA}"
 TUNE_RUNNER="${TUNE_REPORT_META[1]:-NA}"
 TUNE_LOGS_DIR="${TUNE_REPORT_META[2]:-NA}"
+TASK_SUMMARY_PATH="${TUNE_REPORT_META[3]:-NA}"
 BUILD_SEARCH_MODE="baseline_seeded_rebuild_only"
 if [[ "$TUNE_TOTAL_TRIALS" =~ ^[0-9]+$ ]] && [[ "$TUNE_TOTAL_TRIALS" -gt 0 ]]; then
   BUILD_SEARCH_MODE="baseline_seeded_warm_start_incremental"
@@ -642,6 +648,7 @@ export TUNE_REPORT_PATH
 export TUNE_TOTAL_TRIALS
 export TUNE_RUNNER
 export TUNE_LOGS_DIR
+export TASK_SUMMARY_PATH
 export BUILD_SEARCH_MODE
 export BUILD_MODE_DESCRIPTION
 export LOCAL_SO_PATH
@@ -691,6 +698,7 @@ summary = {
         "output_dir": os.environ["OUTPUT_DIR_VAL"],
         "tune_report": os.environ["TUNE_REPORT_PATH"],
         "tuning_logs_dir": os.environ["TUNE_LOGS_DIR"],
+        "task_summary_json": None if os.environ["TASK_SUMMARY_PATH"] == "NA" else os.environ["TASK_SUMMARY_PATH"],
         "total_trials": int(os.environ["TUNE_TOTAL_TRIALS"]) if os.environ["TUNE_TOTAL_TRIALS"].isdigit() else os.environ["TUNE_TOTAL_TRIALS"],
         "runner": os.environ["TUNE_RUNNER"],
         "search_mode": os.environ["BUILD_SEARCH_MODE"],
@@ -751,6 +759,7 @@ cat >"$SUMMARY_MD" <<EOF
 - output_dir: $OUTPUT_DIR_VAL
 - tune_report: $TUNE_REPORT_PATH
 - tuning_logs_dir: $TUNE_LOGS_DIR
+- task_summary_json: $TASK_SUMMARY_PATH
 - total_trials: $TUNE_TOTAL_TRIALS
 - runner: $TUNE_RUNNER
 - search_mode: $BUILD_SEARCH_MODE
