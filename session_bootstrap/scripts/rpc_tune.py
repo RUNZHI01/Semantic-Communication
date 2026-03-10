@@ -218,6 +218,27 @@ def log_task_stage_summary(task_stages):
         )
 
 
+def warn_on_task_filter(task_stages, op_names):
+    if not op_names:
+        return
+
+    raw_names = {row["task_name"] for row in task_stages[RAW_STAGE_NAME]["tasks"]}
+    tuned_names = {row["task_name"] for row in task_stages[TUNED_STAGE_NAME]["tasks"]}
+    missing = [name for name in op_names if name not in tuned_names]
+    if missing:
+        logger.warning(
+            "Selected op/task names are absent from the tuned stage: %s",
+            ",".join(missing),
+        )
+
+    if all(name in raw_names for name in op_names) and task_stages[TUNED_STAGE_NAME]["total_tasks"] > len(raw_names):
+        logger.warning(
+            "Selected op/task filter matches only the raw-import stage (%s). "
+            "Regenerate FULL_HOTSPOT_TASKS with extract_hotspot_tasks.py before the next real run.",
+            ",".join(op_names),
+        )
+
+
 def run_tune(mod, target, work_dir, runner, args):
     """Run MetaSchedule tuning via tune_relax."""
     from tvm.s_tir.meta_schedule.relax_integration import (  # pylint: disable=import-outside-toplevel
@@ -324,6 +345,7 @@ def main():
     raw_mod = load_onnx_to_relax(args.onnx_path, args.input_name, input_shape, args.input_dtype)
     mod, task_stages = summarize_task_stages(raw_mod, target)
     log_task_stage_summary(task_stages)
+    warn_on_task_filter(task_stages, parse_op_names(args.op_names))
     task_summary_path = write_task_summary(output_dir, task_stages, args)
 
     if args.runner == "rpc":
