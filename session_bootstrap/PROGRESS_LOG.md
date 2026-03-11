@@ -1,6 +1,6 @@
 # Session Progress Log（长期维护）
 
-- 最后更新：2026-03-11 08:37 +0800（baseline-vs-current-safe 最终 inference compare 已成功落盘；根因确认为远端 current-safe `optimized_model.so` 漂移；inference 路径已加入 artifact SHA guard，并在飞腾派真实 current-safe smoke 中验证 `artifact_sha256_match=true`）
+- 最后更新：2026-03-11 12:09 +0800（首轮 nonzero-budget current incremental 已实际完成 `500 trials + rpc runner + 编译 + 上传`，新 artifact `1946b08e...` 已在飞腾派 safe runtime 跑通；正式 baseline-vs-current-safe rerun 显示 median 从 `1844.1 ms` 降到 `153.778 ms`，改善 `91.66%`）
 - 作用：沉淀“当前状态 + 失败经验 + 下一步最小执行方案”，避免重复踩坑。
 
 ## 1) 时间线（关键里程碑）
@@ -28,6 +28,7 @@
 | 2026-03-11 07:16 | baseline-vs-current-safe 最终 inference compare 恢复成功 | 先前 `failed_current` 的直接根因不是 payload runner 本身，而是远端 `jscc/tvm_tune_logs/optimized_model.so` 漂移；将飞腾派 current-safe 产物恢复为 2026-03-11 hotfix `.so` 后，对照 benchmark 成功落盘，baseline median `1832.1 ms`，current-safe median `2480.189 ms` | `session_bootstrap/reports/inference_compare_baseline_vs_currentsafe_final_20260311_024434.md` / `session_bootstrap/reports/inference_currentsafe_artifact_guard_handoff_20260311.md` |
 | 2026-03-11 07:56 | current-safe artifact SHA guard 真机验证成功 | inference current-safe 路径现会在远端执行前计算并校验 `optimized_model.so` SHA；飞腾派真实 smoke 已验证 `artifact_sha256=d8e801...` 且 `artifact_sha256_match=true`，说明后续远端 artifact 漂移会在 guard 边界直接 fail fast | `session_bootstrap/reports/inference_currentsafe_guard_validation_20260311_0756.md` / `session_bootstrap/scripts/run_remote_tvm_inference_payload.sh` / `session_bootstrap/scripts/run_inference_benchmark.sh` |
 | 2026-03-11 11:20 | baseline-seeded warm-start current incremental rerun 实际成功（失败原因为旧 SHA guard 配置） | 09:45 重启后的 nonzero-budget incremental rerun 已完成 `500 trials + rpc runner + 编译 + 上传`，生成新 current artifact `1946b08e...`；wrapper 最后 `rc=1` 是因为 env 仍固定旧 hotfix SHA `d8e801...`，并非调优或 runtime 本身失败。将 expected SHA 切到新产物后，current-safe 远端验证已成功 | `session_bootstrap/reports/phytium_baseline_seeded_warm_start_current_incremental_20260311_094548_resume.md` / `session_bootstrap/tmp/phytium_baseline_seeded_warm_start_current_incremental_20260311_094548/optimized_model.so` |
+| 2026-03-11 12:04 | 新 current incremental 产物正式 benchmark 突破成立 | 使用新 SHA `1946b08e...` 的正式 baseline-vs-current-safe rerun 已成功完成；baseline median `1844.1 ms`，current-safe median `153.778 ms`，delta `-1690.322 ms`，improvement `91.66%`。这说明当前已经从“恢复 current-safe 可运行”进入到“新 incremental 产物显著优于 baseline”的阶段 | `session_bootstrap/reports/inference_compare_baseline_vs_currentsafe_rerun_20260311_114828.md` / `session_bootstrap/reports/phytium_current_incremental_breakthrough_20260311.md` |
 
 ## 2) 已完成项 / 阻断项
 
@@ -45,7 +46,7 @@
   - current 已验证应走 `tvm310_safe + safe 0.24.dev0 runtime`。
 - **remote current-safe artifact 身份现在必须显式受控**：
   - 2026-03-11 的 `failed_current` 已确认由远端 `optimized_model.so` 漂移触发；
-  - 当前 inference 路径已支持 `INFERENCE_CURRENT_EXPECTED_SHA256`，且 safe env 默认已写入 hotfix SHA `d8e801eeb25a87d340311015fe475f00d0f324dacd88bd5936654d3eedd03cc6`；
+  - 当前 inference 路径已支持 `INFERENCE_CURRENT_EXPECTED_SHA256`，safe env 现默认跟踪最新 incremental 产物 SHA `1946b08e6cf20a1259fa43f9e849a06f50ae1230c08d4df7081fba1edae4c644`；
   - 若未来 intentional deploy 新 current-safe artifact，必须先记录新 SHA，再更新 env 后才可跑 benchmark。
 - **current compare 的旧结论需要继续收口**：
   - 2026-03-10 的两次 current-safe target compare 都是 `total_trials=0` rebuild-only；
@@ -84,8 +85,8 @@
 - **current 远端 Python/runtime**：
   - `REMOTE_TVM_PYTHON='env TVM_FFI_DISABLE_TORCH_C_DLPACK=1 LD_LIBRARY_PATH=/home/user/anaconda3/envs/tvm310_safe/lib/python3.10/site-packages/tvm_ffi/lib:/home/user/tvm_samegen_safe_20260309/build TVM_LIBRARY_PATH=/home/user/tvm_samegen_safe_20260309/build PYTHONPATH=/home/user/tvm_samegen_20260307/python:/home/user/anaconda3/envs/tvm310_safe/lib/python3.10/site-packages /home/user/anaconda3/envs/tvm310_safe/bin/python'`
 - **current artifact identity guard**：
-  - safe env 默认 expected SHA：`d8e801eeb25a87d340311015fe475f00d0f324dacd88bd5936654d3eedd03cc6`
-  - current-safe 实机 smoke 已验证：`artifact_sha256_match=true`
+  - safe env 默认 expected SHA：`1946b08e6cf20a1259fa43f9e849a06f50ae1230c08d4df7081fba1edae4c644`
+  - current-safe 实机 smoke / benchmark 已验证：`artifact_sha256_match=true`
 - **baseline runtime**：仍走 compat 路径，不要和 current-safe 混用
 - **current target compare 有效性规则**：
   - 只有在不同 target 产出不同 `optimized_model.so` hash 时，compare 才有效；
