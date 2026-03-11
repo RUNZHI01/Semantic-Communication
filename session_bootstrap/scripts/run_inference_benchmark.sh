@@ -21,6 +21,7 @@ Notes:
       INFERENCE_BASELINE_CMD, INFERENCE_CURRENT_CMD
       INFERENCE_REPEAT, INFERENCE_WARMUP_RUNS, INFERENCE_TIMEOUT_SEC
       INFERENCE_BASELINE_ARCHIVE, INFERENCE_CURRENT_ARCHIVE
+      INFERENCE_BASELINE_EXPECTED_SHA256
       INFERENCE_CURRENT_EXPECTED_SHA256
       EXECUTION_ID, INFERENCE_EXECUTION_ID, LOG_DIR, REPORT_DIR
       ALLOW_REPORT_OVERWRITE=1
@@ -152,6 +153,7 @@ EOF
   echo "inference_timeout_sec=$INFERENCE_TIMEOUT_SEC"
   echo "baseline_cmd=$INFERENCE_BASELINE_CMD"
   echo "current_cmd=$INFERENCE_CURRENT_CMD"
+  echo "baseline_expected_sha256=${INFERENCE_BASELINE_EXPECTED_SHA256:-NA}"
   echo "current_expected_sha256=${INFERENCE_CURRENT_EXPECTED_SHA256:-NA}"
 } >"$LOG_FILE"
 
@@ -363,6 +365,7 @@ write_report() {
 - inference_repeat: $INFERENCE_REPEAT
 - inference_warmup_runs: $INFERENCE_WARMUP_RUNS
 - inference_timeout_sec: $INFERENCE_TIMEOUT_SEC
+- baseline_expected_sha256_configured: ${INFERENCE_BASELINE_EXPECTED_SHA256:-NA}
 - current_expected_sha256_configured: ${INFERENCE_CURRENT_EXPECTED_SHA256:-NA}
 - baseline_load_ms: $baseline_load_ms
 - baseline_vm_init_ms: $baseline_vm_init_ms
