@@ -1,6 +1,6 @@
 # Session Progress Log（长期维护）
 
-- 最后更新：2026-03-11 15:45 +0800（Scheme A 公平 pure-inference compare 已在飞腾派真实跑成：baseline / current 同走 payload runner，baseline median `1829.28 ms`，current median `152.846 ms`，improvement `91.64%`；当前主要 caveat 已收敛为 baseline 输出 `249x249`、current 输出 `256x256` 的形状差异）
+- 最后更新：2026-03-11 17:02 +0800（Scheme A 公平 pure-inference compare 已在飞腾派真实跑成：baseline / current 同走 payload runner，baseline median `1829.28 ms`，current median `152.846 ms`，improvement `91.64%`；最新调查显示 `249x249` vs `256x256` 更可能来自 baseline 老 artifact/export 线本身，而不是 payload runner 改写输出）
 - 作用：沉淀“当前状态 + 失败经验 + 下一步最小执行方案”，避免重复踩坑。
 
 ## 1) 时间线（关键里程碑）
@@ -30,6 +30,7 @@
 | 2026-03-11 11:20 | baseline-seeded warm-start current incremental rerun 实际成功（失败原因为旧 SHA guard 配置） | 09:45 重启后的 nonzero-budget incremental rerun 已完成 `500 trials + rpc runner + 编译 + 上传`，生成新 current artifact `1946b08e...`；wrapper 最后 `rc=1` 是因为 env 仍固定旧 hotfix SHA `d8e801...`，并非调优或 runtime 本身失败。将 expected SHA 切到新产物后，current-safe 远端验证已成功 | `session_bootstrap/reports/phytium_baseline_seeded_warm_start_current_incremental_20260311_094548_resume.md` / `session_bootstrap/tmp/phytium_baseline_seeded_warm_start_current_incremental_20260311_094548/optimized_model.so` |
 | 2026-03-11 12:04 | 新 current incremental 产物正式 benchmark 突破成立 | 使用新 SHA `1946b08e...` 的正式 baseline-vs-current-safe rerun 已成功完成；baseline median `1844.1 ms`，current-safe median `153.778 ms`，delta `-1690.322 ms`，improvement `91.66%`。这说明当前已经从“恢复 current-safe 可运行”进入到“新 incremental 产物显著优于 baseline”的阶段 | `session_bootstrap/reports/inference_compare_baseline_vs_currentsafe_rerun_20260311_114828.md` / `session_bootstrap/reports/phytium_current_incremental_breakthrough_20260311.md` |
 | 2026-03-11 15:44 | Scheme A 公平 pure-inference compare 在飞腾派真实跑成 | baseline 与 current 已都走同一 payload runner；在公平 `load + VM init + main()` 口径下，baseline median `1829.28 ms`，current median `152.846 ms`，improvement `91.64%`。先前大幅加速结论因此得到强化，但仍需注明 baseline 输出 `249x249`、current 输出 `256x256` 的 output-shape caveat | `session_bootstrap/reports/inference_compare_scheme_a_fair_fixed_20260311_154243.md` / `session_bootstrap/reports/inference_compare_baseline_vs_currentsafe_scheme_a_20260311.md` |
+| 2026-03-11 17:02 | output-shape caveat 基本定位完成 | 最新调查显示 `249x249` vs `256x256` 最可能不是 payload runner 改写，也不是本地 local fixture 结论能否定的事情；更大的概率是**真实 baseline archive (`85d701...`) 本身就属于不同 legacy artifact/export 线**，而 current 两条已验证产物都稳定给出 `256x256`。因此这个 caveat 目前更像“baseline artifact lineage 差异”，不会推翻 current 在公平 payload 口径下显著更快的主结论 | `session_bootstrap/reports/inference_output_shape_caveat_investigation_20260311.md` |
 
 ## 2) 已完成项 / 阻断项
 
