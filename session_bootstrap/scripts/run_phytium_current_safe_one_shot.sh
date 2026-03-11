@@ -12,6 +12,15 @@ DEFAULT_REPEAT=10
 DEFAULT_WARMUP_RUNS=2
 DEFAULT_ENTRY=main
 DEFAULT_TUNE_RUNNER=local
+DEFAULT_REPORT_PREFIX="phytium_current_safe_one_shot"
+DEFAULT_REPORT_TITLE="Phytium Pi baseline-seeded current-safe one-shot summary"
+DEFAULT_START_LABEL="Phytium baseline-seeded current-safe one-shot started"
+DEFAULT_COMPLETE_LABEL="Phytium baseline-seeded current-safe one-shot complete."
+DEFAULT_INFERENCE_SECTION_TITLE="Safe Runtime Inference"
+DEFAULT_INFERENCE_RUNTIME_LABEL="TVM 0.24.dev0 safe path only"
+DEFAULT_MODE_LOG_DESCRIPTION="baseline-seeded warm-start current + safe runtime"
+DEFAULT_REBUILD_MODE_DESCRIPTION="baseline-seeded warm-start current rebuild-only + safe runtime"
+DEFAULT_INCREMENTAL_MODE_DESCRIPTION="baseline-seeded warm-start current incremental tuning + safe runtime"
 
 usage() {
   cat <<EOF
@@ -306,6 +315,15 @@ SAFE_REPEAT="${REPEAT_OVERRIDE:-$DEFAULT_REPEAT}"
 SAFE_WARMUP_RUNS="${WARMUP_OVERRIDE:-$DEFAULT_WARMUP_RUNS}"
 SAFE_DEVICE="${INFERENCE_DEVICE:-cpu}"
 BUILD_TARGET_NORMALIZED=""
+REPORT_PREFIX="${PHYTIUM_ONE_SHOT_REPORT_PREFIX:-$DEFAULT_REPORT_PREFIX}"
+REPORT_TITLE="${PHYTIUM_ONE_SHOT_REPORT_TITLE:-$DEFAULT_REPORT_TITLE}"
+START_LABEL="${PHYTIUM_ONE_SHOT_START_LABEL:-$DEFAULT_START_LABEL}"
+COMPLETE_LABEL="${PHYTIUM_ONE_SHOT_COMPLETE_LABEL:-$DEFAULT_COMPLETE_LABEL}"
+INFERENCE_SECTION_TITLE="${PHYTIUM_ONE_SHOT_INFERENCE_SECTION_TITLE:-$DEFAULT_INFERENCE_SECTION_TITLE}"
+INFERENCE_RUNTIME_LABEL="${PHYTIUM_ONE_SHOT_INFERENCE_RUNTIME_LABEL:-$DEFAULT_INFERENCE_RUNTIME_LABEL}"
+MODE_LOG_DESCRIPTION="${PHYTIUM_ONE_SHOT_MODE_LOG_DESCRIPTION:-$DEFAULT_MODE_LOG_DESCRIPTION}"
+REBUILD_MODE_DESCRIPTION="${PHYTIUM_ONE_SHOT_MODE_REBUILD_DESCRIPTION:-$DEFAULT_REBUILD_MODE_DESCRIPTION}"
+INCREMENTAL_MODE_DESCRIPTION="${PHYTIUM_ONE_SHOT_MODE_INCREMENTAL_DESCRIPTION:-$DEFAULT_INCREMENTAL_MODE_DESCRIPTION}"
 
 if [[ -n "$BUILD_TARGET_FROM_ENV" ]]; then
   BUILD_TARGET_NORMALIZED="$(normalize_target_json "$BUILD_TARGET_FROM_ENV")"
@@ -393,7 +411,7 @@ fi
 mkdir -p "$BUILD_LOG_DIR" "$BUILD_REPORT_DIR" "$SESSION_DIR/tmp"
 
 STAMP="$(date +%Y%m%d_%H%M%S)"
-REPORT_ID="${REPORT_ID_OVERRIDE:-phytium_current_safe_one_shot_${STAMP}}"
+REPORT_ID="${REPORT_ID_OVERRIDE:-${REPORT_PREFIX}_${STAMP}}"
 OUTPUT_DIR_VAL="$(resolve_path "${OUTPUT_DIR_OVERRIDE:-./session_bootstrap/tmp/${REPORT_ID}}")"
 LOG_FILE="$BUILD_LOG_DIR/${REPORT_ID}.log"
 REMOTE_PAYLOAD_LOG="$BUILD_LOG_DIR/${REPORT_ID}_remote_payload.log"
@@ -432,8 +450,8 @@ upload_remote_file() {
   fi
 }
 
-log "Phytium baseline-seeded current-safe one-shot started"
-log "mode=baseline-seeded warm-start current + safe runtime"
+log "$START_LABEL"
+log "mode=$MODE_LOG_DESCRIPTION"
 log "rebuild_env=$REBUILD_ENV"
 log "inference_env=$INFERENCE_ENV"
 log "target=$CURRENT_SAFE_TARGET"
@@ -526,9 +544,9 @@ BUILD_SEARCH_MODE="baseline_seeded_rebuild_only"
 if [[ "$TUNE_TOTAL_TRIALS" =~ ^[0-9]+$ ]] && [[ "$TUNE_TOTAL_TRIALS" -gt 0 ]]; then
   BUILD_SEARCH_MODE="baseline_seeded_warm_start_incremental"
 fi
-BUILD_MODE_DESCRIPTION="baseline-seeded warm-start current rebuild-only + safe runtime"
+BUILD_MODE_DESCRIPTION="$REBUILD_MODE_DESCRIPTION"
 if [[ "$BUILD_SEARCH_MODE" == "baseline_seeded_warm_start_incremental" ]]; then
-  BUILD_MODE_DESCRIPTION="baseline-seeded warm-start current incremental tuning + safe runtime"
+  BUILD_MODE_DESCRIPTION="$INCREMENTAL_MODE_DESCRIPTION"
 fi
 LOCAL_SO_SHA256="$(sha256sum "$LOCAL_SO_PATH" | awk '{print $1}')"
 LOCAL_SO_SIZE_BYTES="$(stat -c '%s' "$LOCAL_SO_PATH")"
@@ -674,6 +692,7 @@ export SAFE_REPEAT
 export SAFE_DEVICE
 export LOG_FILE
 export REMOTE_PAYLOAD_LOG
+export INFERENCE_RUNTIME_LABEL
 
 python3 - "$SUMMARY_JSON" <<'PY'
 import json
@@ -720,7 +739,7 @@ summary = {
         "database_tuning_record_json": os.environ["REMOTE_DB_TUNING_RECORD_PATH"] if os.environ["REMOTE_DB_UPLOAD_ENABLED"] == "1" else None,
     },
     "safe_runtime_inference": {
-        "runtime": "TVM 0.24.dev0 safe path",
+        "runtime": os.environ["INFERENCE_RUNTIME_LABEL"],
         "remote_tvm_python": os.environ["SAFE_REMOTE_TVM_PYTHON"],
         "input_shape": os.environ["BUILD_INPUT_SHAPE"],
         "input_dtype": os.environ["BUILD_INPUT_DTYPE"],
@@ -741,7 +760,7 @@ with open(summary_path, "w", encoding="utf-8") as outfile:
 PY
 
 cat >"$SUMMARY_MD" <<EOF
-# Phytium Pi baseline-seeded current-safe one-shot summary
+# $REPORT_TITLE
 
 - mode: $BUILD_MODE_DESCRIPTION
 - generated_at: $(date -Iseconds)
@@ -781,9 +800,9 @@ cat >"$SUMMARY_MD" <<EOF
 - remote_database_workload_json: $(if [[ "$REMOTE_DB_UPLOAD_ENABLED" -eq 1 ]]; then printf '%s' "$REMOTE_DB_WORKLOAD_PATH"; else printf 'NA'; fi)
 - remote_database_tuning_record_json: $(if [[ "$REMOTE_DB_UPLOAD_ENABLED" -eq 1 ]]; then printf '%s' "$REMOTE_DB_TUNING_RECORD_PATH"; else printf 'NA'; fi)
 
-## Safe Runtime Inference
+## $INFERENCE_SECTION_TITLE
 
-- runtime: TVM 0.24.dev0 safe path only
+- runtime: $INFERENCE_RUNTIME_LABEL
 - remote_tvm_python: $SAFE_REMOTE_TVM_PYTHON
 - remote_tvm_version: $REMOTE_TVM_VERSION
 - input_shape: $BUILD_INPUT_SHAPE
@@ -811,7 +830,7 @@ cat >"$SUMMARY_MD" <<EOF
 EOF
 
 cat <<EOF
-Phytium baseline-seeded current-safe one-shot complete.
+$COMPLETE_LABEL
   target:         $CURRENT_SAFE_TARGET
   total_trials:   $TUNE_TOTAL_TRIALS
   runner:         $TUNE_RUNNER

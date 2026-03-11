@@ -5,7 +5,7 @@
 
 ## 目录约定
 
-- `scripts/`：执行脚本（`run_quick.sh`、`run_full_placeholder.sh`、`run_hotspot_micro_benchmark.sh`、`summarize_to_daily.sh`、`check_rpc_readiness.sh`、`rpc_print_cmd_templates.sh`、`run_rpc_first_round.sh`、`rpc_tune.py`、`manage_rpc_services.sh`、`run_rpc_tune.sh`、`connect_phytium_pi.sh`）。  
+- `scripts/`：执行脚本（`run_quick.sh`、`run_full_placeholder.sh`、`run_hotspot_micro_benchmark.sh`、`summarize_to_daily.sh`、`check_rpc_readiness.sh`、`rpc_print_cmd_templates.sh`、`run_rpc_first_round.sh`、`rpc_tune.py`、`manage_rpc_services.sh`、`run_rpc_tune.sh`、`connect_phytium_pi.sh`、`run_phytium_baseline_style_current_rebuild.sh`）。
 - `templates/`：统一模板（日报、实验记录）。  
 - `logs/`：运行日志（按日期或执行ID分文件）。  
 - `reports/`：结构化结果输出（对比表、结论）。  
@@ -76,6 +76,23 @@ bash ./session_bootstrap/scripts/run_inference_benchmark.sh \
 - `run_inference_benchmark.sh` 现在既能解析 JSON payload，也能解析 legacy `tvm_002.py` 风格日志，例如：`批量推理时间（1 个样本）: 0.1129 秒`。
 - 因此 baseline 不是 Relax VM artifact 时，可以显式覆盖 `INFERENCE_BASELINE_CMD`，例如复用旧的 realcmd：
 
+### 飞腾派 baseline-style current rebuild-only 一键复现
+
+当你要用**更公平的 baseline-style payload 语义**来重建并验证 current（避免 legacy/current mixed 路径）时，可直接执行：
+
+```bash
+bash ./session_bootstrap/scripts/run_phytium_baseline_style_current_rebuild.sh
+```
+
+说明：
+- 默认会读取：
+  - `config/rpc_tune_rebuild_current_safe.recommended_cortex_a72_neon.2026-03-10.phytium_pi.env`
+  - `config/inference_compare_scheme_a_fair.2026-03-11.phytium_pi.env`
+- 语义：本地 rebuild current `.so` -> 上传到飞腾派 current archive -> 通过 `run_remote_tvm_inference_payload.sh --variant current` 跑 payload-symmetric inference -> 保存 summary。
+- wrapper 会强制校验 `INFERENCE_BASELINE_CMD` / `INFERENCE_CURRENT_CMD` 都指向 payload runner；如果 inference env 还在走 `run_remote_legacy_tvm_compat.sh`，会直接报错，避免脚本语义把 current 跑慢。
+- 该入口只接受 rebuild-only env（`TUNE_TOTAL_TRIALS=0`）；如需 nonzero-budget warm-start 增量调优，继续使用 `run_phytium_baseline_seeded_warm_start_current_incremental.sh`。
+- 默认 report/log 前缀是 `phytium_baseline_style_current_rebuild_*`；常用覆盖项仍包括 `--report-id`、`--repeat`、`--warmup-runs`、`--target`、`--remote-archive-dir`、`--upload-db`。
+
 ### 飞腾派 baseline-seeded current-safe rebuild-only 一键复现
 
 当你要复现**当前已验证的 baseline-seeded warm-start current rebuild-only + safe runtime**路径（只做 current，不碰 baseline/compat）时，可直接执行：
@@ -97,6 +114,7 @@ bash ./session_bootstrap/scripts/run_phytium_current_safe_one_shot.sh
   - `session_bootstrap/reports/<report_id>.md`
   - `session_bootstrap/reports/<report_id>.json`
 - summary 现在会显式落 `total_trials`、`runner`、`search_mode`，避免把这条 rebuild-only 路线误写成“真正独立 current”。
+- 这个入口保留的是既有 current-safe wrapper 语义；如果你需要 payload-symmetric 的 fair baseline-style current 重建入口，优先用 `run_phytium_baseline_style_current_rebuild.sh`。
 - 如需显式比较其他 **baseline-seeded current + safe runtime** target，可通过 `--target '<json>'` 覆盖。
 
 ### 飞腾派 baseline-seeded warm-start current 增量调优
