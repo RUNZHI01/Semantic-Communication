@@ -1,0 +1,234 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PYTHON_RUNNER_SOURCE="$SCRIPT_DIR/current_real_reconstruction.py"
+
+usage() {
+  cat <<'EOF'
+Usage:
+  run_remote_current_real_reconstruction.sh --variant <baseline|current>
+
+Notes:
+  - Runs a real reconstruction path analogous to the legacy JSCC tvm_002.py flow:
+      read latent input -> add channel noise -> VM decode -> write outputs
+  - Emits legacy per-sample latency lines plus a final JSON summary so
+    run_inference_benchmark.sh can parse timings directly.
+  - Supports `.pt` latent inputs for the real remote dataset and `.npz` / `.npy`
+    fallbacks for lightweight local validation.
+
+Required env:
+  REMOTE_MODE=ssh|local
+  REMOTE_TVM_PYTHON
+  REMOTE_INPUT_DIR
+  REMOTE_OUTPUT_BASE
+  REMOTE_SNR_BASELINE / REMOTE_SNR_CURRENT
+  REMOTE_BATCH_BASELINE / REMOTE_BATCH_CURRENT
+
+Artifact selection:
+  baseline -> REMOTE_BASELINE_ARTIFACT or INFERENCE_BASELINE_ARCHIVE or REMOTE_TVM_PRIMARY_DIR
+  current  -> REMOTE_CURRENT_ARTIFACT  or INFERENCE_CURRENT_ARCHIVE  or REMOTE_TVM_JSCC_BASE_DIR
+
+Optional env:
+  REMOTE_TORCH_PYTHONPATH
+  REMOTE_REAL_EXTRA_PYTHONPATH
+  INFERENCE_OUTPUT_PREFIX
+  INFERENCE_REAL_OUTPUT_PREFIX
+  INFERENCE_BASELINE_EXPECTED_SHA256
+  INFERENCE_CURRENT_EXPECTED_SHA256
+  INFERENCE_EXPECTED_SHA256
+EOF
+}
+
+VARIANT=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --variant)
+      VARIANT="${2:-}"
+      shift 2
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "ERROR: Unknown argument: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
+
+if [[ "$VARIANT" != "baseline" && "$VARIANT" != "current" ]]; then
+  echo "ERROR: --variant must be baseline or current." >&2
+  exit 1
+fi
+
+if [[ ! -f "$PYTHON_RUNNER_SOURCE" ]]; then
+  echo "ERROR: runner source not found: $PYTHON_RUNNER_SOURCE" >&2
+  exit 1
+fi
+
+require_var() {
+  local var_name="$1"
+  if [[ -z "${!var_name:-}" ]]; then
+    echo "ERROR: Missing required variable: $var_name" >&2
+    exit 1
+  fi
+}
+
+REMOTE_MODE_RAW="${REMOTE_MODE:-ssh}"
+REMOTE_MODE="$(printf '%s' "$REMOTE_MODE_RAW" | tr '[:upper:]' '[:lower:]')"
+if [[ "$REMOTE_MODE" != "ssh" && "$REMOTE_MODE" != "local" ]]; then
+  echo "ERROR: REMOTE_MODE must be ssh or local (got: $REMOTE_MODE_RAW)" >&2
+  exit 1
+fi
+
+require_var REMOTE_TVM_PYTHON
+require_var REMOTE_INPUT_DIR
+require_var REMOTE_OUTPUT_BASE
+
+if [[ "$REMOTE_MODE" == "ssh" ]]; then
+  for req in REMOTE_HOST REMOTE_USER REMOTE_PASS; do
+    require_var "$req"
+  done
+fi
+
+resolve_artifact_path() {
+  local explicit_path="$1"
+  local archive_dir="$2"
+  if [[ -n "$explicit_path" ]]; then
+    printf '%s\n' "$explicit_path"
+    return 0
+  fi
+  if [[ -n "$archive_dir" ]]; then
+    printf '%s/tvm_tune_logs/optimized_model.so\n' "$archive_dir"
+    return 0
+  fi
+  return 1
+}
+
+if [[ "$VARIANT" == "baseline" ]]; then
+  require_var REMOTE_SNR_BASELINE
+  require_var REMOTE_BATCH_BASELINE
+  REAL_SNR="$REMOTE_SNR_BASELINE"
+  REAL_BATCH="$REMOTE_BATCH_BASELINE"
+  REAL_ARTIFACT_PATH="$(resolve_artifact_path "${REMOTE_BASELINE_ARTIFACT:-}" "${INFERENCE_BASELINE_ARCHIVE:-${REMOTE_TVM_PRIMARY_DIR:-}}")" || {
+    echo "ERROR: Missing baseline artifact path. Set REMOTE_BASELINE_ARTIFACT or INFERENCE_BASELINE_ARCHIVE/REMOTE_TVM_PRIMARY_DIR." >&2
+    exit 1
+  }
+  REAL_EXPECTED_SHA256="${INFERENCE_BASELINE_EXPECTED_SHA256:-${INFERENCE_EXPECTED_SHA256:-}}"
+else
+  require_var REMOTE_SNR_CURRENT
+  require_var REMOTE_BATCH_CURRENT
+  REAL_SNR="$REMOTE_SNR_CURRENT"
+  REAL_BATCH="$REMOTE_BATCH_CURRENT"
+  REAL_ARTIFACT_PATH="$(resolve_artifact_path "${REMOTE_CURRENT_ARTIFACT:-}" "${INFERENCE_CURRENT_ARCHIVE:-${REMOTE_TVM_JSCC_BASE_DIR:-}}")" || {
+    echo "ERROR: Missing current artifact path. Set REMOTE_CURRENT_ARTIFACT or INFERENCE_CURRENT_ARCHIVE/REMOTE_TVM_JSCC_BASE_DIR." >&2
+    exit 1
+  }
+  REAL_EXPECTED_SHA256="${INFERENCE_CURRENT_EXPECTED_SHA256:-${INFERENCE_EXPECTED_SHA256:-}}"
+fi
+
+if ! [[ "$REAL_BATCH" =~ ^[0-9]+$ ]]; then
+  echo "ERROR: batch_size must be a non-negative integer (got: $REAL_BATCH)." >&2
+  exit 1
+fi
+
+if [[ -n "$REAL_EXPECTED_SHA256" ]] && ! [[ "$REAL_EXPECTED_SHA256" =~ ^[0-9A-Fa-f]{64}$ ]]; then
+  echo "ERROR: expected artifact sha256 must be 64 hex characters (got: $REAL_EXPECTED_SHA256)." >&2
+  exit 1
+fi
+
+OUTPUT_PREFIX="${INFERENCE_REAL_OUTPUT_PREFIX:-${INFERENCE_OUTPUT_PREFIX:-inference_real_reconstruction}}"
+REAL_OUTPUT_DIR="$REMOTE_OUTPUT_BASE/${OUTPUT_PREFIX}_${VARIANT}"
+REAL_EXTRA_PYTHONPATH="${REMOTE_REAL_EXTRA_PYTHONPATH:-${REMOTE_TORCH_PYTHONPATH:-}}"
+
+run_real_reconstruction() {
+  local runner_script
+  local rc=0
+  runner_script="$(mktemp)"
+  {
+    cat <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+SH
+    declare -p REMOTE_TVM_PYTHON REMOTE_INPUT_DIR REAL_OUTPUT_DIR REAL_SNR REAL_BATCH VARIANT REAL_ARTIFACT_PATH REAL_EXPECTED_SHA256 REAL_EXTRA_PYTHONPATH
+    cat <<'SH'
+
+remote_python="$REMOTE_TVM_PYTHON"
+input_dir="$REMOTE_INPUT_DIR"
+output_dir="$REAL_OUTPUT_DIR"
+snr="$REAL_SNR"
+batch_size="$REAL_BATCH"
+variant="$VARIANT"
+artifact_path="$REAL_ARTIFACT_PATH"
+expected_sha256="$REAL_EXPECTED_SHA256"
+extra_pythonpath="$REAL_EXTRA_PYTHONPATH"
+
+mkdir -p "$output_dir"
+
+if [[ -n "$extra_pythonpath" ]]; then
+  export PYTHONPATH="$extra_pythonpath${PYTHONPATH:+:$PYTHONPATH}"
+fi
+export PYTHONNOUSERSITE=1
+
+run_remote_python() {
+  local stdin_payload cmd arg rc=0
+  stdin_payload="$(mktemp)"
+  cat >"$stdin_payload"
+  cmd="$remote_python"
+  for arg in "$@"; do
+    cmd+=" $(printf '%q' "$arg")"
+  done
+  set +e
+  bash -c "$cmd" <"$stdin_payload"
+  rc=$?
+  set -e
+  rm -f "$stdin_payload"
+  return "$rc"
+}
+
+echo "[current-real] variant=$variant artifact=$artifact_path output_dir=$output_dir snr=$snr batch_size=$batch_size python=$remote_python"
+
+run_remote_python - \
+  --artifact-path "$artifact_path" \
+  --input-dir "$input_dir" \
+  --output-dir "$output_dir" \
+  --snr "$snr" \
+  --batch-size "$batch_size" \
+  --variant "$variant" \
+  --expected-sha256 "$expected_sha256" <<'PY'
+SH
+    cat "$PYTHON_RUNNER_SOURCE"
+    cat <<'SH'
+PY
+SH
+  } >"$runner_script"
+  chmod 700 "$runner_script"
+
+  if [[ "$REMOTE_MODE" == "ssh" ]]; then
+    set +e
+    bash "$SCRIPT_DIR/ssh_with_password.sh" \
+      --host "$REMOTE_HOST" \
+      --user "$REMOTE_USER" \
+      --pass "$REMOTE_PASS" \
+      --port "${REMOTE_SSH_PORT:-22}" \
+      -- \
+      bash -s \
+      <"$runner_script"
+    rc=$?
+    set -e
+    rm -f "$runner_script"
+    return "$rc"
+  fi
+
+  set +e
+  bash "$runner_script"
+  rc=$?
+  set -e
+  rm -f "$runner_script"
+  return "$rc"
+}
+
+run_real_reconstruction
