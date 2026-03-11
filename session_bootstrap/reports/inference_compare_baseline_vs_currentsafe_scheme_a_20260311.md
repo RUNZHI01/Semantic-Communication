@@ -1,6 +1,6 @@
 # Fair Scheme A Pure-Inference Compare Status
 
-- generated_at: 2026-03-11T13:38:00+08:00
+- generated_at: 2026-03-11T15:45:00+08:00
 - scope: Phytium Pi baseline vs current pure-inference comparison
 
 ## Scheme A implementation
@@ -11,6 +11,7 @@
   - `relax.VirtualMachine(...)` once
   - warmup runs
   - repeated `main()` calls
+- Baseline payload compatibility was extended so the runner falls back to `tvm.runtime.ndarray.array(...)` only when `tvm.runtime.tensor` is missing.
 - Dedicated remote env for this fair path:
   - `session_bootstrap/config/inference_compare_scheme_a_fair.2026-03-11.phytium_pi.env`
 - Benchmark harness now reports configured baseline/current SHA guards symmetrically.
@@ -27,42 +28,42 @@ Local validation was run with both baseline and current on the payload path usin
 - delta (`current - baseline`): `+1.311 ms`
 - result: the payload-vs-payload path itself does **not** create a large synthetic speed gap
 
-### 2. Real Phytium Pi attempt from this session
+### 2. Real Phytium Pi fair compare (successful)
 
-Attempted command:
+Successful report:
 
-```bash
-bash ./session_bootstrap/scripts/run_inference_benchmark.sh \
-  --env ./session_bootstrap/config/inference_compare_scheme_a_fair.2026-03-11.phytium_pi.env
-```
+- `session_bootstrap/reports/inference_compare_scheme_a_fair_fixed_20260311_154243.md`
 
-Artifacts:
+Key numbers:
 
-- report: `session_bootstrap/reports/inference_20260311_133750.md`
-- log: `session_bootstrap/logs/inference_20260311_133750.log`
+- baseline median: `1829.28 ms`
+- current median: `152.846 ms`
+- delta (`current - baseline`): `-1676.434 ms`
+- improvement: `91.64%`
 
-Observed blocker:
+Artifact identity:
 
-```text
-socket: Operation not permitted
-ssh: connect to host 100.121.87.73 port 22: failure
-```
+- baseline SHA: `85d701db0021c26412c3e5e08a4ca043470aaa01fb2d6792cb3b3b29e93bf849`
+- current SHA: `1946b08e6cf20a1259fa43f9e849a06f50ae1230c08d4df7081fba1edae4c644`
+- both matched their configured expected SHA
 
-This is a sandbox/network restriction in the current session, so the fair Pi medians were not collected here.
+## Interpretation
+
+- The large speedup is **not** just a side effect of comparing a legacy baseline script against a payload current script.
+- Under the fairer Scheme A design, the new current artifact still shows a very large gain over baseline on the actual Phytium Pi.
+- So the earlier `~91.66%` improvement is now materially reinforced rather than weakened.
+
+## Caveat
+
+The pure-inference outputs are not perfectly shape-matched between the two artifacts:
+
+- baseline output shape: `[1, 3, 249, 249]`
+- current output shape: `[1, 3, 256, 256]`
+
+This means Scheme A now fairly compares the execution framework (`load + VM init + main()` on both sides), but the two artifacts still represent slightly different compiled output shapes. So the result is much fairer than the earlier mixed-semantics report, yet still should be described as a **payload-symmetric runtime comparison with an output-shape caveat**, not a mathematically perfect like-for-like artifact comparison.
 
 ## Conclusion
 
-- The previous report at `session_bootstrap/reports/inference_compare_baseline_vs_currentsafe_rerun_20260311_114828.md` showed a very large gain, but that result mixed legacy baseline semantics with payload current semantics.
-- Under the fairer Scheme A design, that previous conclusion is **not yet confirmed** from this session because the real Pi run was blocked before baseline execution started.
-- The local apples-to-apples validation materially **weakens confidence** that the earlier `~91.66%` gain was a pure kernel-time effect of the current artifact alone.
-
-## Remaining step on an unrestricted host
-
-Run:
-
-```bash
-bash ./session_bootstrap/scripts/run_inference_benchmark.sh \
-  --env ./session_bootstrap/config/inference_compare_scheme_a_fair.2026-03-11.phytium_pi.env
-```
-
-Then use the resulting report/raw csv as the authoritative fair Scheme A Pi comparison.
+- Scheme A is now operational on the real Phytium Pi.
+- The fairer payload-vs-payload comparison still supports the main conclusion: the new incremental current artifact is dramatically faster than baseline.
+- The next refinement, if needed, is not to re-prove the speedup, but to understand and if necessary normalize the `249x249` vs `256x256` output-shape difference before treating this as the final publication-grade apples-to-apples number.
