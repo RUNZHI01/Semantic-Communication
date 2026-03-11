@@ -71,6 +71,8 @@ bash ./session_bootstrap/scripts/run_inference_benchmark.sh \
 - 默认通过 `run_remote_tvm_inference_payload.sh` 在远端执行：`load_module()` 一次、`relax.VirtualMachine(...)` 一次、warmup 若干次、正式推理若干次。
 - 默认比较 `REMOTE_TVM_PRIMARY_DIR`（baseline）和 `REMOTE_TVM_JSCC_BASE_DIR`（current）；也可用 `INFERENCE_BASELINE_ARCHIVE` / `INFERENCE_CURRENT_ARCHIVE` 覆盖。
 - 常用变量：`INFERENCE_REPEAT`、`INFERENCE_WARMUP_RUNS`、`INFERENCE_TIMEOUT_SEC`、`INFERENCE_ENTRY`。
+- current-safe 路径现在支持 `INFERENCE_CURRENT_EXPECTED_SHA256`（或更通用的 `INFERENCE_EXPECTED_SHA256`）做远端 `optimized_model.so` 身份校验；建议在飞腾派 current-safe benchmark / smoke 中始终带上它，避免远端 artifact 漂移后静默跑偏。
+- `run_remote_tvm_inference_payload.sh` 的 JSON payload 现在会显式输出 `artifact_path`、`artifact_sha256`、`artifact_sha256_expected`、`artifact_sha256_match`；`run_inference_benchmark.sh` 会把这些字段同步写进日志和最终 report。
 - `run_inference_benchmark.sh` 现在既能解析 JSON payload，也能解析 legacy `tvm_002.py` 风格日志，例如：`批量推理时间（1 个样本）: 0.1129 秒`。
 - 因此 baseline 不是 Relax VM artifact 时，可以显式覆盖 `INFERENCE_BASELINE_CMD`，例如复用旧的 realcmd：
 
@@ -87,6 +89,7 @@ bash ./session_bootstrap/scripts/run_phytium_current_safe_one_shot.sh
   - `config/rpc_tune_rebuild_current_safe.recommended_cortex_a72_neon.2026-03-10.phytium_pi.env`
   - `config/inference_tvm310_safe.2026-03-10.phytium_pi.env`
 - 默认使用推荐 target：`{"kind":"llvm","mtriple":"aarch64-linux-gnu","mcpu":"cortex-a72","mattr":["+neon"],"num-cores":4}`
+- `config/inference_tvm310_safe.2026-03-10.phytium_pi.env` 现在默认已写入 `INFERENCE_CURRENT_EXPECTED_SHA256`，用于保护飞腾派 current-safe 远端 artifact 身份；如果你 intentional deploy 了新的 current-safe `.so`，先更新 SHA 再跑。
 - 语义：复用历史 tuning DB，按 `total_trials=0` 做 rebuild-only warm-start current 基线，不是独立 fresh search line。
 - 执行顺序：本地 rebuild current `.so` -> 上传到飞腾派 current archive -> 远端 safe runtime one-shot inference -> 保存 summary
 - 默认输出：
@@ -109,6 +112,7 @@ bash ./session_bootstrap/scripts/run_phytium_baseline_seeded_warm_start_current_
   - `config/rpc_tune_current_safe.baseline_seeded_warm_start.recommended_cortex_a72_neon.2026-03-10.phytium_pi.env`
   - `config/inference_tvm310_safe.2026-03-10.phytium_pi.env`
 - 语义：复用同一份历史 tuning DB，但要求 `TUNE_RUNNER=rpc` 且 `TUNE_TOTAL_TRIALS>0`，然后沿用 current-safe 上传与 safe runtime 验证路径。
+- 因为 inference env 已带 `INFERENCE_CURRENT_EXPECTED_SHA256`，这个入口在最终 safe runtime 验证时也会受 artifact SHA guard 保护；若换了新的 current-safe `.so`，别忘了同步更新 expected SHA。
 - 默认增量预算来自 env（当前为 `500` trials），也可通过 `--total-trials <n>` 覆盖。
 - wrapper 会先尝试拉起 RPC 服务并执行 readiness；如你已确认服务在线，可用 `--skip-services` / `--skip-readiness` 缩短流程。
 - 该入口会把新的 `.so` 和更新后的 `tuning_logs` 一并部署到 remote current archive，再跑 safe runtime inference。
@@ -233,7 +237,12 @@ bash scripts/send_continue_hourly.sh --start-in-min 1 --count 8
 - 默认发送到 `main`，会继续复用 `oc-tui --session main` 的历史对话，而不是新开会话；
 - 可直接用 `--start-in-min 1` 表示从未来 1 分钟开始；
 - 默认每 20 分钟发一次带“最近对话锚点”的 `继续` 提示，尽量优先续接最新上下文；
+- 自动续跑生成的助手回复不会再被当成下一轮锚点，避免脚本自我续写；
+- 如果会话尾部自上次成功自动发送后完全没变化，脚本默认会先跳过 1 轮，再在下一轮重发一次；
+- 如需改成“上一轮完成后再进入下一轮”，可加：`--schedule-mode after-complete`；
+- 如果旧 sender 还占着锁，可直接加：`--replace-existing`，脚本会自动接管；
 - 可选：`--count 8` 表示只发 8 次，`--dry-run` 只打印计划不实际发送；
+- 可选：`--always-send` 恢复成每个定时点都强制发送；
 - 如需后台运行：
 
 ```bash
