@@ -1,6 +1,6 @@
 # Session Progress Log（长期维护）
 
-- 最后更新：2026-03-11 17:02 +0800（Scheme A 公平 pure-inference compare 已在飞腾派真实跑成：baseline / current 同走 payload runner，baseline median `1829.28 ms`，current median `152.846 ms`，improvement `91.64%`；最新调查显示 `249x249` vs `256x256` 更可能来自 baseline 老 artifact/export 线本身，而不是 payload runner 改写输出）
+- 最后更新：2026-03-11 21:23 +0800（新增两条需要严格区分的晚间结果：一条是 current-only Scheme B payload-symmetric compare，不含 baseline，rebuild-only current median `2479.246 ms`，incremental current median `152.36 ms`，improvement `93.85%`，speedup `16.272x`；另一条才是飞腾派真实端到端 reconstruction compare，baseline / current 各写出 `300` 张 PNG，baseline median `1830.3 ms/image`，current median `255.931 ms/image`，improvement `86.02%`）
 - 作用：沉淀“当前状态 + 失败经验 + 下一步最小执行方案”，避免重复踩坑。
 
 ## 1) 时间线（关键里程碑）
@@ -31,6 +31,8 @@
 | 2026-03-11 12:04 | 新 current incremental 产物正式 benchmark 突破成立 | 使用新 SHA `1946b08e...` 的正式 baseline-vs-current-safe rerun 已成功完成；baseline median `1844.1 ms`，current-safe median `153.778 ms`，delta `-1690.322 ms`，improvement `91.66%`。这说明当前已经从“恢复 current-safe 可运行”进入到“新 incremental 产物显著优于 baseline”的阶段 | `session_bootstrap/reports/inference_compare_baseline_vs_currentsafe_rerun_20260311_114828.md` / `session_bootstrap/reports/phytium_current_incremental_breakthrough_20260311.md` |
 | 2026-03-11 15:44 | Scheme A 公平 pure-inference compare 在飞腾派真实跑成 | baseline 与 current 已都走同一 payload runner；在公平 `load + VM init + main()` 口径下，baseline median `1829.28 ms`，current median `152.846 ms`，improvement `91.64%`。先前大幅加速结论因此得到强化，但仍需注明 baseline 输出 `249x249`、current 输出 `256x256` 的 output-shape caveat | `session_bootstrap/reports/inference_compare_scheme_a_fair_fixed_20260311_154243.md` / `session_bootstrap/reports/inference_compare_baseline_vs_currentsafe_scheme_a_20260311.md` |
 | 2026-03-11 17:02 | output-shape caveat 基本定位完成 | 最新调查显示 `249x249` vs `256x256` 最可能不是 payload runner 改写，也不是本地 local fixture 结论能否定的事情；更大的概率是**真实 baseline archive (`85d701...`) 本身就属于不同 legacy artifact/export 线**，而 current 两条已验证产物都稳定给出 `256x256`。因此这个 caveat 目前更像“baseline artifact lineage 差异”，不会推翻 current 在公平 payload 口径下显著更快的主结论 | `session_bootstrap/reports/inference_output_shape_caveat_investigation_20260311.md` |
+| 2026-03-11 19:53 | current-only Scheme B compare 首次落盘 | 这次 compare 的语义已明确为**仅 current 内部**的 payload-symmetric compare，不含 baseline；rebuild-only current SHA `2fcf773fa34d6aa69f80740ffedde33faaf265a045cae97b72022ae2c62a8449` median `2479.246 ms`，incremental current SHA `1946b08e6cf20a1259fa43f9e849a06f50ae1230c08d4df7081fba1edae4c644` median `152.36 ms`，delta `-2326.886 ms`，improvement `93.85%`，speedup `16.272x` | `session_bootstrap/reports/current_scheme_b_compare_20260311_195303.md` |
+| 2026-03-11 21:23 | 飞腾派真实端到端 reconstruction compare 跑成 | 本次 benchmark 语义已明确为真实端到端 reconstruction（read latent -> reconstruct -> write PNGs），不是 payload-only VM timing；baseline / current 输出目录各落 `300` 张 PNG，baseline median `1830.3 ms/image`、mean `1831.471 ms/image`，current median `255.931 ms/image`、mean `255.882 ms/image`，delta `-1574.369 ms/image`，improvement `86.02%` | `session_bootstrap/reports/inference_real_reconstruction_compare_run_20260311_212301.md` |
 
 ## 2) 已完成项 / 阻断项
 
@@ -40,6 +42,8 @@
 - ARMv8 真机参数模板与 runbook 完整：`config/`、`scripts/`、`runbooks/` 已打通。
 - realcmd 级 quick 已跑通：`status=success`，说明远端 Python/TVM/输入目录/输出目录链路可用。
 - full realcmd baseline 已成功执行，说明 `tvm_002.py + batch=1` 路径本身可运行。
+- current real reconstruction runner 已入库：`session_bootstrap/scripts/current_real_reconstruction.py`、`session_bootstrap/scripts/run_remote_current_real_reconstruction.sh` 与 `session_bootstrap/config/inference_real_reconstruction_compare.2026-03-11.phytium_pi.env` 已落盘；current 真实 reconstruction 入口现统一为 `session_bootstrap/scripts/run_remote_current_real_reconstruction.sh --variant current`。
+- 飞腾派真实端到端 reconstruction compare 已完成：baseline 输出目录为 `/home/user/Downloads/jscc-test/jscc/infer_outputs/inference_real_reconstruction_compare_run_20260311_212301_baseline/reconstructions`，current 输出目录为 `/home/user/Downloads/jscc-test/jscc/infer_outputs/inference_real_reconstruction_compare_run_20260311_212301_current/reconstructions`，两侧 file count 均为 `300`。
 
 ### 当前阻断项（P0）
 
@@ -53,6 +57,9 @@
 - **current compare 的旧结论需要继续收口**：
   - 2026-03-10 的两次 current-safe target compare 都是 `total_trials=0` rebuild-only；
   - stable/experimental 当时生成了相同 `optimized_model.so sha256`，所以这些 compare 现在必须视为 invalid，而不是“实验 target 有轻微快慢差异”的证据。
+- **payload-only 与 real reconstruction 结果不可混写**：
+  - `session_bootstrap/reports/current_scheme_b_compare_20260311_195303.md` 只比较 current 内部 rebuild-only SHA `2fcf773fa34d6aa69f80740ffedde33faaf265a045cae97b72022ae2c62a8449` 与 incremental SHA `1946b08e6cf20a1259fa43f9e849a06f50ae1230c08d4df7081fba1edae4c644` 的 payload-symmetric 时间，不含 baseline；
+  - `session_bootstrap/reports/inference_real_reconstruction_compare_run_20260311_212301.md` 才是 read latent -> reconstruct -> write PNGs 的真端到端 benchmark；讨论真实 reconstruction 时，应使用 `1830.3 -> 255.931 ms/image`（improvement `86.02%`）这组结果，而不是 Scheme B 的 `2479.246 -> 152.36 ms`。
 - safe 路径已经可用，但如果未来重新把 `torch` 暴露回 safe env import 路径，`tvm_ffi` 可能再次被 `torch/libc10.so` 触发 `SIGILL`；当前应优先复用已落盘的 safe wrapper / one-shot 入口，而不是直接手工调用原始 `tvm310` 环境。
 
 ## 3) 失败原因与修复经验（可复用）
