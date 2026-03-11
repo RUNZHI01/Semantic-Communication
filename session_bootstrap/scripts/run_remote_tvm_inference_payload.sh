@@ -162,7 +162,16 @@ if device_name == "cpu":
 else:
     dev = tvm.device(device_name, 0)
 
-inp = tvm.runtime.tensor(np.zeros(shape, dtype=dtype), dev)
+runtime = getattr(tvm, "runtime", None)
+runtime_tensor = getattr(runtime, "tensor", None) if runtime is not None else None
+if runtime_tensor is None and runtime is not None:
+    runtime_ndarray = getattr(runtime, "ndarray", None)
+    if runtime_ndarray is not None:
+        runtime_tensor = lambda arr, dev: runtime_ndarray.array(arr, dev)
+if runtime_tensor is None:
+    raise AttributeError("module tvm.runtime has neither tensor nor ndarray.array")
+
+inp = runtime_tensor(np.zeros(shape, dtype=dtype), dev)
 
 report = {
     "variant": variant,
