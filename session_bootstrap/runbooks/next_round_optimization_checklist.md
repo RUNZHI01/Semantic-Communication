@@ -376,13 +376,15 @@ python3 session_bootstrap/scripts/compute_image_quality_metrics.py \
 
 执行策略：
 
-- 当前仓库没有“远端资源采样一键脚本”，因此按执行计划推进。
+- 当前仓库已有可直接复用的远端资源采样脚本：
+  `session_bootstrap/scripts/run_remote_resource_profile.sh`
 - 最小闭环是：先拿 **current trusted** 的资源画像；baseline / MNN / 量化行可以后补。
 
 建议采集项：
 
-- 峰值内存：`/usr/bin/time -v`
-- CPU 利用率：`mpstat -P ALL 1 <duration>`
+- 运行前后内存快照：`free -h`
+- 运行前后系统快照：`top -b -n 1`
+- 运行期间系统级采样：`vmstat 1`
 - 产物大小：`stat -c '%s'` / `ls -lh`
 - 如没有外接功率计，则功耗列明确标记为“暂无板级功率计，当前只提供 CPU / 内存 / 产物大小”
 
@@ -398,19 +400,22 @@ stat -c '%s %n' \
 
 远端采样执行计划：
 
-1. 以 trusted current artifact 为对象，在飞腾派直接运行 `current_real_reconstruction.py`。
-2. 外层包 `/usr/bin/time -v`，并并行启动 `mpstat -P ALL 1 60`。
+1. 以 trusted current artifact 为对象，运行：
+   `bash ./session_bootstrap/scripts/run_remote_resource_profile.sh`
+2. 该脚本默认走 trusted env，并在目标命令运行期间并行启动 `vmstat`，同时采集前后 `free -h` / `top -b -n 1`。
 3. 采集的最小原始文件：
-   - `time_v.txt`
-   - `cpu_usage.log`
-   - `artifact_size.txt`
+   - `target.command.log`
+   - `vmstat.log`
+   - `free_pre_h.txt` / `free_post_h.txt`
+   - `top_pre.txt` / `top_post.txt`
 4. 汇总生成：
    - `session_bootstrap/reports/resource_profile_<RUN_ID>.md`
    - `session_bootstrap/reports/resource_profile_<RUN_ID>.json`
+   - `session_bootstrap/reports/resource_profile_<RUN_ID>/`
 
 通过标准：
 
-- 至少拿到 current trusted 的 `RSS / CPU per-core / artifact size`
+- 至少拿到 current trusted 的 `系统内存快照 / CPU+等待占比趋势 / artifact size`
 - 报告里明确指出瓶颈更像 compute、memory 还是 I/O
 - 如果 CPU 低利用率或 I/O 明显拖累，后续 `7.2`、真实端到端优化优先级上升
 
