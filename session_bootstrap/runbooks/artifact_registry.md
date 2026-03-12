@@ -1,6 +1,6 @@
 # 产物 / 脚本 / 路径索引（当前可信工程入口）
 
-更新时间：`2026-03-12`
+更新时间：`2026-03-13`
 适用范围：飞腾派 current-safe / baseline 对比、增量调优、真实重建复现
 
 这份文档的目的很直接：把**当前最重要的产物、脚本、报告和路径**固定下来，后续要复现、汇报、继续优化时，不用再翻聊天记录。
@@ -12,13 +12,16 @@
 ### 1.1 payload 级推理：current 已显著优于 baseline
 
 核心报告：
-- `session_bootstrap/reports/inference_compare_baseline_vs_currentsafe_rerun_20260311_114828.md`
+- `session_bootstrap/reports/inference_compare_currentsafe_split_topup15_validate_20260313_0002.md`
+- `session_bootstrap/reports/trusted_current_speedup_causal_chain_20260313.md`
 
 关键结果：
-- baseline median: `1844.1 ms`
-- current-safe median: `153.778 ms`
-- improvement: `91.66%`
-- current artifact SHA256: `1946b08e6cf20a1259fa43f9e849a06f50ae1230c08d4df7081fba1edae4c644`
+- previous trusted current median: `153.778 ms`
+- new trusted current median: `131.343 ms`
+- delta vs previous trusted current: `-22.435 ms`（`14.59%` 更快）
+- baseline median in the new formal validation: `1853.7 ms`
+- improvement vs baseline in the new formal validation: `92.91%`
+- current artifact SHA256: `65747fb301851f27892666d28daefc856c0ff2f7f85d3702779be32dde4b6377`
 
 ### 1.2 真实端到端重建：current 已显著优于 baseline
 
@@ -30,18 +33,23 @@
 - current median: `255.931 ms/image`
 - improvement: `86.02%`
 - current artifact SHA256: `1946b08e6cf20a1259fa43f9e849a06f50ae1230c08d4df7081fba1edae4c644`
+- 说明：
+  - 这是当前仓库内最新的真实端到端重建正式报告，但它对应的是上一 trusted current SHA；
+  - 新 trusted SHA `65747fb301851f27892666d28daefc856c0ff2f7f85d3702779be32dde4b6377` 还没有同口径 end-to-end 重跑报告。
 
-### 1.3 增量调优的工程收益已经被验证
+### 1.3 hotspot -> topup -> 新 trusted current 的工程链路已经被验证
 
 核心报告：
-- `session_bootstrap/reports/current_scheme_b_compare_20260311_195303.md`
-- `session_bootstrap/reports/phytium_current_incremental_breakthrough_20260311.md`
+- `session_bootstrap/reports/profiling_trusted_current_20260312_153906.md`
+- `session_bootstrap/reports/hotspot_tasks_trusted_current_20260312_153906.md`
+- `session_bootstrap/reports/trusted_current_speedup_causal_chain_20260313.md`
 
 关键结果：
-- rebuild-only current median: `2479.246 ms`
-- incremental current median: `152.36 ms`
-- incremental vs rebuild-only improvement: `93.85%`
-- speedup: `16.272x`
+- trusted current 热点前 8 个 task 覆盖 tuned-stage weight 的 `80.247%`
+- continuation env 明确从 `resume_from_1549` DB 继续，并把 topup 预算设为 `15` trials
+- `split_stageA_topup15` / `split_topup15` 两个输出目录都编译出同一个新 artifact SHA：
+  - `65747fb301851f27892666d28daefc856c0ff2f7f85d3702779be32dde4b6377`
+- 形式化 payload 验证把 trusted current median 从 `153.778 ms` 压到 `131.343 ms`
 
 ---
 
@@ -50,12 +58,13 @@
 ### 2.1 本地产物（推荐基准 artifact）
 
 - local optimized model:
-  - `session_bootstrap/tmp/phytium_baseline_seeded_warm_start_current_incremental_20260311_094548/optimized_model.so`
+  - `session_bootstrap/tmp/phytium_baseline_seeded_warm_start_current_incremental_split_topup15_20260312_2000/optimized_model.so`
 - SHA256:
-  - `1946b08e6cf20a1259fa43f9e849a06f50ae1230c08d4df7081fba1edae4c644`
+  - `65747fb301851f27892666d28daefc856c0ff2f7f85d3702779be32dde4b6377`
 - 产物说明：
-  - 第一条成功打通的 **baseline-seeded warm-start current incremental** 产物
-  - 已完成：非零预算 tuning → 本地编译 → 远端上传 → safe runtime 验证 → baseline/current 正式对比
+  - 当前 trusted current 的规范入口使用 `split_topup15` 目录；
+  - `split_stageA_topup15` 目录编译出的 `.so` 与它是同一个 SHA，可视为同一个被提升的 MetaSchedule 搜索结果；
+  - 已完成：hotspot 提取 → `resume_from_1549` warm-start continuation → `15`-trial topup → 本地编译 → 远端上传 → safe runtime 正式验证。
 
 ### 2.2 远端部署产物（飞腾派）
 
@@ -76,7 +85,7 @@
 - `session_bootstrap/config/inference_tvm310_safe.2026-03-10.phytium_pi.env`
 
 其中应维护：
-- `INFERENCE_CURRENT_EXPECTED_SHA256=1946b08e6cf20a1259fa43f9e849a06f50ae1230c08d4df7081fba1edae4c644`
+- `INFERENCE_CURRENT_EXPECTED_SHA256=65747fb301851f27892666d28daefc856c0ff2f7f85d3702779be32dde4b6377`
 
 原则：
 - 只要远端 `.so` 有更新，就必须同步更新 expected SHA；
@@ -182,10 +191,11 @@
 
 | 你想回答的问题 | 看哪个报告 |
 |---|---|
-| current 是否真的快过 baseline？ | `session_bootstrap/reports/inference_compare_baseline_vs_currentsafe_rerun_20260311_114828.md` |
-| current 的真实端到端重建是否也更快？ | `session_bootstrap/reports/inference_real_reconstruction_compare_run_20260311_212301.md` |
-| incremental 是否真的比 rebuild-only 更强？ | `session_bootstrap/reports/current_scheme_b_compare_20260311_195303.md` |
-| 本轮突破的总结版结论是什么？ | `session_bootstrap/reports/phytium_current_incremental_breakthrough_20260311.md` |
+| 新 trusted current 是否真的快过 baseline？ | `session_bootstrap/reports/inference_compare_currentsafe_split_topup15_validate_20260313_0002.md` |
+| 为什么 2026-03-13 的 trusted current 比上一版更快？ | `session_bootstrap/reports/trusted_current_speedup_causal_chain_20260313.md` |
+| current 的真实端到端重建是否也更快？ | `session_bootstrap/reports/inference_real_reconstruction_compare_run_20260311_212301.md`（对应上一 trusted SHA `1946...c644`） |
+| 早先 incremental 是否已经优于 rebuild-only？ | `session_bootstrap/reports/current_scheme_b_compare_20260311_195303.md` |
+| 2026-03-11 的第一轮 current incremental 突破总结是什么？ | `session_bootstrap/reports/phytium_current_incremental_breakthrough_20260311.md` |
 | 当前 target 选择为什么倾向 cortex-a72 + neon？ | `session_bootstrap/reports/phytium_current_target_comparison_safe_runtime_20260310.md` |
 | Python 入口为什么切到 tvm310_safe / Python 3.10？ | `session_bootstrap/reports/phytium_tvm24_python310_migration_2026-03-08.md` |
 | baseline/current artifact 路径和 guard 语义怎么演化的？ | `session_bootstrap/reports/inference_currentsafe_artifact_guard_handoff_20260311.md` |
@@ -205,6 +215,8 @@ bash session_bootstrap/scripts/run_inference_benchmark.sh \
 - `current_artifact_sha256_match`
 - `current_run_median_ms`
 - `current_run_variance_ms2`
+- 当前 trusted SHA 参考值：`65747fb301851f27892666d28daefc856c0ff2f7f85d3702779be32dde4b6377`
+- 当前 payload 中位时间参考带：`~131 ms`
 
 ### 6.2 从 rebuild-only 重新建立 current 基线
 
@@ -257,18 +269,21 @@ bash session_bootstrap/scripts/run_inference_benchmark.sh \
 最值得继续投入的顺序：
 
 1. **先稳住当前 trusted SHA**
-   - 对 `1946...c644` 再做 2–3 次 payload benchmark 复跑
-   - 确认 `~154 ms` 延迟带稳定，不是偶然波动
-2. **继续做 warm-start incremental**
+   - 对 `65747...6377` 再做 2–3 次 payload benchmark 复跑
+   - 确认 `~131 ms` 延迟带稳定，不是偶然波动
+2. **补齐新 SHA 的真实端到端重建正式复跑**
+   - 当前最新 real reconstruction 正式报告仍停留在上一 trusted SHA `1946...c644`
+   - 需要在同一条 safe runtime 路径上补一轮 `65747...6377` 的 end-to-end 正式结论
+3. **继续做 warm-start incremental**
    - 在同一条 DB 链上把预算从 `500 -> 1000 -> 2000`
    - 观察边际收益是否还显著
-3. **做热点 task 定位和定向预算投放**
+4. **做热点 task 定位和定向预算投放**
    - 用 `extract_hotspot_tasks.py` 导出 task 权重
    - 如果总提升趋缓，就把预算从“全局均摊”转向“热点集中”
-4. **分离 payload 优化与端到端优化**
-   - payload 已经到 `152 ms` 量级
-   - 端到端是 `255 ms`，中间仍有前后处理、I/O、图片读写和 pipeline 开销可挖
-5. **若 MetaSchedule 边际收益变平，再转 INT8 / 模型级优化**
+5. **分离 payload 优化与端到端优化**
+   - payload 已经到 `131 ms` 量级
+   - 端到端最新正式结论仍是 `255 ms`，中间仍有前后处理、I/O、图片读写和 pipeline 开销可挖
+6. **若 MetaSchedule 边际收益变平，再转 INT8 / 模型级优化**
    - 量化、算子融合、结构裁剪会比继续硬堆搜索预算更划算
 
 更详细的优化计划见：
