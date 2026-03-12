@@ -7,7 +7,7 @@ PYTHON_RUNNER_SOURCE="$SCRIPT_DIR/current_real_reconstruction.py"
 usage() {
   cat <<'EOF'
 Usage:
-  run_remote_current_real_reconstruction.sh --variant <baseline|current>
+  run_remote_current_real_reconstruction.sh --variant <baseline|current> [options]
 
 Notes:
   - Runs a real reconstruction path analogous to the legacy JSCC tvm_002.py flow:
@@ -16,6 +16,8 @@ Notes:
     run_inference_benchmark.sh can parse timings directly.
   - Supports `.pt` latent inputs for the real remote dataset and `.npz` / `.npy`
     fallbacks for lightweight local validation.
+  - Task 5.1 can request a lightweight per-op profiling attempt on the same
+    trusted current runtime path with --profile-ops.
 
 Required env:
   REMOTE_MODE=ssh|local
@@ -37,14 +39,40 @@ Optional env:
   INFERENCE_BASELINE_EXPECTED_SHA256
   INFERENCE_CURRENT_EXPECTED_SHA256
   INFERENCE_EXPECTED_SHA256
+
+Options:
+  --max-inputs <n>         Optional cap on latent inputs. 0 means all.
+  --seed <int>             Optional numpy random seed for the remote runner.
+  --profile-ops            Attempt vm.profile on the first profiled samples.
+  --profile-samples <n>    How many samples attempt vm.profile. Default: 1.
 EOF
 }
 
 VARIANT=""
+MAX_INPUTS=""
+SEED=""
+PROFILE_OPS=0
+PROFILE_SAMPLES=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --variant)
       VARIANT="${2:-}"
+      shift 2
+      ;;
+    --max-inputs)
+      MAX_INPUTS="${2:-}"
+      shift 2
+      ;;
+    --seed)
+      SEED="${2:-}"
+      shift 2
+      ;;
+    --profile-ops)
+      PROFILE_OPS=1
+      shift
+      ;;
+    --profile-samples)
+      PROFILE_SAMPLES="${2:-}"
       shift 2
       ;;
     -h|--help)
@@ -153,7 +181,7 @@ run_real_reconstruction() {
 #!/usr/bin/env bash
 set -euo pipefail
 SH
-    declare -p REMOTE_TVM_PYTHON REMOTE_INPUT_DIR REAL_OUTPUT_DIR REAL_SNR REAL_BATCH VARIANT REAL_ARTIFACT_PATH REAL_EXPECTED_SHA256 REAL_EXTRA_PYTHONPATH
+    declare -p REMOTE_TVM_PYTHON REMOTE_INPUT_DIR REAL_OUTPUT_DIR REAL_SNR REAL_BATCH VARIANT REAL_ARTIFACT_PATH REAL_EXPECTED_SHA256 REAL_EXTRA_PYTHONPATH MAX_INPUTS SEED PROFILE_OPS PROFILE_SAMPLES
     cat <<'SH'
 
 remote_python="$REMOTE_TVM_PYTHON"
@@ -165,6 +193,10 @@ variant="$VARIANT"
 artifact_path="$REAL_ARTIFACT_PATH"
 expected_sha256="$REAL_EXPECTED_SHA256"
 extra_pythonpath="$REAL_EXTRA_PYTHONPATH"
+max_inputs="$MAX_INPUTS"
+seed="$SEED"
+profile_ops="$PROFILE_OPS"
+profile_samples="$PROFILE_SAMPLES"
 
 mkdir -p "$output_dir"
 
@@ -191,6 +223,20 @@ run_remote_python() {
 
 echo "[current-real] variant=$variant artifact=$artifact_path output_dir=$output_dir snr=$snr batch_size=$batch_size python=$remote_python"
 
+extra_args=()
+if [[ -n "$max_inputs" ]]; then
+  extra_args+=(--max-inputs "$max_inputs")
+fi
+if [[ -n "$seed" ]]; then
+  extra_args+=(--seed "$seed")
+fi
+if [[ "$profile_ops" == "1" ]]; then
+  extra_args+=(--profile-ops)
+fi
+if [[ -n "$profile_samples" ]]; then
+  extra_args+=(--profile-samples "$profile_samples")
+fi
+
 run_remote_python - \
   --artifact-path "$artifact_path" \
   --input-dir "$input_dir" \
@@ -198,7 +244,8 @@ run_remote_python - \
   --snr "$snr" \
   --batch-size "$batch_size" \
   --variant "$variant" \
-  --expected-sha256 "$expected_sha256" <<'PY'
+  --expected-sha256 "$expected_sha256" \
+  "${extra_args[@]}" <<'PY'
 SH
     cat "$PYTHON_RUNNER_SOURCE"
     cat <<'SH'

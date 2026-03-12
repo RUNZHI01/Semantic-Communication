@@ -42,7 +42,30 @@ def parse_args():
     parser.add_argument("--batch-size", type=int, required=True)
     parser.add_argument("--variant", default="current")
     parser.add_argument("--expected-sha256", default="")
-    return parser.parse_args()
+    parser.add_argument(
+        "--max-inputs",
+        type=int,
+        default=0,
+        help="Optional cap on the number of latent files to process. 0 means all.",
+    )
+    parser.add_argument("--seed", type=int, default=None, help="Optional numpy random seed.")
+    parser.add_argument(
+        "--profile-ops",
+        action="store_true",
+        help="Attempt vm.profile on the first profiled samples.",
+    )
+    parser.add_argument(
+        "--profile-samples",
+        type=int,
+        default=1,
+        help="How many samples should attempt vm.profile when --profile-ops is enabled.",
+    )
+    args = parser.parse_args()
+    if args.max_inputs < 0:
+        raise SystemExit(f"ERROR: --max-inputs must be >= 0 (got: {args.max_inputs})")
+    if args.profile_samples < 0:
+        raise SystemExit(f"ERROR: --profile-samples must be >= 0 (got: {args.profile_samples})")
+    return args
 
 
 def file_sha256(path: Path) -> str:
@@ -146,6 +169,332 @@ def save_reconstruction(output: np.ndarray, output_stem: Path) -> Path:
     return save_path
 
 
+def _normalized_key(key: str) -> str:
+    return "".join(ch for ch in str(key).lower() if ch.isalnum())
+
+
+def _parse_numeric(value):
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.strip().replace(",", ""))
+        except ValueError:
+            return None
+    return None
+
+
+def _find_row_value(row, *candidate_keys):
+    normalized = {_normalized_key(key): value for key, value in row.items()}
+    for key in candidate_keys:
+        if key in normalized:
+            return normalized[key]
+    return None
+
+
+def _iter_dict_lists(payload):
+    if isinstance(payload, list):
+        if payload and all(isinstance(item, dict) for item in payload):
+            yield payload
+        for item in payload:
+            yield from _iter_dict_lists(item)
+        return
+    if isinstance(payload, dict):
+        for value in payload.values():
+            yield from _iter_dict_lists(value)
+
+
+def _score_profile_rows(rows) -> int:
+    score = 0
+    for row in rows[: min(len(rows), 10)]:
+        keyset = {_normalized_key(key) for key in row}
+        if keyset & {"name", "op", "operator", "opname", "funcname"}:
+            score += 2
+        if any("duration" in key or key.endswith("us") or key.endswith("ms") for key in keyset):
+            score += 2
+        if "percent" in keyset or "percentage" in keyset:
+            score += 1
+    return score
+
+
+def _normalize_profile_rows(payload):
+    best_rows = None
+    best_score = -1
+    for rows in _iter_dict_lists(payload):
+        score = _score_profile_rows(rows)
+        if score > best_score:
+            best_score = score
+            best_rows = rows
+
+    if not best_rows:
+        return []
+
+    normalized_rows = []
+    for row in best_rows:
+        name = _find_row_value(row, "name", "opname", "operator", "op", "funcname", "hash")
+        if name in (None, ""):
+            continue
+
+        duration_us = None
+        raw_duration = None
+        for key, scale in (
+            ("durationus", 1.0),
+            ("timingus", 1.0),
+            ("durationms", 1000.0),
+            ("timingms", 1000.0),
+            ("durationns", 0.001),
+            ("timingns", 0.001),
+            ("duration", 1.0),
+            ("time", 1.0),
+        ):
+            value = _find_row_value(row, key)
+            numeric = _parse_numeric(value)
+            if numeric is not None:
+                raw_duration = numeric
+                duration_us = numeric * scale
+                break
+
+        percent = _parse_numeric(_find_row_value(row, "percent", "percentage"))
+        count = _parse_numeric(_find_row_value(row, "count", "calls", "numcalls"))
+        device = _find_row_value(row, "device", "devicetype")
+        normalized_rows.append(
+            {
+                "name": str(name),
+                "duration_us": None if duration_us is None else round(duration_us, 3),
+                "percent": None if percent is None else round(percent, 3),
+                "count": None if count is None else int(count),
+                "device": None if device in (None, "") else str(device),
+                "raw_duration": raw_duration,
+            }
+        )
+
+    normalized_rows = [row for row in normalized_rows if row["duration_us"] is not None or row["percent"] is not None]
+    normalized_rows.sort(
+        key=lambda row: (
+            -1.0 if row["duration_us"] is None else -row["duration_us"],
+            row["name"],
+        )
+    )
+
+    total_duration_us = sum(row["duration_us"] or 0.0 for row in normalized_rows)
+    if total_duration_us > 0.0:
+        for row in normalized_rows:
+            if row["percent"] is None and row["duration_us"] is not None:
+                row["percent"] = round((row["duration_us"] / total_duration_us) * 100.0, 3)
+    for row in normalized_rows:
+        row.pop("raw_duration", None)
+    return normalized_rows
+
+
+def serialize_profile_report(report):
+    report_text = ""
+    report_json = None
+    report_json_text = None
+    json_error = None
+    table_error = None
+
+    if hasattr(report, "json"):
+        try:
+            raw_json = report.json()
+            if isinstance(raw_json, str):
+                report_json_text = raw_json
+                report_json = json.loads(raw_json)
+            else:
+                report_json = raw_json
+                report_json_text = json.dumps(raw_json, ensure_ascii=False)
+        except Exception as err:  # pragma: no cover - depends on TVM runtime support.
+            json_error = f"{type(err).__name__}: {err}"
+
+    if hasattr(report, "table"):
+        try:
+            report_text = report.table()
+        except Exception as err:  # pragma: no cover - depends on TVM runtime support.
+            table_error = f"{type(err).__name__}: {err}"
+
+    if not report_text:
+        report_text = str(report)
+
+    return {
+        "report_text": report_text,
+        "report_json": report_json,
+        "report_json_text": report_json_text,
+        "report_json_error": json_error,
+        "report_table_error": table_error,
+        "rows": _normalize_profile_rows(report_json) if report_json is not None else [],
+    }
+
+
+def attempt_vm_profile(vm, noisy: np.ndarray, dev, input_file: str):
+    result = {
+        "input_file": input_file,
+        "requested": True,
+        "supported": None,
+        "status": "not_attempted",
+        "api_call": None,
+        "attempts": [],
+    }
+
+    if not hasattr(vm, "profile"):
+        result.update(
+            {
+                "supported": False,
+                "status": "unsupported",
+                "error": "relax.VirtualMachine has no profile attribute",
+            }
+        )
+        return result
+
+    runtime_input = runtime_tensor(noisy.astype(np.float32), dev)
+    attempts = [
+        ("vm.profile('main', input)", lambda: vm.profile("main", runtime_input)),
+        ("vm.profile(input)", lambda: vm.profile(runtime_input)),
+    ]
+    for call_name, callback in attempts:
+        started = time.perf_counter()
+        try:
+            report = callback()
+            elapsed_ms = (time.perf_counter() - started) * 1000.0
+            serialized = serialize_profile_report(report)
+            result.update(
+                {
+                    "supported": True,
+                    "status": "profiled" if serialized["rows"] else "profiled_raw",
+                    "api_call": call_name,
+                    "elapsed_ms": round(elapsed_ms, 3),
+                    "rows": serialized["rows"],
+                    "report_text": serialized["report_text"],
+                    "report_json": serialized["report_json"],
+                    "report_json_text": serialized["report_json_text"],
+                    "report_json_error": serialized["report_json_error"],
+                    "report_table_error": serialized["report_table_error"],
+                }
+            )
+            result["attempts"].append(
+                {
+                    "call": call_name,
+                    "status": "ok",
+                    "elapsed_ms": round(elapsed_ms, 3),
+                }
+            )
+            return result
+        except TypeError as err:
+            result["attempts"].append(
+                {
+                    "call": call_name,
+                    "status": "type_error",
+                    "error": str(err),
+                }
+            )
+            continue
+        except Exception as err:  # pragma: no cover - runtime dependent.
+            result["attempts"].append(
+                {
+                    "call": call_name,
+                    "status": "error",
+                    "error": f"{type(err).__name__}: {err}",
+                }
+            )
+            result.update(
+                {
+                    "supported": False,
+                    "status": "error",
+                    "api_call": call_name,
+                    "error": f"{type(err).__name__}: {err}",
+                }
+            )
+            return result
+
+    result.update(
+        {
+            "supported": False,
+            "status": "unsupported",
+            "error": "all vm.profile signature attempts failed",
+        }
+    )
+    return result
+
+
+def aggregate_runtime_profiles(profile_results):
+    successful = [
+        sample
+        for sample in profile_results
+        if sample.get("status") in {"profiled", "profiled_raw"} and sample.get("rows")
+    ]
+    if not successful:
+        return []
+
+    aggregate = {}
+    for sample in successful:
+        for row in sample["rows"]:
+            bucket = aggregate.setdefault(
+                row["name"],
+                {
+                    "name": row["name"],
+                    "durations_us": [],
+                    "percents": [],
+                    "counts": [],
+                    "devices": set(),
+                },
+            )
+            if row.get("duration_us") is not None:
+                bucket["durations_us"].append(row["duration_us"])
+            if row.get("percent") is not None:
+                bucket["percents"].append(row["percent"])
+            if row.get("count") is not None:
+                bucket["counts"].append(row["count"])
+            if row.get("device"):
+                bucket["devices"].add(row["device"])
+
+    rows = []
+    for bucket in aggregate.values():
+        mean_duration_us = (
+            round(sum(bucket["durations_us"]) / len(bucket["durations_us"]), 3)
+            if bucket["durations_us"]
+            else None
+        )
+        mean_percent = (
+            round(sum(bucket["percents"]) / len(bucket["percents"]), 3)
+            if bucket["percents"]
+            else None
+        )
+        mean_count = (
+            round(sum(bucket["counts"]) / len(bucket["counts"]), 3)
+            if bucket["counts"]
+            else None
+        )
+        rows.append(
+            {
+                "name": bucket["name"],
+                "mean_duration_us": mean_duration_us,
+                "mean_percent": mean_percent,
+                "mean_count": mean_count,
+                "devices": sorted(bucket["devices"]),
+                "samples": max(
+                    len(bucket["durations_us"]),
+                    len(bucket["percents"]),
+                    len(bucket["counts"]),
+                    0,
+                ),
+            }
+        )
+
+    rows.sort(
+        key=lambda row: (
+            -1.0 if row["mean_duration_us"] is None else -row["mean_duration_us"],
+            row["name"],
+        )
+    )
+
+    total_duration_us = sum(row["mean_duration_us"] or 0.0 for row in rows)
+    if total_duration_us > 0.0:
+        for row in rows:
+            if row["mean_percent"] is None and row["mean_duration_us"] is not None:
+                row["mean_percent"] = round((row["mean_duration_us"] / total_duration_us) * 100.0, 3)
+    return rows
+
+
 def build_summary(
     args,
     artifact_path: Path,
@@ -154,11 +503,30 @@ def build_summary(
     vm_init_ms: float,
     run_samples_ms,
     processed_count: int,
-    total_inputs: int,
+    selected_input_count: int,
+    available_input_count: int,
     reconstructions_dir: Path,
     output_dtype: str,
     output_shape,
+    runtime_profiles,
 ):
+    aggregated_profiles = aggregate_runtime_profiles(runtime_profiles)
+    runtime_profile_status = "not_requested"
+    runtime_profile_supported = None
+    if args.profile_ops:
+        if any(sample.get("status") == "profiled" for sample in runtime_profiles):
+            runtime_profile_status = "profiled"
+            runtime_profile_supported = True
+        elif any(sample.get("status") == "profiled_raw" for sample in runtime_profiles):
+            runtime_profile_status = "profiled_raw"
+            runtime_profile_supported = True
+        elif runtime_profiles:
+            runtime_profile_status = "unsupported"
+            runtime_profile_supported = False
+        else:
+            runtime_profile_status = "requested_but_skipped"
+            runtime_profile_supported = None
+
     summary = {
         "variant": args.variant,
         "artifact_path": str(artifact_path),
@@ -171,7 +539,8 @@ def build_summary(
         "output_dir": str(reconstructions_dir),
         "output_count": len(list(reconstructions_dir.glob("*"))),
         "processed_count": processed_count,
-        "input_count": total_inputs,
+        "input_count": selected_input_count,
+        "available_input_count": available_input_count,
         "load_ms": round(load_ms, 3),
         "vm_init_ms": round(vm_init_ms, 3),
         "run_count": len(run_samples_ms),
@@ -186,6 +555,20 @@ def build_summary(
         "snr": args.snr,
         "batch_size": args.batch_size,
         "save_format": "png" if Image is not None else "npy",
+        "seed": args.seed,
+        "max_inputs": args.max_inputs,
+        "runtime_profiling": {
+            "requested": args.profile_ops,
+            "profile_samples_requested": args.profile_samples if args.profile_ops else 0,
+            "attempted_samples": len(runtime_profiles),
+            "successful_samples": sum(
+                1 for sample in runtime_profiles if sample.get("status") in {"profiled", "profiled_raw"}
+            ),
+            "supported": runtime_profile_supported,
+            "status": runtime_profile_status,
+            "top_ops": aggregated_profiles[:10],
+            "sample_results": runtime_profiles,
+        },
     }
     return summary
 
@@ -193,6 +576,9 @@ def build_summary(
 def main():
     configure_logging()
     args = parse_args()
+
+    if args.seed is not None:
+        np.random.seed(args.seed)
 
     artifact_path = Path(args.artifact_path)
     input_dir = Path(args.input_dir)
@@ -221,6 +607,9 @@ def main():
     input_files = sorted({path.resolve(): path for path in input_files}.values())
     if not input_files:
         raise SystemExit(f"ERROR: no supported latent files found in {input_dir}")
+    available_input_count = len(input_files)
+    if args.max_inputs:
+        input_files = input_files[: args.max_inputs]
 
     dev = tvm.cpu(0)
     load_t0 = time.perf_counter()
@@ -234,6 +623,7 @@ def main():
     run_samples_ms = []
     processed_count = 0
     last_output = None
+    runtime_profiles = []
 
     for input_path in input_files:
         base_name = input_path.stem.split("_latent")[0]
@@ -251,6 +641,15 @@ def main():
             run_samples_ms.append(elapsed_ms)
             processed_count += 1
             last_output = output_np
+            if args.profile_ops and len(runtime_profiles) < args.profile_samples:
+                runtime_profiles.append(
+                    attempt_vm_profile(
+                        vm=vm,
+                        noisy=noisy,
+                        dev=dev,
+                        input_file=input_path.name,
+                    )
+                )
         except Exception as err:  # pragma: no cover - exercised through runtime smoke.
             LOGGER.error("处理文件失败 %s: %s", input_path, err)
 
@@ -270,10 +669,12 @@ def main():
         vm_init_ms=(load_t2 - load_t1) * 1000.0,
         run_samples_ms=run_samples_ms,
         processed_count=processed_count,
-        total_inputs=len(input_files),
+        selected_input_count=len(input_files),
+        available_input_count=available_input_count,
         reconstructions_dir=reconstructions_dir,
         output_dtype=output_dtype,
         output_shape=output_shape,
+        runtime_profiles=runtime_profiles,
     )
     print(json.dumps(summary, ensure_ascii=False))
 
