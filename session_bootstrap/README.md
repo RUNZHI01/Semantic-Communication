@@ -15,8 +15,26 @@
 - `config/rpc_armv8.phytium_rpc_tune.env`：RPC Tune 配置模板（笔记本 builder + 飞腾派 runner）。  
 - `config/phytium_pi_login.example.env`：飞腾派登录模板（默认 `user@100.121.87.73:22`，密码字段可留空）。  
 - `runbooks/rpc_first_round_runbook.md`：首轮真机 RPC 闭环步骤手册。  
-- `runbooks/optimization_roadmap.md`：优化路线图（阶段 B/C/止损判断/转向方向）。  
+- `runbooks/artifact_registry.md`：当前可信产物 / 脚本 / 路径索引。  
+- `runbooks/optimization_roadmap.md`：优化路线图（当前状态、下一轮重点、止损与转向）。  
 - `tasks/backlog.md`：待办池与优先级列表。
+
+## 当前可信成果入口（2026-03-12）
+
+优先看下面这些：
+
+| 目的 | 路径 |
+|---|---|
+| 当前成果 / 脚本 / 路径总索引 | `runbooks/artifact_registry.md` |
+| trusted current 突破总结 | `reports/phytium_current_incremental_breakthrough_20260311.md` |
+| payload 基准正式结论 | `reports/inference_compare_baseline_vs_currentsafe_rerun_20260311_114828.md` |
+| 真实端到端重建正式结论 | `reports/inference_real_reconstruction_compare_run_20260311_212301.md` |
+| 后续性能优化路线 | `runbooks/optimization_roadmap.md` |
+
+如果你只想知道“现在应该复现哪条线”，默认优先：
+- current trusted artifact：`tmp/phytium_baseline_seeded_warm_start_current_incremental_20260311_094548/optimized_model.so`
+- trusted SHA256：`1946b08e6cf20a1259fa43f9e849a06f50ae1230c08d4df7081fba1edae4c644`
+- 推荐验证入口：`scripts/run_inference_benchmark.sh` + `config/inference_tvm310_safe.2026-03-10.phytium_pi.env`
 
 ## 飞腾派登录固化
 
