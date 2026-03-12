@@ -26,16 +26,18 @@
 ### 1.2 真实端到端重建：current 已显著优于 baseline
 
 核心报告：
-- `session_bootstrap/reports/inference_real_reconstruction_compare_run_20260311_212301.md`
+- `session_bootstrap/reports/inference_real_reconstruction_compare_currentsafe_split_topup15_20260313_003633_retry_20260313_005140.md`
 
 关键结果：
-- baseline median: `1830.3 ms/image`
-- current median: `255.931 ms/image`
-- improvement: `86.02%`
-- current artifact SHA256: `1946b08e6cf20a1259fa43f9e849a06f50ae1230c08d4df7081fba1edae4c644`
+- baseline median: `1834.1 ms/image`
+- current median: `234.219 ms/image`
+- improvement: `87.23%`
+- baseline/current count: `300`
+- current artifact SHA256: `65747fb301851f27892666d28daefc856c0ff2f7f85d3702779be32dde4b6377`
+- delta vs previous trusted current end-to-end median `255.931 ms/image`: `-21.712 ms/image`（约 `8.48%` 更快）
 - 说明：
-  - 这是当前仓库内最新的真实端到端重建正式报告，但它对应的是上一 trusted current SHA；
-  - 新 trusted SHA `65747fb301851f27892666d28daefc856c0ff2f7f85d3702779be32dde4b6377` 还没有同口径 end-to-end 重跑报告。
+  - 这是当前仓库内最新、且已正式对齐当前 trusted current SHA 的真实端到端重建报告；
+  - `session_bootstrap/reports/inference_real_reconstruction_compare_run_20260311_212301.md` 现保留为上一 trusted current SHA `1946...c644` 的历史参照。
 
 ### 1.3 hotspot -> topup -> 新 trusted current 的工程链路已经被验证
 
@@ -50,6 +52,7 @@
 - `split_stageA_topup15` / `split_topup15` 两个输出目录都编译出同一个新 artifact SHA：
   - `65747fb301851f27892666d28daefc856c0ff2f7f85d3702779be32dde4b6377`
 - 形式化 payload 验证把 trusted current median 从 `153.778 ms` 压到 `131.343 ms`
+- 同一新 SHA 的真实端到端 reconstruction 正式复跑也已把 current median 从 `255.931 ms/image` 压到 `234.219 ms/image`
 
 ---
 
@@ -193,7 +196,7 @@
 |---|---|
 | 新 trusted current 是否真的快过 baseline？ | `session_bootstrap/reports/inference_compare_currentsafe_split_topup15_validate_20260313_0002.md` |
 | 为什么 2026-03-13 的 trusted current 比上一版更快？ | `session_bootstrap/reports/trusted_current_speedup_causal_chain_20260313.md` |
-| current 的真实端到端重建是否也更快？ | `session_bootstrap/reports/inference_real_reconstruction_compare_run_20260311_212301.md`（对应上一 trusted SHA `1946...c644`） |
+| current 的真实端到端重建是否也更快？ | `session_bootstrap/reports/inference_real_reconstruction_compare_currentsafe_split_topup15_20260313_003633_retry_20260313_005140.md` |
 | 早先 incremental 是否已经优于 rebuild-only？ | `session_bootstrap/reports/current_scheme_b_compare_20260311_195303.md` |
 | 2026-03-11 的第一轮 current incremental 突破总结是什么？ | `session_bootstrap/reports/phytium_current_incremental_breakthrough_20260311.md` |
 | 当前 target 选择为什么倾向 cortex-a72 + neon？ | `session_bootstrap/reports/phytium_current_target_comparison_safe_runtime_20260310.md` |
@@ -234,7 +237,7 @@ bash session_bootstrap/scripts/run_phytium_baseline_seeded_warm_start_current_in
 
 ```bash
 bash session_bootstrap/scripts/run_inference_benchmark.sh \
-  --env session_bootstrap/tmp/inference_real_reconstruction_compare_run_20260311_212301.env
+  --env session_bootstrap/tmp/inference_real_reconstruction_compare_currentsafe_split_topup15_retry_20260313_005140.env
 ```
 
 ---
@@ -271,9 +274,9 @@ bash session_bootstrap/scripts/run_inference_benchmark.sh \
 1. **先稳住当前 trusted SHA**
    - 对 `65747...6377` 再做 2–3 次 payload benchmark 复跑
    - 确认 `~131 ms` 延迟带稳定，不是偶然波动
-2. **补齐新 SHA 的真实端到端重建正式复跑**
-   - 当前最新 real reconstruction 正式报告仍停留在上一 trusted SHA `1946...c644`
-   - 需要在同一条 safe runtime 路径上补一轮 `65747...6377` 的 end-to-end 正式结论
+2. **把新的真实端到端正式结论同步到对外材料**
+   - 当前 latest real reconstruction 正式报告已更新为 `1834.1 -> 234.219 ms/image`
+   - 后续若再复跑，应视为稳定性验证，而不是“补齐缺失 end-to-end 证据”
 3. **继续做 warm-start incremental**
    - 在同一条 DB 链上把预算从 `500 -> 1000 -> 2000`
    - 观察边际收益是否还显著
@@ -282,7 +285,7 @@ bash session_bootstrap/scripts/run_inference_benchmark.sh \
    - 如果总提升趋缓，就把预算从“全局均摊”转向“热点集中”
 5. **分离 payload 优化与端到端优化**
    - payload 已经到 `131 ms` 量级
-   - 端到端最新正式结论仍是 `255 ms`，中间仍有前后处理、I/O、图片读写和 pipeline 开销可挖
+   - 端到端最新正式结论已更新到 `234 ms/image` 量级，中间仍有前后处理、I/O、图片读写和 pipeline 开销可挖
 6. **若 MetaSchedule 边际收益变平，再转 INT8 / 模型级优化**
    - 量化、算子融合、结构裁剪会比继续硬堆搜索预算更划算
 
