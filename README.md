@@ -11,7 +11,7 @@
 | 路线 | 指标 | 数值 |
 |---|---|---|
 | TVM 真实端到端重建 | baseline → current | 1830.3 → 255.931 ms/image（**86.02% 提升**） |
-| TVM payload 级推理 | 中位时间 | 152.36 ms |
+| TVM payload 级推理 | 中位时间 | 131.343 ms（较上一 trusted current 再快 14.59%） |
 | TVM 增量调优加速比 | rebuild-only → incremental | **16.272x** |
 | MNN 动态形状推理 | 加速比 | 1.85x（300 张不同尺寸图片） |
 
@@ -54,15 +54,15 @@
 | 真实端到端重建 benchmark | `session_bootstrap/scripts/current_real_reconstruction.py` |
 | baseline vs current 推理对比 | `session_bootstrap/scripts/run_inference_benchmark.sh` |
 
-## 当前可信产物（2026-03-11）
+## 当前可信产物（2026-03-13）
 
 | 类别 | 当前可信入口 |
 |---|---|
-| trusted current 本地产物 | `session_bootstrap/tmp/phytium_baseline_seeded_warm_start_current_incremental_20260311_094548/optimized_model.so` |
-| trusted current SHA256 | `1946b08e6cf20a1259fa43f9e849a06f50ae1230c08d4df7081fba1edae4c644` |
-| payload 基准结论 | `session_bootstrap/reports/inference_compare_baseline_vs_currentsafe_rerun_20260311_114828.md` |
-| 真实端到端重建结论 | `session_bootstrap/reports/inference_real_reconstruction_compare_run_20260311_212301.md` |
-| 增量调优突破总结 | `session_bootstrap/reports/phytium_current_incremental_breakthrough_20260311.md` |
+| trusted current 本地产物 | `session_bootstrap/tmp/phytium_baseline_seeded_warm_start_current_incremental_split_topup15_20260312_2000/optimized_model.so` |
+| trusted current SHA256 | `65747fb301851f27892666d28daefc856c0ff2f7f85d3702779be32dde4b6377` |
+| payload 基准结论 | `session_bootstrap/reports/inference_compare_currentsafe_split_topup15_validate_20260313_0002.md` |
+| 速度原因说明 | `session_bootstrap/reports/trusted_current_speedup_causal_chain_20260313.md` |
+| 最新真实端到端重建结论 | `session_bootstrap/reports/inference_real_reconstruction_compare_run_20260311_212301.md`（基于上一 trusted SHA `1946...c644`，新 SHA 待复跑） |
 | 详细产物 / 脚本 / 路径说明 | `session_bootstrap/runbooks/artifact_registry.md` |
 
 ## 技术架构
