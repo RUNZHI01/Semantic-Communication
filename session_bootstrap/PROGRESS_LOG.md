@@ -1,6 +1,6 @@
 # Session Progress Log（长期维护）
 
-- 最后更新：2026-03-13 00:44 +0800（补记 2026-03-13 新 trusted current 正式 payload 验证结果：current SHA 从 `1946b08e...c644` 切到 `65747fb3...b6377`，median 从 `153.778 ms` 进一步降到 `131.343 ms`，较上一代 current 再快 `14.59%`；同时明确这次收益来自 hotspot -> warm-start continuation -> `15` trial topup 后产生的新 MetaSchedule artifact，而不是 benchmark 路径漂移；新 SHA 的真实端到端 reconstruction 正式复跑已启动，结果待补）
+- 最后更新：2026-03-13 01:03 +0800（补记 2026-03-13 新 trusted current 真实端到端 reconstruction 正式复跑结果：current SHA `65747fb3...b6377` 已完成同口径真端到端复跑，baseline median `1834.1 ms/image`，current median `234.219 ms/image`，improvement `87.23%`，baseline/current count 均为 `300`；相对上一代 trusted current `255.931 ms/image` 再快约 `8.48%`，先前“复跑已启动，结果待补”备注已关闭）
 - 作用：沉淀“当前状态 + 失败经验 + 下一步最小执行方案”，避免重复踩坑。
 
 ## 1) 时间线（关键里程碑）
@@ -35,6 +35,7 @@
 | 2026-03-11 21:23 | 飞腾派真实端到端 reconstruction compare 跑成 | 本次 benchmark 语义已明确为真实端到端 reconstruction（read latent -> reconstruct -> write PNGs），不是 payload-only VM timing；baseline / current 输出目录各落 `300` 张 PNG，baseline median `1830.3 ms/image`、mean `1831.471 ms/image`，current median `255.931 ms/image`、mean `255.882 ms/image`，delta `-1574.369 ms/image`，improvement `86.02%` | `session_bootstrap/reports/inference_real_reconstruction_compare_run_20260311_212301.md` |
 | 2026-03-13 00:13 | 新 trusted current 正式 payload 验证完成 | 以新 SHA `65747fb301851f27892666d28daefc856c0ff2f7f85d3702779be32dde4b6377` 跑正式 baseline-vs-current-safe validate 成功；baseline median `1853.7 ms`，current median `131.343 ms`，improvement `92.91%`。相对上一代 trusted current（SHA `1946b08e...c644`，median `153.778 ms`），本代 current 再降 `22.435 ms`，约快 `14.59%` | `session_bootstrap/reports/inference_compare_currentsafe_split_topup15_validate_20260313_0002.md` / `session_bootstrap/reports/trusted_current_speedup_causal_chain_20260313.md` |
 | 2026-03-13 00:28 | trusted current 文档入口完成切换 | `README.md`、`runbooks/artifact_registry.md` 与新归因报告已统一切到 SHA `65747fb3...b6377` 和 payload 中位数 `131.343 ms`；同时明确“为什么这轮更快”的因果链来自 hotspot -> warm-start continuation -> `15` trial topup -> 新 artifact，而非 benchmark 路径变化 | `README.md` / `session_bootstrap/runbooks/artifact_registry.md` / `session_bootstrap/reports/trusted_current_speedup_causal_chain_20260313.md` |
+| 2026-03-13 01:02 | 新 trusted current 真实端到端 reconstruction 正式复跑完成 | 以新 SHA `65747fb3...b6377` 跑正式 real reconstruction rerun 成功；baseline median `1834.1 ms/image`，current median `234.219 ms/image`，improvement `87.23%`，baseline/current count 均为 `300`。相对上一代 trusted current（`255.931 ms/image`）再降 `21.712 ms/image`，约快 `8.48%` | `session_bootstrap/reports/inference_real_reconstruction_compare_currentsafe_split_topup15_20260313_003633_retry_20260313_005140.md` / `session_bootstrap/reports/inference_real_reconstruction_compare_run_20260311_212301.md` |
 
 ## 2) 已完成项 / 阻断项
 
@@ -45,7 +46,7 @@
 - realcmd 级 quick 已跑通：`status=success`，说明远端 Python/TVM/输入目录/输出目录链路可用。
 - full realcmd baseline 已成功执行，说明 `tvm_002.py + batch=1` 路径本身可运行。
 - current real reconstruction runner 已入库：`session_bootstrap/scripts/current_real_reconstruction.py`、`session_bootstrap/scripts/run_remote_current_real_reconstruction.sh` 与 `session_bootstrap/config/inference_real_reconstruction_compare.2026-03-11.phytium_pi.env` 已落盘；current 真实 reconstruction 入口现统一为 `session_bootstrap/scripts/run_remote_current_real_reconstruction.sh --variant current`。
-- 飞腾派真实端到端 reconstruction compare 已完成：baseline 输出目录为 `/home/user/Downloads/jscc-test/jscc/infer_outputs/inference_real_reconstruction_compare_run_20260311_212301_baseline/reconstructions`，current 输出目录为 `/home/user/Downloads/jscc-test/jscc/infer_outputs/inference_real_reconstruction_compare_run_20260311_212301_current/reconstructions`，两侧 file count 均为 `300`。
+- 新 trusted current 真实端到端 reconstruction 正式复跑已完成：`session_bootstrap/reports/inference_real_reconstruction_compare_currentsafe_split_topup15_20260313_003633_retry_20260313_005140.md` 已确认 baseline/current run count 均为 `300`，baseline median `1834.1 ms/image`，current median `234.219 ms/image`，improvement `87.23%`；相对上一代 trusted current `255.931 ms/image` 再快约 `8.48%`。
 - 新 trusted current payload 验证已完成：当前正式 trusted current SHA 已推进到 `65747fb301851f27892666d28daefc856c0ff2f7f85d3702779be32dde4b6377`，正式 payload 中位时间为 `131.343 ms`，较上一代 trusted current `1946b08e...c644` 的 `153.778 ms` 再快 `14.59%`；对应归因报告已落盘。
 
 ### 当前阻断项（P0）
@@ -63,7 +64,8 @@
 - **payload-only 与 real reconstruction 结果不可混写**：
   - `session_bootstrap/reports/current_scheme_b_compare_20260311_195303.md` 只比较 current 内部 rebuild-only SHA `2fcf773fa34d6aa69f80740ffedde33faaf265a045cae97b72022ae2c62a8449` 与 incremental SHA `1946b08e6cf20a1259fa43f9e849a06f50ae1230c08d4df7081fba1edae4c644` 的 payload-symmetric 时间，不含 baseline；
   - `session_bootstrap/reports/inference_compare_currentsafe_split_topup15_validate_20260313_0002.md` 是新的 trusted current payload 正式 validate，结论是新 SHA `65747fb3...b6377` 对应 `131.343 ms`；
-  - `session_bootstrap/reports/inference_real_reconstruction_compare_run_20260311_212301.md` 才是 read latent -> reconstruct -> write PNGs 的真端到端 benchmark；讨论真实 reconstruction 时，应使用 `1830.3 -> 255.931 ms/image`（improvement `86.02%`）这组已正式落盘结果，而不是 Scheme B 的 `2479.246 -> 152.36 ms` 或新的 payload `131.343 ms`。
+  - `session_bootstrap/reports/inference_real_reconstruction_compare_currentsafe_split_topup15_20260313_003633_retry_20260313_005140.md` 才是当前 trusted current SHA `65747fb3...b6377` 的 read latent -> reconstruct -> write PNGs 真端到端 benchmark；讨论真实 reconstruction 时，应使用 `1834.1 -> 234.219 ms/image`（improvement `87.23%`）这组最新正式结果，而不是 Scheme B 的 `2479.246 -> 152.36 ms` 或新的 payload `131.343 ms`。
+  - `session_bootstrap/reports/inference_real_reconstruction_compare_run_20260311_212301.md` 现保留为上一代 trusted current SHA `1946b08e...c644` 的历史参照；其 current median 为 `255.931 ms/image`，说明新 trusted current 在真实端到端口径下又再快约 `8.48%`。
 - safe 路径已经可用，但如果未来重新把 `torch` 暴露回 safe env import 路径，`tvm_ffi` 可能再次被 `torch/libc10.so` 触发 `SIGILL`；当前应优先复用已落盘的 safe wrapper / one-shot 入口，而不是直接手工调用原始 `tvm310` 环境。
 
 ## 3) 失败原因与修复经验（可复用）
@@ -170,7 +172,7 @@ bash ./session_bootstrap/scripts/run_quick.sh --env "$ENV"
 
 ### P0（必须先完成）
 
-1. 补齐新 trusted current SHA `65747fb301851f27892666d28daefc856c0ff2f7f85d3702779be32dde4b6377` 的真实端到端 reconstruction 正式复跑；当前后台任务已启动，但结果尚未回填到正式报告与本日志。
+1. 对外汇报与后续文档统一采用新 trusted current SHA `65747fb301851f27892666d28daefc856c0ff2f7f85d3702779be32dde4b6377` 的两组正式口径：payload `131.343 ms`、真实端到端 reconstruction `234.219 ms/image`；不要再引用“新 SHA end-to-end 待复跑”的旧说法。
 2. 后续任何 baseline-vs-current-safe inference / smoke / compare 执行前，都保留并核对 `INFERENCE_CURRENT_EXPECTED_SHA256`；若 intentional deploy 新 current-safe artifact，先记新 SHA，再更新 env。
 3. 继续以 `cortex-a72 + neon` 作为默认 current target；更激进的 `+crypto,+crc` 只保留为受控实验分支，并且 compare 必须通过 artifact hash 差异校验才算有效。
 4. 如果后续需要把 safe 路线重新产品化，先把 `torch` 对 `tvm_ffi` 的污染隔离策略（或 `TVM_FFI_DISABLE_TORCH_C_DLPACK=1` 的强制入口）固化到更上层的统一运行封装里。
