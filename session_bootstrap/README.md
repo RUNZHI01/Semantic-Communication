@@ -29,6 +29,7 @@
 | trusted current 突破总结 | `reports/phytium_current_incremental_breakthrough_20260311.md` |
 | payload 基准正式结论 | `reports/inference_compare_baseline_vs_currentsafe_rerun_20260311_114828.md` |
 | 真实端到端重建正式结论 | `reports/inference_real_reconstruction_compare_run_20260311_212301.md` |
+| 下一轮性能优化执行清单 | `runbooks/next_round_optimization_checklist.md` |
 | 后续性能优化路线 | `runbooks/optimization_roadmap.md` |
 
 如果你只想知道“现在应该复现哪条线”，默认优先：
