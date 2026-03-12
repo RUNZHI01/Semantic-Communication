@@ -295,8 +295,8 @@ echo "$RUN_ID"
 
 当前状态：
 
-- 仓库里还没有产品化的 `quality_metrics` 脚本入口。
-- 因此这里按“可执行计划 + 明确交付物”推进，而不是假设已有脚本。
+- 仓库内已补充 `session_bootstrap/scripts/compute_image_quality_metrics.py`。
+- 该脚本按统一约定输出 `session_bootstrap/reports/<run_id>.md` 与 `session_bootstrap/reports/<run_id>.json`。
 
 执行计划：
 
@@ -308,23 +308,39 @@ echo "$RUN_ID"
    - `TVM baseline vs TVM current`
 4. 输出 `md + json` 双份报告，并把表格准备成可直接抄入论文的格式。
 
-建议的文件接口：
+建议的运行接口：
 
 ```bash
 RUN_ID="quality_metrics_$(date +%Y%m%d_%H%M%S)"
 REF_DIR="/path/to/pytorch_reference_reconstructions"
 BASE_DIR="/home/user/Downloads/jscc-test/jscc/infer_outputs/inference_real_reconstruction_compare_run_20260311_212301_baseline/reconstructions"
 CUR_DIR="/home/user/Downloads/jscc-test/jscc/infer_outputs/inference_real_reconstruction_compare_run_20260311_212301_current/reconstructions"
-REPORT_MD="session_bootstrap/reports/${RUN_ID}.md"
-REPORT_JSON="session_bootstrap/reports/${RUN_ID}.json"
+
+python3 session_bootstrap/scripts/compute_image_quality_metrics.py \
+  --ref-dir "$REF_DIR" \
+  --test-dir "$BASE_DIR" \
+  --comparison-label "pytorch_vs_tvm_baseline" \
+  --report-prefix "session_bootstrap/reports/${RUN_ID}_pytorch_vs_tvm_baseline"
+
+python3 session_bootstrap/scripts/compute_image_quality_metrics.py \
+  --ref-dir "$REF_DIR" \
+  --test-dir "$CUR_DIR" \
+  --comparison-label "pytorch_vs_tvm_current" \
+  --report-prefix "session_bootstrap/reports/${RUN_ID}_pytorch_vs_tvm_current"
+
+python3 session_bootstrap/scripts/compute_image_quality_metrics.py \
+  --ref-dir "$BASE_DIR" \
+  --test-dir "$CUR_DIR" \
+  --comparison-label "tvm_baseline_vs_tvm_current" \
+  --report-prefix "session_bootstrap/reports/${RUN_ID}_tvm_baseline_vs_tvm_current"
 ```
 
-若临时写脚本，接口固定为：
+脚本要点：
 
-- `--ref-dir`
-- `--test-dir`
-- `--max-images 300`
-- 输出每张图的指标明细，以及均值 / 方差 / 最小值
+- 默认比较同名 `PNG`，文件名不一致会直接报错；只有显式加 `--allow-mismatch` 才会退化为公共子集比较。
+- 默认 `--size-mismatch crop`，尺寸不一致时裁到公共区域，并在报告中记录 `cropped_pair_count`。
+- `--lpips auto` 为默认行为：环境里有 `torch + lpips` 时计算 LPIPS，否则继续产出 PSNR / SSIM 报告并在 md/json 里记录跳过原因。
+- json 含每张图的明细；md 含 aggregate 表和可直接抄入论文的单行汇总。
 
 通过标准：
 
