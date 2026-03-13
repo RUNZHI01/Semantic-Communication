@@ -1,0 +1,313 @@
+--- a/example/system/amp/openamp_for_linux/src/slaver_00_example.c
++++ b/example/system/amp/openamp_for_linux/src/slaver_00_example.c
+@@ -33,6 +33,7 @@
+ /***************************** Include Files *********************************/
+ 
+ #include <stdio.h>
++#include <string.h>
+ #include <openamp/open_amp.h>
+ #include <metal/alloc.h>
+ #include "platform_info.h"
+@@ -58,11 +59,19 @@
+ #define SLAVE_DEBUG_E(format, ...) \
+     FT_DEBUG_PRINT_E(SLAVE_DEBUG_TAG, format, ##__VA_ARGS__)
+ 
+-#define MAX_DATA_LENGTH      (RPMSG_BUFFER_SIZE / 2)
+-
+-#define DEVICE_CORE_START    0x0001U /* 开始任务 */
+-#define DEVICE_CORE_SHUTDOWN 0x0002U /* 关闭核心 */
+-#define DEVICE_CORE_CHECK    0x0003U /* 检查消息 */
++#define SC_CTRL_MAGIC      0x53434F4DU
++#define SC_CTRL_VERSION    1U
++#define SC_MSG_STATUS_REQ  0x0008U
++#define SC_MSG_STATUS_RESP 0x0009U
++
++/* Minimal STATUS_RESP stub state mapping. */
++#define SC_GUARD_STATE_BOOT          0U
++#define SC_GUARD_STATE_READY         1U
++#define SC_GUARD_STATE_JOB_ACTIVE    2U
++#define SC_GUARD_STATE_WAIT_DONE     3U
++#define SC_GUARD_STATE_DENY_PENDING  4U
++#define SC_GUARD_STATE_FAULT_LATCHED 5U
++
+ /************************** Variable Definitions *****************************/
+ static volatile int shutdown_req = 0;
+ 
+@@ -70,15 +79,32 @@
+ struct remoteproc remoteproc_slave_00;
+ static struct rpmsg_device *rpdev_slave_00 = NULL;
+ 
+-/* 协议数据结构 */
+ typedef struct
+ {
+-    uint32_t command;           /* 命令字，占4个字节 */
+-    uint16_t length;            /* 数据长度，占2个字节 */
+-    char data[MAX_DATA_LENGTH]; /* 数据内容，动态长度 */
+-} ProtocolData;
+-
+-static ProtocolData protocol_data;
++    u32 magic;
++    u16 version;
++    u16 msg_type;
++    u32 seq;
++    u32 job_id;
++    u32 payload_len;
++    u32 header_crc32;
++} ScCtrlHdr;
++
++typedef struct
++{
++    u32 guard_state;
++    u32 active_job_id;
++    u32 last_fault_code;
++    u32 heartbeat_ok;
++    u32 sticky_fault;
++    u32 total_fault_count;
++} ScStatusResp;
++
++typedef struct
++{
++    ScCtrlHdr header;
++    ScStatusResp payload;
++} ScStatusRespFrame;
+ 
+ /************************** 资源表定义，与linux协商一致 **********/
+ static struct remote_resource_table __resource resources __attribute__((used)) = {
+@@ -149,57 +175,90 @@
+                                         .share_mem_attribute = SLAVE00_SHARE_BUFFER_ATTRIBUTE};
+ 
+ /************************** Function Prototypes ******************************/
+-/*协议解析接口*/
+-int parse_protocol_data(const char *input, size_t input_size, ProtocolData *output)
+-{
+-    int i = 0;
+-
+-    if (input_size < 6)
+-    {              /* 确保最小长度（命令字+数据长度）*/
+-        return -1; /* 数据太短 */
+-    }
+-
+-    /* 提取命令字 */
+-    output->command = *((uint32_t *)input);
+-    input += 4;
+-
+-    /* 提取数据长度 */
+-    output->length = *((uint16_t *)input);
+-    input += 2;
+-
+-    /* 检查数据长度是否超出预定义最大长度 */
+-    if (output->length > MAX_DATA_LENGTH)
+-    {
+-        return -2; // 数据长度超出限制
+-    }
+-
+-    /* 复制数据内容 */
+-    memcpy(output->data, input, output->length);
+-
+-    return 0; /* 解析成功 */
+-}
+-
+-/*协议组装接口*/
+-int assemble_protocol_data(const ProtocolData *input, char *output, size_t *output_size)
+-{
+-    /* 检查预期的输出大小是否超出最大长度 */
+-    if (6 + input->length > MAX_DATA_LENGTH)
+-    {
+-        return -1; /* 数据长度超出限制 */
+-    }
+-
+-    *output_size = 6 + input->length; /* 命令字+长度+数据 */
+-
+-    /* 组装命令字 */
+-    *((uint32_t *)output) = input->command;
+-
+-    /* 组装数据长度 */
+-    *((uint16_t *)(output + 4)) = input->length;
+-
+-    /* 复制数据内容 */
+-    memcpy(output + 6, input->data, input->length);
+-
+-    return 0; /* 组装成功 */
++static u32 sc_ctrl_crc32(const void *data, size_t len)
++{
++    const u8 *bytes = (const u8 *)data;
++    u32 crc = 0xFFFFFFFFU;
++    size_t byte_index;
++    u32 bit_index;
++
++    for (byte_index = 0; byte_index < len; ++byte_index)
++    {
++        crc ^= (u32)bytes[byte_index];
++        for (bit_index = 0; bit_index < 8U; ++bit_index)
++        {
++            if (crc & 1U)
++            {
++                crc = (crc >> 1) ^ 0xEDB88320U;
++            }
++            else
++            {
++                crc >>= 1;
++            }
++        }
++    }
++
++    return crc ^ 0xFFFFFFFFU;
++}
++
++static u32 sc_ctrl_compute_header_crc(const ScCtrlHdr *header)
++{
++    return sc_ctrl_crc32(header, offsetof(ScCtrlHdr, header_crc32));
++}
++
++static int sc_ctrl_parse_header(const void *data, size_t len, ScCtrlHdr *header)
++{
++    if (len < sizeof(*header))
++    {
++        return -1;
++    }
++
++    memcpy(header, data, sizeof(*header));
++
++    if (header->magic != SC_CTRL_MAGIC)
++    {
++        return -2;
++    }
++
++    if (header->version != SC_CTRL_VERSION)
++    {
++        return -3;
++    }
++
++    if ((size_t)header->payload_len != (len - sizeof(*header)))
++    {
++        return -4;
++    }
++
++    if (sc_ctrl_compute_header_crc(header) != header->header_crc32)
++    {
++        return -5;
++    }
++
++    return 0;
++}
++
++static int sc_ctrl_send_status_resp(struct rpmsg_endpoint *ept, const ScCtrlHdr *request_header)
++{
++    ScStatusRespFrame response;
++
++    memset(&response, 0, sizeof(response));
++    response.header.magic = SC_CTRL_MAGIC;
++    response.header.version = SC_CTRL_VERSION;
++    response.header.msg_type = SC_MSG_STATUS_RESP;
++    response.header.seq = request_header->seq;
++    response.header.job_id = request_header->job_id;
++    response.header.payload_len = sizeof(response.payload);
++    response.header.header_crc32 = sc_ctrl_compute_header_crc(&response.header);
++
++    response.payload.guard_state = SC_GUARD_STATE_READY;
++    response.payload.active_job_id = 0U;
++    response.payload.last_fault_code = 0U;
++    response.payload.heartbeat_ok = 0U;
++    response.payload.sticky_fault = 0U;
++    response.payload.total_fault_count = 0U;
++
++    return rpmsg_send(ept, &response, sizeof(response));
+ }
+ 
+ /*-----------------------------------------------------------------------------*
+@@ -208,49 +267,41 @@
+ static int rpmsg_endpoint_cb(struct rpmsg_endpoint *ept, void *data, size_t len,
+                              uint32_t src, void *priv)
+ {
+-    (void)priv;
+-    (void)src;
+-
++    ScCtrlHdr header = {0};
+     int ret;
+-    int i = 0;
++
+     (void)priv;
+     SLAVE_DEBUG_I("src:0x%x", src);
+     ept->dest_addr = src;
+ 
+-    ret = parse_protocol_data((char *)data, len, &protocol_data);
++    ret = sc_ctrl_parse_header(data, len, &header);
+     if (ret != 0)
+     {
+-        SLAVE_DEBUG_E("parse protocol data error,ret:%d", ret);
+-        return RPMSG_SUCCESS; /* 解析失败，忽略数据 */
+-    }
+-    SLAVE_DEBUG_I("command:0x%x,length:%d.", protocol_data.command, protocol_data.length);
+-    switch (protocol_data.command)
+-    {
+-        case DEVICE_CORE_START:
+-            {
+-                break;
+-            }
+-        case DEVICE_CORE_SHUTDOWN:
+-            {
+-                shutdown_req = 1;
+-                break;
+-            }
+-        case DEVICE_CORE_CHECK:
+-            {
+-                /* Send temp_data back to master */
+-                /* 请勿直接对data指针对应的内存进行写操作，操作vring中remoteproc发送通道分配的内存，引发错误的问题*/
+-                ret = rpmsg_send(ept, &protocol_data, len);
+-                if (ret < 0)
+-                {
+-                    SLAVE_DEBUG_E("rpmsg_send failed.\r\n");
+-                    return ret;
+-                }
+-                break;
+-            }
+-        default:
+-            break;
+-    }
+-
++        SLAVE_DEBUG_W("ignore non control frame, len:%lu, ret:%d", (unsigned long)len, ret);
++        return RPMSG_SUCCESS;
++    }
++
++    if (header.msg_type != SC_MSG_STATUS_REQ)
++    {
++        SLAVE_DEBUG_W("ignore unsupported msg_type:0x%x, seq:%u, job_id:%u",
++                      header.msg_type, header.seq, header.job_id);
++        return RPMSG_SUCCESS;
++    }
++
++    if (header.payload_len != 0U)
++    {
++        SLAVE_DEBUG_W("ignore STATUS_REQ with payload_len:%u", header.payload_len);
++        return RPMSG_SUCCESS;
++    }
++
++    ret = sc_ctrl_send_status_resp(ept, &header);
++    if (ret < 0)
++    {
++        SLAVE_DEBUG_E("rpmsg_send status resp failed.\r\n");
++        return ret;
++    }
++
++    SLAVE_DEBUG_I("STATUS_REQ seq:%u job_id:%u -> STATUS_RESP", header.seq, header.job_id);
+     return RPMSG_SUCCESS;
+ }
+ 
+@@ -293,7 +344,7 @@
+         }
+     }
+     rpmsg_destroy_ept(&lept);
+-    SLAVE_DEBUG_I("Exiting rpmsg echo app.\r\n");
++    SLAVE_DEBUG_I("Exiting rpmsg status app.\r\n");
+     return ret;
+ }
+ 
+@@ -350,7 +401,7 @@
+         ret = FRpmsgEchoApp(rpdev_slave_00, &remoteproc_slave_00);
+         if (ret)
+         {
+-            SLAVE_DEBUG_E("Failed to running echoapp");
++            SLAVE_DEBUG_E("Failed to running status app");
+             platform_cleanup(&remoteproc_slave_00);
+             return -1;
+         }
