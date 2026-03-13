@@ -605,9 +605,12 @@ if [[ "$LOCAL_SO_SHA256" != "$REMOTE_SO_SHA256" ]]; then
   exit 1
 fi
 
+SAFE_EXPECTED_CURRENT_SHA256="$REMOTE_SO_SHA256"
 log "remote_so=$REMOTE_SO_PATH"
 log "remote_so_sha256=$REMOTE_SO_SHA256"
 log "remote_so_size_bytes=$REMOTE_SO_SIZE_BYTES"
+log "inference_current_expected_sha256=$SAFE_EXPECTED_CURRENT_SHA256"
+log "inference_current_expected_sha256_source=uploaded_remote_artifact"
 
 log "step=run_safe_runtime_inference start"
 set +e
@@ -626,6 +629,7 @@ set +e
   export INFERENCE_WARMUP_RUNS="$SAFE_WARMUP_RUNS"
   export INFERENCE_ENTRY="$SAFE_ENTRY"
   export INFERENCE_DEVICE="$SAFE_DEVICE"
+  export INFERENCE_CURRENT_EXPECTED_SHA256="$SAFE_EXPECTED_CURRENT_SHA256"
   run_with_optional_timeout "$SAFE_TIMEOUT_SEC" bash "$SCRIPT_DIR/run_remote_tvm_inference_payload.sh" --variant current
 ) >"$REMOTE_PAYLOAD_LOG" 2>&1
 INFERENCE_RC=$?
