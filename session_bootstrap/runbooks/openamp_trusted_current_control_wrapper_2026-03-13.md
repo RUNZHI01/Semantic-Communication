@@ -65,12 +65,14 @@ python3 ./session_bootstrap/scripts/openamp_control_wrapper.py \
   --expected-sha256 "${INFERENCE_CURRENT_EXPECTED_SHA256}" \
   --output-dir ./session_bootstrap/reports/openamp_wrapper_phytium_20260313 \
   --transport hook \
-  --control-hook-cmd 'python3 ./session_bootstrap/scripts/openamp_rpmsg_bridge.py --device /dev/rpmsg0'
+  --control-hook-cmd 'python3 ./session_bootstrap/scripts/openamp_rpmsg_bridge.py --hook-stdin --rpmsg-ctrl /dev/rpmsg_ctrl0 --rpmsg-dev /dev/rpmsg0 --output-dir ./session_bootstrap/reports/openamp_wrapper_hook_bridge_20260314'
 ```
 
 说明：
 
-- `openamp_rpmsg_bridge.py` 目前尚未落库，上面只是未来桥接形态。
+- `openamp_rpmsg_bridge.py` 已落库，但当前阶段只真实转发 `STATUS_REQ`。
+- 若 wrapper 继续发 `JOB_REQ`，bridge 会返回本地 `DENY`，避免假装已经有从核授权路径。
+- 真实 `JOB_REQ/JOB_ACK`、`HEARTBEAT`、`SAFE_STOP` 仍依赖从核 firmware 实现。
 - wrapper 对 hook 的要求非常保守：
   - 事件 JSON 从 stdin 输入；
   - 当前 phase 从 `OPENAMP_PHASE` 环境变量读取；
@@ -100,6 +102,6 @@ python3 ./session_bootstrap/scripts/openamp_control_wrapper.py \
 
 ## 7. 下一步落点
 
-- 在真实飞腾板上补一个最小 bridge，先打通 `STATUS_REQ/RESP`。
-- 再让 bridge 支持 `JOB_REQ/JOB_ACK(ALLOW/DENY)`。
+- 先用已落库的 `openamp_rpmsg_bridge.py` 在真实飞腾板上回收 `STATUS_REQ` 探测证据，确认是否拿到真实 `STATUS_RESP`。
+- 再让 bridge 与从核 firmware 一起支持 `JOB_REQ/JOB_ACK(ALLOW/DENY)`。
 - 最后把 heartbeat timeout / safe-stop 接到从核 guard 策略，并保留现有 trusted current SHA guard 作为执行前置条件。
