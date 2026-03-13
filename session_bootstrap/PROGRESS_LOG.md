@@ -1,6 +1,6 @@
 # Session Progress Log（长期维护）
 
-- 最后更新：2026-03-13 01:03 +0800（补记 2026-03-13 新 trusted current 真实端到端 reconstruction 正式复跑结果：current SHA `65747fb3...b6377` 已完成同口径真端到端复跑，baseline median `1834.1 ms/image`，current median `234.219 ms/image`，improvement `87.23%`，baseline/current count 均为 `300`；相对上一代 trusted current `255.931 ms/image` 再快约 `8.48%`，先前“复跑已启动，结果待补”备注已关闭）
+- 最后更新：2026-03-13 18:27 +0800（补记 2026-03-13 `chunk4` 新 current SHA `6f236b07...6dc1` 已补齐 fresh baseline-vs-current payload + 真实端到端 reconstruction 两组正式成对验证：payload baseline median `1846.9 ms`、current median `130.219 ms`、improvement `92.95%`；真实端到端 baseline median `1850.0 ms/image`、current median `230.339 ms/image`、improvement `87.55%`；两组 current artifact SHA guard 均 `match=true`。因此 trusted current 已从 `65747fb3...b6377` 推进到 `6f236b07...6dc1`）
 - 作用：沉淀“当前状态 + 失败经验 + 下一步最小执行方案”，避免重复踩坑。
 
 ## 1) 时间线（关键里程碑）
@@ -36,6 +36,8 @@
 | 2026-03-13 00:13 | 新 trusted current 正式 payload 验证完成 | 以新 SHA `65747fb301851f27892666d28daefc856c0ff2f7f85d3702779be32dde4b6377` 跑正式 baseline-vs-current-safe validate 成功；baseline median `1853.7 ms`，current median `131.343 ms`，improvement `92.91%`。相对上一代 trusted current（SHA `1946b08e...c644`，median `153.778 ms`），本代 current 再降 `22.435 ms`，约快 `14.59%` | `session_bootstrap/reports/inference_compare_currentsafe_split_topup15_validate_20260313_0002.md` / `session_bootstrap/reports/trusted_current_speedup_causal_chain_20260313.md` |
 | 2026-03-13 00:28 | trusted current 文档入口完成切换 | `README.md`、`runbooks/artifact_registry.md` 与新归因报告已统一切到 SHA `65747fb3...b6377` 和 payload 中位数 `131.343 ms`；同时明确“为什么这轮更快”的因果链来自 hotspot -> warm-start continuation -> `15` trial topup -> 新 artifact，而非 benchmark 路径变化 | `README.md` / `session_bootstrap/runbooks/artifact_registry.md` / `session_bootstrap/reports/trusted_current_speedup_causal_chain_20260313.md` |
 | 2026-03-13 01:02 | 新 trusted current 真实端到端 reconstruction 正式复跑完成 | 以新 SHA `65747fb3...b6377` 跑正式 real reconstruction rerun 成功；baseline median `1834.1 ms/image`，current median `234.219 ms/image`，improvement `87.23%`，baseline/current count 均为 `300`。相对上一代 trusted current（`255.931 ms/image`）再降 `21.712 ms/image`，约快 `8.48%` | `session_bootstrap/reports/inference_real_reconstruction_compare_currentsafe_split_topup15_20260313_003633_retry_20260313_005140.md` / `session_bootstrap/reports/inference_real_reconstruction_compare_run_20260311_212301.md` |
+| 2026-03-13 18:11 | `chunk4` 新 current fresh payload 成对验证完成 | 以 `chunk4` 新 SHA `6f236b07...6dc1` 跑 fresh baseline-vs-current payload compare 成功；baseline median `1846.9 ms`，current median `130.219 ms`，improvement `92.95%`，current SHA guard `match=true`。相对上一代 trusted current（SHA `65747fb3...b6377`，median `131.343 ms`）再降 `1.124 ms`，约快 `0.86%` | `session_bootstrap/reports/inference_compare_currentsafe_chunk4_refresh_20260313_1758.md` |
+| 2026-03-13 18:22 | `chunk4` 新 current fresh 真实端到端 reconstruction 成对验证完成 | 以 `chunk4` 新 SHA `6f236b07...6dc1` 跑 fresh baseline-vs-current 真实端到端 compare 成功；baseline median `1850.0 ms/image`，current median `230.339 ms/image`，improvement `87.55%`，baseline/current count 均为 `300`，current SHA guard `match=true`。相对上一代 trusted current（SHA `65747fb3...b6377`，median `234.219 ms/image`）再降 `3.880 ms/image`，约快 `1.66%` | `session_bootstrap/reports/inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md` |
 
 ## 2) 已完成项 / 阻断项
 
@@ -46,8 +48,8 @@
 - realcmd 级 quick 已跑通：`status=success`，说明远端 Python/TVM/输入目录/输出目录链路可用。
 - full realcmd baseline 已成功执行，说明 `tvm_002.py + batch=1` 路径本身可运行。
 - current real reconstruction runner 已入库：`session_bootstrap/scripts/current_real_reconstruction.py`、`session_bootstrap/scripts/run_remote_current_real_reconstruction.sh` 与 `session_bootstrap/config/inference_real_reconstruction_compare.2026-03-11.phytium_pi.env` 已落盘；current 真实 reconstruction 入口现统一为 `session_bootstrap/scripts/run_remote_current_real_reconstruction.sh --variant current`。
-- 新 trusted current 真实端到端 reconstruction 正式复跑已完成：`session_bootstrap/reports/inference_real_reconstruction_compare_currentsafe_split_topup15_20260313_003633_retry_20260313_005140.md` 已确认 baseline/current run count 均为 `300`，baseline median `1834.1 ms/image`，current median `234.219 ms/image`，improvement `87.23%`；相对上一代 trusted current `255.931 ms/image` 再快约 `8.48%`。
-- 新 trusted current payload 验证已完成：当前正式 trusted current SHA 已推进到 `65747fb301851f27892666d28daefc856c0ff2f7f85d3702779be32dde4b6377`，正式 payload 中位时间为 `131.343 ms`，较上一代 trusted current `1946b08e...c644` 的 `153.778 ms` 再快 `14.59%`；对应归因报告已落盘。
+- `chunk4` 新 current fresh 真实端到端 reconstruction 正式成对验证已完成：`session_bootstrap/reports/inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md` 已确认 baseline/current run count 均为 `300`，baseline median `1850.0 ms/image`，current median `230.339 ms/image`，improvement `87.55%`；相对上一代 trusted current `234.219 ms/image` 再快约 `1.66%`。
+- `chunk4` 新 current fresh payload 正式成对验证已完成：当前正式 trusted current SHA 已推进到 `6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1`，正式 payload 中位时间为 `130.219 ms`，较上一代 trusted current `65747fb3...b6377` 的 `131.343 ms` 再快约 `0.86%`；对应 fresh payload / e2e 两份正式报告已落盘。
 
 ### 当前阻断项（P0）
 
@@ -56,16 +58,16 @@
   - current 已验证应走 `tvm310_safe + safe 0.24.dev0 runtime`。
 - **remote current-safe artifact 身份现在必须显式受控**：
   - 2026-03-11 的 `failed_current` 已确认由远端 `optimized_model.so` 漂移触发；
-  - 当前 inference 路径已支持 `INFERENCE_CURRENT_EXPECTED_SHA256`，safe env 现默认跟踪最新 trusted current 产物 SHA `65747fb301851f27892666d28daefc856c0ff2f7f85d3702779be32dde4b6377`；
+  - 当前 inference 路径已支持 `INFERENCE_CURRENT_EXPECTED_SHA256`，safe env 现默认应跟踪最新 trusted current 产物 SHA `6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1`；
   - 若未来 intentional deploy 新 current-safe artifact，必须先记录新 SHA，再更新 env 后才可跑 benchmark。
 - **current compare 的旧结论需要继续收口**：
   - 2026-03-10 的两次 current-safe target compare 都是 `total_trials=0` rebuild-only；
   - stable/experimental 当时生成了相同 `optimized_model.so sha256`，所以这些 compare 现在必须视为 invalid，而不是“实验 target 有轻微快慢差异”的证据。
 - **payload-only 与 real reconstruction 结果不可混写**：
   - `session_bootstrap/reports/current_scheme_b_compare_20260311_195303.md` 只比较 current 内部 rebuild-only SHA `2fcf773fa34d6aa69f80740ffedde33faaf265a045cae97b72022ae2c62a8449` 与 incremental SHA `1946b08e6cf20a1259fa43f9e849a06f50ae1230c08d4df7081fba1edae4c644` 的 payload-symmetric 时间，不含 baseline；
-  - `session_bootstrap/reports/inference_compare_currentsafe_split_topup15_validate_20260313_0002.md` 是新的 trusted current payload 正式 validate，结论是新 SHA `65747fb3...b6377` 对应 `131.343 ms`；
-  - `session_bootstrap/reports/inference_real_reconstruction_compare_currentsafe_split_topup15_20260313_003633_retry_20260313_005140.md` 才是当前 trusted current SHA `65747fb3...b6377` 的 read latent -> reconstruct -> write PNGs 真端到端 benchmark；讨论真实 reconstruction 时，应使用 `1834.1 -> 234.219 ms/image`（improvement `87.23%`）这组最新正式结果，而不是 Scheme B 的 `2479.246 -> 152.36 ms` 或新的 payload `131.343 ms`。
-  - `session_bootstrap/reports/inference_real_reconstruction_compare_run_20260311_212301.md` 现保留为上一代 trusted current SHA `1946b08e...c644` 的历史参照；其 current median 为 `255.931 ms/image`，说明新 trusted current 在真实端到端口径下又再快约 `8.48%`。
+  - `session_bootstrap/reports/inference_compare_currentsafe_chunk4_refresh_20260313_1758.md` 是当前 trusted current payload 正式 validate，结论是新 SHA `6f236b07...6dc1` 对应 `130.219 ms`；
+  - `session_bootstrap/reports/inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md` 才是当前 trusted current SHA `6f236b07...6dc1` 的 read latent -> reconstruct -> write PNGs 真端到端 benchmark；讨论真实 reconstruction 时，应使用 `1850.0 -> 230.339 ms/image`（improvement `87.55%`）这组最新正式结果，而不是 Scheme B 的 `2479.246 -> 152.36 ms` 或 payload-only `130.219 ms`。
+  - `session_bootstrap/reports/inference_real_reconstruction_compare_currentsafe_split_topup15_20260313_003633_retry_20260313_005140.md` 现保留为上一代 trusted current SHA `65747fb3...b6377` 的历史参照；其 current median 为 `234.219 ms/image`，说明 `chunk4` 新 trusted current 在真实端到端口径下又再快约 `1.66%`。
 - safe 路径已经可用，但如果未来重新把 `torch` 暴露回 safe env import 路径，`tvm_ffi` 可能再次被 `torch/libc10.so` 触发 `SIGILL`；当前应优先复用已落盘的 safe wrapper / one-shot 入口，而不是直接手工调用原始 `tvm310` 环境。
 
 ## 3) 失败原因与修复经验（可复用）
@@ -100,9 +102,9 @@
 - **current 远端 Python/runtime**：
   - `REMOTE_TVM_PYTHON='env TVM_FFI_DISABLE_TORCH_C_DLPACK=1 LD_LIBRARY_PATH=/home/user/anaconda3/envs/tvm310_safe/lib/python3.10/site-packages/tvm_ffi/lib:/home/user/tvm_samegen_safe_20260309/build TVM_LIBRARY_PATH=/home/user/tvm_samegen_safe_20260309/build PYTHONPATH=/home/user/tvm_samegen_20260307/python:/home/user/anaconda3/envs/tvm310_safe/lib/python3.10/site-packages /home/user/anaconda3/envs/tvm310_safe/bin/python'`
 - **current artifact identity guard**：
-  - safe env 默认 expected SHA：`65747fb301851f27892666d28daefc856c0ff2f7f85d3702779be32dde4b6377`
-  - current-safe 实机 benchmark 已验证：`artifact_sha256_match=true`
-  - 上一代 trusted current SHA `1946b08e6cf20a1259fa43f9e849a06f50ae1230c08d4df7081fba1edae4c644` 现保留为历史参照，不再作为默认 guard
+  - safe env 默认 expected SHA：`6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1`
+  - current-safe 实机 benchmark 已验证：payload / real reconstruction 两条正式链路都已 `artifact_sha256_match=true`
+  - 上一代 trusted current SHA `65747fb301851f27892666d28daefc856c0ff2f7f85d3702779be32dde4b6377` 现保留为历史参照，不再作为默认 guard
 - **baseline runtime**：仍走 compat 路径，不要和 current-safe 混用
 - **current target compare 有效性规则**：
   - 只有在不同 target 产出不同 `optimized_model.so` hash 时，compare 才有效；
@@ -172,7 +174,7 @@ bash ./session_bootstrap/scripts/run_quick.sh --env "$ENV"
 
 ### P0（必须先完成）
 
-1. 对外汇报与后续文档统一采用新 trusted current SHA `65747fb301851f27892666d28daefc856c0ff2f7f85d3702779be32dde4b6377` 的两组正式口径：payload `131.343 ms`、真实端到端 reconstruction `234.219 ms/image`；不要再引用“新 SHA end-to-end 待复跑”的旧说法。
+1. 对外汇报与后续文档统一采用新 trusted current SHA `6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1` 的两组正式口径：payload `130.219 ms`、真实端到端 reconstruction `230.339 ms/image`；不要再引用 `65747fb3...b6377` 作为当前默认 trusted current。
 2. 后续任何 baseline-vs-current-safe inference / smoke / compare 执行前，都保留并核对 `INFERENCE_CURRENT_EXPECTED_SHA256`；若 intentional deploy 新 current-safe artifact，先记新 SHA，再更新 env。
 3. 继续以 `cortex-a72 + neon` 作为默认 current target；更激进的 `+crypto,+crc` 只保留为受控实验分支，并且 compare 必须通过 artifact hash 差异校验才算有效。
 4. 如果后续需要把 safe 路线重新产品化，先把 `torch` 对 `tvm_ffi` 的污染隔离策略（或 `TVM_FFI_DISABLE_TORCH_C_DLPACK=1` 的强制入口）固化到更上层的统一运行封装里。
