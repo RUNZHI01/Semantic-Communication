@@ -14,16 +14,18 @@
 
 1. 当前 live device tree 只看到 `mailbox@32a00000`，未看到 `remoteproc`、`rpmsg`、`openamp` 相关节点。
 2. `/boot` 下同时存在 `phytium-pi-board-v3-openamp.dtb`，且该 DTB 字符串中明确包含 `rproc@b0100000`、`homo_rproc@0`、`homo,rproc`、`openamp_core0.elf`。
-3. `/lib/firmware` 与 `/usr/lib/firmware` 都存在 `openamp_core0.elf`。
-4. platform driver 已存在 `homo-rproc` 与 `phytium-mbox`，但 platform device 只有 `32a00000.mailbox`。
+3. `/boot/phytium-pi-board.dtb` 还是一个通用软链，并且当前明确指向 `phytium-pi-board-v3.dtb`。
+4. live DT 与 `phytium-pi-board.dtb`（默认 dtb）一致只包含 `mailbox@32a00000`，而与 `phytium-pi-board-v3-openamp.dtb` 不一致：后者独有 `homo_rproc`、`rproc@b0100000`、`openamp_core0.elf`、`reserved-memory`。
+5. `/lib/firmware` 与 `/usr/lib/firmware` 都存在 `openamp_core0.elf`。
+6. platform driver 已存在 `homo-rproc` 与 `phytium-mbox`，但 platform device 只有 `32a00000.mailbox`。
 
 基于以上证据，最可能的 blocker 排序是：
 
-1. 当前 boot 链未实际使用 `phytium-pi-board-v3-openamp.dtb`，或等效 OpenAMP overlay 未生效。
+1. 当前 boot 链大概率仍在使用默认 `phytium-pi-board.dtb -> phytium-pi-board-v3.dtb`，而不是 `phytium-pi-board-v3-openamp.dtb`；或者等效 OpenAMP overlay 未生效。
 2. 即使 boot 目标本应包含 OpenAMP 节点，`homo-rproc` 对应的 remoteproc 节点也没有被枚举/绑定。
 3. 从核固件 `openamp_core0.elf` 虽已落盘，但尚未真正接入 remoteproc 启动链。
 
-这里第 1 条是最高优先级推断，不是已被直接证明的事实；它来自“候选 openamp DTB 中有节点，而 live DT 中没有这些节点”的对照。
+这里第 1 条仍然属于高置信度推断而不是直接的 bootloader 日志证明；但它已经不只是“候选 dtb 中有节点而 live DT 中没有”的弱对照，而是“live DT 与默认 dtb 命中完全一致、与 openamp dtb 命中显著不同”的强对照。
 
 ## 2. 已确认事实
 
@@ -50,6 +52,20 @@
   - `openamp_core0.elf`
 
 而 live DT 侧没有出现这些节点/关键字。
+
+### 2.2.1 默认 dtb 软链与 live DT 高度一致
+
+新增只读比对进一步确认：
+
+- `/boot/phytium-pi-board.dtb -> phytium-pi-board-v3.dtb`
+- live DT / default DTB / openamp DTB 的关键节点对比为：
+  - `homo_rproc`: live=`no` / default=`no` / openamp=`yes`
+  - `rproc@b0100000`: live=`no` / default=`no` / openamp=`yes`
+  - `openamp_core0.elf`: live=`no` / default=`no` / openamp=`yes`
+  - `reserved-memory`: live=`no` / default=`no` / openamp=`yes`
+  - `mailbox@32a00000`: live=`yes` / default=`yes` / openamp=`yes`
+
+这组对比比“仅仅看到 `/boot` 下有 openamp dtb”更强：它说明当前 live DT 与默认 dtb 同步，而不是与 openamp dtb 同步。
 
 ### 2.3 固件文件已落盘
 
