@@ -248,6 +248,28 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertIn("OpenAMP control-plane status, FIT evidence, and performance in one place.", body)
         self.assertIn('<script src="/app.js"></script>', body)
 
+    def test_app_js_serves_dashboard_javascript(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+
+        status, headers, body = request_text(state, "GET", "/app.js")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["content-type"], "application/javascript; charset=utf-8")
+        self.assertEqual(headers["cache-control"], "no-store")
+        self.assertIn("const state = {", body)
+        self.assertIn('fetch("/api/snapshot"', body)
+
+    def test_app_css_serves_dashboard_stylesheet(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+
+        status, headers, body = request_text(state, "GET", "/app.css")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["content-type"], "text/css; charset=utf-8")
+        self.assertEqual(headers["cache-control"], "no-store")
+        self.assertIn(":root {", body)
+        self.assertIn("--accent: #c95d12;", body)
+
     def test_docs_endpoint_renders_repo_relative_markdown_document(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
         doc_path = "session_bootstrap/demo/openamp_control_plane_demo/README.md"
