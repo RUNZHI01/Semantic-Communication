@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import io
 import json
 from pathlib import Path
@@ -7,6 +8,7 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import patch
+from urllib.parse import quote
 
 
 DEMO_ROOT = Path(__file__).resolve().parents[1]
@@ -14,6 +16,9 @@ if str(DEMO_ROOT) not in sys.path:
     sys.path.insert(0, str(DEMO_ROOT))
 
 from server import DashboardState, DemoRequestHandler  # noqa: E402
+
+
+REPO_ROOT = DEMO_ROOT.parents[2]
 
 
 def live_probe_payload(requested_at: str, summary: str) -> dict[str, object]:
@@ -69,12 +74,12 @@ class FakeSocket:
         return self._wfile.getvalue()
 
 
-def request_json(
+def request_response(
     state: DashboardState,
     method: str,
     path: str,
     body: bytes | None = None,
-) -> tuple[int, dict[str, str], dict[str, object]]:
+) -> tuple[int, dict[str, str], bytes]:
     payload = body or b""
     request_bytes = (
         f"{method} {path} HTTP/1.1\r\n"
@@ -97,10 +102,30 @@ def request_json(
             continue
         name, value = line.split(":", 1)
         headers[name.strip().lower()] = value.strip()
+    return status, headers, response_body
+
+
+def request_json(
+    state: DashboardState,
+    method: str,
+    path: str,
+    body: bytes | None = None,
+) -> tuple[int, dict[str, str], dict[str, object]]:
+    status, headers, response_body = request_response(state, method, path, body)
     try:
         return status, headers, json.loads(response_body.decode("utf-8"))
     except json.JSONDecodeError as exc:
         raise AssertionError(response_body.decode("utf-8")) from exc
+
+
+def request_text(
+    state: DashboardState,
+    method: str,
+    path: str,
+    body: bytes | None = None,
+) -> tuple[int, dict[str, str], str]:
+    status, headers, response_body = request_response(state, method, path, body)
+    return status, headers, response_body.decode("utf-8")
 
 
 class DashboardStateTest(unittest.TestCase):
@@ -200,6 +225,50 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(snapshot_payload["board"]["current_status"]["label"], "No fresh live probe")
         self.assertFalse(snapshot_payload["board"]["current_status"]["reachable"])
         self.assertEqual(snapshot_payload["board"]["current_status"]["requested_at"], "")
+
+    def test_docs_endpoint_renders_repo_relative_markdown_document(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        doc_path = "session_bootstrap/demo/openamp_control_plane_demo/README.md"
+        expected_line = (REPO_ROOT / doc_path).read_text(encoding="utf-8").splitlines()[0]
+
+        status, headers, body = request_text(state, "GET", f"/docs?path={quote(doc_path, safe='')}")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["content-type"], "text/html; charset=utf-8")
+        self.assertEqual(headers["cache-control"], "no-store")
+        self.assertIn(f"<title>{doc_path}</title>", body)
+        self.assertIn(f'<div class="path">{doc_path}</div>', body)
+        self.assertIn(html.escape(expected_line), body)
+
+    def test_docs_endpoint_rejects_missing_invalid_and_missing_file_paths(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        cases = (
+            ("/docs", 400, "missing path"),
+            (f"/docs?path={quote('/etc/passwd', safe='')}", 400, "invalid path"),
+            ("/docs?path=session_bootstrap/demo/openamp_control_plane_demo/not-real.md", 404, "file not found"),
+        )
+
+        for request_path, expected_status, expected_message in cases:
+            with self.subTest(request_path=request_path):
+                status, headers, body = request_text(state, "GET", request_path)
+                self.assertEqual(status, expected_status)
+                self.assertTrue(headers["content-type"].startswith("text/html"))
+                self.assertEqual(headers["cache-control"], "no-store")
+                self.assertIn(expected_message, body)
+
+    def test_docs_endpoint_pretty_prints_json_documents(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        doc_path = "session_bootstrap/reports/openamp_input_contract_fit_20260315_014542/fit_summary.json"
+        raw_json = (REPO_ROOT / doc_path).read_text(encoding="utf-8")
+        expected_json = html.escape(json.dumps(json.loads(raw_json), ensure_ascii=False, indent=2))
+
+        status, headers, body = request_text(state, "GET", f"/docs?path={quote(doc_path, safe='')}")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["content-type"], "text/html; charset=utf-8")
+        self.assertEqual(headers["cache-control"], "no-store")
+        self.assertIn(f'<div class="path">{doc_path}</div>', body)
+        self.assertIn(expected_json, body)
 
 
 if __name__ == "__main__":
