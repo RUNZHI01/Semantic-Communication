@@ -124,6 +124,35 @@ def normalize_decision(response: dict[str, Any] | None) -> str | None:
     return text or None
 
 
+def build_job_ack_payload(
+    *,
+    job_id: int,
+    transport: str,
+    decision: str | None,
+    response: dict[str, Any] | None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "job_id": job_id,
+        "decision": "ALLOW" if transport != "hook" else ("ALLOW" if decision == "ALLOW" else "DENY"),
+    }
+    if isinstance(response, dict):
+        for key in (
+            "source",
+            "fault_code",
+            "fault_name",
+            "guard_state",
+            "guard_state_name",
+            "transport_status",
+            "protocol_semantics",
+            "note",
+        ):
+            if key in response:
+                payload[key] = response[key]
+    if transport == "hook" and decision != "ALLOW" and "note" not in payload:
+        payload["note"] = "control hook did not return an explicit ALLOW"
+    return payload
+
+
 def emit_event(
     *,
     trace_path: Path,
@@ -250,8 +279,15 @@ def main() -> int:
         hook_cmd=args.control_hook_cmd,
         hook_timeout_sec=args.control_hook_timeout_sec,
     )
-    decision = normalize_decision(job_req_response.get("response") if job_req_response else None)
-    if decision == "DENY":
+    hook_response = job_req_response.get("response") if job_req_response else None
+    decision = normalize_decision(hook_response)
+    job_ack_payload = build_job_ack_payload(
+        job_id=args.job_id,
+        transport=args.transport,
+        decision=decision,
+        response=hook_response,
+    )
+    if args.transport == "hook" and decision != "ALLOW":
         summary = {
             "finished_at": now_iso(),
             "job_id": args.job_id,
@@ -267,7 +303,7 @@ def main() -> int:
         emit_event(
             trace_path=trace_path,
             phase="JOB_ACK",
-            payload={"job_id": args.job_id, "decision": "DENY"},
+            payload=job_ack_payload,
             transport="none",
             hook_cmd="",
             hook_timeout_sec=args.control_hook_timeout_sec,
@@ -278,7 +314,7 @@ def main() -> int:
     emit_event(
         trace_path=trace_path,
         phase="JOB_ACK",
-        payload={"job_id": args.job_id, "decision": "ALLOW" if decision != "DENY" else "DENY"},
+        payload=job_ack_payload,
         transport="none",
         hook_cmd="",
         hook_timeout_sec=args.control_hook_timeout_sec,
