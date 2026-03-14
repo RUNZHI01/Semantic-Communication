@@ -91,8 +91,8 @@ The current demo regression suite covers these public/operator-facing surfaces:
 
 Intentional gaps and higher-risk edges:
 
-- `board_probe.py` is still not tested directly; the `/api/probe-board` regression tests stub `run_live_probe()` instead of exercising SSH command construction, timeout/error normalization, or probe stdout parsing
+- `board_probe.run_live_probe()` now has direct unit coverage for success, timeout, non-zero exit, and JSON parse-error payload shaping, but those tests stub `build_probe_command()` so env-file parsing and SSH command selection are still not locked down directly
 - the frontend is covered as served assets only; there is no browser-level regression for DOM rendering or the in-page refresh flow
 - `main()`, `--probe-startup`, and real socket binding are not exercised; the suite instantiates `DashboardState` and `DemoRequestHandler` directly
 
-If one more test is needed, the highest-value next addition is a `board_probe.run_live_probe()` unit test that mocks `subprocess.run()` and locks down success, timeout, non-zero exit, and JSON parse-error payload shaping.
+If one more test is needed, the highest-value next addition is a `board_probe.build_probe_command()` unit test that writes a temporary env file and locks down the `ssh_with_password.sh` path, `REMOTE_SSH_PORT` override handling, and fallback to `connect_phytium_pi.sh --env ...`.
