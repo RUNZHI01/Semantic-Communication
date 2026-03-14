@@ -1,6 +1,6 @@
 # Session Progress Log（长期维护）
 
-- 最后更新：2026-03-13 18:27 +0800（补记 2026-03-13 `chunk4` 新 current SHA `6f236b07...6dc1` 已补齐 fresh baseline-vs-current payload + 真实端到端 reconstruction 两组正式成对验证：payload baseline median `1846.9 ms`、current median `130.219 ms`、improvement `92.95%`；真实端到端 baseline median `1850.0 ms/image`、current median `230.339 ms/image`、improvement `87.55%`；两组 current artifact SHA guard 均 `match=true`。因此 trusted current 已从 `65747fb3...b6377` 推进到 `6f236b07...6dc1`）
+- 最后更新：2026-03-14 16:27 +0800（补记 2026-03-14 OpenAMP `release_v1.4.0` 候选已通过飞腾板关键真机门禁：live `/lib/firmware/openamp_core0.elf` 当前为 size `1627224`、SHA `685f39b0...5dc8`，安装候选后冷启动成功，`remoteproc0=running`，dmesg 出现 `size 1627224` / `remote processor homo_rproc is now up` / `creating channel rpmsg-openamp-demo-channel`，`/dev/rpmsg_ctrl0` 与 `/dev/rpmsg0` 均存在，`sudo rpmsg-demo` 已 echo 至 `Hello World! No:100`。该结论只验证冷启动 + 官方 RPMsg demo 路径，不代表已证明与板原始官方固件 byte-identical）
 - 作用：沉淀“当前状态 + 失败经验 + 下一步最小执行方案”，避免重复踩坑。
 
 ## 1) 时间线（关键里程碑）
@@ -38,6 +38,7 @@
 | 2026-03-13 01:02 | 新 trusted current 真实端到端 reconstruction 正式复跑完成 | 以新 SHA `65747fb3...b6377` 跑正式 real reconstruction rerun 成功；baseline median `1834.1 ms/image`，current median `234.219 ms/image`，improvement `87.23%`，baseline/current count 均为 `300`。相对上一代 trusted current（`255.931 ms/image`）再降 `21.712 ms/image`，约快 `8.48%` | `session_bootstrap/reports/inference_real_reconstruction_compare_currentsafe_split_topup15_20260313_003633_retry_20260313_005140.md` / `session_bootstrap/reports/inference_real_reconstruction_compare_run_20260311_212301.md` |
 | 2026-03-13 18:11 | `chunk4` 新 current fresh payload 成对验证完成 | 以 `chunk4` 新 SHA `6f236b07...6dc1` 跑 fresh baseline-vs-current payload compare 成功；baseline median `1846.9 ms`，current median `130.219 ms`，improvement `92.95%`，current SHA guard `match=true`。相对上一代 trusted current（SHA `65747fb3...b6377`，median `131.343 ms`）再降 `1.124 ms`，约快 `0.86%` | `session_bootstrap/reports/inference_compare_currentsafe_chunk4_refresh_20260313_1758.md` |
 | 2026-03-13 18:22 | `chunk4` 新 current fresh 真实端到端 reconstruction 成对验证完成 | 以 `chunk4` 新 SHA `6f236b07...6dc1` 跑 fresh baseline-vs-current 真实端到端 compare 成功；baseline median `1850.0 ms/image`，current median `230.339 ms/image`，improvement `87.55%`，baseline/current count 均为 `300`，current SHA guard `match=true`。相对上一代 trusted current（SHA `65747fb3...b6377`，median `234.219 ms/image`）再降 `3.880 ms/image`，约快 `1.66%` | `session_bootstrap/reports/inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md` |
+| 2026-03-14 16:27 | OpenAMP `release_v1.4.0` 候选冷启动 + 官方 demo 路径门禁通过 | 板上 live `/lib/firmware/openamp_core0.elf` 已确认切到候选（size `1627224`，SHA `685f39b0...5dc8`）；冷启动成功后 `remoteproc0=running`，dmesg 出现 `Booting fw image openamp_core0.elf, size 1627224` / `remote processor homo_rproc is now up` / `creating channel rpmsg-openamp-demo-channel`，`/dev/rpmsg_ctrl0` 与 `/dev/rpmsg0` 均存在，`sudo rpmsg-demo` 已稳定 echo 至 `Hello World! No:100`。因此 `release_v1.4.0` 已通过关键真机门禁：冷启动 + 官方 RPMsg demo 路径；但这仍不等于已证明与板原始官方固件 byte-identical | `session_bootstrap/reports/openamp_phase5_release_v1.4.0_cold_boot_and_demo_success_2026-03-14.md` |
 
 ## 2) 已完成项 / 阻断项
 
@@ -50,6 +51,7 @@
 - current real reconstruction runner 已入库：`session_bootstrap/scripts/current_real_reconstruction.py`、`session_bootstrap/scripts/run_remote_current_real_reconstruction.sh` 与 `session_bootstrap/config/inference_real_reconstruction_compare.2026-03-11.phytium_pi.env` 已落盘；current 真实 reconstruction 入口现统一为 `session_bootstrap/scripts/run_remote_current_real_reconstruction.sh --variant current`。
 - `chunk4` 新 current fresh 真实端到端 reconstruction 正式成对验证已完成：`session_bootstrap/reports/inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md` 已确认 baseline/current run count 均为 `300`，baseline median `1850.0 ms/image`，current median `230.339 ms/image`，improvement `87.55%`；相对上一代 trusted current `234.219 ms/image` 再快约 `1.66%`。
 - `chunk4` 新 current fresh payload 正式成对验证已完成：当前正式 trusted current SHA 已推进到 `6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1`，正式 payload 中位时间为 `130.219 ms`，较上一代 trusted current `65747fb3...b6377` 的 `131.343 ms` 再快约 `0.86%`；对应 fresh payload / e2e 两份正式报告已落盘。
+- OpenAMP `release_v1.4.0` 候选真机冷启动 + 官方 RPMsg demo 路径已验证成功：board 当前 live `/lib/firmware/openamp_core0.elf` 为 size `1627224`、SHA `685f39b0bcdd4eee31ad81d196cf8dda4ba6e33e2285b32985727bd1465e5dc8`；安装候选后冷启动成功，`remoteproc0=running`，dmesg 已出现 `size 1627224` / `remote processor homo_rproc is now up` / `creating channel rpmsg-openamp-demo-channel`，`/dev/rpmsg_ctrl0` 与 `/dev/rpmsg0` 均存在，`sudo rpmsg-demo` 已 echo 至 `Hello World! No:100`。这说明候选已通过板级冷启动与官方 userspace demo 门禁，但不代表已证明与板原始官方固件 byte-identical。
 
 ### 当前阻断项（P0）
 
