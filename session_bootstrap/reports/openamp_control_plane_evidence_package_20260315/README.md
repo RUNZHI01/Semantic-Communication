@@ -14,6 +14,15 @@
 2. [coverage_matrix.md](coverage_matrix.md)
 3. [../openamp_phase5_fit03_watchdog_success_2026-03-15.md](../openamp_phase5_fit03_watchdog_success_2026-03-15.md)
 
+## 答辩 / Demo 材料
+
+如果当前任务不是继续补板级实验，而是准备 defense / live demo，优先看下面这些：
+
+1. [demo_materials_index.md](demo_materials_index.md)
+2. [demo_four_act_runbook.md](demo_four_act_runbook.md)
+3. [defense_talk_outline.md](defense_talk_outline.md)
+4. [degraded_demo_plan.md](degraded_demo_plan.md)
+
 ## 阅读顺序
 
 1. [summary_report.md](summary_report.md)

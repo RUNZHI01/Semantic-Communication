@@ -11,6 +11,10 @@
 
 核心入口：
 - `session_bootstrap/reports/openamp_control_plane_evidence_package_20260315/README.md`
+- `session_bootstrap/reports/openamp_control_plane_evidence_package_20260315/demo_materials_index.md`
+- `session_bootstrap/reports/openamp_control_plane_evidence_package_20260315/demo_four_act_runbook.md`
+- `session_bootstrap/reports/openamp_control_plane_evidence_package_20260315/defense_talk_outline.md`
+- `session_bootstrap/reports/openamp_control_plane_evidence_package_20260315/degraded_demo_plan.md`
 - `session_bootstrap/reports/openamp_control_plane_evidence_package_20260315/summary_report.md`
 - `session_bootstrap/reports/openamp_control_plane_evidence_package_20260315/coverage_matrix.md`
 

@@ -49,6 +49,7 @@
 | 执行命令与脚本说明 | `session_bootstrap/README.md` |
 | 当前成果 / 脚本 / 路径索引 | `session_bootstrap/runbooks/artifact_registry.md` |
 | OpenAMP 控制面答辩证据包 | `session_bootstrap/reports/openamp_control_plane_evidence_package_20260315/README.md` |
+| OpenAMP demo / 答辩材料索引 | `session_bootstrap/reports/openamp_control_plane_evidence_package_20260315/demo_materials_index.md` |
 | 下一轮性能优化执行清单 | `session_bootstrap/runbooks/next_round_optimization_checklist.md` |
 | 后续性能优化路线 | `session_bootstrap/runbooks/optimization_roadmap.md` |
 | 飞腾派 RPC 调优 | `session_bootstrap/scripts/rpc_tune.py` |
