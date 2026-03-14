@@ -1,0 +1,176 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+import subprocess
+import sys
+import unittest
+from unittest.mock import patch
+
+
+DEMO_ROOT = Path(__file__).resolve().parents[1]
+if str(DEMO_ROOT) not in sys.path:
+    sys.path.insert(0, str(DEMO_ROOT))
+
+from board_probe import PROJECT_ROOT, run_live_probe  # noqa: E402
+
+
+class RunLiveProbeTest(unittest.TestCase):
+    def test_success_payload_shaping_from_valid_json_stdout(self) -> None:
+        command = ["bash", "fake-connect"]
+        details = {
+            "hostname": "phytium-demo",
+            "remoteproc": [
+                {"name": "remoteproc0", "state": "running"},
+                {"name": "remoteproc1", "state": "offline"},
+            ],
+            "rpmsg_devices": ["/dev/rpmsg0", "/dev/rpmsg1"],
+            "firmware": {"sha256": "abcdef1234567890fedcba"},
+        }
+        completed = subprocess.CompletedProcess(
+            command,
+            0,
+            stdout="ssh banner\n" + json.dumps(details) + "\n",
+            stderr="",
+        )
+
+        with (
+            patch("board_probe.now_iso", return_value="2026-03-15T12:00:00+0800"),
+            patch("board_probe.build_probe_command", return_value=command) as build_command,
+            patch("board_probe.subprocess.run", return_value=completed) as run_mock,
+        ):
+            payload = run_live_probe(env_file="demo.env", timeout_sec=12.5)
+
+        build_command.assert_called_once_with("demo.env")
+        run_mock.assert_called_once_with(
+            command,
+            cwd=PROJECT_ROOT,
+            check=False,
+            text=True,
+            capture_output=True,
+            timeout=12.5,
+        )
+        self.assertEqual(
+            payload,
+            {
+                "requested_at": "2026-03-15T12:00:00+0800",
+                "reachable": True,
+                "status": "success",
+                "summary": "phytium-demo reachable; remoteproc0=running, remoteproc1=offline; 2 rpmsg device(s); firmware abcdef123456.",
+                "error": "",
+                "details": details,
+            },
+        )
+
+    def test_timeout_returns_timeout_payload(self) -> None:
+        command = ["bash", "fake-connect"]
+
+        with (
+            patch("board_probe.now_iso", return_value="2026-03-15T12:05:00+0800"),
+            patch("board_probe.build_probe_command", return_value=command) as build_command,
+            patch(
+                "board_probe.subprocess.run",
+                side_effect=subprocess.TimeoutExpired(cmd=command, timeout=3.0),
+            ) as run_mock,
+        ):
+            payload = run_live_probe(timeout_sec=3.0)
+
+        build_command.assert_called_once_with(None)
+        run_mock.assert_called_once_with(
+            command,
+            cwd=PROJECT_ROOT,
+            check=False,
+            text=True,
+            capture_output=True,
+            timeout=3.0,
+        )
+        self.assertEqual(
+            payload,
+            {
+                "requested_at": "2026-03-15T12:05:00+0800",
+                "reachable": False,
+                "status": "timeout",
+                "summary": "The read-only SSH probe timed out before a response arrived.",
+                "error": "probe timeout",
+                "details": {},
+            },
+        )
+
+    def test_non_zero_exit_returns_error_payload(self) -> None:
+        command = ["bash", "fake-connect"]
+        completed = subprocess.CompletedProcess(
+            command,
+            7,
+            stdout="transient stdout\n",
+            stderr="permission denied\n",
+        )
+
+        with (
+            patch("board_probe.now_iso", return_value="2026-03-15T12:10:00+0800"),
+            patch("board_probe.build_probe_command", return_value=command) as build_command,
+            patch("board_probe.subprocess.run", return_value=completed) as run_mock,
+        ):
+            payload = run_live_probe(timeout_sec=9.0)
+
+        build_command.assert_called_once_with(None)
+        run_mock.assert_called_once_with(
+            command,
+            cwd=PROJECT_ROOT,
+            check=False,
+            text=True,
+            capture_output=True,
+            timeout=9.0,
+        )
+        self.assertEqual(
+            payload,
+            {
+                "requested_at": "2026-03-15T12:10:00+0800",
+                "reachable": False,
+                "status": "error",
+                "summary": "The read-only SSH probe could not reach the board from this environment.",
+                "error": "permission denied",
+                "details": {},
+            },
+        )
+
+    def test_invalid_json_stdout_returns_parse_error_payload(self) -> None:
+        command = ["bash", "fake-connect"]
+        completed = subprocess.CompletedProcess(
+            command,
+            0,
+            stdout="ssh banner\nnot-json\n",
+            stderr="stderr line\n",
+        )
+
+        with (
+            patch("board_probe.now_iso", return_value="2026-03-15T12:15:00+0800"),
+            patch("board_probe.build_probe_command", return_value=command) as build_command,
+            patch("board_probe.subprocess.run", return_value=completed) as run_mock,
+        ):
+            payload = run_live_probe(timeout_sec=6.0)
+
+        build_command.assert_called_once_with(None)
+        run_mock.assert_called_once_with(
+            command,
+            cwd=PROJECT_ROOT,
+            check=False,
+            text=True,
+            capture_output=True,
+            timeout=6.0,
+        )
+        self.assertEqual(payload["requested_at"], "2026-03-15T12:15:00+0800")
+        self.assertFalse(payload["reachable"])
+        self.assertEqual(payload["status"], "parse_error")
+        self.assertEqual(
+            payload["summary"],
+            "The read-only SSH probe returned output that could not be parsed as JSON.",
+        )
+        self.assertIn("Expecting value", payload["error"])
+        self.assertEqual(
+            payload["details"],
+            {"stdout": "ssh banner\nnot-json", "stderr": "stderr line"},
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()
