@@ -2,6 +2,8 @@
 
 > Date: 2026-03-14  
 > Scope: local bridge and firmware patch artifacts only; no board deployment in this step.
+>
+> Update 2026-03-15: the missing timeout/watchdog piece from this note is now implemented in `session_bootstrap/reports/openamp_phase5_minimal_heartbeat_timeout_impl_2026-03-15.md`. The "No heartbeat watchdog yet" boundary below is historical for the 2026-03-14 step only.
 
 ## Implemented pieces
 

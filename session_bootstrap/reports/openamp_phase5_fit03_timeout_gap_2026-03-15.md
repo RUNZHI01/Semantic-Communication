@@ -60,3 +60,22 @@
    - `JOB_ACTIVE / fault=0`
    变成
    - `READY or fault-latched / last_fault=HEARTBEAT_TIMEOUT (F003)`。
+
+## 5. 2026-03-15 本地修复准备
+
+同日已在本地 `release_v1.4.0` firmware patch artifact 里补上最小 watchdog 语义，方向保持为 firmware 侧、协议不变：
+
+- 记录最近一次被接受 `HEARTBEAT` 的 generic-timer tick；
+- 在下一次入站控制流量（包括 `STATUS_REQ`）时 lazy 检查是否已经超过 `5000 ms`；
+- 若超时，则把可观察状态收敛到：
+  - `READY`
+  - `active_job_id = 0`
+  - `last_fault = HEARTBEAT_TIMEOUT (F003)`
+  - `heartbeat_ok = 0`
+  - `total_fault_count += 1`
+
+关联本地产物：
+
+- `session_bootstrap/patches/phytium_openamp_for_linux_status_req_resp_release_v1.4.0_2026-03-14.patch`
+- `session_bootstrap/patches/phytium_openamp_for_linux_status_req_resp_release_v1.4.0_2026-03-14.md`
+- `session_bootstrap/reports/openamp_phase5_minimal_heartbeat_timeout_impl_2026-03-15.md`
