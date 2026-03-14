@@ -32,6 +32,17 @@
 | 下一轮性能优化执行清单 | `runbooks/next_round_optimization_checklist.md` |
 | 后续性能优化路线 | `runbooks/optimization_roadmap.md` |
 
+## OpenAMP 控制面证据入口（2026-03-15）
+
+如果当前目标是答辩 / 演示 OpenAMP 控制面，而不是继续做 TVM benchmark，优先看下面这些：
+
+| 目的 | 路径 |
+|---|---|
+| OpenAMP 证据包索引 | `reports/openamp_control_plane_evidence_package_20260315/README.md` |
+| OpenAMP 总报告 | `reports/openamp_control_plane_evidence_package_20260315/summary_report.md` |
+| OpenAMP 统一 coverage matrix / FIT summary | `reports/openamp_control_plane_evidence_package_20260315/coverage_matrix.md` |
+| 历史时间线真相源 | `PROGRESS_LOG.md` |
+
 如果你只想知道“现在应该复现哪条线”，默认优先：
 - current trusted artifact：`tmp/phytium_baseline_seeded_warm_start_current_incremental_20260311_094548/optimized_model.so`
 - trusted SHA256：`1946b08e6cf20a1259fa43f9e849a06f50ae1230c08d4df7081fba1edae4c644`
@@ -276,7 +287,8 @@ bash scripts/send_continue_hourly.sh --start-in-min 1 --count 8
 - 默认每 20 分钟发一次带“最近对话锚点”的 `继续` 提示，尽量优先续接最新上下文；
 - 自动续跑生成的助手回复不会再被当成下一轮锚点，避免脚本自我续写；
 - 如果会话尾部自上次成功自动发送后完全没变化，脚本默认会先跳过 1 轮，再在下一轮重发一次；
-- 如需改成“上一轮完成后再进入下一轮”，可加：`--schedule-mode after-complete`；
+- 如需改成“主对话里上一轮任务真正结束后，再发下一条继续”，可加：`--schedule-mode after-complete`；这个模式现在会在发送前先等待 `main` 会话上一轮任务结束，而不是只等待脚本自己上一条 auto-continue 的 run；
+- 对 `Connection error.`、`fetch failed`、HTTP 502-504 这类瞬时中转/网络错误，脚本会每 15 秒自动重试；`after-complete` 模式下若 run 因这类错误结束，也会自动重提当前这一轮；
 - 如果旧 sender 还占着锁，可直接加：`--replace-existing`，脚本会自动接管；
 - 可选：`--count 8` 表示只发 8 次，`--dry-run` 只打印计划不实际发送；
 - 可选：`--always-send` 恢复成每个定时点都强制发送；
