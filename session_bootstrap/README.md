@@ -39,6 +39,10 @@
 | 目的 | 路径 |
 |---|---|
 | OpenAMP 证据包索引 | `reports/openamp_control_plane_evidence_package_20260315/README.md` |
+| OpenAMP demo / 答辩材料索引 | `reports/openamp_control_plane_evidence_package_20260315/demo_materials_index.md` |
+| 四幕演示 runbook | `reports/openamp_control_plane_evidence_package_20260315/demo_four_act_runbook.md` |
+| 答辩讲稿 / 页结构提纲 | `reports/openamp_control_plane_evidence_package_20260315/defense_talk_outline.md` |
+| live 不稳时的降级方案 | `reports/openamp_control_plane_evidence_package_20260315/degraded_demo_plan.md` |
 | OpenAMP 总报告 | `reports/openamp_control_plane_evidence_package_20260315/summary_report.md` |
 | OpenAMP 统一 coverage matrix / FIT summary | `reports/openamp_control_plane_evidence_package_20260315/coverage_matrix.md` |
 | 历史时间线真相源 | `PROGRESS_LOG.md` |
