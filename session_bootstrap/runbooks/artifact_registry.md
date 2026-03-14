@@ -1,9 +1,25 @@
 # 产物 / 脚本 / 路径索引（当前可信工程入口）
 
-更新时间：`2026-03-13`
-适用范围：飞腾派 current-safe / baseline 对比、增量调优、真实重建复现
+更新时间：`2026-03-15`
+适用范围：飞腾派 current-safe / baseline 对比、增量调优、真实重建复现，以及 OpenAMP 控制面答辩收证
 
 这份文档的目的很直接：把**当前最重要的产物、脚本、报告和路径**固定下来，后续要复现、汇报、继续优化时，不用再翻聊天记录。
+
+---
+
+## 0. OpenAMP 控制面答辩证据包（2026-03-15）
+
+核心入口：
+- `session_bootstrap/reports/openamp_control_plane_evidence_package_20260315/README.md`
+- `session_bootstrap/reports/openamp_control_plane_evidence_package_20260315/summary_report.md`
+- `session_bootstrap/reports/openamp_control_plane_evidence_package_20260315/coverage_matrix.md`
+
+关键结论：
+- P0 最小板级控制闭环已落证：`STATUS_REQ/RESP`、`JOB_REQ/JOB_ACK`、`HEARTBEAT/HEARTBEAT_ACK`、wrapper-backed board smoke、`SAFE_STOP`、`JOB_DONE`
+- P1 正式 FIT 最终状态：`FIT-01 PASS / FIT-02 PASS / FIT-03 PASS`
+- `FIT-03` 历史明确保留了 pre-fix FAIL -> post-fix PASS：
+  - pre-fix: `session_bootstrap/reports/openamp_phase5_fit03_timeout_gap_2026-03-15.md`
+  - post-fix: `session_bootstrap/reports/openamp_phase5_fit03_watchdog_success_2026-03-15.md`
 
 ---
 
