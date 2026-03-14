@@ -31,7 +31,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--probe-timeout-sec",
         type=float,
-        default=10.0,
+        default=30.0,
         help="Timeout for the read-only SSH board probe.",
     )
     parser.add_argument(

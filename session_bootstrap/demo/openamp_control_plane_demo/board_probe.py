@@ -143,7 +143,7 @@ def summarize_probe(details: dict[str, Any]) -> str:
     return f"{details.get('hostname', 'board')} reachable; {states}; {rpmsg_count} rpmsg device(s); {firmware_note}."
 
 
-def run_live_probe(env_file: str | None = None, timeout_sec: float = 10.0) -> dict[str, Any]:
+def run_live_probe(env_file: str | None = None, timeout_sec: float = 30.0) -> dict[str, Any]:
     requested_at = now_iso()
     command = build_probe_command(env_file)
     try:
