@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import errno
 import importlib.util
 from pathlib import Path
 import unittest
+from unittest import mock
 
 from openamp_mock.protocol import Decision, FaultCode, FORMAL_TRUSTED_CURRENT_SHA, MessageType
 
@@ -17,6 +19,37 @@ BRIDGE_SPEC.loader.exec_module(bridge)
 
 
 class OpenAmpRpmsgBridgeTest(unittest.TestCase):
+    def test_write_all_tries_direct_write_before_waiting_for_writable(self) -> None:
+        with (
+            mock.patch.object(bridge.os, "write", return_value=4) as mock_write,
+            mock.patch.object(bridge.select, "select") as mock_select,
+        ):
+            written = bridge.write_all(7, b"ping", timeout_sec=0.1)
+
+        self.assertEqual(written, 4)
+        self.assertEqual(mock_write.call_count, 1)
+        mock_select.assert_not_called()
+
+    def test_write_all_retries_after_retryable_nonblocking_write_error(self) -> None:
+        attempts = 0
+
+        def fake_write(fd: int, payload: bytes | memoryview) -> int:
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise BlockingIOError(errno.EAGAIN, "rpmsg busy")
+            return len(payload)
+
+        with (
+            mock.patch.object(bridge.os, "write", side_effect=fake_write) as mock_write,
+            mock.patch.object(bridge.select, "select", return_value=([], [7], [])) as mock_select,
+        ):
+            written = bridge.write_all(7, b"payload", timeout_sec=0.1)
+
+        self.assertEqual(written, len(b"payload"))
+        self.assertEqual(mock_write.call_count, 2)
+        self.assertEqual(mock_select.call_count, 1)
+
     def test_build_job_req_payload_encodes_binary_wire_shape(self) -> None:
         payload = bridge.build_job_req_payload_from_hook(
             {
