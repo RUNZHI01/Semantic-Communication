@@ -49,6 +49,13 @@ Minimal admission checks in the patch:
 
 State behavior:
 
+- Before entering `FRpmsgEchoApp(...)`, the patch now explicitly resets:
+  - `sc_guard_state`
+  - `sc_active_job_id`
+  - `sc_last_fault_code`
+  - `sc_total_fault_count`
+  - `sc_heartbeat_seen`
+- This avoids relying on startup-time static initialization for a fresh remoteproc/app start.
 - On `ALLOW`, the patch sets:
   - `active_job_id = <request job_id>`
   - `guard_state = JOB_ACTIVE`
@@ -56,13 +63,28 @@ State behavior:
 - On `ALLOW`, the patch also clears the per-job heartbeat bit:
   - `heartbeat_ok = 0` in follow-up `STATUS_RESP` until the first accepted `HEARTBEAT`
 - On accepted `HEARTBEAT`, the patch:
+  - requires `guard_state == JOB_ACTIVE`
+  - requires `active_job_id != 0`
+  - requires `job_id == active_job_id`
   - sends `HEARTBEAT_ACK(guard_state=<current>, heartbeat_ok=1)`
   - updates the minimal per-job state so follow-up `STATUS_REQ` reports `heartbeat_ok = 1`
 - On ignored or mismatched `HEARTBEAT`, the patch still returns a minimal `HEARTBEAT_ACK`, but with `heartbeat_ok = 0`
-- On `DENY`, the patch keeps the current runtime state, updates `last_fault_code`, increments `total_fault_count`, and sends a real `JOB_ACK(DENY, ...)`.
+- On `DENY`, the patch updates `last_fault_code`, increments `total_fault_count`, and normalizes any non-admitted state back to:
+  - `guard_state = READY`
+  - `active_job_id = 0`
+  - `heartbeat_ok = 0`
 - Unsupported control messages are still ignored conservatively after logging.
+
+State-consistency hypothesis fixed in this revision:
+
+- The HEARTBEAT-era inconsistency is most plausibly caused by stale file-scope state surviving into a new app session because the patch relied on static initialization only.
+- Once stale `guard_state=JOB_ACTIVE` and `active_job_id=<old job>` are present, a fresh `JOB_REQ` can be denied as duplicate while a follow-up `HEARTBEAT` for that same stale `job_id` is still acknowledged.
+- The local fix is therefore:
+  - explicit runtime-state reset at app entry
+  - heartbeat gating on a nonzero admitted `active_job_id`
+  - normalization of non-active state before deny/status reporting
 
 Local artifact checks performed on 2026-03-14:
 
 - `python3 -m unittest openamp_mock.tests.test_rpmsg_bridge`
-- local unified-diff hunk-count verification for `phytium_openamp_for_linux_status_req_resp_release_v1.4.0_2026-03-14.patch`
+- `git diff --check -- session_bootstrap/patches/phytium_openamp_for_linux_status_req_resp_release_v1.4.0_2026-03-14.patch session_bootstrap/patches/phytium_openamp_for_linux_status_req_resp_release_v1.4.0_2026-03-14.md`

@@ -37,7 +37,7 @@
  /************************** Variable Definitions *****************************/
  static volatile int shutdown_req = 0;
  
-@@ -128,34 +151,455 @@
+@@ -128,34 +151,479 @@
  /*******************例程全局变量***********************************************/
  struct remoteproc remoteproc_slave_00;
  static struct rpmsg_device *rpdev_slave_00 = NULL;
@@ -124,6 +124,25 @@
 +static uint32_t sc_total_fault_count = 0U;
 +static uint32_t sc_heartbeat_seen = 0U;
  /************************** Function Prototypes ******************************/
++static void sc_ctrl_reset_runtime_state(void)
++{
++    sc_guard_state = SC_GUARD_STATE_READY;
++    sc_active_job_id = 0U;
++    sc_last_fault_code = SC_FAULT_NONE;
++    sc_total_fault_count = 0U;
++    sc_heartbeat_seen = 0U;
++}
++
++static void sc_ctrl_normalize_runtime_state(void)
++{
++    if ((sc_guard_state != SC_GUARD_STATE_JOB_ACTIVE) || (sc_active_job_id == 0U))
++    {
++        sc_guard_state = SC_GUARD_STATE_READY;
++        sc_active_job_id = 0U;
++        sc_heartbeat_seen = 0U;
++    }
++}
++
 +static uint32_t sc_ctrl_crc32(const void *data, size_t len)
 +{
 +    const uint8_t *bytes = (const uint8_t *)data;
@@ -249,6 +268,7 @@
 +{
 +    ScStatusRespFrame response;
 +
++    sc_ctrl_normalize_runtime_state();
 +    memset(&response, 0, sizeof(response));
 +    ept->dest_addr = src;
 +    response.header.magic = SC_CTRL_MAGIC;
@@ -262,6 +282,7 @@
 +    response.payload.active_job_id = sc_active_job_id;
 +    response.payload.last_fault_code = sc_last_fault_code;
 +    response.payload.heartbeat_ok = ((sc_guard_state == SC_GUARD_STATE_JOB_ACTIVE) &&
++                                     (sc_active_job_id != 0U) &&
 +                                     (sc_heartbeat_seen != 0U)) ? 1U : 0U;
 +    response.payload.sticky_fault = 0U;
 +    response.payload.total_fault_count = sc_total_fault_count;
@@ -277,6 +298,7 @@
 +    uint32_t fault_code = SC_FAULT_NONE;
 +    int ret;
 +
++    sc_ctrl_normalize_runtime_state();
 +    if (request_header->payload_len != sizeof(request))
 +    {
 +        fault_code = SC_FAULT_PARAM_RANGE;
@@ -335,6 +357,7 @@
 +
 +deny_request:
 +    sc_ctrl_note_fault(fault_code);
++    sc_ctrl_normalize_runtime_state();
 +
 +    ret = sc_ctrl_send_job_ack(ept, src, request_header, SC_DECISION_DENY, fault_code);
 +    if (ret < 0)
@@ -376,7 +399,9 @@
 +
 +    memcpy(&request, payload_data, sizeof(request));
 +
++    sc_ctrl_normalize_runtime_state();
 +    if ((sc_guard_state == SC_GUARD_STATE_JOB_ACTIVE) &&
++        (sc_active_job_id != 0U) &&
 +        (request_header->job_id == sc_active_job_id))
 +    {
 +        sc_heartbeat_seen = 1U;
@@ -506,3 +531,9 @@
  }
  
  static void rpmsg_service_unbind(struct rpmsg_endpoint *ept)
+@@ -351,4 +819,5 @@
++        sc_ctrl_reset_runtime_state();
+         ret = FRpmsgEchoApp(rpdev_slave_00, &remoteproc_slave_00);
+         if (ret)
+         {
+             SLAVE_DEBUG_E("Failed to running echoapp");
