@@ -81,11 +81,44 @@ def now_iso() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%S%z")
 
 
+def parse_env_file(env_file: str | None) -> dict[str, str]:
+    if not env_file:
+        return {}
+    path = Path(env_file)
+    if not path.is_absolute():
+        path = (PROJECT_ROOT / env_file).resolve()
+    values: dict[str, str] = {}
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        values[key.strip()] = value.strip().strip('"').strip("'")
+    return values
+
+
 def build_probe_command(env_file: str | None = None) -> list[str]:
+    remote_cmd = f"python3 -c {shlex.quote(REMOTE_PROBE_CODE)}"
+    values = parse_env_file(env_file)
+    if values.get("REMOTE_HOST") and values.get("REMOTE_USER") and values.get("REMOTE_PASS"):
+        return [
+            "bash",
+            str(SSH_WITH_PASSWORD_SCRIPT),
+            "--host",
+            values["REMOTE_HOST"],
+            "--user",
+            values["REMOTE_USER"],
+            "--pass",
+            values["REMOTE_PASS"],
+            "--port",
+            values.get("REMOTE_SSH_PORT", "22"),
+            "--",
+            remote_cmd,
+        ]
+
     command = ["bash", str(CONNECT_SCRIPT)]
     if env_file:
         command.extend(["--env", env_file])
-    remote_cmd = f"python3 -c {shlex.quote(REMOTE_PROBE_CODE)}"
     command.extend(["--", remote_cmd])
     return command
 
