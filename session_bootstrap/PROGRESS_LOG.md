@@ -1,6 +1,6 @@
 # Session Progress Log（长期维护）
 
-- 最后更新：2026-03-15 02:36 +0800（P1 三类正式 FIT 现在都已变成真实板级 PASS：先由 Codex 在仓库里补上 firmware 侧 lazy heartbeat-timeout watchdog patch（commit `0503b04`），随后主会话将该 patch 应用到远端 `release_v1.4.0` 源树、使用远端 xpack bare-metal 工具链重新构建出新固件 `openamp_core0.elf`（SHA `2c4240e03deedd2cc6bbd1c7c34abee852aa8f7927a5187a5131659c4ce7878a`，live size `893392`），并替换板上原 live `JOB_DONE` 版固件（旧 SHA `afa9679f...3803` 已备份到 `/tmp/openamp_core0.elf.backup.20260315_023107`）。在新固件上原样复跑 `FIT-03`：`pre STATUS_REQ -> JOB_REQ(ALLOW) -> HEARTBEAT_ACK(1) -> 停发 heartbeat 5s -> STATUS_REQ`，follow-up `STATUS_RESP` 现在已真实返回 `READY / active_job_id=0 / last_fault_code=HEARTBEAT_TIMEOUT(3) / heartbeat_ok=0 / total_fault_count=1`。这意味着当前控制面已经不仅有 admission 拒绝证据，也已具备最小 watchdog 超时证据，P1 三项正式 FIT 全部闭环。）
+- 最后更新：2026-03-15 02:52 +0800（从阶段判断看，工程已经从“OpenAMP 最小控制面 + 风险/FIT 收证”推进到“答辩/演示材料收口阶段”。OpenAMP 这条线目前最核心的工程闭环已经完成：`STATUS_REQ/RESP`、`JOB_REQ/JOB_ACK`、`HEARTBEAT/HEARTBEAT_ACK`、`SAFE_STOP`、`JOB_DONE` 与 wrapper-backed board smoke 均已在飞腾派真机落证；`FIT-01/02/03` 也已全部形成最终 PASS，其中 `FIT-03` 明确保留了 old live firmware 先 FAIL、再经 watchdog patch（commit `0503b04`）修复后 PASS 的完整历史链。与此同时，总证据矩阵与答辩用总报告也已汇总到 `session_bootstrap/reports/openamp_control_plane_evidence_package_20260315/`。这意味着当前主战场不再是“把控制面做出来”，而是“把这套已闭环证据转成 Demo、视频、PPT、讲稿，并补齐评委高频追问材料”。）
 - 作用：沉淀“当前状态 + 失败经验 + 下一步最小执行方案”，避免重复踩坑。
 
 ## 1) 时间线（关键里程碑）
@@ -49,6 +49,8 @@
 | 2026-03-15 01:45 | OpenAMP P1 `FIT-02` 输入契约破坏真机验证成功 | 已在 fresh boot 后按单一路径 `set_env.sh -> sudo rpmsg-demo` 恢复 `/dev/rpmsg0`，随后对真实 `JOB_REQ` 注入非法 `expected_outputs=2`。firmware 返回 `JOB_ACK(DENY)`，其中 `fault_code=9 / ILLEGAL_PARAM_RANGE`、`guard_state=READY`；wrapper 收敛为 `denied_by_control_hook` 且 runner 未启动，follow-up `STATUS_RESP` 仍保持 `READY/active_job_id=0`，并把 `last_fault=ILLEGAL_PARAM_RANGE`、`total_fault_count=1` 稳定落盘。这说明“参数范围 / 输入契约非法值拒绝执行”也已具备正式板级证据 | `session_bootstrap/reports/openamp_input_contract_fit_20260315_014542/fit_report_FIT-02.md` / `session_bootstrap/reports/openamp_phase5_fit02_input_contract_success_2026-03-15.md` / `session_bootstrap/reports/openamp_input_contract_fit_20260315_014542/fit_summary.json` |
 | 2026-03-15 01:57 | OpenAMP P1 `FIT-03` 心跳超时 / watchdog 真实缺口确认 | 已在 fresh boot 后按干净路径恢复 `/dev/rpmsg0`，并真实执行 `pre STATUS_REQ -> JOB_REQ(ALLOW) -> HEARTBEAT_ACK(heartbeat_ok=1) -> 停发 heartbeat 5s -> STATUS_REQ`。结果显示 `5s` 无 heartbeat 后状态仍为 `JOB_ACTIVE / active_job_id=9303 / last_fault=0 / heartbeat_ok=1 / total_fault_count=0`，没有出现 `HEARTBEAT_TIMEOUT(F003)` 或自动 stop；最后只能通过显式 `SAFE_STOP` 清理回 `READY`。这说明 `FIT-03` 已拿到正式真机结论，但当前 live firmware 仍缺自动 watchdog 语义 | `session_bootstrap/reports/openamp_heartbeat_timeout_fit_20260315_015841/fit_report_FIT-03.md` / `session_bootstrap/reports/openamp_phase5_fit03_timeout_gap_2026-03-15.md` / `session_bootstrap/reports/openamp_heartbeat_timeout_fit_20260315_015841/fit_summary.json` |
 | 2026-03-15 02:34 | OpenAMP P1 `FIT-03` 心跳超时 / watchdog 修复后真机验证成功 | 已将 watchdog 修复版 live firmware（SHA `2c4240e0...7878a`，size `893392`）部署到板上并冷启动 bring-up 成功；在同样的 `pre STATUS_REQ -> JOB_REQ(ALLOW) -> HEARTBEAT_ACK(1) -> 停发 heartbeat 5s -> STATUS_REQ` 探针下，follow-up `STATUS_RESP` 已真实返回 `READY / active_job_id=0 / last_fault=HEARTBEAT_TIMEOUT(3) / heartbeat_ok=0 / total_fault_count=1`。这说明 lazy watchdog patch 已经把 `FIT-03` 从真实缺口转成真实 PASS | `session_bootstrap/reports/openamp_heartbeat_timeout_fit_watchdogfix_20260315_023410/fit_report_FIT-03.md` / `session_bootstrap/reports/openamp_phase5_fit03_watchdog_success_2026-03-15.md` / `session_bootstrap/reports/openamp_heartbeat_timeout_fit_watchdogfix_20260315_023410/fit_summary.json` |
+| 2026-03-15 02:40 | 新 watchdog live firmware clean baseline 再确认成功 | 在部署 watchdog-fix live firmware（SHA `2c4240e0...7878a`）并完成 `FIT-03` 复验后，再次通过 fresh reboot + `set_env.sh -> sudo rpmsg-demo` bring-up 做 `STATUS_REQ` clean check，结果返回 `READY / active_job_id=0 / last_fault_code=0 / heartbeat_ok=0 / total_fault_count=0`。这说明当前板上 live 固件不仅能触发 `F003`，也能在 fresh boot 后回到干净 READY 基线，适合作为后续 Demo / 讲解起点 | 主会话 final ready probe（`rpmsg_exists=true`，`guard_state=1`，`active_job_id=0`，`last_fault_code=0`，`heartbeat_ok=0`，`total_fault_count=0`） |
+| 2026-03-15 02:50 | OpenAMP 控制面总证据包收口完成 | 已新增 `session_bootstrap/reports/openamp_control_plane_evidence_package_20260315/{README.md,coverage_matrix.md,summary_report.md}`，并同步更新根 `README.md`、`session_bootstrap/README.md` 与 `runbooks/artifact_registry.md`，形成可直接用于答辩 / 演示的统一入口。至此 OpenAMP 工程推进阶段可判断为：P1 风险/FIT/覆盖分析基本完成，主焦点切换到 Demo / 视频 / PPT / 讲稿与评委高频追问补证 | `session_bootstrap/reports/openamp_control_plane_evidence_package_20260315/README.md` / `coverage_matrix.md` / `summary_report.md` |
 | 2026-03-14 21:04 | OpenAMP 最小 `HEARTBEAT/HEARTBEAT_ACK` 真机闭环打通且 fresh-boot 状态一致性修复成功 | 修复后的 heartbeat-fix 版固件（size `1646088`，SHA `c1172b7c...4711`）已在真机上验证：fresh boot 后初始 `STATUS_RESP` 为 `guard_state=READY, active_job_id=0, heartbeat_ok=0, total_fault_count=0`；随后真实 `JOB_REQ(ALLOW)`、`HEARTBEAT_ACK(heartbeat_ok=1)` 与 follow-up `STATUS_RESP(guard_state=JOB_ACTIVE, active_job_id=9501, heartbeat_ok=1)` 全部成立，说明先前 deny/heartbeat 状态不一致问题已被 reset/normalize 修复收住 | `session_bootstrap/reports/openamp_heartbeat_fix_validate_20260314/phase3_probe.log` / `session_bootstrap/patches/phytium_openamp_for_linux_status_req_resp_release_v1.4.0_2026-03-14.patch` |
 
 ## 2) 已完成项 / 阻断项
@@ -75,6 +77,8 @@
 - P1 `FIT-02` 输入契约破坏真机板级证据也已补齐：在 fresh boot 后通过单一路径 `set_env.sh -> sudo rpmsg-demo` 恢复 `/dev/rpmsg0`，然后对真实 `JOB_REQ` 注入非法 `expected_outputs=2`，板侧 evidence 已落回本地 `session_bootstrap/reports/openamp_input_contract_fit_20260315_014542/`。正式结论为 `PASS`：`JOB_ACK(DENY, ILLEGAL_PARAM_RANGE)`、wrapper `denied_by_control_hook`、runner 未启动、follow-up `STATUS_RESP=READY/active_job_id=0/last_fault=ILLEGAL_PARAM_RANGE/total_fault_count=1`。
 - P1 `FIT-03` 心跳超时 / watchdog 也已拿到真实板级结论：在 fresh boot 后允许一个真实作业、发送一次有效 `HEARTBEAT_ACK(heartbeat_ok=1)`，然后故意停发 heartbeat `5s`，follow-up `STATUS_RESP` 仍保持 `JOB_ACTIVE/active_job_id=9303/last_fault=0/heartbeat_ok=1/total_fault_count=0`。这证明当前 live firmware **尚未实现或接通自动 heartbeat-timeout watchdog**；本轮为了清理板子，额外发送了 `SAFE_STOP`，随后状态回到 `READY/last_fault=MANUAL_SAFE_STOP(10)`。因此 `FIT-03` 的正式结论是：缺口已确认，而非猜测。
 - P1 `FIT-03` 的 watchdog 缺口现已在新 live firmware 上被关闭：仓库内 `0503b04 openamp: add lazy firmware heartbeat timeout watchdog` 已被应用到远端 `release_v1.4.0` 源树并成功构建/部署，复跑同一套 `5s` 无 heartbeat 探针后，follow-up `STATUS_RESP` 已真实返回 `HEARTBEAT_TIMEOUT(F003)` 且状态回到 `READY`。因此当前 P1 的最终正式结论已更新为：`FIT-01 PASS / FIT-02 PASS / FIT-03 PASS`。
+- OpenAMP 控制面总证据包已正式收口：`session_bootstrap/reports/openamp_control_plane_evidence_package_20260315/` 现已提供统一 `README + coverage_matrix + summary_report` 三件套，并把 P0 里程碑、P1 三项 FIT 最终状态以及 `FIT-03` 的 pre-fix FAIL -> post-fix PASS 历史链都纳入统一答辩入口。
+- 新 watchdog live firmware clean baseline 已确认：在部署 SHA `2c4240e0...7878a` 并完成 `FIT-03` PASS 后，再次 fresh reboot + bring-up 的 `STATUS_REQ` 已返回 `READY / active_job_id=0 / last_fault=0 / heartbeat_ok=0 / total_fault_count=0`，说明当前板上 live 基线适合作为后续 Demo / PPT 演示起点。
 
 ### 当前阻断项（P0）
 
@@ -97,10 +101,10 @@
   - 重新整板启动后，只跑一次 `sudo /home/user/open-amp/set_env.sh` 仍然只会拿到 `/dev/rpmsg_ctrl0`；
   - 随后再跑一次 `sudo timeout 15s /home/user/open-amp/rpmsg-demo`，`/dev/rpmsg0` 才稳定出现；
   - 因此后续 `FIT-03` 的 fresh-boot bring-up 应沿用这条单一路径，而不是再次手工多次操纵 `remoteproc0/state`。
-- **当前 P1 的主缺口已不再是 watchdog，而是证据汇总与更高层语义收口**：
-  - `FIT-01`、`FIT-02`、`FIT-03` 现在都已经拿到了真实板级 PASS 证据；
-  - 其中 `FIT-03` 采用的是最小 lazy watchdog 语义：timeout 在“下一次入站控制帧”上变得可观测，而不是由周期性 ISR/task 主动打断；
-  - 因此下一阶段最值钱的工作已经从“补单点功能缺口”转向“把三类 FIT 与 SAFE_STOP/JOB_DONE/STATUS_REQ/RESP 汇总成统一 coverage matrix / FIT summary / defense-facing 总报告”。
+- **当前 OpenAMP 主缺口已经从控制面工程实现切换到答辩材料与非核心扩展能力**：
+  - 控制面最小闭环与三类正式 FIT 都已经完成真机收证，并且统一 evidence package 也已经生成；
+  - 当前最值钱的下一步不再是继续补 `FIT-01/02/03`，而是把这套证据转成四幕 Demo、视频脚本、PPT 页结构和讲稿；
+  - 仍未纳入当前正式口径的 OpenAMP 扩展项包括：`FIT-04/05`、`RESET_REQ/ACK`、deadline enforcement、sticky fault reset。
 - **payload-only 与 real reconstruction 结果不可混写**：
   - `session_bootstrap/reports/current_scheme_b_compare_20260311_195303.md` 只比较 current 内部 rebuild-only SHA `2fcf773fa34d6aa69f80740ffedde33faaf265a045cae97b72022ae2c62a8449` 与 incremental SHA `1946b08e6cf20a1259fa43f9e849a06f50ae1230c08d4df7081fba1edae4c644` 的 payload-symmetric 时间，不含 baseline；
   - `session_bootstrap/reports/inference_compare_currentsafe_chunk4_refresh_20260313_1758.md` 是当前 trusted current payload 正式 validate，结论是新 SHA `6f236b07...6dc1` 对应 `130.219 ms`；
@@ -223,5 +227,7 @@ bash ./session_bootstrap/scripts/run_quick.sh --env "$ENV"
 2. 把 rebuild-only one-shot、incremental current、compare 输出分别纳入 daily/experiment 汇总，避免三种语义在文案里混淆成同一条“current 结果”。
 3. 如需最终替换长期默认配置，再评估是否把旧 `generic + neon` 文档/模板整体退役，避免误用。
 4. 将本文件作为每次 round 后唯一“进度真相源”持续更新（含失败栈摘要、artifact hash 结论与 compare 有效性状态）。
-5. 一旦换到有网络权限的执行环境，直接复跑 `python3 ./session_bootstrap/scripts/run_openamp_fit_wrong_sha.py --output-dir ./session_bootstrap/reports/openamp_wrong_sha_fit_<new_timestamp>`，目标是把当前 `BLOCKED` bundle升级为真正的 `JOB_ACK(DENY, F001)` 真机证据包。
-6. FIT-01 真机收口后，不要再重新设计目录结构；直接复用 `openamp_wrong_sha_fit_<timestamp>/` 里已经固定下来的 `manifest + status snapshot + wrapper trace + fit report + coverage matrix` 约定，把 FIT-02 与 FIT-03 接到同一套 evidence contract 上。
+5. 以 `session_bootstrap/reports/openamp_control_plane_evidence_package_20260315/` 作为当前默认 OpenAMP 对外入口，不要再分散引用零散 report。
+6. 下一步优先把 OpenAMP 证据包翻译成四幕 Demo、视频脚本、PPT 页结构与讲稿。
+7. 在答辩材料阶段，明确保留 `FIT-03` 的 pre-fix FAIL -> post-fix PASS 两阶段历史，不要只展示最终 PASS。
+8. 若时间允许，再补 `FIT-04/05`、`RESET_REQ/ACK`、deadline enforcement、sticky fault reset 等非当前主口径扩展项。
