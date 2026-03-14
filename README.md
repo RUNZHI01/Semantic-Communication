@@ -50,6 +50,8 @@
 | 当前成果 / 脚本 / 路径索引 | `session_bootstrap/runbooks/artifact_registry.md` |
 | OpenAMP 控制面答辩证据包 | `session_bootstrap/reports/openamp_control_plane_evidence_package_20260315/README.md` |
 | OpenAMP demo / 答辩材料索引 | `session_bootstrap/reports/openamp_control_plane_evidence_package_20260315/demo_materials_index.md` |
+| 启动集成 OpenAMP demo 软件 | `bash session_bootstrap/scripts/run_openamp_demo.sh` |
+| OpenAMP demo 软件说明 | `session_bootstrap/demo/openamp_control_plane_demo/README.md` |
 | 下一轮性能优化执行清单 | `session_bootstrap/runbooks/next_round_optimization_checklist.md` |
 | 后续性能优化路线 | `session_bootstrap/runbooks/optimization_roadmap.md` |
 | 飞腾派 RPC 调优 | `session_bootstrap/scripts/rpc_tune.py` |
@@ -89,6 +91,9 @@
 ## 快速开始
 
 ```bash
+# 0. 启动集成 OpenAMP dashboard（默认离线证据模式）
+bash session_bootstrap/scripts/run_openamp_demo.sh
+
 # 1. 连接飞腾派
 bash session_bootstrap/scripts/connect_phytium_pi.sh
 

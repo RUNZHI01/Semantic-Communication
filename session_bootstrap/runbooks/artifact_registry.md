@@ -17,6 +17,8 @@
 - `session_bootstrap/reports/openamp_control_plane_evidence_package_20260315/degraded_demo_plan.md`
 - `session_bootstrap/reports/openamp_control_plane_evidence_package_20260315/summary_report.md`
 - `session_bootstrap/reports/openamp_control_plane_evidence_package_20260315/coverage_matrix.md`
+- `session_bootstrap/scripts/run_openamp_demo.sh`
+- `session_bootstrap/demo/openamp_control_plane_demo/README.md`
 
 关键结论：
 - P0 最小板级控制闭环已落证：`STATUS_REQ/RESP`、`JOB_REQ/JOB_ACK`、`HEARTBEAT/HEARTBEAT_ACK`、wrapper-backed board smoke、`SAFE_STOP`、`JOB_DONE`

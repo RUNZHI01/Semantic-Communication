@@ -40,6 +40,9 @@
 |---|---|
 | OpenAMP 证据包索引 | `reports/openamp_control_plane_evidence_package_20260315/README.md` |
 | OpenAMP demo / 答辩材料索引 | `reports/openamp_control_plane_evidence_package_20260315/demo_materials_index.md` |
+| 集成 OpenAMP demo dashboard 启动器 | `scripts/run_openamp_demo.sh` |
+| OpenAMP demo 软件说明 | `demo/openamp_control_plane_demo/README.md` |
+| 只读板级状态探针 | `scripts/probe_openamp_board_status.py` |
 | 四幕演示 runbook | `reports/openamp_control_plane_evidence_package_20260315/demo_four_act_runbook.md` |
 | 答辩讲稿 / 页结构提纲 | `reports/openamp_control_plane_evidence_package_20260315/defense_talk_outline.md` |
 | live 不稳时的降级方案 | `reports/openamp_control_plane_evidence_package_20260315/degraded_demo_plan.md` |
@@ -51,6 +54,19 @@
 - current trusted artifact：`tmp/phytium_baseline_seeded_warm_start_current_incremental_20260311_094548/optimized_model.so`
 - trusted SHA256：`1946b08e6cf20a1259fa43f9e849a06f50ae1230c08d4df7081fba1edae4c644`
 - 推荐验证入口：`scripts/run_inference_benchmark.sh` + `config/inference_tvm310_safe.2026-03-10.phytium_pi.env`
+
+如果当前目标是直接演示 OpenAMP 控制面，优先执行：
+
+```bash
+bash ./session_bootstrap/scripts/run_openamp_demo.sh
+```
+
+如需把只读 SSH 板级状态探针也接进 dashboard：
+
+```bash
+bash ./session_bootstrap/scripts/run_openamp_demo.sh \
+  --probe-env ./session_bootstrap/config/phytium_pi_login.env
+```
 
 ## 飞腾派登录固化
 

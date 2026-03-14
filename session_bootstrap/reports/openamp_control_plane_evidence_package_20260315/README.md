@@ -22,6 +22,8 @@
 2. [demo_four_act_runbook.md](demo_four_act_runbook.md)
 3. [defense_talk_outline.md](defense_talk_outline.md)
 4. [degraded_demo_plan.md](degraded_demo_plan.md)
+5. [../../demo/openamp_control_plane_demo/README.md](../../demo/openamp_control_plane_demo/README.md)
+6. [../../scripts/run_openamp_demo.sh](../../scripts/run_openamp_demo.sh)
 
 ## 阅读顺序
 
