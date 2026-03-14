@@ -27,6 +27,7 @@ JOB_REQ_STRUCT = struct.Struct("<32sIII")
 JOB_ACK_STRUCT = struct.Struct("<III")
 HEARTBEAT_STRUCT = struct.Struct("<IIII")
 HEARTBEAT_ACK_STRUCT = struct.Struct("<II")
+JOB_DONE_STRUCT = struct.Struct("<IIII")
 
 FLAG_NAME_TO_WIRE = {
     "payload": 1,
@@ -58,7 +59,7 @@ def parse_args() -> argparse.Namespace:
         description=(
             "Minimal Linux-side OpenAMP/RPMsg bridge for the phase-5 control plane. "
             "Direct mode preserves the existing STATUS_REQ probe. Hook mode also forwards "
-            "minimal binary JOB_REQ/HEARTBEAT/SAFE_STOP frames and parses "
+            "minimal binary JOB_REQ/HEARTBEAT/JOB_DONE/SAFE_STOP frames and parses "
             "JOB_ACK/HEARTBEAT_ACK/STATUS_RESP results."
         )
     )
@@ -82,7 +83,7 @@ def parse_args() -> argparse.Namespace:
         default="STATUS_REQ",
         help=(
             "Direct mode phase. Direct mode only forwards STATUS_REQ; "
-            "hook mode also supports JOB_REQ, HEARTBEAT, and SAFE_STOP."
+            "hook mode also supports JOB_REQ, HEARTBEAT, JOB_DONE, and SAFE_STOP."
         ),
     )
     parser.add_argument("--job-id", type=int, default=0, help="job_id field used in the control header.")
@@ -110,7 +111,7 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help=(
             "Read wrapper hook event JSON from stdin. OPENAMP_PHASE/event.phase decides the phase. "
-            "STATUS_REQ stays unchanged; JOB_REQ/HEARTBEAT/SAFE_STOP are forwarded as "
+            "STATUS_REQ stays unchanged; JOB_REQ/HEARTBEAT/JOB_DONE/SAFE_STOP are forwarded as "
             "minimal binary control frames. Unsupported phases are denied locally."
         ),
     )
@@ -284,6 +285,8 @@ def parse_frame(payload: bytes) -> dict[str, Any]:
         result["heartbeat"] = parse_heartbeat_payload(body)
     elif msg_type == int(MessageType.HEARTBEAT_ACK):
         result["heartbeat_ack"] = parse_heartbeat_ack_payload(body)
+    elif msg_type == int(MessageType.JOB_DONE):
+        result["job_done"] = parse_job_done_payload(body)
     elif msg_type == int(MessageType.JOB_REQ):
         result["job_req"] = parse_job_req_payload(body)
     elif msg_type == int(MessageType.JOB_ACK):
@@ -383,6 +386,28 @@ def parse_heartbeat_ack_payload(payload: bytes) -> dict[str, Any]:
             "guard_state_name": safe_guard_state_name(guard_state),
             "heartbeat_ok": heartbeat_ok,
             "acknowledged": heartbeat_ok == 1,
+        }
+    )
+    return result
+
+
+def parse_job_done_payload(payload: bytes) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "payload_len": len(payload),
+        "parsed": False,
+    }
+    if len(payload) != JOB_DONE_STRUCT.size:
+        result["parse_error"] = "unexpected_job_done_size"
+        return result
+    result_code, output_count, result_crc32, reserved = JOB_DONE_STRUCT.unpack(payload)
+    result.update(
+        {
+            "parsed": True,
+            "result_code": result_code,
+            "output_count": output_count,
+            "result_crc32": result_crc32,
+            "reserved": reserved,
+            "reported_success": result_code == 0,
         }
     )
     return result
@@ -868,6 +893,200 @@ def classify_heartbeat_probe(
     )
 
 
+def build_job_done_transport_summary(
+    *,
+    phase: str,
+    tx_parsed: dict[str, Any],
+    rx_parsed: dict[str, Any] | None,
+    acknowledged: bool,
+    reported_result_code: int,
+    reported_output_count: int,
+    guard_state: int,
+    active_job_id: int,
+    last_fault_code: int,
+    heartbeat_ok: int,
+    sticky_fault: int,
+    total_fault_count: int,
+    source: str,
+    transport_status: str,
+    protocol_semantics: str,
+    note: str,
+) -> dict[str, Any]:
+    return {
+        "phase": phase,
+        "acknowledged": acknowledged,
+        "reported_result_code": reported_result_code,
+        "reported_output_count": reported_output_count,
+        "reported_success": reported_result_code == 0,
+        "guard_state": guard_state,
+        "guard_state_name": safe_guard_state_name(guard_state),
+        "active_job_id": active_job_id,
+        "last_fault_code": last_fault_code,
+        "last_fault_name": safe_fault_name(last_fault_code),
+        "heartbeat_ok": heartbeat_ok,
+        "sticky_fault": sticky_fault,
+        "total_fault_count": total_fault_count,
+        "source": source,
+        "transport_status": transport_status,
+        "protocol_semantics": protocol_semantics,
+        "note": note,
+        "tx_frame": tx_parsed,
+        "rx_frame": rx_parsed,
+    }
+
+
+def classify_job_done_probe(
+    *,
+    phase: str,
+    tx_bytes: bytes,
+    rx_bytes: bytes,
+    rx_timeout: bool,
+) -> dict[str, Any]:
+    tx_parsed = parse_frame(tx_bytes)
+    job_done = tx_parsed.get("job_done", {})
+    reported_result_code = int(job_done.get("result_code", 1))
+    reported_output_count = int(job_done.get("output_count", 0))
+    if rx_timeout:
+        return build_job_done_transport_summary(
+            phase=phase,
+            tx_parsed=tx_parsed,
+            rx_parsed=None,
+            acknowledged=False,
+            reported_result_code=reported_result_code,
+            reported_output_count=reported_output_count,
+            guard_state=DEFAULT_GUARD_STATE,
+            active_job_id=0,
+            last_fault_code=int(FaultCode.NONE),
+            heartbeat_ok=0,
+            sticky_fault=0,
+            total_fault_count=0,
+            source="linux_bridge_transport_guard",
+            transport_status="tx_ok_rx_timeout",
+            protocol_semantics="not_verified",
+            note=(
+                "JOB_DONE was written to /dev/rpmsg0 but no STATUS_RESP result arrived before timeout. "
+                "Treat completion semantics as unresolved."
+            ),
+        )
+    rx_parsed = parse_frame(rx_bytes)
+    if rx_bytes == tx_bytes:
+        return build_job_done_transport_summary(
+            phase=phase,
+            tx_parsed=tx_parsed,
+            rx_parsed=rx_parsed,
+            acknowledged=False,
+            reported_result_code=reported_result_code,
+            reported_output_count=reported_output_count,
+            guard_state=DEFAULT_GUARD_STATE,
+            active_job_id=0,
+            last_fault_code=int(FaultCode.NONE),
+            heartbeat_ok=0,
+            sticky_fault=0,
+            total_fault_count=0,
+            source="linux_bridge_transport_guard",
+            transport_status="transport_echo_only",
+            protocol_semantics="not_implemented",
+            note=(
+                "Received an exact echo of the transmitted JOB_DONE frame. "
+                "That is not a firmware-backed completion result."
+            ),
+        )
+    if rx_parsed.get("is_protocol_frame") and rx_parsed.get("msg_type") == int(MessageType.STATUS_RESP):
+        status_resp = rx_parsed.get("status_resp", {})
+        if status_resp.get("parsed"):
+            guard_state = int(status_resp["guard_state"])
+            active_job_id = int(status_resp["active_job_id"])
+            last_fault_code = int(status_resp["last_fault_code"])
+            heartbeat_ok = int(status_resp["heartbeat_ok"])
+            sticky_fault = int(status_resp["sticky_fault"])
+            total_fault_count = int(status_resp["total_fault_count"])
+            cleared_job = guard_state == 1 and active_job_id == 0 and heartbeat_ok == 0
+            if reported_result_code == 0:
+                acknowledged = cleared_job and last_fault_code == int(FaultCode.NONE)
+                note = (
+                    "Received STATUS_RESP after JOB_DONE and firmware reported the active job as cleared."
+                    if acknowledged
+                    else (
+                        "Received STATUS_RESP after JOB_DONE, but firmware did not report the expected "
+                        "READY/active_job_id=0/last_fault_code=NONE post-done state."
+                    )
+                )
+            else:
+                acknowledged = cleared_job and last_fault_code == int(FaultCode.OUTPUT_INCOMPLETE)
+                note = (
+                    "Received STATUS_RESP after failed JOB_DONE and firmware cleared the active job with OUTPUT_INCOMPLETE."
+                    if acknowledged
+                    else (
+                        "Received STATUS_RESP after failed JOB_DONE, but firmware did not report the expected "
+                        "READY/active_job_id=0/last_fault_code=OUTPUT_INCOMPLETE post-done state."
+                    )
+                )
+            return build_job_done_transport_summary(
+                phase=phase,
+                tx_parsed=tx_parsed,
+                rx_parsed=rx_parsed,
+                acknowledged=acknowledged,
+                reported_result_code=reported_result_code,
+                reported_output_count=reported_output_count,
+                guard_state=guard_state,
+                active_job_id=active_job_id,
+                last_fault_code=last_fault_code,
+                heartbeat_ok=heartbeat_ok,
+                sticky_fault=sticky_fault,
+                total_fault_count=total_fault_count,
+                source="firmware_job_done_status",
+                transport_status=(
+                    "job_done_status_received"
+                    if acknowledged
+                    else "job_done_status_received_not_applied"
+                ),
+                protocol_semantics="implemented",
+                note=note,
+            )
+        return build_job_done_transport_summary(
+            phase=phase,
+            tx_parsed=tx_parsed,
+            rx_parsed=rx_parsed,
+            acknowledged=False,
+            reported_result_code=reported_result_code,
+            reported_output_count=reported_output_count,
+            guard_state=DEFAULT_GUARD_STATE,
+            active_job_id=0,
+            last_fault_code=int(FaultCode.NONE),
+            heartbeat_ok=0,
+            sticky_fault=0,
+            total_fault_count=0,
+            source="linux_bridge_transport_guard",
+            transport_status="job_done_status_received_unparsed_payload",
+            protocol_semantics="partially_verified",
+            note=(
+                "Received STATUS_RESP after JOB_DONE, but the payload shape does not match the expected "
+                "24-byte layout."
+            ),
+        )
+    return build_job_done_transport_summary(
+        phase=phase,
+        tx_parsed=tx_parsed,
+        rx_parsed=rx_parsed,
+        acknowledged=False,
+        reported_result_code=reported_result_code,
+        reported_output_count=reported_output_count,
+        guard_state=DEFAULT_GUARD_STATE,
+        active_job_id=0,
+        last_fault_code=int(FaultCode.NONE),
+        heartbeat_ok=0,
+        sticky_fault=0,
+        total_fault_count=0,
+        source="linux_bridge_transport_guard",
+        transport_status="unexpected_response",
+        protocol_semantics="not_verified",
+        note=(
+            "A response arrived after JOB_DONE, but it is not a decodable STATUS_RESP frame. "
+            "Treat completion semantics as unresolved."
+        ),
+    )
+
+
 def build_safe_stop_transport_summary(
     *,
     phase: str,
@@ -1174,6 +1393,52 @@ def persist_heartbeat_exchange_artifacts(
     return {name: str(path) for name, path in artifacts.items()}
 
 
+def persist_job_done_exchange_artifacts(
+    *,
+    output_dir: Path,
+    hook_event: dict[str, Any],
+    tx_bytes: bytes,
+    rx_bytes: bytes,
+    summary: dict[str, Any],
+    txn: dict[str, Any],
+) -> dict[str, str]:
+    artifacts = {
+        "stdin_event": output_dir / "stdin_event.json",
+        "tx_raw": output_dir / "job_done_tx.bin",
+        "tx_hex": output_dir / "job_done_tx.hex",
+        "tx_json": output_dir / "job_done_tx.json",
+        "rx_raw": output_dir / "job_done_status_rx.bin",
+        "rx_hex": output_dir / "job_done_status_rx.hex",
+        "rx_json": output_dir / "job_done_status_rx.json",
+        "summary": output_dir / "bridge_summary.json",
+    }
+    write_json(artifacts["stdin_event"], hook_event or {})
+    write_raw(artifacts["tx_raw"], tx_bytes)
+    write_hex(artifacts["tx_hex"], tx_bytes)
+    write_json(
+        artifacts["tx_json"],
+        {
+            "captured_at": now_iso(),
+            "byte_len": len(tx_bytes),
+            "hex": tx_bytes.hex(),
+            "parsed_frame": summary["tx_frame"],
+        },
+    )
+    write_raw(artifacts["rx_raw"], rx_bytes)
+    write_hex(artifacts["rx_hex"], rx_bytes)
+    write_json(
+        artifacts["rx_json"],
+        {
+            "captured_at": now_iso(),
+            "byte_len": len(rx_bytes),
+            "hex": rx_bytes.hex(),
+            "rx_timeout": txn["rx_timeout"],
+            "parsed_frame": summary["rx_frame"],
+        },
+    )
+    return {name: str(path) for name, path in artifacts.items()}
+
+
 def persist_safe_stop_exchange_artifacts(
     *,
     output_dir: Path,
@@ -1369,6 +1634,25 @@ def build_safe_stop_payload_from_hook(hook_event: dict[str, Any]) -> bytes:
     return b""
 
 
+def build_job_done_payload_from_hook(hook_event: dict[str, Any]) -> bytes:
+    payload = hook_event.get("payload") if isinstance(hook_event, dict) else None
+    if not isinstance(payload, dict):
+        raise ValueError("hook JOB_DONE event must contain a payload object.")
+    result_code = coerce_positive_int(payload.get("result_code", 1), "result_code")
+    output_count = coerce_positive_int(
+        payload.get("output_count", payload.get("completed_outputs", 0)),
+        "output_count",
+    )
+    result_crc32 = coerce_positive_int(payload.get("result_crc32", 0), "result_crc32")
+    reserved = coerce_positive_int(payload.get("reserved", 0), "reserved")
+    return JOB_DONE_STRUCT.pack(
+        result_code,
+        output_count,
+        result_crc32,
+        reserved,
+    )
+
+
 def build_local_deny_summary(
     *,
     args: argparse.Namespace,
@@ -1391,6 +1675,49 @@ def build_local_deny_summary(
         "fault_name": safe_fault_name(fault_code),
         "guard_state": guard_state,
         "guard_state_name": safe_guard_state_name(guard_state),
+        "source": source,
+        "transport_status": transport_status,
+        "protocol_semantics": protocol_semantics,
+        "note": note,
+        "job_id": derive_job_id(args, hook_event),
+        "rpmsg_ctrl": args.rpmsg_ctrl,
+        "rpmsg_dev": args.rpmsg_dev,
+        "output_dir": str(output_dir),
+        "hook_event": hook_event or {},
+    }
+    write_json(output_dir / "bridge_summary.json", summary)
+    if hook_event:
+        write_json(output_dir / "stdin_event.json", hook_event)
+    return summary
+
+
+def build_job_done_local_summary(
+    *,
+    args: argparse.Namespace,
+    output_dir: Path,
+    phase: str,
+    hook_event: dict[str, Any],
+    note: str,
+    source: str = "linux_bridge_local_guard",
+    transport_status: str = "not_attempted",
+    protocol_semantics: str = "not_available",
+) -> dict[str, Any]:
+    summary = {
+        "generated_at": now_iso(),
+        "bridge_mode": "hook" if args.hook_stdin else "direct",
+        "phase": phase,
+        "acknowledged": False,
+        "reported_result_code": 1,
+        "reported_output_count": 0,
+        "reported_success": False,
+        "last_fault_code": int(FaultCode.NONE),
+        "last_fault_name": safe_fault_name(int(FaultCode.NONE)),
+        "guard_state": DEFAULT_GUARD_STATE,
+        "guard_state_name": safe_guard_state_name(DEFAULT_GUARD_STATE),
+        "active_job_id": 0,
+        "heartbeat_ok": 0,
+        "sticky_fault": 0,
+        "total_fault_count": 0,
         "source": source,
         "transport_status": transport_status,
         "protocol_semantics": protocol_semantics,
@@ -1627,6 +1954,95 @@ def run_heartbeat_probe(
     return summary
 
 
+def run_job_done_probe(
+    *,
+    args: argparse.Namespace,
+    output_dir: Path,
+    phase: str,
+    hook_event: dict[str, Any],
+) -> dict[str, Any]:
+    rpmsg_ctrl = Path(args.rpmsg_ctrl)
+    rpmsg_dev = Path(args.rpmsg_dev)
+    device_status = preflight_devices(
+        rpmsg_ctrl=rpmsg_ctrl,
+        rpmsg_dev=rpmsg_dev,
+        require_devices=args.require_devices,
+    )
+    try:
+        if args.require_devices:
+            require_existing_device(rpmsg_ctrl, "--rpmsg-ctrl")
+            require_existing_device(rpmsg_dev, "--rpmsg-dev")
+        job_done_payload = build_job_done_payload_from_hook(hook_event)
+    except ValueError as err:
+        return build_job_done_local_summary(
+            args=args,
+            output_dir=output_dir,
+            phase=phase,
+            hook_event=hook_event,
+            note=f"JOB_DONE hook payload is not encodable as the minimal binary payload: {err}",
+        )
+    job_id = derive_job_id(args, hook_event)
+    tx_bytes = build_frame(
+        msg_type=MessageType.JOB_DONE,
+        seq=args.seq,
+        job_id=job_id,
+        payload=job_done_payload,
+    )
+    try:
+        txn = transact(
+            rpmsg_dev=rpmsg_dev,
+            tx_bytes=tx_bytes,
+            response_timeout_sec=args.response_timeout_sec,
+            settle_timeout_sec=args.settle_timeout_sec,
+            max_rx_bytes=args.max_rx_bytes,
+            drain_before_send=args.drain_before_send,
+        )
+    except (OSError, TimeoutError, SystemExit) as err:
+        return build_job_done_local_summary(
+            args=args,
+            output_dir=output_dir,
+            phase=phase,
+            hook_event=hook_event,
+            note=f"JOB_DONE transport failed before a valid STATUS_RESP was received: {err}",
+            source="linux_bridge_transport_guard",
+            transport_status="transport_error",
+            protocol_semantics="not_verified",
+        )
+    summary = classify_job_done_probe(
+        phase=phase,
+        tx_bytes=tx_bytes,
+        rx_bytes=txn["rx_bytes"],
+        rx_timeout=txn["rx_timeout"],
+    )
+    summary.update(
+        {
+            "generated_at": now_iso(),
+            "job_id": job_id,
+            "seq": args.seq,
+            "rpmsg_ctrl": str(rpmsg_ctrl),
+            "rpmsg_dev": str(rpmsg_dev),
+            "device_status": device_status,
+            "bridge_mode": "hook",
+            "hook_event_phase": hook_event.get("phase") if isinstance(hook_event, dict) else None,
+            "hook_event_payload": hook_event.get("payload") if isinstance(hook_event, dict) else None,
+            "written_bytes": txn["written_bytes"],
+            "drained_bytes_hex": txn["drained_bytes"].hex(),
+            "rx_bytes_hex": txn["rx_bytes"].hex(),
+            "output_dir": str(output_dir),
+        }
+    )
+    summary["artifact_paths"] = persist_job_done_exchange_artifacts(
+        output_dir=output_dir,
+        hook_event=hook_event,
+        tx_bytes=tx_bytes,
+        rx_bytes=txn["rx_bytes"],
+        summary=summary,
+        txn=txn,
+    )
+    write_json(output_dir / "bridge_summary.json", summary)
+    return summary
+
+
 def run_safe_stop_probe(
     *,
     args: argparse.Namespace,
@@ -1759,6 +2175,16 @@ def main() -> int:
         print(json.dumps(summary, ensure_ascii=False))
         return 0 if summary.get("acknowledged") else 2
 
+    if phase == "JOB_DONE" and args.hook_stdin:
+        summary = run_job_done_probe(
+            args=args,
+            output_dir=output_dir,
+            phase=phase,
+            hook_event=hook_event,
+        )
+        print(json.dumps(summary, ensure_ascii=False))
+        return 0 if summary.get("acknowledged") else 2
+
     if phase == "SAFE_STOP" and args.hook_stdin:
         summary = run_safe_stop_probe(
             args=args,
@@ -1776,7 +2202,7 @@ def main() -> int:
         hook_event=hook_event,
         note=(
             "This bridge phase only forwards STATUS_REQ in direct mode and STATUS_REQ/JOB_REQ/HEARTBEAT/"
-            "SAFE_STOP in hook mode. Later phases remain locally denied until firmware support is implemented."
+            "JOB_DONE/SAFE_STOP in hook mode. Later phases remain locally denied until firmware support is implemented."
         ),
     )
     print(json.dumps(summary, ensure_ascii=False))
