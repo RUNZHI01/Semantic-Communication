@@ -1,6 +1,6 @@
 # Session Progress Log（长期维护）
 
-- 最后更新：2026-03-15 00:18 +0800（补记 2026-03-15 `JOB_DONE` 最小真机闭环已验证成功：当前 live `/lib/firmware/openamp_core0.elf` 为 `JOB_DONE` 版固件，size `1649896`、SHA `afa9679f...3803`；fresh boot + bring-up 后初始 `STATUS_RESP` 为干净 `READY/active_job_id=0/heartbeat_ok=0`，随后真机依次完成 `JOB_REQ(ALLOW)`、`HEARTBEAT_ACK(heartbeat_ok=1)`、`JOB_DONE(success)`，其返回的 post-done `STATUS_RESP` 与 follow-up `STATUS_REQ` 都稳定落在 `guard_state=READY`、`active_job_id=0`、`last_fault_code=0`、`heartbeat_ok=0`、`total_fault_count=0`。这标志着 OpenAMP 最小控制闭环已从准入/心跳/停机进一步推进到最小作业完成语义也可用。）
+- 最后更新：2026-03-15 01:09 +0800（本轮主目标切到 P1 `FIT-01`：已新增可复用的 `session_bootstrap/scripts/run_openamp_fit_wrong_sha.py`，并实际从 Snapdragon workspace `/home/tianxing/tvm_metaschedule_execution_project` 发起一次真机 wrong-SHA 远端探测；首跳 SSH 到 `100.121.87.73:22` 立即命中 `socket: Operation not permitted`，因此本轮未能把 `STATUS_REQ -> wrapper wrong-SHA JOB_REQ -> post STATUS_REQ` 发到飞腾板上。虽然真机 verdict 仍待补跑，但这次已不再只是留口头备注，而是沉淀出结构化证据包 `session_bootstrap/reports/openamp_wrong_sha_fit_20260315_010828/`：其中包含 `run_manifest.json`、`pre/post status_snapshot.json`、`wrapper/job_manifest.json`、`wrapper/control_trace.jsonl`、`wrapper/wrapper_summary.json`、`fit_summary.json`、`fit_report_FIT-01.md`、`coverage_matrix.md` 与 `blocked_report.md`，并保留了下一次一旦 SSH 可达就可直接复用的完整板侧命令序列。）
 - 作用：沉淀“当前状态 + 失败经验 + 下一步最小执行方案”，避免重复踩坑。
 
 ## 1) 时间线（关键里程碑）
@@ -44,6 +44,7 @@
 | 2026-03-14 19:24 | OpenAMP wrapper-backed board smoke 成功 | 板上 wrapper 通过 `--transport hook` 调 bridge 发出真实 `JOB_REQ`（`job_id=9205`）后，已收到 `source=firmware_job_ack` 的真实 `JOB_ACK(ALLOW)`，并且 wrapper 真实放行 runner，最终落 `JOB_DONE(success)`、`runner_exit_code=0`。这说明 OpenAMP 已不再只是“底层协议打通”，而是已完成 wrapper × bridge × firmware × board 的 admission gate 串接 | `session_bootstrap/reports/openamp_wrapper_hook_board_smoke_success_2026-03-14.md` / `session_bootstrap/reports/openamp_wrapper_hook_board_smoke_20260314_005.wrapper_summary.json` / `session_bootstrap/reports/openamp_wrapper_hook_board_smoke_20260314_005.control_trace.jsonl` |
 | 2026-03-14 21:45 | OpenAMP 最小 `SAFE_STOP` 真机闭环打通 | `SAFE_STOP` 版固件（size `1647272`，SHA `3e7512fe...0424`）在真机上完成了 `JOB_REQ(ALLOW)`、`HEARTBEAT_ACK(heartbeat_ok=1)`、`SAFE_STOP`、follow-up `STATUS_REQ` 的整条链路；post-stop `STATUS_RESP` 与 follow-up `STATUS_RESP` 均为 `guard_state=READY`、`active_job_id=0`、`last_fault_code=MANUAL_SAFE_STOP(10)`、`heartbeat_ok=0`、`total_fault_count=1`。这说明最小安全停止语义已真实改变并稳定保持从核运行态 | `session_bootstrap/reports/openamp_phase5_safe_stop_success_2026-03-14.md` / `session_bootstrap/reports/openamp_safe_stop_real_probe_20260314_001.json` |
 | 2026-03-15 00:18 | OpenAMP 最小 `JOB_DONE` 真机闭环打通 | `JOB_DONE` 版固件（size `1649896`，SHA `afa9679f...3803`）在 fresh boot + bring-up 后完成了 `STATUS_REQ(READY)`、`JOB_REQ(ALLOW)`、`HEARTBEAT_ACK(heartbeat_ok=1)`、`JOB_DONE(success)`、follow-up `STATUS_REQ` 的整条链路；post-done `STATUS_RESP` 与 follow-up `STATUS_RESP` 均为 `guard_state=READY`、`active_job_id=0`、`last_fault_code=0`、`heartbeat_ok=0`、`total_fault_count=0`。这说明最小作业完成语义已真实改变并稳定保持从核运行态 | `session_bootstrap/reports/openamp_phase5_job_done_success_2026-03-15.md` / `session_bootstrap/reports/openamp_job_done_real_probe_20260315_001.json` |
+| 2026-03-15 01:09 | OpenAMP P1 `FIT-01` wrong-SHA 首轮远端探测已结构化落证（当前 blocked） | 已从 Snapdragon workspace 真实尝试对飞腾板执行 `pre STATUS_REQ -> wrapper wrong-SHA JOB_REQ -> post STATUS_REQ`；但首跳 `ssh_with_password.sh` 到 `100.121.87.73:22` 即命中 `socket: Operation not permitted`，因此这轮没有真正触板。不过本轮已新增 `run_openamp_fit_wrong_sha.py` 并生成结构化 FIT 包，明确记录预期语义、SSH blocker、manifest/trace/status snapshot/report/coverage layout，为下一次在有网络权限的执行环境中直接补跑 FIT-01 做好收口 | `session_bootstrap/scripts/run_openamp_fit_wrong_sha.py` / `session_bootstrap/reports/openamp_wrong_sha_fit_20260315_010828/fit_report_FIT-01.md` / `session_bootstrap/reports/openamp_fit_wrong_sha_remote_probe_blocked_2026-03-15.md` |
 | 2026-03-14 21:04 | OpenAMP 最小 `HEARTBEAT/HEARTBEAT_ACK` 真机闭环打通且 fresh-boot 状态一致性修复成功 | 修复后的 heartbeat-fix 版固件（size `1646088`，SHA `c1172b7c...4711`）已在真机上验证：fresh boot 后初始 `STATUS_RESP` 为 `guard_state=READY, active_job_id=0, heartbeat_ok=0, total_fault_count=0`；随后真实 `JOB_REQ(ALLOW)`、`HEARTBEAT_ACK(heartbeat_ok=1)` 与 follow-up `STATUS_RESP(guard_state=JOB_ACTIVE, active_job_id=9501, heartbeat_ok=1)` 全部成立，说明先前 deny/heartbeat 状态不一致问题已被 reset/normalize 修复收住 | `session_bootstrap/reports/openamp_heartbeat_fix_validate_20260314/phase3_probe.log` / `session_bootstrap/patches/phytium_openamp_for_linux_status_req_resp_release_v1.4.0_2026-03-14.patch` |
 
 ## 2) 已完成项 / 阻断项
@@ -65,6 +66,7 @@
 - `SAFE_STOP` 最小真机闭环也已验证成功：当前 `SAFE_STOP` 版固件（size `1647272`，SHA `3e7512fef57b0581afd319aaccd0a3144cf0e08052b30b043c2c87908dfe0424`）已在真机上完成 `JOB_REQ(ALLOW)`、`HEARTBEAT_ACK(heartbeat_ok=1)`、`SAFE_STOP` 与 follow-up `STATUS_REQ` 的全链路验证；post-stop 与 follow-up 状态均稳定收敛到 `READY / active_job_id=0 / last_fault_code=MANUAL_SAFE_STOP(10) / heartbeat_ok=0 / total_fault_count=1`。这说明控制面已从“允许运行 + 运行中打点”进一步推进到“允许显式安全停止并稳定保持 stop 后状态”。
 - `JOB_DONE` 最小真机闭环也已验证成功：当前 `JOB_DONE` 版固件（size `1649896`，SHA `afa9679f24f0d9d4ccd4c35e0c779e72573bfe839799d7f95586706977b23803`）已在 fresh boot + bring-up 后完成 `STATUS_REQ(READY)`、`JOB_REQ(ALLOW)`、`HEARTBEAT_ACK(heartbeat_ok=1)`、`JOB_DONE(success)` 与 follow-up `STATUS_REQ` 的全链路验证；post-done 与 follow-up 状态均稳定收敛到 `READY / active_job_id=0 / last_fault_code=0 / heartbeat_ok=0 / total_fault_count=0`。这说明控制面已进一步推进到“作业完成后回到干净 READY 状态”也可稳定成立。
 - `JOB_DONE` 最小真机闭环也已验证成功：当前 `JOB_DONE` 版固件（size `1649896`，SHA `afa9679f24f0d9d4ccd4c35e0c779e72573bfe839799d7f95586706977b23803`）已在 fresh boot + bring-up 后完成 `STATUS_REQ(READY)`、`JOB_REQ(ALLOW)`、`HEARTBEAT_ACK(heartbeat_ok=1)`、`JOB_DONE(success)` 与 follow-up `STATUS_REQ` 的全链路验证；post-done 与 follow-up 状态均稳定收敛到 `READY / active_job_id=0 / last_fault_code=0 / heartbeat_ok=0 / total_fault_count=0`。这说明控制面已进一步推进到“作业完成后回到干净 READY 状态”也可稳定成立。
+- P1 `FIT-01` wrong-SHA 首轮远端探测已产出结构化证据包：`session_bootstrap/scripts/run_openamp_fit_wrong_sha.py` 已把真机命令序列、SSH reachability probe、pre/post status snapshot、wrapper manifest/trace/summary、FIT summary/report 与 coverage scaffold 收口到 `session_bootstrap/reports/openamp_wrong_sha_fit_20260315_010828/`；这次 bundle 的真实结论是 `BLOCKED`，根因是当前 workspace 无法打开到飞腾板 `100.121.87.73:22` 的 socket，而不是 firmware 已经返回了 wrong-SHA 决策。
 
 ### 当前阻断项（P0）
 
@@ -78,6 +80,11 @@
 - **current compare 的旧结论需要继续收口**：
   - 2026-03-10 的两次 current-safe target compare 都是 `total_trials=0` rebuild-only；
   - stable/experimental 当时生成了相同 `optimized_model.so sha256`，所以这些 compare 现在必须视为 invalid，而不是“实验 target 有轻微快慢差异”的证据。
+- **当前 Snapdragon workspace 不能直接把 P1 FIT 打到飞腾板**：
+  - 2026-03-15 01:09 +0800，本轮 `FIT-01` 首跳 `ssh_with_password.sh` 到 `100.121.87.73:22` 即返回 `socket: Operation not permitted` / `ssh: connect to host 100.121.87.73 port 22: failure`；
+  - 因此这轮没有真正发出 board-side `STATUS_REQ`、`JOB_REQ` 或 follow-up `STATUS_REQ`；
+  - 当前已落盘的 FIT-01 bundle 只能证明“本机执行上下文被网络边界阻断”，不能证明 firmware 的 `JOB_ACK(DENY, F001)` 已经真机出现；
+  - 下一次必须在能打开 outbound SSH socket 的执行环境中，直接重跑 `python3 ./session_bootstrap/scripts/run_openamp_fit_wrong_sha.py`，才能把 FIT-01 从 `BLOCKED` 推到真正的 board evidence。
 - **payload-only 与 real reconstruction 结果不可混写**：
   - `session_bootstrap/reports/current_scheme_b_compare_20260311_195303.md` 只比较 current 内部 rebuild-only SHA `2fcf773fa34d6aa69f80740ffedde33faaf265a045cae97b72022ae2c62a8449` 与 incremental SHA `1946b08e6cf20a1259fa43f9e849a06f50ae1230c08d4df7081fba1edae4c644` 的 payload-symmetric 时间，不含 baseline；
   - `session_bootstrap/reports/inference_compare_currentsafe_chunk4_refresh_20260313_1758.md` 是当前 trusted current payload 正式 validate，结论是新 SHA `6f236b07...6dc1` 对应 `130.219 ms`；
@@ -200,3 +207,5 @@ bash ./session_bootstrap/scripts/run_quick.sh --env "$ENV"
 2. 把 rebuild-only one-shot、incremental current、compare 输出分别纳入 daily/experiment 汇总，避免三种语义在文案里混淆成同一条“current 结果”。
 3. 如需最终替换长期默认配置，再评估是否把旧 `generic + neon` 文档/模板整体退役，避免误用。
 4. 将本文件作为每次 round 后唯一“进度真相源”持续更新（含失败栈摘要、artifact hash 结论与 compare 有效性状态）。
+5. 一旦换到有网络权限的执行环境，直接复跑 `python3 ./session_bootstrap/scripts/run_openamp_fit_wrong_sha.py --output-dir ./session_bootstrap/reports/openamp_wrong_sha_fit_<new_timestamp>`，目标是把当前 `BLOCKED` bundle升级为真正的 `JOB_ACK(DENY, F001)` 真机证据包。
+6. FIT-01 真机收口后，不要再重新设计目录结构；直接复用 `openamp_wrong_sha_fit_<timestamp>/` 里已经固定下来的 `manifest + status snapshot + wrapper trace + fit report + coverage matrix` 约定，把 FIT-02 与 FIT-03 接到同一套 evidence contract 上。
