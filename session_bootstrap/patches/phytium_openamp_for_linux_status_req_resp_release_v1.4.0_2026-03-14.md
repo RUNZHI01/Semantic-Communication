@@ -3,6 +3,7 @@
 - Patch file: `session_bootstrap/patches/phytium_openamp_for_linux_status_req_resp_release_v1.4.0_2026-03-14.patch`
 - Target source path: `example/system/amp/openamp_for_linux/src/slaver_00_example.c`
 - Target source shape: old `release_v1.4.0` callback flow with `FRpmsgEchoApp(...)`, `SHUTDOWN_MSG`, and direct `temp_data` echo behavior
+- Artifact integrity: the patch file has been regenerated as a canonical unified diff against `/tmp/release_v1.4.0.slaver_00_example.c`
 
 Structural differences from `phytium_openamp_for_linux_status_req_resp_2026-03-14.patch`:
 
@@ -86,5 +87,8 @@ State-consistency hypothesis fixed in this revision:
 
 Local artifact checks performed on 2026-03-14:
 
+- `git -C .codex_tmp/release_v1_4_0_patch_repair/apply_check_20260314_1 apply --check /home/tianxing/tvm_metaschedule_execution_project/session_bootstrap/patches/phytium_openamp_for_linux_status_req_resp_release_v1.4.0_2026-03-14.patch`
+- `git -C .codex_tmp/release_v1_4_0_patch_repair/apply_verify_20260314_1 apply /home/tianxing/tvm_metaschedule_execution_project/session_bootstrap/patches/phytium_openamp_for_linux_status_req_resp_release_v1.4.0_2026-03-14.patch`
+- `diff -u .codex_tmp/release_v1_4_0_patch_repair/slaver_00_example.c .codex_tmp/release_v1_4_0_patch_repair/apply_verify_20260314_1/example/system/amp/openamp_for_linux/src/slaver_00_example.c`
 - `python3 -m unittest openamp_mock.tests.test_rpmsg_bridge`
 - `git diff --check -- session_bootstrap/patches/phytium_openamp_for_linux_status_req_resp_release_v1.4.0_2026-03-14.patch session_bootstrap/patches/phytium_openamp_for_linux_status_req_resp_release_v1.4.0_2026-03-14.md`
