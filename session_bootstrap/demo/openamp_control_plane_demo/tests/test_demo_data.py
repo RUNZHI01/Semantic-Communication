@@ -43,6 +43,21 @@ class DemoDataTest(unittest.TestCase):
         self.assertEqual(snapshot["mode"]["effective_label"], "Live cue active")
         self.assertTrue(snapshot["board"]["current_status"]["reachable"])
 
+    def test_cached_live_probe_is_labeled_as_saved(self) -> None:
+        snapshot = build_snapshot(
+            live_probe={
+                "requested_at": "2026-03-15T12:00:00+0800",
+                "reachable": True,
+                "status": "success",
+                "summary": "board reachable",
+                "details": {"remoteproc": [{"name": "remoteproc0", "state": "running"}]},
+                "_loaded_from_cache": True,
+            }
+        )
+        self.assertIn("recovered", snapshot["mode"]["summary"].lower())
+        self.assertEqual(snapshot["board"]["current_status"]["label"], "Saved read-only SSH probe")
+        self.assertIn("Loaded from the last successful probe artifact.", snapshot["board"]["current_status"]["summary"])
+
 
 if __name__ == "__main__":
     unittest.main()

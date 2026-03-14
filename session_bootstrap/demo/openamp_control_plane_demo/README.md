@@ -29,6 +29,7 @@ bash ./session_bootstrap/scripts/run_openamp_demo.sh \
 ```
 
 The dashboard stays evidence-led either way. The "Refresh live board status" action only runs a read-only SSH probe.
+If `session_bootstrap/reports/openamp_demo_live_probe_latest.json` already exists, the dashboard loads that saved successful probe on startup and keeps showing it if a later in-dashboard refresh fails.
 
 ## Read-only board probe
 

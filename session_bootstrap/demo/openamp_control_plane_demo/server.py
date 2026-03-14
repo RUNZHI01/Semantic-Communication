@@ -12,7 +12,7 @@ from threading import Lock
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from board_probe import run_live_probe
+from board_probe import DEFAULT_LIVE_PROBE_OUTPUT, is_successful_probe, load_probe_output, run_live_probe, write_probe_output
 from demo_data import PROJECT_ROOT, build_snapshot, read_text, repo_relative, resolve_repo_path
 
 
@@ -47,11 +47,21 @@ def json_bytes(payload: dict[str, Any]) -> bytes:
 
 
 class DashboardState:
-    def __init__(self, probe_env: str | None, probe_timeout_sec: float) -> None:
+    def __init__(
+        self,
+        probe_env: str | None,
+        probe_timeout_sec: float,
+        probe_cache_path: str | Path | None = DEFAULT_LIVE_PROBE_OUTPUT,
+    ) -> None:
         self._probe_env = probe_env or None
         self._probe_timeout_sec = probe_timeout_sec
+        self._probe_cache_path = probe_cache_path
         self._lock = Lock()
-        self._last_live_probe: dict[str, Any] | None = None
+        cached_probe = load_probe_output(probe_cache_path) if probe_cache_path else None
+        if is_successful_probe(cached_probe):
+            self._last_live_probe = {**cached_probe, "_loaded_from_cache": True}
+        else:
+            self._last_live_probe = None
 
     def current_snapshot(self) -> dict[str, Any]:
         with self._lock:
@@ -61,7 +71,10 @@ class DashboardState:
     def refresh_live_probe(self) -> dict[str, Any]:
         result = run_live_probe(env_file=self._probe_env, timeout_sec=self._probe_timeout_sec)
         with self._lock:
-            self._last_live_probe = result
+            if is_successful_probe(result):
+                self._last_live_probe = result
+                if self._probe_cache_path:
+                    write_probe_output(result, self._probe_cache_path)
         return result
 
 

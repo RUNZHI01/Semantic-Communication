@@ -207,16 +207,26 @@ def synthesize_fit_readout(summary: dict[str, Any]) -> str:
     )
 
 
+def live_probe_loaded_from_cache(live_probe: dict[str, Any] | None) -> bool:
+    return bool(live_probe and live_probe.get("_loaded_from_cache"))
+
+
 def build_mode_snapshot(live_probe: dict[str, Any] | None) -> dict[str, Any]:
     materials = parse_markdown_key_values(PACKAGE_ROOT / "demo_materials_index.md")
     has_live = bool(live_probe and live_probe.get("reachable"))
     if has_live:
         effective_label = "Live cue active"
         effective_tone = "live"
-        summary = (
-            "A fresh read-only SSH probe is available. The dashboard is still evidence-led, "
-            "but it can show a current board read without touching the control flow."
-        )
+        if live_probe_loaded_from_cache(live_probe):
+            summary = (
+                "The dashboard recovered the last successful read-only SSH probe from the saved "
+                "probe file. Trigger a refresh for a new board read."
+            )
+        else:
+            summary = (
+                "A fresh read-only SSH probe is available. The dashboard is still evidence-led, "
+                "but it can show a current board read without touching the control flow."
+            )
     else:
         effective_label = "Fallback evidence mode"
         effective_tone = "fallback"
@@ -284,13 +294,17 @@ def build_board_snapshot(live_probe: dict[str, Any] | None) -> dict[str, Any]:
     }
 
     if live_probe and live_probe.get("reachable"):
+        loaded_from_cache = live_probe_loaded_from_cache(live_probe)
+        summary = live_probe.get("summary", "")
+        if loaded_from_cache:
+            summary = f"{summary} Loaded from the last successful probe artifact."
         current = {
-            "label": "Fresh read-only SSH probe",
-            "summary": live_probe.get("summary", ""),
+            "label": "Saved read-only SSH probe" if loaded_from_cache else "Fresh read-only SSH probe",
+            "summary": summary,
             "reachable": True,
             "requested_at": live_probe.get("requested_at", ""),
             "details": live_probe.get("details", {}),
-            "evidence": [],
+            "evidence": [link_entry(REPORTS_ROOT / "openamp_demo_live_probe_latest.json", "saved live probe JSON")],
         }
     else:
         reason = live_probe.get("error", "") if live_probe else "No live probe executed."

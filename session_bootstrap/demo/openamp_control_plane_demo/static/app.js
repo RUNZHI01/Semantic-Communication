@@ -252,7 +252,13 @@ async function refreshProbe() {
   try {
     const response = await fetch("/api/probe-board", { method: "POST" });
     if (!response.ok) throw new Error(`probe request failed: ${response.status}`);
+    const probe = await response.json();
     await loadSnapshot();
+    if (probe.status !== "success") {
+      const message = probe.summary || probe.error || "Live probe failed.";
+      document.getElementById("heroSummary").textContent =
+        `${message} Showing the last successful live probe when available.`;
+    }
   } finally {
     button.disabled = false;
     button.textContent = "Refresh live board status";

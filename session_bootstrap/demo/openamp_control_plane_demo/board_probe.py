@@ -9,8 +9,10 @@ from typing import Any
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+REPORTS_ROOT = PROJECT_ROOT / "session_bootstrap" / "reports"
 CONNECT_SCRIPT = PROJECT_ROOT / "session_bootstrap" / "scripts" / "connect_phytium_pi.sh"
 SSH_WITH_PASSWORD_SCRIPT = PROJECT_ROOT / "session_bootstrap" / "scripts" / "ssh_with_password.sh"
+DEFAULT_LIVE_PROBE_OUTPUT = REPORTS_ROOT / "openamp_demo_live_probe_latest.json"
 
 REMOTE_PROBE_CODE = r"""
 import glob
@@ -79,6 +81,28 @@ print(json.dumps(payload, ensure_ascii=True))
 
 def now_iso() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%S%z")
+
+
+def resolve_project_path(path_value: str | Path) -> Path:
+    path = Path(path_value)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    return path.resolve()
+
+
+def is_successful_probe(payload: dict[str, Any] | None) -> bool:
+    return bool(payload and payload.get("reachable") and payload.get("status") == "success")
+
+
+def load_probe_output(output_path: str | Path) -> dict[str, Any] | None:
+    path = resolve_project_path(output_path)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    return payload
 
 
 def parse_env_file(env_file: str | None) -> dict[str, str]:
@@ -197,6 +221,7 @@ def run_live_probe(env_file: str | None = None, timeout_sec: float = 30.0) -> di
     }
 
 
-def write_probe_output(payload: dict[str, Any], output_path: Path) -> None:
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+def write_probe_output(payload: dict[str, Any], output_path: str | Path) -> None:
+    path = resolve_project_path(output_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
