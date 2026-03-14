@@ -79,3 +79,20 @@ Recommended checks:
 python3 -m unittest discover -s ./session_bootstrap/demo/openamp_control_plane_demo/tests -p 'test_*.py'
 bash ./session_bootstrap/scripts/run_openamp_demo.sh --port 8079
 ```
+
+## Regression coverage snapshot
+
+The current demo regression suite covers these public/operator-facing surfaces:
+
+- snapshot construction in `demo_data.build_snapshot()`, including final FIT verdicts, trusted-current performance alignment, live-probe mode switching, and saved-probe labeling
+- HTTP smoke coverage for `GET /api/snapshot`, `POST /api/probe-board`, `GET /docs?path=...`, `GET /api/health`, `GET /`, `GET /app.js`, and `GET /app.css`
+- live-probe cache behavior: startup reuse of the last successful probe artifact and preservation of that saved probe when a later refresh fails
+- docs endpoint guardrails for missing path, invalid repo-external path, missing file, and JSON pretty-print rendering
+
+Intentional gaps and higher-risk edges:
+
+- `board_probe.py` is still not tested directly; the `/api/probe-board` regression tests stub `run_live_probe()` instead of exercising SSH command construction, timeout/error normalization, or probe stdout parsing
+- the frontend is covered as served assets only; there is no browser-level regression for DOM rendering or the in-page refresh flow
+- `main()`, `--probe-startup`, and real socket binding are not exercised; the suite instantiates `DashboardState` and `DemoRequestHandler` directly
+
+If one more test is needed, the highest-value next addition is a `board_probe.run_live_probe()` unit test that mocks `subprocess.run()` and locks down success, timeout, non-zero exit, and JSON parse-error payload shaping.
