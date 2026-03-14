@@ -110,6 +110,19 @@ class OpenAmpRpmsgBridgeTest(unittest.TestCase):
         self.assertEqual(parsed["completed_outputs"], 0)
         self.assertEqual(parsed["progress_x100"], 0)
 
+    def test_build_safe_stop_payload_is_empty_wire_body(self) -> None:
+        payload = bridge.build_safe_stop_payload_from_hook(
+            {
+                "phase": "SAFE_STOP",
+                "payload": {
+                    "job_id": 42,
+                    "reason": "runner_timeout",
+                },
+            }
+        )
+
+        self.assertEqual(payload, b"")
+
     def test_parse_job_ack_frame_and_classify_echo(self) -> None:
         ack_frame = bridge.build_frame(
             msg_type=MessageType.JOB_ACK,
@@ -219,6 +232,90 @@ class OpenAmpRpmsgBridgeTest(unittest.TestCase):
         self.assertFalse(summary["acknowledged"])
         self.assertEqual(summary["guard_state_name"], "READY")
         self.assertEqual(summary["transport_status"], "heartbeat_ack_received_negative")
+
+    def test_classify_safe_stop_probe_success_via_status_resp(self) -> None:
+        safe_stop_frame = bridge.build_frame(
+            msg_type=MessageType.SAFE_STOP,
+            seq=11,
+            job_id=777,
+            payload=bridge.build_safe_stop_payload_from_hook(
+                {
+                    "phase": "SAFE_STOP",
+                    "payload": {
+                        "job_id": 777,
+                        "reason": "runner_timeout",
+                    },
+                }
+            ),
+        )
+        status_frame = bridge.build_frame(
+            msg_type=MessageType.STATUS_RESP,
+            seq=11,
+            job_id=777,
+            payload=bridge.STATUS_RESP_STRUCT.pack(
+                1,
+                0,
+                int(FaultCode.MANUAL_SAFE_STOP),
+                0,
+                0,
+                3,
+            ),
+        )
+
+        summary = bridge.classify_safe_stop_probe(
+            phase="SAFE_STOP",
+            tx_bytes=safe_stop_frame,
+            rx_bytes=status_frame,
+            rx_timeout=False,
+        )
+
+        self.assertTrue(summary["acknowledged"])
+        self.assertEqual(summary["guard_state_name"], "READY")
+        self.assertEqual(summary["last_fault_name"], "MANUAL_SAFE_STOP")
+        self.assertEqual(summary["transport_status"], "safe_stop_status_received")
+        self.assertEqual(summary["source"], "firmware_safe_stop_status")
+
+    def test_classify_safe_stop_probe_reports_negative_status_result(self) -> None:
+        safe_stop_frame = bridge.build_frame(
+            msg_type=MessageType.SAFE_STOP,
+            seq=12,
+            job_id=778,
+            payload=bridge.build_safe_stop_payload_from_hook(
+                {
+                    "phase": "SAFE_STOP",
+                    "payload": {
+                        "job_id": 778,
+                        "reason": "keyboard_interrupt",
+                    },
+                }
+            ),
+        )
+        status_frame = bridge.build_frame(
+            msg_type=MessageType.STATUS_RESP,
+            seq=12,
+            job_id=778,
+            payload=bridge.STATUS_RESP_STRUCT.pack(
+                2,
+                778,
+                int(FaultCode.NONE),
+                1,
+                0,
+                1,
+            ),
+        )
+
+        summary = bridge.classify_safe_stop_probe(
+            phase="SAFE_STOP",
+            tx_bytes=safe_stop_frame,
+            rx_bytes=status_frame,
+            rx_timeout=False,
+        )
+
+        self.assertFalse(summary["acknowledged"])
+        self.assertEqual(summary["guard_state_name"], "JOB_ACTIVE")
+        self.assertEqual(summary["active_job_id"], 778)
+        self.assertEqual(summary["transport_status"], "safe_stop_status_received_not_applied")
+        self.assertEqual(summary["source"], "firmware_safe_stop_status")
 
 
 if __name__ == "__main__":
