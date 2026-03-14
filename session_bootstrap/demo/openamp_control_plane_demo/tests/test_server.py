@@ -190,6 +190,16 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertIn("fits", payload)
         self.assertIsInstance(payload["fits"], list)
 
+    def test_health_endpoint_returns_ok_payload(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+
+        status, headers, payload = request_json(state, "GET", "/api/health")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["content-type"], "application/json; charset=utf-8")
+        self.assertEqual(headers["cache-control"], "no-store")
+        self.assertEqual(payload, {"status": "ok"})
+
     def test_probe_board_endpoint_updates_snapshot_after_success(self) -> None:
         success = live_probe_payload("2026-03-15T12:00:00+0800", "board reachable")
         state = DashboardState(None, 30.0, probe_cache_path=None)
@@ -225,6 +235,18 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(snapshot_payload["board"]["current_status"]["label"], "No fresh live probe")
         self.assertFalse(snapshot_payload["board"]["current_status"]["reachable"])
         self.assertEqual(snapshot_payload["board"]["current_status"]["requested_at"], "")
+
+    def test_root_serves_dashboard_entry_page(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+
+        status, headers, body = request_text(state, "GET", "/")
+
+        self.assertEqual(status, 200)
+        self.assertTrue(headers["content-type"].startswith("text/html"))
+        self.assertEqual(headers["cache-control"], "no-store")
+        self.assertIn("<title>OpenAMP Control Plane Demo</title>", body)
+        self.assertIn("OpenAMP control-plane status, FIT evidence, and performance in one place.", body)
+        self.assertIn('<script src="/app.js"></script>', body)
 
     def test_docs_endpoint_renders_repo_relative_markdown_document(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
