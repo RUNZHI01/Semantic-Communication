@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import json
 import os
 from pathlib import Path
@@ -413,18 +414,31 @@ def drain_fd(fd: int, max_bytes: int) -> bytes:
     return b"".join(chunks)
 
 
+def is_retryable_write_error(err: OSError) -> bool:
+    return err.errno in {errno.EAGAIN, errno.EWOULDBLOCK, errno.EINTR}
+
+
 def write_all(fd: int, payload: bytes, timeout_sec: float) -> int:
     end_time = time.monotonic() + timeout_sec
     written = 0
     view = memoryview(payload)
     while written < len(payload):
-        remaining = end_time - time.monotonic()
-        if remaining <= 0:
-            raise TimeoutError("write timeout")
-        _, writable, _ = select.select([], [fd], [], remaining)
-        if not writable:
-            raise TimeoutError("write timeout")
-        chunk = os.write(fd, view[written:])
+        try:
+            chunk = os.write(fd, view[written:])
+        except BlockingIOError:
+            chunk = None
+        except OSError as err:
+            if not is_retryable_write_error(err):
+                raise
+            chunk = None
+        if chunk is None:
+            remaining = end_time - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("write timeout")
+            _, writable, _ = select.select([], [fd], [], remaining)
+            if not writable:
+                raise TimeoutError("write timeout")
+            continue
         if chunk <= 0:
             raise OSError("rpmsg write returned zero bytes")
         written += chunk
