@@ -9,7 +9,7 @@
  #include <openamp/open_amp.h>
  #include <metal/alloc.h>
  #include "platform_info.h"
-@@ -52,6 +54,25 @@
+@@ -52,6 +54,27 @@
  #define     SLAVE_DEBUG_E(format, ...) FT_DEBUG_PRINT_E( SLAVE_DEBUG_TAG, format, ##__VA_ARGS__)
  
  #define SHUTDOWN_MSG                0xEF56A55A
@@ -17,6 +17,8 @@
 +#define SC_CTRL_VERSION             1U
 +#define SC_MSG_JOB_REQ              0x0001U
 +#define SC_MSG_JOB_ACK              0x0002U
++#define SC_MSG_HEARTBEAT            0x0003U
++#define SC_MSG_HEARTBEAT_ACK        0x0004U
 +#define SC_MSG_STATUS_REQ           0x0008U
 +#define SC_MSG_STATUS_RESP          0x0009U
 +#define SC_GUARD_STATE_BOOT         0U
@@ -35,7 +37,7 @@
  /************************** Variable Definitions *****************************/
  static volatile int shutdown_req = 0;
  
-@@ -128,34 +149,344 @@
+@@ -128,34 +151,455 @@
  /*******************例程全局变量***********************************************/
  struct remoteproc remoteproc_slave_00;
  static struct rpmsg_device *rpdev_slave_00 = NULL;
@@ -69,6 +71,20 @@
 +
 +typedef struct
 +{
++    uint32_t runtime_state;
++    uint32_t elapsed_ms;
++    uint32_t completed_outputs;
++    uint32_t progress_x100;
++} ScHeartbeat;
++
++typedef struct
++{
++    uint32_t guard_state;
++    uint32_t heartbeat_ok;
++} ScHeartbeatAck;
++
++typedef struct
++{
 +    uint32_t guard_state;
 +    uint32_t active_job_id;
 +    uint32_t last_fault_code;
@@ -82,6 +98,12 @@
 +    ScCtrlHdr header;
 +    ScJobAck payload;
 +} ScJobAckFrame;
++
++typedef struct
++{
++    ScCtrlHdr header;
++    ScHeartbeatAck payload;
++} ScHeartbeatAckFrame;
 +
 +typedef struct
 +{
@@ -100,6 +122,7 @@
 +static uint32_t sc_active_job_id = 0U;
 +static uint32_t sc_last_fault_code = SC_FAULT_NONE;
 +static uint32_t sc_total_fault_count = 0U;
++static uint32_t sc_heartbeat_seen = 0U;
  /************************** Function Prototypes ******************************/
 +static uint32_t sc_ctrl_crc32(const void *data, size_t len)
 +{
@@ -200,6 +223,27 @@
 +    return rpmsg_send(ept, &response, sizeof(response));
 +}
 +
++static int sc_ctrl_send_heartbeat_ack(struct rpmsg_endpoint *ept, uint32_t src,
++                                      const ScCtrlHdr *request_header,
++                                      uint32_t heartbeat_ok)
++{
++    ScHeartbeatAckFrame response;
++
++    memset(&response, 0, sizeof(response));
++    ept->dest_addr = src;
++    response.header.magic = SC_CTRL_MAGIC;
++    response.header.version = SC_CTRL_VERSION;
++    response.header.msg_type = SC_MSG_HEARTBEAT_ACK;
++    response.header.seq = request_header->seq;
++    response.header.job_id = request_header->job_id;
++    response.header.payload_len = sizeof(response.payload);
++    response.header.header_crc32 = sc_ctrl_compute_header_crc(&response.header);
++    response.payload.guard_state = sc_guard_state;
++    response.payload.heartbeat_ok = heartbeat_ok;
++
++    return rpmsg_send(ept, &response, sizeof(response));
++}
++
 +static int sc_ctrl_send_status_resp(struct rpmsg_endpoint *ept, uint32_t src,
 +                                    const ScCtrlHdr *request_header)
 +{
@@ -217,7 +261,8 @@
 +    response.payload.guard_state = sc_guard_state;
 +    response.payload.active_job_id = sc_active_job_id;
 +    response.payload.last_fault_code = sc_last_fault_code;
-+    response.payload.heartbeat_ok = (sc_guard_state == SC_GUARD_STATE_JOB_ACTIVE) ? 1U : 0U;
++    response.payload.heartbeat_ok = ((sc_guard_state == SC_GUARD_STATE_JOB_ACTIVE) &&
++                                     (sc_heartbeat_seen != 0U)) ? 1U : 0U;
 +    response.payload.sticky_fault = 0U;
 +    response.payload.total_fault_count = sc_total_fault_count;
 +
@@ -273,6 +318,7 @@
 +    sc_last_fault_code = SC_FAULT_NONE;
 +    sc_active_job_id = request_header->job_id;
 +    sc_guard_state = SC_GUARD_STATE_JOB_ACTIVE;
++    sc_heartbeat_seen = 0U;
 +
 +    ret = sc_ctrl_send_job_ack(ept, src, request_header, SC_DECISION_ALLOW, SC_FAULT_NONE);
 +    if (ret < 0)
@@ -302,6 +348,64 @@
 +                  (unsigned int)fault_code,
 +                  (unsigned int)sc_guard_state,
 +                  (unsigned int)sc_active_job_id);
++    return RPMSG_SUCCESS;
++}
++
++static int sc_ctrl_handle_heartbeat(struct rpmsg_endpoint *ept, uint32_t src,
++                                    const ScCtrlHdr *request_header,
++                                    const void *payload_data)
++{
++    ScHeartbeat request;
++    uint32_t heartbeat_ok = 0U;
++    int ret;
++
++    if (request_header->payload_len != sizeof(request))
++    {
++        ret = sc_ctrl_send_heartbeat_ack(ept, src, request_header, 0U);
++        if (ret < 0)
++        {
++            return ret;
++        }
++
++        SLAVE_DEBUG_W("HEARTBEAT invalid payload_len:%u seq:%u job_id:%u",
++                      (unsigned int)request_header->payload_len,
++                      (unsigned int)request_header->seq,
++                      (unsigned int)request_header->job_id);
++        return RPMSG_SUCCESS;
++    }
++
++    memcpy(&request, payload_data, sizeof(request));
++
++    if ((sc_guard_state == SC_GUARD_STATE_JOB_ACTIVE) &&
++        (request_header->job_id == sc_active_job_id))
++    {
++        sc_heartbeat_seen = 1U;
++        heartbeat_ok = 1U;
++    }
++
++    ret = sc_ctrl_send_heartbeat_ack(ept, src, request_header, heartbeat_ok);
++    if (ret < 0)
++    {
++        return ret;
++    }
++
++    if (heartbeat_ok != 0U)
++    {
++        SLAVE_DEBUG_I("HEARTBEAT ack seq:%u job_id:%u elapsed:%u progress:%u",
++                      (unsigned int)request_header->seq,
++                      (unsigned int)request_header->job_id,
++                      (unsigned int)request.elapsed_ms,
++                      (unsigned int)request.progress_x100);
++    }
++    else
++    {
++        SLAVE_DEBUG_W("HEARTBEAT ignore seq:%u job_id:%u guard:%u active:%u",
++                      (unsigned int)request_header->seq,
++                      (unsigned int)request_header->job_id,
++                      (unsigned int)sc_guard_state,
++                      (unsigned int)sc_active_job_id);
++    }
++
 +    return RPMSG_SUCCESS;
 +}
 +
@@ -377,6 +481,15 @@
 +            if (ret < 0)
 +            {
 +                SLAVE_DEBUG_E("rpmsg_send job ack failed.\r\n");
++                return ret;
++            }
++            return RPMSG_SUCCESS;
++
++        case SC_MSG_HEARTBEAT:
++            ret = sc_ctrl_handle_heartbeat(ept, src, &header, payload_data);
++            if (ret < 0)
++            {
++                SLAVE_DEBUG_E("rpmsg_send heartbeat ack failed.\r\n");
 +                return ret;
 +            }
 +            return RPMSG_SUCCESS;

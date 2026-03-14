@@ -91,6 +91,25 @@ class OpenAmpRpmsgBridgeTest(unittest.TestCase):
         self.assertEqual(parsed["flags"], 0)
         self.assertEqual(parsed["flag_name"], "unknown_0x0")
 
+    def test_build_heartbeat_payload_defaults_missing_progress_fields(self) -> None:
+        payload = bridge.build_heartbeat_payload_from_hook(
+            {
+                "phase": "HEARTBEAT",
+                "payload": {
+                    "job_id": 42,
+                    "elapsed_ms": 1500,
+                    "runtime_state": "RUNNING",
+                },
+            }
+        )
+
+        parsed = bridge.parse_heartbeat_payload(payload)
+        self.assertTrue(parsed["parsed"])
+        self.assertEqual(parsed["runtime_state_name"], "RUNNING")
+        self.assertEqual(parsed["elapsed_ms"], 1500)
+        self.assertEqual(parsed["completed_outputs"], 0)
+        self.assertEqual(parsed["progress_x100"], 0)
+
     def test_parse_job_ack_frame_and_classify_echo(self) -> None:
         ack_frame = bridge.build_frame(
             msg_type=MessageType.JOB_ACK,
@@ -129,6 +148,77 @@ class OpenAmpRpmsgBridgeTest(unittest.TestCase):
         self.assertEqual(summary["decision"], "DENY")
         self.assertEqual(summary["source"], "linux_bridge_transport_guard")
         self.assertEqual(summary["transport_status"], "transport_echo_only")
+
+    def test_parse_heartbeat_ack_frame_and_classify_success(self) -> None:
+        ack_frame = bridge.build_frame(
+            msg_type=MessageType.HEARTBEAT_ACK,
+            seq=9,
+            job_id=1234,
+            payload=bridge.HEARTBEAT_ACK_STRUCT.pack(2, 1),
+        )
+        parsed = bridge.parse_frame(ack_frame)
+        self.assertTrue(parsed["heartbeat_ack"]["parsed"])
+        self.assertEqual(parsed["heartbeat_ack"]["guard_state_name"], "JOB_ACTIVE")
+        self.assertTrue(parsed["heartbeat_ack"]["acknowledged"])
+
+        heartbeat_frame = bridge.build_frame(
+            msg_type=MessageType.HEARTBEAT,
+            seq=9,
+            job_id=1234,
+            payload=bridge.build_heartbeat_payload_from_hook(
+                {
+                    "phase": "HEARTBEAT",
+                    "payload": {
+                        "job_id": 1234,
+                        "runtime_state": "RUNNING",
+                        "elapsed_ms": 500,
+                        "completed_outputs": 0,
+                        "progress_x100": 0,
+                    },
+                }
+            ),
+        )
+        summary = bridge.classify_heartbeat_probe(
+            phase="HEARTBEAT",
+            tx_bytes=heartbeat_frame,
+            rx_bytes=ack_frame,
+            rx_timeout=False,
+        )
+        self.assertTrue(summary["acknowledged"])
+        self.assertEqual(summary["source"], "firmware_heartbeat_ack")
+        self.assertEqual(summary["transport_status"], "heartbeat_ack_received")
+
+    def test_classify_heartbeat_probe_negative_ack(self) -> None:
+        heartbeat_frame = bridge.build_frame(
+            msg_type=MessageType.HEARTBEAT,
+            seq=10,
+            job_id=5678,
+            payload=bridge.build_heartbeat_payload_from_hook(
+                {
+                    "phase": "HEARTBEAT",
+                    "payload": {
+                        "job_id": 5678,
+                        "runtime_state": "RUNNING",
+                        "elapsed_ms": 750,
+                    },
+                }
+            ),
+        )
+        ack_frame = bridge.build_frame(
+            msg_type=MessageType.HEARTBEAT_ACK,
+            seq=10,
+            job_id=5678,
+            payload=bridge.HEARTBEAT_ACK_STRUCT.pack(1, 0),
+        )
+        summary = bridge.classify_heartbeat_probe(
+            phase="HEARTBEAT",
+            tx_bytes=heartbeat_frame,
+            rx_bytes=ack_frame,
+            rx_timeout=False,
+        )
+        self.assertFalse(summary["acknowledged"])
+        self.assertEqual(summary["guard_state_name"], "READY")
+        self.assertEqual(summary["transport_status"], "heartbeat_ack_received_negative")
 
 
 if __name__ == "__main__":
