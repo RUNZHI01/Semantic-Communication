@@ -25,6 +25,8 @@ HEADER_STRUCT = struct.Struct("<IHHIIII")
 STATUS_RESP_STRUCT = struct.Struct("<IIIIII")
 JOB_REQ_STRUCT = struct.Struct("<32sIII")
 JOB_ACK_STRUCT = struct.Struct("<III")
+HEARTBEAT_STRUCT = struct.Struct("<IIII")
+HEARTBEAT_ACK_STRUCT = struct.Struct("<II")
 
 FLAG_NAME_TO_WIRE = {
     "payload": 1,
@@ -32,6 +34,12 @@ FLAG_NAME_TO_WIRE = {
     "smoke": 3,
 }
 FLAG_WIRE_TO_NAME = {value: key for key, value in FLAG_NAME_TO_WIRE.items()}
+RUNTIME_STATE_NAME_TO_WIRE = {
+    "PRECHECK": 1,
+    "RUNNING": 2,
+    "FINALIZING": 3,
+}
+RUNTIME_STATE_WIRE_TO_NAME = {value: key for key, value in RUNTIME_STATE_NAME_TO_WIRE.items()}
 GUARD_STATE_NAMES = {
     0: "BOOT",
     1: "READY",
@@ -50,7 +58,7 @@ def parse_args() -> argparse.Namespace:
         description=(
             "Minimal Linux-side OpenAMP/RPMsg bridge for the phase-5 control plane. "
             "Direct mode preserves the existing STATUS_REQ probe. Hook mode also forwards "
-            "a minimal binary JOB_REQ and parses JOB_ACK."
+            "minimal binary JOB_REQ/HEARTBEAT frames and parses JOB_ACK/HEARTBEAT_ACK."
         )
     )
     parser.add_argument(
@@ -71,7 +79,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--phase",
         default="STATUS_REQ",
-        help="Direct mode phase. Direct mode only forwards STATUS_REQ; hook mode also supports JOB_REQ.",
+        help=(
+            "Direct mode phase. Direct mode only forwards STATUS_REQ; "
+            "hook mode also supports JOB_REQ and HEARTBEAT."
+        ),
     )
     parser.add_argument("--job-id", type=int, default=0, help="job_id field used in the control header.")
     parser.add_argument("--seq", type=int, default=1, help="Sequence field used in the control header.")
@@ -98,8 +109,8 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help=(
             "Read wrapper hook event JSON from stdin. OPENAMP_PHASE/event.phase decides the phase. "
-            "STATUS_REQ stays unchanged; JOB_REQ is forwarded as a minimal binary control frame. "
-            "Unsupported phases are denied locally."
+            "STATUS_REQ stays unchanged; JOB_REQ/HEARTBEAT are forwarded as minimal binary "
+            "control frames. Unsupported phases are denied locally."
         ),
     )
     parser.add_argument(
@@ -220,6 +231,10 @@ def safe_guard_state_name(value: int) -> str:
     return GUARD_STATE_NAMES.get(value, f"UNKNOWN_{value:#x}")
 
 
+def safe_runtime_state_name(value: int) -> str:
+    return RUNTIME_STATE_WIRE_TO_NAME.get(value, f"UNKNOWN_{value:#x}")
+
+
 def parse_frame(payload: bytes) -> dict[str, Any]:
     result: dict[str, Any] = {
         "raw_len": len(payload),
@@ -264,6 +279,10 @@ def parse_frame(payload: bytes) -> dict[str, Any]:
     result["is_protocol_frame"] = True
     if msg_type == int(MessageType.STATUS_RESP):
         result["status_resp"] = parse_status_resp_payload(body)
+    elif msg_type == int(MessageType.HEARTBEAT):
+        result["heartbeat"] = parse_heartbeat_payload(body)
+    elif msg_type == int(MessageType.HEARTBEAT_ACK):
+        result["heartbeat_ack"] = parse_heartbeat_ack_payload(body)
     elif msg_type == int(MessageType.JOB_REQ):
         result["job_req"] = parse_job_req_payload(body)
     elif msg_type == int(MessageType.JOB_ACK):
@@ -320,6 +339,49 @@ def parse_job_req_payload(payload: bytes) -> dict[str, Any]:
             "expected_outputs": expected_outputs,
             "flags": flags,
             "flag_name": FLAG_WIRE_TO_NAME.get(flags, f"unknown_{flags:#x}"),
+        }
+    )
+    return result
+
+
+def parse_heartbeat_payload(payload: bytes) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "payload_len": len(payload),
+        "parsed": False,
+    }
+    if len(payload) != HEARTBEAT_STRUCT.size:
+        result["parse_error"] = "unexpected_heartbeat_size"
+        return result
+    runtime_state, elapsed_ms, completed_outputs, progress_x100 = HEARTBEAT_STRUCT.unpack(payload)
+    result.update(
+        {
+            "parsed": True,
+            "runtime_state": runtime_state,
+            "runtime_state_name": safe_runtime_state_name(runtime_state),
+            "elapsed_ms": elapsed_ms,
+            "completed_outputs": completed_outputs,
+            "progress_x100": progress_x100,
+        }
+    )
+    return result
+
+
+def parse_heartbeat_ack_payload(payload: bytes) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "payload_len": len(payload),
+        "parsed": False,
+    }
+    if len(payload) != HEARTBEAT_ACK_STRUCT.size:
+        result["parse_error"] = "unexpected_heartbeat_ack_size"
+        return result
+    guard_state, heartbeat_ok = HEARTBEAT_ACK_STRUCT.unpack(payload)
+    result.update(
+        {
+            "parsed": True,
+            "guard_state": guard_state,
+            "guard_state_name": safe_guard_state_name(guard_state),
+            "heartbeat_ok": heartbeat_ok,
+            "acknowledged": heartbeat_ok == 1,
         }
     )
     return result
@@ -674,6 +736,137 @@ def classify_job_probe(
     )
 
 
+def build_heartbeat_transport_summary(
+    *,
+    phase: str,
+    tx_parsed: dict[str, Any],
+    rx_parsed: dict[str, Any] | None,
+    acknowledged: bool,
+    heartbeat_ok: int,
+    guard_state: int,
+    source: str,
+    transport_status: str,
+    protocol_semantics: str,
+    note: str,
+) -> dict[str, Any]:
+    return {
+        "phase": phase,
+        "acknowledged": acknowledged,
+        "heartbeat_ok": heartbeat_ok,
+        "guard_state": guard_state,
+        "guard_state_name": safe_guard_state_name(guard_state),
+        "source": source,
+        "transport_status": transport_status,
+        "protocol_semantics": protocol_semantics,
+        "note": note,
+        "tx_frame": tx_parsed,
+        "rx_frame": rx_parsed,
+    }
+
+
+def classify_heartbeat_probe(
+    *,
+    phase: str,
+    tx_bytes: bytes,
+    rx_bytes: bytes,
+    rx_timeout: bool,
+) -> dict[str, Any]:
+    tx_parsed = parse_frame(tx_bytes)
+    if rx_timeout:
+        return build_heartbeat_transport_summary(
+            phase=phase,
+            tx_parsed=tx_parsed,
+            rx_parsed=None,
+            acknowledged=False,
+            heartbeat_ok=0,
+            guard_state=DEFAULT_GUARD_STATE,
+            source="linux_bridge_transport_guard",
+            transport_status="tx_ok_rx_timeout",
+            protocol_semantics="not_verified",
+            note=(
+                "HEARTBEAT was written to /dev/rpmsg0 but no HEARTBEAT_ACK arrived before timeout. "
+                "Treat the transport as reachable but the heartbeat semantics as unverified."
+            ),
+        )
+    rx_parsed = parse_frame(rx_bytes)
+    if rx_bytes == tx_bytes:
+        return build_heartbeat_transport_summary(
+            phase=phase,
+            tx_parsed=tx_parsed,
+            rx_parsed=rx_parsed,
+            acknowledged=False,
+            heartbeat_ok=0,
+            guard_state=DEFAULT_GUARD_STATE,
+            source="linux_bridge_transport_guard",
+            transport_status="transport_echo_only",
+            protocol_semantics="not_implemented",
+            note=(
+                "Received an exact echo of the transmitted HEARTBEAT frame. "
+                "That is not a firmware-backed HEARTBEAT_ACK."
+            ),
+        )
+    if rx_parsed.get("is_protocol_frame") and rx_parsed.get("msg_type") == int(MessageType.HEARTBEAT_ACK):
+        heartbeat_ack = rx_parsed.get("heartbeat_ack", {})
+        if heartbeat_ack.get("parsed"):
+            heartbeat_ok = int(heartbeat_ack["heartbeat_ok"])
+            if heartbeat_ok == 1:
+                return build_heartbeat_transport_summary(
+                    phase=phase,
+                    tx_parsed=tx_parsed,
+                    rx_parsed=rx_parsed,
+                    acknowledged=True,
+                    heartbeat_ok=heartbeat_ok,
+                    guard_state=int(heartbeat_ack["guard_state"]),
+                    source="firmware_heartbeat_ack",
+                    transport_status="heartbeat_ack_received",
+                    protocol_semantics="implemented",
+                    note="Received a decodable HEARTBEAT_ACK frame from firmware.",
+                )
+            return build_heartbeat_transport_summary(
+                phase=phase,
+                tx_parsed=tx_parsed,
+                rx_parsed=rx_parsed,
+                acknowledged=False,
+                heartbeat_ok=heartbeat_ok,
+                guard_state=int(heartbeat_ack["guard_state"]),
+                source="firmware_heartbeat_ack",
+                transport_status="heartbeat_ack_received_negative",
+                protocol_semantics="implemented",
+                note=(
+                    "Received a decodable HEARTBEAT_ACK frame, but firmware did not mark the heartbeat as ok."
+                ),
+            )
+        return build_heartbeat_transport_summary(
+            phase=phase,
+            tx_parsed=tx_parsed,
+            rx_parsed=rx_parsed,
+            acknowledged=False,
+            heartbeat_ok=0,
+            guard_state=DEFAULT_GUARD_STATE,
+            source="linux_bridge_transport_guard",
+            transport_status="heartbeat_ack_received_unparsed_payload",
+            protocol_semantics="partially_verified",
+            note=(
+                "Received HEARTBEAT_ACK msg_type but the payload shape does not match the expected 8-byte layout."
+            ),
+        )
+    return build_heartbeat_transport_summary(
+        phase=phase,
+        tx_parsed=tx_parsed,
+        rx_parsed=rx_parsed,
+        acknowledged=False,
+        heartbeat_ok=0,
+        guard_state=DEFAULT_GUARD_STATE,
+        source="linux_bridge_transport_guard",
+        transport_status="unexpected_response",
+        protocol_semantics="not_verified",
+        note=(
+            "A response arrived after HEARTBEAT, but it is not a decodable HEARTBEAT_ACK frame. "
+            "Treat heartbeat semantics as unresolved."
+        ),
+    )
+
+
 def persist_status_exchange_artifacts(
     *,
     output_dir: Path,
@@ -737,6 +930,52 @@ def persist_job_exchange_artifacts(
         "rx_raw": output_dir / "job_ack_rx.bin",
         "rx_hex": output_dir / "job_ack_rx.hex",
         "rx_json": output_dir / "job_ack_rx.json",
+        "summary": output_dir / "bridge_summary.json",
+    }
+    write_json(artifacts["stdin_event"], hook_event or {})
+    write_raw(artifacts["tx_raw"], tx_bytes)
+    write_hex(artifacts["tx_hex"], tx_bytes)
+    write_json(
+        artifacts["tx_json"],
+        {
+            "captured_at": now_iso(),
+            "byte_len": len(tx_bytes),
+            "hex": tx_bytes.hex(),
+            "parsed_frame": summary["tx_frame"],
+        },
+    )
+    write_raw(artifacts["rx_raw"], rx_bytes)
+    write_hex(artifacts["rx_hex"], rx_bytes)
+    write_json(
+        artifacts["rx_json"],
+        {
+            "captured_at": now_iso(),
+            "byte_len": len(rx_bytes),
+            "hex": rx_bytes.hex(),
+            "rx_timeout": txn["rx_timeout"],
+            "parsed_frame": summary["rx_frame"],
+        },
+    )
+    return {name: str(path) for name, path in artifacts.items()}
+
+
+def persist_heartbeat_exchange_artifacts(
+    *,
+    output_dir: Path,
+    hook_event: dict[str, Any],
+    tx_bytes: bytes,
+    rx_bytes: bytes,
+    summary: dict[str, Any],
+    txn: dict[str, Any],
+) -> dict[str, str]:
+    artifacts = {
+        "stdin_event": output_dir / "stdin_event.json",
+        "tx_raw": output_dir / "heartbeat_tx.bin",
+        "tx_hex": output_dir / "heartbeat_tx.hex",
+        "tx_json": output_dir / "heartbeat_tx.json",
+        "rx_raw": output_dir / "heartbeat_ack_rx.bin",
+        "rx_hex": output_dir / "heartbeat_ack_rx.hex",
+        "rx_json": output_dir / "heartbeat_ack_rx.json",
         "summary": output_dir / "bridge_summary.json",
     }
     write_json(artifacts["stdin_event"], hook_event or {})
@@ -867,6 +1106,15 @@ def map_job_flags(raw: Any) -> int:
     return 0
 
 
+def map_runtime_state(raw: Any) -> int:
+    if isinstance(raw, int):
+        return raw if raw in RUNTIME_STATE_WIRE_TO_NAME else 0
+    text = str(raw or "").strip().upper()
+    if text in RUNTIME_STATE_NAME_TO_WIRE:
+        return RUNTIME_STATE_NAME_TO_WIRE[text]
+    return 0
+
+
 def build_job_req_payload_from_hook(hook_event: dict[str, Any]) -> bytes:
     payload = hook_event.get("payload") if isinstance(hook_event, dict) else None
     if not isinstance(payload, dict):
@@ -880,6 +1128,22 @@ def build_job_req_payload_from_hook(hook_event: dict[str, Any]) -> bytes:
         deadline_ms,
         expected_outputs,
         flags,
+    )
+
+
+def build_heartbeat_payload_from_hook(hook_event: dict[str, Any]) -> bytes:
+    payload = hook_event.get("payload") if isinstance(hook_event, dict) else None
+    if not isinstance(payload, dict):
+        raise ValueError("hook HEARTBEAT event must contain a payload object.")
+    runtime_state = map_runtime_state(payload.get("runtime_state", "RUNNING"))
+    elapsed_ms = coerce_positive_int(payload.get("elapsed_ms", 0), "elapsed_ms")
+    completed_outputs = coerce_positive_int(payload.get("completed_outputs", 0), "completed_outputs")
+    progress_x100 = coerce_positive_int(payload.get("progress_x100", 0), "progress_x100")
+    return HEARTBEAT_STRUCT.pack(
+        runtime_state,
+        elapsed_ms,
+        completed_outputs,
+        progress_x100,
     )
 
 
@@ -1011,6 +1275,96 @@ def run_job_probe(
     return summary
 
 
+def run_heartbeat_probe(
+    *,
+    args: argparse.Namespace,
+    output_dir: Path,
+    phase: str,
+    hook_event: dict[str, Any],
+) -> dict[str, Any]:
+    rpmsg_ctrl = Path(args.rpmsg_ctrl)
+    rpmsg_dev = Path(args.rpmsg_dev)
+    device_status = preflight_devices(
+        rpmsg_ctrl=rpmsg_ctrl,
+        rpmsg_dev=rpmsg_dev,
+        require_devices=args.require_devices,
+    )
+    try:
+        if args.require_devices:
+            require_existing_device(rpmsg_ctrl, "--rpmsg-ctrl")
+            require_existing_device(rpmsg_dev, "--rpmsg-dev")
+        heartbeat_payload = build_heartbeat_payload_from_hook(hook_event)
+    except ValueError as err:
+        return build_local_deny_summary(
+            args=args,
+            output_dir=output_dir,
+            phase=phase,
+            hook_event=hook_event,
+            note=f"HEARTBEAT hook payload is not encodable as the minimal binary payload: {err}",
+        )
+    job_id = derive_job_id(args, hook_event)
+    tx_bytes = build_frame(
+        msg_type=MessageType.HEARTBEAT,
+        seq=args.seq,
+        job_id=job_id,
+        payload=heartbeat_payload,
+    )
+    try:
+        txn = transact(
+            rpmsg_dev=rpmsg_dev,
+            tx_bytes=tx_bytes,
+            response_timeout_sec=args.response_timeout_sec,
+            settle_timeout_sec=args.settle_timeout_sec,
+            max_rx_bytes=args.max_rx_bytes,
+            drain_before_send=args.drain_before_send,
+        )
+    except (OSError, TimeoutError, SystemExit) as err:
+        return build_local_deny_summary(
+            args=args,
+            output_dir=output_dir,
+            phase=phase,
+            hook_event=hook_event,
+            note=f"HEARTBEAT transport failed before a valid HEARTBEAT_ACK was received: {err}",
+            fault_code=CONTROL_PATH_FAULT_CODE,
+            source="linux_bridge_transport_guard",
+            transport_status="transport_error",
+            protocol_semantics="not_verified",
+        )
+    summary = classify_heartbeat_probe(
+        phase=phase,
+        tx_bytes=tx_bytes,
+        rx_bytes=txn["rx_bytes"],
+        rx_timeout=txn["rx_timeout"],
+    )
+    summary.update(
+        {
+            "generated_at": now_iso(),
+            "job_id": job_id,
+            "seq": args.seq,
+            "rpmsg_ctrl": str(rpmsg_ctrl),
+            "rpmsg_dev": str(rpmsg_dev),
+            "device_status": device_status,
+            "bridge_mode": "hook",
+            "hook_event_phase": hook_event.get("phase") if isinstance(hook_event, dict) else None,
+            "hook_event_payload": hook_event.get("payload") if isinstance(hook_event, dict) else None,
+            "written_bytes": txn["written_bytes"],
+            "drained_bytes_hex": txn["drained_bytes"].hex(),
+            "rx_bytes_hex": txn["rx_bytes"].hex(),
+            "output_dir": str(output_dir),
+        }
+    )
+    summary["artifact_paths"] = persist_heartbeat_exchange_artifacts(
+        output_dir=output_dir,
+        hook_event=hook_event,
+        tx_bytes=tx_bytes,
+        rx_bytes=txn["rx_bytes"],
+        summary=summary,
+        txn=txn,
+    )
+    write_json(output_dir / "bridge_summary.json", summary)
+    return summary
+
+
 def main() -> int:
     args = parse_args()
     if args.response_timeout_sec <= 0:
@@ -1044,14 +1398,24 @@ def main() -> int:
         print(json.dumps(summary, ensure_ascii=False))
         return 0 if summary.get("decision") == "ALLOW" else 2
 
+    if phase == "HEARTBEAT" and args.hook_stdin:
+        summary = run_heartbeat_probe(
+            args=args,
+            output_dir=output_dir,
+            phase=phase,
+            hook_event=hook_event,
+        )
+        print(json.dumps(summary, ensure_ascii=False))
+        return 0 if summary.get("acknowledged") else 2
+
     summary = build_local_deny_summary(
         args=args,
         output_dir=output_dir,
         phase=phase,
         hook_event=hook_event,
         note=(
-            "This bridge phase only forwards STATUS_REQ in direct mode and STATUS_REQ/JOB_REQ in hook mode. "
-            "Later phases remain locally denied until firmware support is implemented."
+            "This bridge phase only forwards STATUS_REQ in direct mode and STATUS_REQ/JOB_REQ/HEARTBEAT "
+            "in hook mode. Later phases remain locally denied until firmware support is implemented."
         ),
     )
     print(json.dumps(summary, ensure_ascii=False))

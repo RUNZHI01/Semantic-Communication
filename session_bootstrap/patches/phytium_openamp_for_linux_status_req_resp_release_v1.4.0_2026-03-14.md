@@ -1,4 +1,4 @@
-# release_v1.4.0 STATUS_REQ/RESP + JOB_REQ/JOB_ACK patch note
+# release_v1.4.0 STATUS_REQ/RESP + JOB_REQ/JOB_ACK + HEARTBEAT patch note
 
 - Patch file: `session_bootstrap/patches/phytium_openamp_for_linux_status_req_resp_release_v1.4.0_2026-03-14.patch`
 - Target source path: `example/system/amp/openamp_for_linux/src/slaver_00_example.c`
@@ -29,6 +29,14 @@ Implemented behavior:
   - `decision`
   - `fault_code`
   - `guard_state`
+- Accept `HEARTBEAT (0x03)` with a fixed 16-byte payload:
+  - `runtime_state`
+  - `elapsed_ms`
+  - `completed_outputs`
+  - `progress_x100`
+- Reply with `HEARTBEAT_ACK (0x04)` carrying:
+  - `guard_state`
+  - `heartbeat_ok`
 
 Minimal admission checks in the patch:
 
@@ -45,12 +53,16 @@ State behavior:
   - `active_job_id = <request job_id>`
   - `guard_state = JOB_ACTIVE`
   - `last_fault_code = 0`
+- On `ALLOW`, the patch also clears the per-job heartbeat bit:
+  - `heartbeat_ok = 0` in follow-up `STATUS_RESP` until the first accepted `HEARTBEAT`
+- On accepted `HEARTBEAT`, the patch:
+  - sends `HEARTBEAT_ACK(guard_state=<current>, heartbeat_ok=1)`
+  - updates the minimal per-job state so follow-up `STATUS_REQ` reports `heartbeat_ok = 1`
+- On ignored or mismatched `HEARTBEAT`, the patch still returns a minimal `HEARTBEAT_ACK`, but with `heartbeat_ok = 0`
 - On `DENY`, the patch keeps the current runtime state, updates `last_fault_code`, increments `total_fault_count`, and sends a real `JOB_ACK(DENY, ...)`.
 - Unsupported control messages are still ignored conservatively after logging.
 
-Local patch check performed on 2026-03-14:
+Local artifact checks performed on 2026-03-14:
 
-```bash
-git apply --check --directory=.codex_tmp/release_v1.4.0_verify \
-  session_bootstrap/patches/phytium_openamp_for_linux_status_req_resp_release_v1.4.0_2026-03-14.patch
-```
+- `python3 -m unittest openamp_mock.tests.test_rpmsg_bridge`
+- local unified-diff hunk-count verification for `phytium_openamp_for_linux_status_req_resp_release_v1.4.0_2026-03-14.patch`
