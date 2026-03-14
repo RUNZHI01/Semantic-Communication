@@ -123,6 +123,28 @@ class OpenAmpRpmsgBridgeTest(unittest.TestCase):
 
         self.assertEqual(payload, b"")
 
+    def test_build_job_done_payload_defaults_optional_fields(self) -> None:
+        payload = bridge.build_job_done_payload_from_hook(
+            {
+                "phase": "JOB_DONE",
+                "payload": {
+                    "job_id": 42,
+                    "elapsed_ms": 1500,
+                    "result_code": 0,
+                    "runner_exit_code": 0,
+                    "timed_out": False,
+                },
+            }
+        )
+
+        parsed = bridge.parse_job_done_payload(payload)
+        self.assertTrue(parsed["parsed"])
+        self.assertEqual(parsed["result_code"], 0)
+        self.assertEqual(parsed["output_count"], 0)
+        self.assertEqual(parsed["result_crc32"], 0)
+        self.assertEqual(parsed["reserved"], 0)
+        self.assertTrue(parsed["reported_success"])
+
     def test_parse_job_ack_frame_and_classify_echo(self) -> None:
         ack_frame = bridge.build_frame(
             msg_type=MessageType.JOB_ACK,
@@ -232,6 +254,95 @@ class OpenAmpRpmsgBridgeTest(unittest.TestCase):
         self.assertFalse(summary["acknowledged"])
         self.assertEqual(summary["guard_state_name"], "READY")
         self.assertEqual(summary["transport_status"], "heartbeat_ack_received_negative")
+
+    def test_classify_job_done_probe_success_via_status_resp(self) -> None:
+        job_done_frame = bridge.build_frame(
+            msg_type=MessageType.JOB_DONE,
+            seq=11,
+            job_id=777,
+            payload=bridge.build_job_done_payload_from_hook(
+                {
+                    "phase": "JOB_DONE",
+                    "payload": {
+                        "job_id": 777,
+                        "result_code": 0,
+                        "runner_exit_code": 0,
+                        "timed_out": False,
+                    },
+                }
+            ),
+        )
+        status_frame = bridge.build_frame(
+            msg_type=MessageType.STATUS_RESP,
+            seq=11,
+            job_id=777,
+            payload=bridge.STATUS_RESP_STRUCT.pack(
+                1,
+                0,
+                int(FaultCode.NONE),
+                0,
+                0,
+                0,
+            ),
+        )
+
+        summary = bridge.classify_job_done_probe(
+            phase="JOB_DONE",
+            tx_bytes=job_done_frame,
+            rx_bytes=status_frame,
+            rx_timeout=False,
+        )
+
+        self.assertTrue(summary["acknowledged"])
+        self.assertTrue(summary["reported_success"])
+        self.assertEqual(summary["guard_state_name"], "READY")
+        self.assertEqual(summary["last_fault_name"], "NONE")
+        self.assertEqual(summary["transport_status"], "job_done_status_received")
+        self.assertEqual(summary["source"], "firmware_job_done_status")
+
+    def test_classify_job_done_probe_failed_result_via_status_resp(self) -> None:
+        job_done_frame = bridge.build_frame(
+            msg_type=MessageType.JOB_DONE,
+            seq=12,
+            job_id=778,
+            payload=bridge.build_job_done_payload_from_hook(
+                {
+                    "phase": "JOB_DONE",
+                    "payload": {
+                        "job_id": 778,
+                        "result_code": 1,
+                        "runner_exit_code": 3,
+                        "timed_out": False,
+                    },
+                }
+            ),
+        )
+        status_frame = bridge.build_frame(
+            msg_type=MessageType.STATUS_RESP,
+            seq=12,
+            job_id=778,
+            payload=bridge.STATUS_RESP_STRUCT.pack(
+                1,
+                0,
+                int(FaultCode.OUTPUT_INCOMPLETE),
+                0,
+                0,
+                1,
+            ),
+        )
+
+        summary = bridge.classify_job_done_probe(
+            phase="JOB_DONE",
+            tx_bytes=job_done_frame,
+            rx_bytes=status_frame,
+            rx_timeout=False,
+        )
+
+        self.assertTrue(summary["acknowledged"])
+        self.assertFalse(summary["reported_success"])
+        self.assertEqual(summary["last_fault_name"], "OUTPUT_INCOMPLETE")
+        self.assertEqual(summary["transport_status"], "job_done_status_received")
+        self.assertEqual(summary["source"], "firmware_job_done_status")
 
     def test_classify_safe_stop_probe_success_via_status_resp(self) -> None:
         safe_stop_frame = bridge.build_frame(

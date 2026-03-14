@@ -9,7 +9,7 @@
  #include <openamp/open_amp.h>
  #include <metal/alloc.h>
  #include "platform_info.h"
-@@ -52,6 +54,28 @@
+@@ -52,6 +54,30 @@
  #define     SLAVE_DEBUG_E(format, ...) FT_DEBUG_PRINT_E( SLAVE_DEBUG_TAG, format, ##__VA_ARGS__)
  
  #define SHUTDOWN_MSG                0xEF56A55A
@@ -19,6 +19,7 @@
 +#define SC_MSG_JOB_ACK              0x0002U
 +#define SC_MSG_HEARTBEAT            0x0003U
 +#define SC_MSG_HEARTBEAT_ACK        0x0004U
++#define SC_MSG_JOB_DONE             0x0005U
 +#define SC_MSG_SAFE_STOP            0x0007U
 +#define SC_MSG_STATUS_REQ           0x0008U
 +#define SC_MSG_STATUS_RESP          0x0009U
@@ -32,13 +33,14 @@
 +#define SC_DECISION_ALLOW           1U
 +#define SC_FAULT_NONE               0U
 +#define SC_FAULT_ARTIFACT_SHA       1U
++#define SC_FAULT_OUTPUT_INCOMPLETE  5U
 +#define SC_FAULT_DUPLICATE_JOB      8U
 +#define SC_FAULT_PARAM_RANGE        9U
 +#define SC_FAULT_MANUAL_SAFE_STOP   10U
  /************************** Variable Definitions *****************************/
  static volatile int shutdown_req = 0;
  
-@@ -128,34 +152,547 @@
+@@ -128,34 +154,632 @@
  /*******************例程全局变量***********************************************/
  struct remoteproc remoteproc_slave_00;
  static struct rpmsg_device *rpdev_slave_00 = NULL;
@@ -77,6 +79,14 @@
 +    uint32_t completed_outputs;
 +    uint32_t progress_x100;
 +} ScHeartbeat;
++
++typedef struct
++{
++    uint32_t result_code;
++    uint32_t output_count;
++    uint32_t result_crc32;
++    uint32_t reserved;
++} ScJobDone;
 +
 +typedef struct
 +{
@@ -124,6 +134,7 @@
 +static uint32_t sc_last_fault_code = SC_FAULT_NONE;
 +static uint32_t sc_total_fault_count = 0U;
 +static uint32_t sc_heartbeat_seen = 0U;
++static uint32_t sc_expected_outputs = 0U;
  /************************** Function Prototypes ******************************/
 +static int sc_ctrl_has_admitted_job(void)
 +{
@@ -131,22 +142,26 @@
 +            (sc_active_job_id != 0U));
 +}
 +
-+static void sc_ctrl_reset_runtime_state(void)
++static void sc_ctrl_clear_active_job(void)
 +{
 +    sc_guard_state = SC_GUARD_STATE_READY;
 +    sc_active_job_id = 0U;
++    sc_heartbeat_seen = 0U;
++    sc_expected_outputs = 0U;
++}
++
++static void sc_ctrl_reset_runtime_state(void)
++{
++    sc_ctrl_clear_active_job();
 +    sc_last_fault_code = SC_FAULT_NONE;
 +    sc_total_fault_count = 0U;
-+    sc_heartbeat_seen = 0U;
 +}
 +
 +static void sc_ctrl_normalize_runtime_state(void)
 +{
 +    if (!sc_ctrl_has_admitted_job())
 +    {
-+        sc_guard_state = SC_GUARD_STATE_READY;
-+        sc_active_job_id = 0U;
-+        sc_heartbeat_seen = 0U;
++        sc_ctrl_clear_active_job();
 +    }
 +}
 +
@@ -348,6 +363,7 @@
 +    sc_active_job_id = request_header->job_id;
 +    sc_guard_state = SC_GUARD_STATE_JOB_ACTIVE;
 +    sc_heartbeat_seen = 0U;
++    sc_expected_outputs = request.expected_outputs;
 +
 +    ret = sc_ctrl_send_job_ack(ept, src, request_header, SC_DECISION_ALLOW,
 +                               SC_FAULT_NONE);
@@ -442,6 +458,70 @@
 +    return RPMSG_SUCCESS;
 +}
 +
++static int sc_ctrl_handle_job_done(struct rpmsg_endpoint *ept, uint32_t src,
++                                   const ScCtrlHdr *request_header,
++                                   const void *payload_data)
++{
++    ScJobDone request;
++    int done_applied = 0;
++    uint32_t expected_outputs = 0U;
++    int ret;
++
++    sc_ctrl_normalize_runtime_state();
++    if ((request_header->payload_len == sizeof(request)) &&
++        sc_ctrl_has_admitted_job() &&
++        (request_header->job_id == sc_active_job_id))
++    {
++        memcpy(&request, payload_data, sizeof(request));
++        expected_outputs = sc_expected_outputs;
++        if (request.result_code == 0U)
++        {
++            sc_last_fault_code = SC_FAULT_NONE;
++            sc_ctrl_clear_active_job();
++        }
++        else
++        {
++            sc_ctrl_note_fault(SC_FAULT_OUTPUT_INCOMPLETE);
++            sc_ctrl_clear_active_job();
++        }
++        done_applied = 1;
++    }
++
++    ret = sc_ctrl_send_status_resp(ept, src, request_header);
++    if (ret < 0)
++    {
++        return ret;
++    }
++
++    if (done_applied != 0)
++    {
++        SLAVE_DEBUG_I("JOB_DONE applied seq:%u job_id:%u result:%u outputs:%u expected:%u fault:%u",
++                      (unsigned int)request_header->seq,
++                      (unsigned int)request_header->job_id,
++                      (unsigned int)request.result_code,
++                      (unsigned int)request.output_count,
++                      (unsigned int)expected_outputs,
++                      (unsigned int)sc_last_fault_code);
++    }
++    else if (request_header->payload_len != sizeof(request))
++    {
++        SLAVE_DEBUG_W("JOB_DONE invalid payload_len:%u seq:%u job_id:%u",
++                      (unsigned int)request_header->payload_len,
++                      (unsigned int)request_header->seq,
++                      (unsigned int)request_header->job_id);
++    }
++    else
++    {
++        SLAVE_DEBUG_W("JOB_DONE ignore seq:%u job_id:%u guard:%u active:%u",
++                      (unsigned int)request_header->seq,
++                      (unsigned int)request_header->job_id,
++                      (unsigned int)sc_guard_state,
++                      (unsigned int)sc_active_job_id);
++    }
++
++    return RPMSG_SUCCESS;
++}
++
 +static int sc_ctrl_handle_safe_stop(struct rpmsg_endpoint *ept, uint32_t src,
 +                                    const ScCtrlHdr *request_header)
 +{
@@ -454,9 +534,7 @@
 +        (request_header->job_id == sc_active_job_id))
 +    {
 +        sc_ctrl_note_fault(SC_FAULT_MANUAL_SAFE_STOP);
-+        sc_guard_state = SC_GUARD_STATE_READY;
-+        sc_active_job_id = 0U;
-+        sc_heartbeat_seen = 0U;
++        sc_ctrl_clear_active_job();
 +        stop_applied = 1;
 +    }
 +
@@ -578,6 +656,15 @@
 +            }
 +            return RPMSG_SUCCESS;
 +
++        case SC_MSG_JOB_DONE:
++            ret = sc_ctrl_handle_job_done(ept, src, &header, payload_data);
++            if (ret < 0)
++            {
++                SLAVE_DEBUG_E("rpmsg_send job done status failed.\r\n");
++                return ret;
++            }
++            return RPMSG_SUCCESS;
++
 +        case SC_MSG_SAFE_STOP:
 +            ret = sc_ctrl_handle_safe_stop(ept, src, &header);
 +            if (ret < 0)
@@ -599,7 +686,7 @@
  }
  
  static void rpmsg_service_unbind(struct rpmsg_endpoint *ept)
-@@ -247,7 +784,8 @@
+@@ -247,7 +871,8 @@
      SLAVE_DEBUG_I("Starting application...");
      if(!slave_init())
      {
