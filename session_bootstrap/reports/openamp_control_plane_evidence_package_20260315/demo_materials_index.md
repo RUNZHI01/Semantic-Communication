@@ -23,6 +23,8 @@
 | [demo_four_act_runbook.md](demo_four_act_runbook.md) | 四幕演示脚本、操作顺序、每幕话术与证据落点 | 主文档 |
 | [defense_talk_outline.md](defense_talk_outline.md) | PPT 页结构 + speaking outline + 高频问答口径 | 讲稿 / 做页 |
 | [degraded_demo_plan.md](degraded_demo_plan.md) | live 不稳时的降级策略、时间压缩版与红线 | 兜底文档 |
+| [../../demo/openamp_control_plane_demo/README.md](../../demo/openamp_control_plane_demo/README.md) | 集成 dashboard 软件说明、启动命令与 live probe 边界 | 软件入口 |
+| [../../scripts/run_openamp_demo.sh](../../scripts/run_openamp_demo.sh) | 本地启动集成 OpenAMP demo UI | 启动器 |
 
 ## 最短准备路径
 
@@ -32,6 +34,7 @@
 2. [degraded_demo_plan.md](degraded_demo_plan.md)
 3. [summary_report.md](summary_report.md)
 4. [coverage_matrix.md](coverage_matrix.md)
+5. [../../scripts/run_openamp_demo.sh](../../scripts/run_openamp_demo.sh)
 
 ## 四幕与证据映射
 

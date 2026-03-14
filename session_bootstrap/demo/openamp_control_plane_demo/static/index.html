@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OpenAMP Control Plane Demo</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <div class="background-glow glow-a"></div>
+  <div class="background-glow glow-b"></div>
+  <main class="shell">
+    <section class="hero panel">
+      <div class="hero-copy">
+        <p class="eyebrow">Integrated Demo Surface</p>
+        <h1>OpenAMP control-plane status, FIT evidence, and performance in one place.</h1>
+        <p class="lede" id="heroSummary">Loading repo-backed snapshot...</p>
+        <div class="actions">
+          <button id="reloadButton" class="button button-primary" type="button">Reload evidence</button>
+          <button id="probeButton" class="button button-secondary" type="button">Refresh live board status</button>
+        </div>
+      </div>
+      <div class="hero-side">
+        <div class="mode-card card">
+          <div class="label">Mode</div>
+          <div class="mode-pill" id="modePill">Preparing</div>
+          <p id="modeSummary">Waiting for snapshot.</p>
+        </div>
+        <div class="metric-strip" id="topStats"></div>
+      </div>
+    </section>
+
+    <section class="grid-two">
+      <article class="panel board-panel">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Board And Control Plane</p>
+            <h2>Evidence-backed state</h2>
+          </div>
+          <span class="muted" id="generatedAt"></span>
+        </div>
+        <div id="boardEvidenceCard"></div>
+        <div id="boardLiveCard" class="board-live-card"></div>
+      </article>
+
+      <article class="panel panel-stack">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Operator Entry</p>
+            <h2>Launch and scope</h2>
+          </div>
+        </div>
+        <div id="launchCommands" class="launch-list"></div>
+        <div class="mini-grid">
+          <div class="card" id="hostSideCard"></div>
+          <div class="card" id="slaveSideCard"></div>
+        </div>
+      </article>
+    </section>
+
+    <section class="panel">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Milestones</p>
+          <h2>Key OpenAMP path prove-out</h2>
+        </div>
+      </div>
+      <div id="milestonesGrid" class="timeline-grid"></div>
+    </section>
+
+    <section class="grid-two">
+      <article class="panel">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">FIT State</p>
+            <h2>Formal evidence closure</h2>
+          </div>
+        </div>
+        <div id="fitGrid" class="fit-grid"></div>
+      </article>
+
+      <article class="panel">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Performance Positioning</p>
+            <h2>Trusted current alignment</h2>
+          </div>
+        </div>
+        <p id="performanceNote" class="lede compact"></p>
+        <div id="performanceGrid" class="performance-grid"></div>
+      </article>
+    </section>
+
+    <section class="panel">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Sources</p>
+          <h2>Primary documents and scripts</h2>
+        </div>
+      </div>
+      <div id="sourcesGrid" class="sources-grid"></div>
+    </section>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>
