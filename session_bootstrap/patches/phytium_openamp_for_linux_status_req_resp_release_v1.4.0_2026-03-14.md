@@ -1,9 +1,9 @@
-# release_v1.4.0 STATUS_REQ/RESP + JOB_REQ/JOB_ACK + HEARTBEAT patch note
+# release_v1.4.0 STATUS_REQ/RESP + JOB_REQ/JOB_ACK + HEARTBEAT + SAFE_STOP patch note
 
 - Patch file: `session_bootstrap/patches/phytium_openamp_for_linux_status_req_resp_release_v1.4.0_2026-03-14.patch`
 - Target source path: `example/system/amp/openamp_for_linux/src/slaver_00_example.c`
 - Target source shape: old `release_v1.4.0` callback flow with `FRpmsgEchoApp(...)`, `SHUTDOWN_MSG`, and direct `temp_data` echo behavior
-- Artifact integrity: the patch file has been regenerated as a canonical unified diff against `/tmp/release_v1.4.0.slaver_00_example.c`
+- Artifact integrity: the patch file has been regenerated as a canonical unified diff against `.codex_tmp/release_v1_4_0_patch_repair/apply_check_20260314_1/example/system/amp/openamp_for_linux/src/slaver_00_example.c`
 
 Structural differences from `phytium_openamp_for_linux_status_req_resp_2026-03-14.patch`:
 
@@ -38,6 +38,10 @@ Implemented behavior:
 - Reply with `HEARTBEAT_ACK (0x04)` carrying:
   - `guard_state`
   - `heartbeat_ok`
+- Accept `SAFE_STOP (0x07)` with `payload_len == 0`
+- Reply to `SAFE_STOP` with `STATUS_RESP (0x09)` as the minimal result frame:
+  - no dedicated `SAFE_STOP_ACK` is added
+  - the returned `STATUS_RESP` carries the post-stop runtime state
 
 Minimal admission checks in the patch:
 
@@ -70,6 +74,17 @@ State behavior:
   - sends `HEARTBEAT_ACK(guard_state=<current>, heartbeat_ok=1)`
   - updates the minimal per-job state so follow-up `STATUS_REQ` reports `heartbeat_ok = 1`
 - On ignored or mismatched `HEARTBEAT`, the patch still returns a minimal `HEARTBEAT_ACK`, but with `heartbeat_ok = 0`
+- On accepted `SAFE_STOP`, the patch:
+  - requires `payload_len == 0`
+  - requires an admitted active job
+  - requires `job_id == active_job_id`
+  - records `last_fault_code = 10 (MANUAL_SAFE_STOP)`
+  - increments `total_fault_count`
+  - clears `active_job_id`
+  - clears the per-job heartbeat bit
+  - moves the observable state back to `guard_state = READY`
+  - returns a `STATUS_RESP` that reflects this post-stop state
+- On ignored or mismatched `SAFE_STOP`, the patch still returns a `STATUS_RESP`, but with the current state unchanged
 - On `DENY`, the patch updates `last_fault_code`, increments `total_fault_count`, and normalizes any non-admitted state back to:
   - `guard_state = READY`
   - `active_job_id = 0`
@@ -87,8 +102,9 @@ State-consistency hypothesis fixed in this revision:
 
 Local artifact checks performed on 2026-03-14:
 
-- `git -C .codex_tmp/release_v1_4_0_patch_repair/apply_check_20260314_1 apply --check /home/tianxing/tvm_metaschedule_execution_project/session_bootstrap/patches/phytium_openamp_for_linux_status_req_resp_release_v1.4.0_2026-03-14.patch`
-- `git -C .codex_tmp/release_v1_4_0_patch_repair/apply_verify_20260314_1 apply /home/tianxing/tvm_metaschedule_execution_project/session_bootstrap/patches/phytium_openamp_for_linux_status_req_resp_release_v1.4.0_2026-03-14.patch`
-- `diff -u .codex_tmp/release_v1_4_0_patch_repair/slaver_00_example.c .codex_tmp/release_v1_4_0_patch_repair/apply_verify_20260314_1/example/system/amp/openamp_for_linux/src/slaver_00_example.c`
+- `git -C .codex_tmp/release_v1_4_0_patch_repair/apply_check_safe_stop_20260314_1 apply --check /home/tianxing/tvm_metaschedule_execution_project/session_bootstrap/patches/phytium_openamp_for_linux_status_req_resp_release_v1.4.0_2026-03-14.patch`
+- `git -C .codex_tmp/release_v1_4_0_patch_repair/apply_verify_safe_stop_20260314_1 apply /home/tianxing/tvm_metaschedule_execution_project/session_bootstrap/patches/phytium_openamp_for_linux_status_req_resp_release_v1.4.0_2026-03-14.patch`
+- `diff -u .codex_tmp/release_v1_4_0_patch_repair/apply_verify_20260314_1/example/system/amp/openamp_for_linux/src/slaver_00_example.c .codex_tmp/release_v1_4_0_patch_repair/apply_verify_safe_stop_20260314_1/example/system/amp/openamp_for_linux/src/slaver_00_example.c`
+- `python3 -m py_compile session_bootstrap/scripts/openamp_rpmsg_bridge.py session_bootstrap/scripts/openamp_control_wrapper.py openamp_mock/tests/test_rpmsg_bridge.py`
 - `python3 -m unittest openamp_mock.tests.test_rpmsg_bridge`
-- `git diff --check -- session_bootstrap/patches/phytium_openamp_for_linux_status_req_resp_release_v1.4.0_2026-03-14.patch session_bootstrap/patches/phytium_openamp_for_linux_status_req_resp_release_v1.4.0_2026-03-14.md`
+- `git diff --check -- session_bootstrap/scripts/openamp_rpmsg_bridge.py openamp_mock/tests/test_rpmsg_bridge.py session_bootstrap/patches/phytium_openamp_for_linux_status_req_resp_release_v1.4.0_2026-03-14.patch session_bootstrap/patches/phytium_openamp_for_linux_status_req_resp_release_v1.4.0_2026-03-14.md session_bootstrap/reports/openamp_phase5_minimal_safe_stop_impl_2026-03-14.md`
