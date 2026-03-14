@@ -17,18 +17,39 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from openamp_mock.protocol import MAGIC, MessageType, VERSION  # noqa: E402
+from openamp_mock.protocol import Decision, FaultCode, MAGIC, MessageType, VERSION  # noqa: E402
 
 
 HEADER_STRUCT = struct.Struct("<IHHIIII")
 STATUS_RESP_STRUCT = struct.Struct("<IIIIII")
+JOB_REQ_STRUCT = struct.Struct("<32sIII")
+JOB_ACK_STRUCT = struct.Struct("<III")
+
+FLAG_NAME_TO_WIRE = {
+    "payload": 1,
+    "reconstruction": 2,
+    "smoke": 3,
+}
+FLAG_WIRE_TO_NAME = {value: key for key, value in FLAG_NAME_TO_WIRE.items()}
+GUARD_STATE_NAMES = {
+    0: "BOOT",
+    1: "READY",
+    2: "JOB_ACTIVE",
+    3: "WAIT_DONE",
+    4: "DENY_PENDING",
+    5: "FAULT_LATCHED",
+}
+DEFAULT_GUARD_STATE = 0
+CONTROL_PATH_FAULT_CODE = int(FaultCode.CONTROL_CRC_ERROR)
+INPUT_RANGE_FAULT_CODE = int(FaultCode.ILLEGAL_PARAM_RANGE)
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Minimal Linux-side OpenAMP/RPMsg bridge for STATUS_REQ probing. "
-            "This script only proves the Linux transport path and never fabricates STATUS_RESP."
+            "Minimal Linux-side OpenAMP/RPMsg bridge for the phase-5 control plane. "
+            "Direct mode preserves the existing STATUS_REQ probe. Hook mode also forwards "
+            "a minimal binary JOB_REQ and parses JOB_ACK."
         )
     )
     parser.add_argument(
@@ -49,7 +70,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--phase",
         default="STATUS_REQ",
-        help="Direct mode phase. Only STATUS_REQ is forwarded in this phase.",
+        help="Direct mode phase. Direct mode only forwards STATUS_REQ; hook mode also supports JOB_REQ.",
     )
     parser.add_argument("--job-id", type=int, default=0, help="job_id field used in the control header.")
     parser.add_argument("--seq", type=int, default=1, help="Sequence field used in the control header.")
@@ -76,7 +97,8 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help=(
             "Read wrapper hook event JSON from stdin. OPENAMP_PHASE/event.phase decides the phase. "
-            "Unsupported phases are denied locally without pretending to be firmware responses."
+            "STATUS_REQ stays unchanged; JOB_REQ is forwarded as a minimal binary control frame. "
+            "Unsupported phases are denied locally."
         ),
     )
     parser.add_argument(
@@ -172,6 +194,31 @@ def build_frame(*, msg_type: MessageType, seq: int, job_id: int, payload: bytes 
     return header + payload
 
 
+def safe_msg_name(value: int) -> str:
+    try:
+        return MessageType(value).name
+    except ValueError:
+        return f"UNKNOWN_{value:#x}"
+
+
+def safe_fault_name(value: int) -> str:
+    try:
+        return FaultCode(value).name
+    except ValueError:
+        return f"UNKNOWN_{value:#x}"
+
+
+def safe_decision_name(value: int) -> str:
+    try:
+        return Decision(value).name
+    except ValueError:
+        return f"UNKNOWN_{value:#x}"
+
+
+def safe_guard_state_name(value: int) -> str:
+    return GUARD_STATE_NAMES.get(value, f"UNKNOWN_{value:#x}")
+
+
 def parse_frame(payload: bytes) -> dict[str, Any]:
     result: dict[str, Any] = {
         "raw_len": len(payload),
@@ -216,6 +263,10 @@ def parse_frame(payload: bytes) -> dict[str, Any]:
     result["is_protocol_frame"] = True
     if msg_type == int(MessageType.STATUS_RESP):
         result["status_resp"] = parse_status_resp_payload(body)
+    elif msg_type == int(MessageType.JOB_REQ):
+        result["job_req"] = parse_job_req_payload(body)
+    elif msg_type == int(MessageType.JOB_ACK):
+        result["job_ack"] = parse_job_ack_payload(body)
     return result
 
 
@@ -239,8 +290,10 @@ def parse_status_resp_payload(payload: bytes) -> dict[str, Any]:
         {
             "parsed": True,
             "guard_state": guard_state,
+            "guard_state_name": safe_guard_state_name(guard_state),
             "active_job_id": active_job_id,
             "last_fault_code": last_fault_code,
+            "last_fault_name": safe_fault_name(last_fault_code),
             "heartbeat_ok": heartbeat_ok,
             "sticky_fault": sticky_fault,
             "total_fault_count": total_fault_count,
@@ -249,11 +302,49 @@ def parse_status_resp_payload(payload: bytes) -> dict[str, Any]:
     return result
 
 
-def safe_msg_name(value: int) -> str:
-    try:
-        return MessageType(value).name
-    except ValueError:
-        return f"UNKNOWN_{value:#x}"
+def parse_job_req_payload(payload: bytes) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "payload_len": len(payload),
+        "parsed": False,
+    }
+    if len(payload) != JOB_REQ_STRUCT.size:
+        result["parse_error"] = "unexpected_job_req_size"
+        return result
+    expected_sha256, deadline_ms, expected_outputs, flags = JOB_REQ_STRUCT.unpack(payload)
+    result.update(
+        {
+            "parsed": True,
+            "expected_sha256_hex": expected_sha256.hex(),
+            "deadline_ms": deadline_ms,
+            "expected_outputs": expected_outputs,
+            "flags": flags,
+            "flag_name": FLAG_WIRE_TO_NAME.get(flags, f"unknown_{flags:#x}"),
+        }
+    )
+    return result
+
+
+def parse_job_ack_payload(payload: bytes) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "payload_len": len(payload),
+        "parsed": False,
+    }
+    if len(payload) != JOB_ACK_STRUCT.size:
+        result["parse_error"] = "unexpected_job_ack_size"
+        return result
+    decision, fault_code, guard_state = JOB_ACK_STRUCT.unpack(payload)
+    result.update(
+        {
+            "parsed": True,
+            "decision": decision,
+            "decision_name": safe_decision_name(decision),
+            "fault_code": fault_code,
+            "fault_name": safe_fault_name(fault_code),
+            "guard_state": guard_state,
+            "guard_state_name": safe_guard_state_name(guard_state),
+        }
+    )
+    return result
 
 
 def read_hook_event() -> dict[str, Any]:
@@ -419,8 +510,8 @@ def classify_status_probe(
             "transport_status": "transport_echo_only",
             "protocol_semantics": "not_implemented",
             "note": (
-                "Received bytes exactly match the transmitted STATUS_REQ candidate frame. "
-                "This is consistent with the current demo echo firmware, not with a real STATUS_RESP handler."
+                "Received bytes exactly match the transmitted STATUS_REQ frame. "
+                "That is consistent with the demo echo firmware, not with a real STATUS_RESP handler."
             ),
             "tx_frame": tx_parsed,
             "rx_frame": rx_parsed,
@@ -440,7 +531,7 @@ def classify_status_probe(
             "phase": phase,
             "transport_status": "status_resp_received_unparsed_payload",
             "protocol_semantics": "partially_verified",
-            "note": "Received STATUS_RESP msg_type but payload shape does not yet match the expected 24-byte layout.",
+            "note": "Received STATUS_RESP msg_type but payload shape does not match the expected 24-byte layout.",
             "tx_frame": tx_parsed,
             "rx_frame": rx_parsed,
         }
@@ -457,7 +548,119 @@ def classify_status_probe(
     }
 
 
-def persist_exchange_artifacts(
+def build_job_transport_deny_summary(
+    *,
+    phase: str,
+    tx_parsed: dict[str, Any],
+    rx_parsed: dict[str, Any] | None,
+    transport_status: str,
+    protocol_semantics: str,
+    note: str,
+    source: str = "linux_bridge_transport_guard",
+) -> dict[str, Any]:
+    return {
+        "phase": phase,
+        "decision": "DENY",
+        "fault_code": CONTROL_PATH_FAULT_CODE,
+        "fault_name": safe_fault_name(CONTROL_PATH_FAULT_CODE),
+        "guard_state": DEFAULT_GUARD_STATE,
+        "guard_state_name": safe_guard_state_name(DEFAULT_GUARD_STATE),
+        "source": source,
+        "transport_status": transport_status,
+        "protocol_semantics": protocol_semantics,
+        "note": note,
+        "tx_frame": tx_parsed,
+        "rx_frame": rx_parsed,
+    }
+
+
+def classify_job_probe(
+    *,
+    phase: str,
+    tx_bytes: bytes,
+    rx_bytes: bytes,
+    rx_timeout: bool,
+) -> dict[str, Any]:
+    tx_parsed = parse_frame(tx_bytes)
+    if rx_timeout:
+        return build_job_transport_deny_summary(
+            phase=phase,
+            tx_parsed=tx_parsed,
+            rx_parsed=None,
+            transport_status="tx_ok_rx_timeout",
+            protocol_semantics="not_verified",
+            note=(
+                "JOB_REQ was written to /dev/rpmsg0 but no JOB_ACK arrived before timeout. "
+                "The wrapper must deny locally instead of assuming admission."
+            ),
+        )
+    rx_parsed = parse_frame(rx_bytes)
+    if rx_bytes == tx_bytes:
+        return build_job_transport_deny_summary(
+            phase=phase,
+            tx_parsed=tx_parsed,
+            rx_parsed=rx_parsed,
+            transport_status="transport_echo_only",
+            protocol_semantics="not_implemented",
+            note=(
+                "Received an exact echo of the transmitted JOB_REQ frame. "
+                "That is not a firmware-backed JOB_ACK, so the wrapper must deny locally."
+            ),
+        )
+    if rx_parsed.get("is_protocol_frame") and rx_parsed.get("msg_type") == int(MessageType.JOB_ACK):
+        job_ack = rx_parsed.get("job_ack", {})
+        if job_ack.get("parsed"):
+            if job_ack.get("decision_name") not in {"ALLOW", "DENY"}:
+                return build_job_transport_deny_summary(
+                    phase=phase,
+                    tx_parsed=tx_parsed,
+                    rx_parsed=rx_parsed,
+                    transport_status="job_ack_received_invalid_decision",
+                    protocol_semantics="partially_verified",
+                    note=(
+                        "Received JOB_ACK with an unknown decision code. "
+                        "The wrapper must deny locally unless firmware explicitly returns ALLOW."
+                    ),
+                )
+            return {
+                "phase": phase,
+                "decision": job_ack["decision_name"],
+                "fault_code": job_ack["fault_code"],
+                "fault_name": job_ack["fault_name"],
+                "guard_state": job_ack["guard_state"],
+                "guard_state_name": job_ack["guard_state_name"],
+                "source": "firmware_job_ack",
+                "transport_status": "job_ack_received",
+                "protocol_semantics": "implemented",
+                "note": "Received a decodable JOB_ACK frame from firmware.",
+                "tx_frame": tx_parsed,
+                "rx_frame": rx_parsed,
+            }
+        return build_job_transport_deny_summary(
+            phase=phase,
+            tx_parsed=tx_parsed,
+            rx_parsed=rx_parsed,
+            transport_status="job_ack_received_unparsed_payload",
+            protocol_semantics="partially_verified",
+            note=(
+                "Received JOB_ACK msg_type but the payload shape does not match the expected 12-byte layout. "
+                "The wrapper must deny locally."
+            ),
+        )
+    return build_job_transport_deny_summary(
+        phase=phase,
+        tx_parsed=tx_parsed,
+        rx_parsed=rx_parsed,
+        transport_status="unexpected_response",
+        protocol_semantics="not_verified",
+        note=(
+            "A response arrived after JOB_REQ, but it is not a decodable JOB_ACK frame. "
+            "The wrapper must deny locally."
+        ),
+    )
+
+
+def persist_status_exchange_artifacts(
     *,
     output_dir: Path,
     hook_event: dict[str, Any],
@@ -474,6 +677,52 @@ def persist_exchange_artifacts(
         "rx_raw": output_dir / "status_resp_or_echo_rx.bin",
         "rx_hex": output_dir / "status_resp_or_echo_rx.hex",
         "rx_json": output_dir / "status_resp_or_echo_rx.json",
+        "summary": output_dir / "bridge_summary.json",
+    }
+    write_json(artifacts["stdin_event"], hook_event or {})
+    write_raw(artifacts["tx_raw"], tx_bytes)
+    write_hex(artifacts["tx_hex"], tx_bytes)
+    write_json(
+        artifacts["tx_json"],
+        {
+            "captured_at": now_iso(),
+            "byte_len": len(tx_bytes),
+            "hex": tx_bytes.hex(),
+            "parsed_frame": summary["tx_frame"],
+        },
+    )
+    write_raw(artifacts["rx_raw"], rx_bytes)
+    write_hex(artifacts["rx_hex"], rx_bytes)
+    write_json(
+        artifacts["rx_json"],
+        {
+            "captured_at": now_iso(),
+            "byte_len": len(rx_bytes),
+            "hex": rx_bytes.hex(),
+            "rx_timeout": txn["rx_timeout"],
+            "parsed_frame": summary["rx_frame"],
+        },
+    )
+    return {name: str(path) for name, path in artifacts.items()}
+
+
+def persist_job_exchange_artifacts(
+    *,
+    output_dir: Path,
+    hook_event: dict[str, Any],
+    tx_bytes: bytes,
+    rx_bytes: bytes,
+    summary: dict[str, Any],
+    txn: dict[str, Any],
+) -> dict[str, str]:
+    artifacts = {
+        "stdin_event": output_dir / "stdin_event.json",
+        "tx_raw": output_dir / "job_req_tx.bin",
+        "tx_hex": output_dir / "job_req_tx.hex",
+        "tx_json": output_dir / "job_req_tx.json",
+        "rx_raw": output_dir / "job_ack_rx.bin",
+        "rx_hex": output_dir / "job_ack_rx.hex",
+        "rx_json": output_dir / "job_ack_rx.json",
         "summary": output_dir / "bridge_summary.json",
     }
     write_json(artifacts["stdin_event"], hook_event or {})
@@ -556,13 +805,9 @@ def run_status_probe(
             "drained_bytes_hex": txn["drained_bytes"].hex(),
             "rx_bytes_hex": txn["rx_bytes"].hex(),
             "output_dir": str(output_dir),
-            "blocker": (
-                "Current Linux bridge is ready, but real STATUS_REQ/RESP semantics still depend on "
-                "remote firmware replacing the demo echo service with a protocol handler."
-            ),
         }
     )
-    summary["artifact_paths"] = persist_exchange_artifacts(
+    summary["artifact_paths"] = persist_status_exchange_artifacts(
         output_dir=output_dir,
         hook_event=hook_event,
         tx_bytes=tx_bytes,
@@ -574,25 +819,82 @@ def run_status_probe(
     return summary
 
 
+def decode_sha256_hex(raw: Any) -> bytes:
+    text = str(raw or "").strip().lower()
+    if not text:
+        raise ValueError("expected_sha256 is required for JOB_REQ hook events.")
+    try:
+        sha_bytes = bytes.fromhex(text)
+    except ValueError as err:
+        raise ValueError("expected_sha256 must be a 64-character hex string.") from err
+    if len(sha_bytes) != 32:
+        raise ValueError("expected_sha256 must decode to exactly 32 bytes.")
+    return sha_bytes
+
+
+def coerce_positive_int(raw: Any, label: str) -> int:
+    try:
+        value = int(raw)
+    except (TypeError, ValueError) as err:
+        raise ValueError(f"{label} must be an integer.") from err
+    if value < 0:
+        raise ValueError(f"{label} must be >= 0.")
+    if value > 0xFFFFFFFF:
+        raise ValueError(f"{label} must fit in u32.")
+    return value
+
+
+def map_job_flags(raw: Any) -> int:
+    if isinstance(raw, int):
+        return raw if raw in FLAG_WIRE_TO_NAME else 0
+    text = str(raw or "").strip().lower()
+    if text in FLAG_NAME_TO_WIRE:
+        return FLAG_NAME_TO_WIRE[text]
+    return 0
+
+
+def build_job_req_payload_from_hook(hook_event: dict[str, Any]) -> bytes:
+    payload = hook_event.get("payload") if isinstance(hook_event, dict) else None
+    if not isinstance(payload, dict):
+        raise ValueError("hook JOB_REQ event must contain a payload object.")
+    expected_sha256 = decode_sha256_hex(payload.get("expected_sha256"))
+    deadline_ms = coerce_positive_int(payload.get("deadline_ms"), "deadline_ms")
+    expected_outputs = coerce_positive_int(payload.get("expected_outputs"), "expected_outputs")
+    flags = map_job_flags(payload.get("job_flags", payload.get("flags")))
+    return JOB_REQ_STRUCT.pack(
+        expected_sha256,
+        deadline_ms,
+        expected_outputs,
+        flags,
+    )
+
+
 def build_local_deny_summary(
     *,
     args: argparse.Namespace,
     output_dir: Path,
     phase: str,
     hook_event: dict[str, Any],
+    note: str,
+    fault_code: int = INPUT_RANGE_FAULT_CODE,
+    guard_state: int = DEFAULT_GUARD_STATE,
+    source: str = "linux_bridge_local_guard",
+    transport_status: str = "not_attempted",
+    protocol_semantics: str = "not_available",
 ) -> dict[str, Any]:
     summary = {
         "generated_at": now_iso(),
         "bridge_mode": "hook" if args.hook_stdin else "direct",
         "phase": phase,
         "decision": "DENY",
-        "source": "linux_bridge_local_guard",
-        "transport_status": "not_attempted",
-        "protocol_semantics": "not_available",
-        "note": (
-            "This bridge skeleton only forwards STATUS_REQ in the current phase. "
-            "Unsupported wrapper phases are denied locally so the wrapper does not pretend to have a real firmware-backed policy path."
-        ),
+        "fault_code": fault_code,
+        "fault_name": safe_fault_name(fault_code),
+        "guard_state": guard_state,
+        "guard_state_name": safe_guard_state_name(guard_state),
+        "source": source,
+        "transport_status": transport_status,
+        "protocol_semantics": protocol_semantics,
+        "note": note,
         "job_id": derive_job_id(args, hook_event),
         "rpmsg_ctrl": args.rpmsg_ctrl,
         "rpmsg_dev": args.rpmsg_dev,
@@ -602,6 +904,96 @@ def build_local_deny_summary(
     write_json(output_dir / "bridge_summary.json", summary)
     if hook_event:
         write_json(output_dir / "stdin_event.json", hook_event)
+    return summary
+
+
+def run_job_probe(
+    *,
+    args: argparse.Namespace,
+    output_dir: Path,
+    phase: str,
+    hook_event: dict[str, Any],
+) -> dict[str, Any]:
+    rpmsg_ctrl = Path(args.rpmsg_ctrl)
+    rpmsg_dev = Path(args.rpmsg_dev)
+    device_status = preflight_devices(
+        rpmsg_ctrl=rpmsg_ctrl,
+        rpmsg_dev=rpmsg_dev,
+        require_devices=args.require_devices,
+    )
+    try:
+        if args.require_devices:
+            require_existing_device(rpmsg_ctrl, "--rpmsg-ctrl")
+            require_existing_device(rpmsg_dev, "--rpmsg-dev")
+        job_payload = build_job_req_payload_from_hook(hook_event)
+    except ValueError as err:
+        return build_local_deny_summary(
+            args=args,
+            output_dir=output_dir,
+            phase=phase,
+            hook_event=hook_event,
+            note=f"JOB_REQ hook payload is not encodable as the minimal binary payload: {err}",
+        )
+    job_id = derive_job_id(args, hook_event)
+    tx_bytes = build_frame(
+        msg_type=MessageType.JOB_REQ,
+        seq=args.seq,
+        job_id=job_id,
+        payload=job_payload,
+    )
+    try:
+        txn = transact(
+            rpmsg_dev=rpmsg_dev,
+            tx_bytes=tx_bytes,
+            response_timeout_sec=args.response_timeout_sec,
+            settle_timeout_sec=args.settle_timeout_sec,
+            max_rx_bytes=args.max_rx_bytes,
+            drain_before_send=args.drain_before_send,
+        )
+    except (OSError, TimeoutError, SystemExit) as err:
+        return build_local_deny_summary(
+            args=args,
+            output_dir=output_dir,
+            phase=phase,
+            hook_event=hook_event,
+            note=f"JOB_REQ transport failed before a valid JOB_ACK was received: {err}",
+            fault_code=CONTROL_PATH_FAULT_CODE,
+            source="linux_bridge_transport_guard",
+            transport_status="transport_error",
+            protocol_semantics="not_verified",
+        )
+    summary = classify_job_probe(
+        phase=phase,
+        tx_bytes=tx_bytes,
+        rx_bytes=txn["rx_bytes"],
+        rx_timeout=txn["rx_timeout"],
+    )
+    summary.update(
+        {
+            "generated_at": now_iso(),
+            "job_id": job_id,
+            "seq": args.seq,
+            "rpmsg_ctrl": str(rpmsg_ctrl),
+            "rpmsg_dev": str(rpmsg_dev),
+            "device_status": device_status,
+            "bridge_mode": "hook",
+            "hook_event_phase": hook_event.get("phase") if isinstance(hook_event, dict) else None,
+            "hook_event_payload": hook_event.get("payload") if isinstance(hook_event, dict) else None,
+            "written_bytes": txn["written_bytes"],
+            "drained_bytes_hex": txn["drained_bytes"].hex(),
+            "rx_bytes_hex": txn["rx_bytes"].hex(),
+            "output_dir": str(output_dir),
+        }
+    )
+    summary["artifact_paths"] = persist_job_exchange_artifacts(
+        output_dir=output_dir,
+        hook_event=hook_event,
+        tx_bytes=tx_bytes,
+        rx_bytes=txn["rx_bytes"],
+        summary=summary,
+        txn=txn,
+    )
+    write_json(output_dir / "bridge_summary.json", summary)
     return summary
 
 
@@ -618,24 +1010,38 @@ def main() -> int:
     hook_event = read_hook_event() if args.hook_stdin else {}
     phase = determine_phase(args, hook_event)
 
-    if phase != "STATUS_REQ":
-        summary = build_local_deny_summary(
+    if phase == "STATUS_REQ":
+        summary = run_status_probe(
             args=args,
             output_dir=output_dir,
             phase=phase,
             hook_event=hook_event,
         )
         print(json.dumps(summary, ensure_ascii=False))
-        return 2
+        return 0
 
-    summary = run_status_probe(
+    if phase == "JOB_REQ" and args.hook_stdin:
+        summary = run_job_probe(
+            args=args,
+            output_dir=output_dir,
+            phase=phase,
+            hook_event=hook_event,
+        )
+        print(json.dumps(summary, ensure_ascii=False))
+        return 0 if summary.get("decision") == "ALLOW" else 2
+
+    summary = build_local_deny_summary(
         args=args,
         output_dir=output_dir,
         phase=phase,
         hook_event=hook_event,
+        note=(
+            "This bridge phase only forwards STATUS_REQ in direct mode and STATUS_REQ/JOB_REQ in hook mode. "
+            "Later phases remain locally denied until firmware support is implemented."
+        ),
     )
     print(json.dumps(summary, ensure_ascii=False))
-    return 0
+    return 2
 
 
 if __name__ == "__main__":
