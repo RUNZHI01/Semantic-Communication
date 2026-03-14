@@ -1,9 +1,9 @@
-# release_v1.4.0 STATUS_REQ/RESP + JOB_REQ/JOB_ACK + HEARTBEAT + SAFE_STOP + JOB_DONE patch note
+# release_v1.4.0 STATUS_REQ/RESP + JOB_REQ/JOB_ACK + HEARTBEAT + HEARTBEAT_TIMEOUT + SAFE_STOP + JOB_DONE patch note
 
 - Patch file: `session_bootstrap/patches/phytium_openamp_for_linux_status_req_resp_release_v1.4.0_2026-03-14.patch`
 - Target source path: `example/system/amp/openamp_for_linux/src/slaver_00_example.c`
 - Target source shape: old `release_v1.4.0` callback flow with `FRpmsgEchoApp(...)`, `SHUTDOWN_MSG`, and direct `temp_data` echo behavior
-- Artifact integrity: the patch file has been regenerated as a canonical unified diff from the untouched old-source copy at `.codex_tmp/release_v1_4_0_patch_repair/apply_check_safe_stop_20260314_1/example/system/amp/openamp_for_linux/src/slaver_00_example.c` to the locally extended `JOB_DONE` copy at `.codex_tmp/release_v1_4_0_patch_repair/apply_verify_job_done_20260315_1/example/system/amp/openamp_for_linux/src/slaver_00_example.c`
+- Artifact integrity: the patch file has been regenerated as a canonical unified diff from the untouched old-source copy at `.codex_tmp/release_v1_4_0_patch_repair/apply_check_safe_stop_20260314_1/example/system/amp/openamp_for_linux/src/slaver_00_example.c` to the locally extended `JOB_DONE + heartbeat-timeout` copy at `.codex_tmp/release_v1_4_0_patch_repair/apply_verify_job_done_20260315_1/example/system/amp/openamp_for_linux/src/slaver_00_example.c`
 
 Structural differences from `phytium_openamp_for_linux_status_req_resp_2026-03-14.patch`:
 
@@ -38,6 +38,9 @@ Implemented behavior:
 - Reply with `HEARTBEAT_ACK (0x04)` carrying:
   - `guard_state`
   - `heartbeat_ok`
+- Keep the wire protocol stable for timeout handling:
+  - no new timeout frame is introduced
+  - timeout becomes observable through the existing `STATUS_RESP`
 - Accept `SAFE_STOP (0x07)` with `payload_len == 0`
 - Reply to `SAFE_STOP` with `STATUS_RESP (0x09)` as the minimal result frame:
   - no dedicated `SAFE_STOP_ACK` is added
@@ -82,6 +85,18 @@ State behavior:
   - requires `job_id == active_job_id`
   - sends `HEARTBEAT_ACK(guard_state=<current>, heartbeat_ok=1)`
   - updates the minimal per-job state so follow-up `STATUS_REQ` reports `heartbeat_ok = 1`
+- After the first accepted `HEARTBEAT`, the patch arms a lazy watchdog:
+  - last accepted heartbeat timestamp is recorded from the Arm generic counter
+  - timeout threshold is fixed at `5000 ms`
+  - no new interrupt/task loop is introduced
+- Before serving inbound control traffic (`STATUS_REQ`, `JOB_REQ`, `HEARTBEAT`, `SAFE_STOP`, `JOB_DONE`), the patch lazily checks whether the active job has exceeded that heartbeat window
+- On watchdog expiry, the patch:
+  - records `last_fault_code = 3 (HEARTBEAT_TIMEOUT / F003)`
+  - increments `total_fault_count`
+  - clears `active_job_id`
+  - clears the per-job heartbeat bit
+  - returns the observable state to `guard_state = READY`
+  - lets the current or follow-up `STATUS_RESP` expose the timeout without adding a new wire message
 - On ignored or mismatched `HEARTBEAT`, the patch still returns a minimal `HEARTBEAT_ACK`, but with `heartbeat_ok = 0`
 - On accepted `SAFE_STOP`, the patch:
   - requires `payload_len == 0`
@@ -111,6 +126,7 @@ State behavior:
 
 Deliberate boundary kept in this revision:
 
+- The timeout watchdog is lazy and inbound-control-driven; there is still no separate periodic timer ISR/task just for guard polling
 - `JOB_DONE` failure is reflected as `READY + last_fault_code=OUTPUT_INCOMPLETE`, not `FAULT_LATCHED`
 - No `FAULT_REPORT` is emitted yet
 - No `RESET_REQ/ACK` dependency is introduced just to consume a minimal completion report
@@ -127,6 +143,5 @@ State-consistency hypothesis fixed in this revision:
 Local artifact checks performed on 2026-03-15:
 
 - `diff -u --label a/example/system/amp/openamp_for_linux/src/slaver_00_example.c --label b/example/system/amp/openamp_for_linux/src/slaver_00_example.c .codex_tmp/release_v1_4_0_patch_repair/apply_check_safe_stop_20260314_1/example/system/amp/openamp_for_linux/src/slaver_00_example.c .codex_tmp/release_v1_4_0_patch_repair/apply_verify_job_done_20260315_1/example/system/amp/openamp_for_linux/src/slaver_00_example.c > session_bootstrap/patches/phytium_openamp_for_linux_status_req_resp_release_v1.4.0_2026-03-14.patch`
-- `python3 -m py_compile session_bootstrap/scripts/openamp_rpmsg_bridge.py session_bootstrap/scripts/openamp_control_wrapper.py openamp_mock/tests/test_rpmsg_bridge.py`
-- `python3 -m unittest openamp_mock.tests.test_rpmsg_bridge`
-- `git diff --check -- session_bootstrap/scripts/openamp_rpmsg_bridge.py openamp_mock/tests/test_rpmsg_bridge.py session_bootstrap/patches/phytium_openamp_for_linux_status_req_resp_release_v1.4.0_2026-03-14.patch session_bootstrap/patches/phytium_openamp_for_linux_status_req_resp_release_v1.4.0_2026-03-14.md session_bootstrap/reports/openamp_phase5_minimal_job_done_impl_2026-03-15.md`
+- `git diff --check -- session_bootstrap/patches/phytium_openamp_for_linux_status_req_resp_release_v1.4.0_2026-03-14.patch session_bootstrap/patches/phytium_openamp_for_linux_status_req_resp_release_v1.4.0_2026-03-14.md session_bootstrap/reports/openamp_phase5_minimal_heartbeat_impl_2026-03-14.md session_bootstrap/reports/openamp_phase5_minimal_heartbeat_timeout_impl_2026-03-15.md session_bootstrap/reports/openamp_phase5_fit03_timeout_gap_2026-03-15.md`
+- No firmware build, remote deployment, or board rerun was performed from Codex in this step

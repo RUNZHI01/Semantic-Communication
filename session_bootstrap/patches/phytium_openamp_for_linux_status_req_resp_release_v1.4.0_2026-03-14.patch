@@ -9,7 +9,7 @@
  #include <openamp/open_amp.h>
  #include <metal/alloc.h>
  #include "platform_info.h"
-@@ -52,6 +54,30 @@
+@@ -52,6 +54,32 @@
  #define     SLAVE_DEBUG_E(format, ...) FT_DEBUG_PRINT_E( SLAVE_DEBUG_TAG, format, ##__VA_ARGS__)
  
  #define SHUTDOWN_MSG                0xEF56A55A
@@ -33,14 +33,16 @@
 +#define SC_DECISION_ALLOW           1U
 +#define SC_FAULT_NONE               0U
 +#define SC_FAULT_ARTIFACT_SHA       1U
++#define SC_FAULT_HEARTBEAT_TIMEOUT  3U
 +#define SC_FAULT_OUTPUT_INCOMPLETE  5U
 +#define SC_FAULT_DUPLICATE_JOB      8U
 +#define SC_FAULT_PARAM_RANGE        9U
 +#define SC_FAULT_MANUAL_SAFE_STOP   10U
++#define SC_HEARTBEAT_TIMEOUT_MS     5000U
  /************************** Variable Definitions *****************************/
  static volatile int shutdown_req = 0;
  
-@@ -128,34 +154,632 @@
+@@ -128,34 +156,721 @@
  /*******************例程全局变量***********************************************/
  struct remoteproc remoteproc_slave_00;
  static struct rpmsg_device *rpdev_slave_00 = NULL;
@@ -135,6 +137,8 @@
 +static uint32_t sc_total_fault_count = 0U;
 +static uint32_t sc_heartbeat_seen = 0U;
 +static uint32_t sc_expected_outputs = 0U;
++static uint64_t sc_last_heartbeat_ticks = 0ULL;
++static uint64_t sc_heartbeat_timeout_ticks = 0ULL;
  /************************** Function Prototypes ******************************/
 +static int sc_ctrl_has_admitted_job(void)
 +{
@@ -148,6 +152,7 @@
 +    sc_active_job_id = 0U;
 +    sc_heartbeat_seen = 0U;
 +    sc_expected_outputs = 0U;
++    sc_last_heartbeat_ticks = 0ULL;
 +}
 +
 +static void sc_ctrl_reset_runtime_state(void)
@@ -155,6 +160,7 @@
 +    sc_ctrl_clear_active_job();
 +    sc_last_fault_code = SC_FAULT_NONE;
 +    sc_total_fault_count = 0U;
++    sc_heartbeat_timeout_ticks = 0ULL;
 +}
 +
 +static void sc_ctrl_normalize_runtime_state(void)
@@ -196,6 +202,47 @@
 +    return sc_ctrl_crc32(header, 20U);
 +}
 +
++static uint64_t sc_ctrl_read_timer_frequency(void)
++{
++    uint64_t value = 0ULL;
++
++    __asm__ volatile ("mrs %0, cntfrq_el0" : "=r" (value));
++    return value;
++}
++
++static uint64_t sc_ctrl_read_timer_ticks(void)
++{
++    uint64_t value = 0ULL;
++
++    __asm__ volatile ("mrs %0, cntpct_el0" : "=r" (value));
++    return value;
++}
++
++static uint64_t sc_ctrl_get_heartbeat_timeout_ticks(void)
++{
++    uint64_t frequency_hz;
++
++    if (sc_heartbeat_timeout_ticks != 0ULL)
++    {
++        return sc_heartbeat_timeout_ticks;
++    }
++
++    frequency_hz = sc_ctrl_read_timer_frequency();
++    if (frequency_hz == 0ULL)
++    {
++        return 0ULL;
++    }
++
++    sc_heartbeat_timeout_ticks =
++        ((frequency_hz * SC_HEARTBEAT_TIMEOUT_MS) + 999ULL) / 1000ULL;
++    if (sc_heartbeat_timeout_ticks == 0ULL)
++    {
++        sc_heartbeat_timeout_ticks = 1ULL;
++    }
++
++    return sc_heartbeat_timeout_ticks;
++}
++
 +static void sc_ctrl_note_fault(uint32_t fault_code)
 +{
 +    sc_last_fault_code = fault_code;
@@ -203,6 +250,43 @@
 +    {
 +        sc_total_fault_count += 1U;
 +    }
++}
++
++static void sc_ctrl_apply_watchdog_timeout(void)
++{
++    uint32_t timed_out_job_id;
++    uint64_t timeout_ticks;
++    uint64_t now_ticks;
++
++    if (!sc_ctrl_has_admitted_job())
++    {
++        return;
++    }
++
++    if ((sc_heartbeat_seen == 0U) || (sc_last_heartbeat_ticks == 0ULL))
++    {
++        return;
++    }
++
++    timeout_ticks = sc_ctrl_get_heartbeat_timeout_ticks();
++    if (timeout_ticks == 0ULL)
++    {
++        return;
++    }
++
++    now_ticks = sc_ctrl_read_timer_ticks();
++    if ((now_ticks - sc_last_heartbeat_ticks) < timeout_ticks)
++    {
++        return;
++    }
++
++    timed_out_job_id = sc_active_job_id;
++    sc_ctrl_note_fault(SC_FAULT_HEARTBEAT_TIMEOUT);
++    sc_ctrl_clear_active_job();
++    SLAVE_DEBUG_W("HEARTBEAT timeout seq-state job_id:%u fault:%u total_faults:%u",
++                  (unsigned int)timed_out_job_id,
++                  (unsigned int)sc_last_fault_code,
++                  (unsigned int)sc_total_fault_count);
 +}
 +
 +static int sc_ctrl_parse_header(const void *data, size_t len, ScCtrlHdr *header)
@@ -290,6 +374,7 @@
 +{
 +    ScStatusRespFrame response;
 +
++    sc_ctrl_apply_watchdog_timeout();
 +    sc_ctrl_normalize_runtime_state();
 +    memset(&response, 0, sizeof(response));
 +    ept->dest_addr = src;
@@ -319,6 +404,7 @@
 +    uint32_t fault_code = SC_FAULT_NONE;
 +    int ret;
 +
++    sc_ctrl_apply_watchdog_timeout();
 +    sc_ctrl_normalize_runtime_state();
 +    if (request_header->payload_len != sizeof(request))
 +    {
@@ -364,6 +450,7 @@
 +    sc_guard_state = SC_GUARD_STATE_JOB_ACTIVE;
 +    sc_heartbeat_seen = 0U;
 +    sc_expected_outputs = request.expected_outputs;
++    sc_last_heartbeat_ticks = 0ULL;
 +
 +    ret = sc_ctrl_send_job_ack(ept, src, request_header, SC_DECISION_ALLOW,
 +                               SC_FAULT_NONE);
@@ -407,6 +494,7 @@
 +    uint32_t heartbeat_ok = 0U;
 +    int ret;
 +
++    sc_ctrl_apply_watchdog_timeout();
 +    sc_ctrl_normalize_runtime_state();
 +    if (request_header->payload_len != sizeof(request))
 +    {
@@ -429,6 +517,7 @@
 +        (request_header->job_id == sc_active_job_id))
 +    {
 +        sc_heartbeat_seen = 1U;
++        sc_last_heartbeat_ticks = sc_ctrl_read_timer_ticks();
 +        heartbeat_ok = 1U;
 +    }
 +
@@ -467,6 +556,7 @@
 +    uint32_t expected_outputs = 0U;
 +    int ret;
 +
++    sc_ctrl_apply_watchdog_timeout();
 +    sc_ctrl_normalize_runtime_state();
 +    if ((request_header->payload_len == sizeof(request)) &&
 +        sc_ctrl_has_admitted_job() &&
@@ -528,6 +618,7 @@
 +    int stop_applied = 0;
 +    int ret;
 +
++    sc_ctrl_apply_watchdog_timeout();
 +    sc_ctrl_normalize_runtime_state();
 +    if ((request_header->payload_len == 0U) &&
 +        sc_ctrl_has_admitted_job() &&
@@ -586,7 +677,9 @@
      /* On reception of a shutdown we signal the application to terminate */
 -    if ((*(unsigned int *)data) == SHUTDOWN_MSG)
 +    if (len >= sizeof(shutdown_msg))
-+    {
+     {
+-        SLAVE_DEBUG_I("Shutdown message is received.\r\n");
+-        shutdown_req = 1;
 +        memcpy(&shutdown_msg, data, sizeof(shutdown_msg));
 +        if (shutdown_msg == SHUTDOWN_MSG)
 +        {
@@ -598,9 +691,7 @@
 +
 +    ret = sc_ctrl_parse_header(data, len, &header);
 +    if (ret != 0)
-     {
--        SLAVE_DEBUG_I("Shutdown message is received.\r\n");
--        shutdown_req = 1;
++    {
 +        SLAVE_DEBUG_W("ignore non control frame, len:%lu, ret:%d",
 +                      (unsigned long)len, ret);
          return RPMSG_SUCCESS;
@@ -686,7 +777,7 @@
  }
  
  static void rpmsg_service_unbind(struct rpmsg_endpoint *ept)
-@@ -247,7 +871,8 @@
+@@ -247,7 +962,8 @@
      SLAVE_DEBUG_I("Starting application...");
      if(!slave_init())
      {
