@@ -88,11 +88,12 @@ The current demo regression suite covers these public/operator-facing surfaces:
 - HTTP smoke coverage for `GET /api/snapshot`, `POST /api/probe-board`, `GET /docs?path=...`, `GET /api/health`, `GET /`, `GET /app.js`, and `GET /app.css`
 - live-probe cache behavior: startup reuse of the last successful probe artifact and preservation of that saved probe when a later refresh fails
 - docs endpoint guardrails for missing path, invalid repo-external path, missing file, and JSON pretty-print rendering
+- direct `board_probe` unit coverage for command construction and execution outcomes: password-auth SSH selection, `REMOTE_SSH_PORT` override handling, `connect_phytium_pi.sh --env ...` fallback, and `run_live_probe()` success, timeout, non-zero exit, and JSON parse-error payload shaping
 
 Intentional gaps and higher-risk edges:
 
-- `board_probe.run_live_probe()` now has direct unit coverage for success, timeout, non-zero exit, and JSON parse-error payload shaping, but those tests stub `build_probe_command()` so env-file parsing and SSH command selection are still not locked down directly
+- `board_probe` cache/persistence helpers such as `load_probe_output()` and `write_probe_output()` are covered through `DashboardState`, but do not yet have dedicated unit tests of their own
 - the frontend is covered as served assets only; there is no browser-level regression for DOM rendering or the in-page refresh flow
 - `main()`, `--probe-startup`, and real socket binding are not exercised; the suite instantiates `DashboardState` and `DemoRequestHandler` directly
 
-If one more test is needed, the highest-value next addition is a `board_probe.build_probe_command()` unit test that writes a temporary env file and locks down the `ssh_with_password.sh` path, `REMOTE_SSH_PORT` override handling, and fallback to `connect_phytium_pi.sh --env ...`.
+If one more test is needed, the highest-value next addition is a small `server.main()` bootstrap test that patches argument parsing and `DemoHTTPServer` construction to lock down `--probe-startup` wiring without binding a real socket.
