@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import shlex
 import subprocess
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -12,7 +14,117 @@ DEMO_ROOT = Path(__file__).resolve().parents[1]
 if str(DEMO_ROOT) not in sys.path:
     sys.path.insert(0, str(DEMO_ROOT))
 
-from board_probe import PROJECT_ROOT, run_live_probe  # noqa: E402
+from board_probe import (  # noqa: E402
+    CONNECT_SCRIPT,
+    PROJECT_ROOT,
+    REMOTE_PROBE_CODE,
+    SSH_WITH_PASSWORD_SCRIPT,
+    build_probe_command,
+    run_live_probe,
+)
+
+
+EXPECTED_REMOTE_COMMAND = f"python3 -c {shlex.quote(REMOTE_PROBE_CODE)}"
+
+
+class BuildProbeCommandTest(unittest.TestCase):
+    def write_env(self, content: str, *, relative: bool = False) -> str:
+        temp_dir = tempfile.TemporaryDirectory(dir=PROJECT_ROOT)
+        self.addCleanup(temp_dir.cleanup)
+        env_path = Path(temp_dir.name) / "probe.env"
+        env_path.write_text(content, encoding="utf-8")
+        if relative:
+            return str(env_path.relative_to(PROJECT_ROOT))
+        return str(env_path)
+
+    def test_password_env_uses_ssh_with_password_script_with_default_port(self) -> None:
+        env_file = self.write_env(
+            "\n".join(
+                [
+                    "REMOTE_HOST=demo-board",
+                    "REMOTE_USER=demo-user",
+                    "REMOTE_PASS=demo-pass",
+                ]
+            ),
+            relative=True,
+        )
+
+        command = build_probe_command(env_file)
+
+        self.assertEqual(
+            command,
+            [
+                "bash",
+                str(SSH_WITH_PASSWORD_SCRIPT),
+                "--host",
+                "demo-board",
+                "--user",
+                "demo-user",
+                "--pass",
+                "demo-pass",
+                "--port",
+                "22",
+                "--",
+                EXPECTED_REMOTE_COMMAND,
+            ],
+        )
+
+    def test_password_env_honors_remote_ssh_port_override(self) -> None:
+        env_file = self.write_env(
+            "\n".join(
+                [
+                    "REMOTE_HOST=demo-board",
+                    "REMOTE_USER=demo-user",
+                    "REMOTE_PASS=demo-pass",
+                    "REMOTE_SSH_PORT=2202",
+                ]
+            )
+        )
+
+        command = build_probe_command(env_file)
+
+        self.assertEqual(
+            command,
+            [
+                "bash",
+                str(SSH_WITH_PASSWORD_SCRIPT),
+                "--host",
+                "demo-board",
+                "--user",
+                "demo-user",
+                "--pass",
+                "demo-pass",
+                "--port",
+                "2202",
+                "--",
+                EXPECTED_REMOTE_COMMAND,
+            ],
+        )
+
+    def test_missing_password_auth_vars_falls_back_to_connect_script_with_env(self) -> None:
+        env_file = self.write_env(
+            "\n".join(
+                [
+                    "REMOTE_HOST=demo-board",
+                    "REMOTE_USER=demo-user",
+                ]
+            ),
+            relative=True,
+        )
+
+        command = build_probe_command(env_file)
+
+        self.assertEqual(
+            command,
+            [
+                "bash",
+                str(CONNECT_SCRIPT),
+                "--env",
+                env_file,
+                "--",
+                EXPECTED_REMOTE_COMMAND,
+            ],
+        )
 
 
 class RunLiveProbeTest(unittest.TestCase):
