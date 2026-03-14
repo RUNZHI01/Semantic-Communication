@@ -1,6 +1,6 @@
 # Session Progress Log（长期维护）
 
-- 最后更新：2026-03-14 16:57 +0800（补记 2026-03-14 基于 `release_v1.4.0` 的适配 patch 已在飞腾板上真实打通最小控制语义：live `/lib/firmware/openamp_core0.elf` 当前为 patched 版，size `1635728`、SHA `daf889e3...fcb6`；`remoteproc0=running`、`rpmsg-openamp-demo-channel` 已建立；对 `/dev/rpmsg0` 发出的真实 `STATUS_REQ`（`msg_type=8`）已收到 `STATUS_RESP`（`msg_type=9`），payload 为 `guard_state=1, active_job_id=0, last_fault_code=0, heartbeat_ok=0, sticky_fault=0, total_fault_count=0`。这标志着 OpenAMP 已从 demo echo transport 正式推进到最小控制协议可用阶段。）
+- 最后更新：2026-03-14 17:07 +0800（补记 2026-03-14 基于 `release_v1.4.0` 的适配 patch 已在飞腾板上真实打通最小控制语义：live `/lib/firmware/openamp_core0.elf` 当前为 patched 版，size `1635728`、SHA `daf889e3...fcb6`；`remoteproc0=running`、`rpmsg-openamp-demo-channel` 已建立；对 `/dev/rpmsg0` 发出的真实 `STATUS_REQ`（`msg_type=8`）已收到 `STATUS_RESP`（`msg_type=9`），payload 为 `guard_state=1, active_job_id=0, last_fault_code=0, heartbeat_ok=0, sticky_fault=0, total_fault_count=0`。这标志着 OpenAMP 已从 demo echo transport 正式推进到最小控制协议可用阶段；同时，下一步最小 `JOB_REQ/JOB_ACK` 扩展计划也已收敛到“wrapper schema 基本不变、bridge 负责转码、从核只先接 admission ACK”的范围。）
 - 作用：沉淀“当前状态 + 失败经验 + 下一步最小执行方案”，避免重复踩坑。
 
 ## 1) 时间线（关键里程碑）
