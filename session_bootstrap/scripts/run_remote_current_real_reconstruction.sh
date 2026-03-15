@@ -170,13 +170,7 @@ remote_sha256_file() {
     --pass "$REMOTE_PASS" \
     --port "${REMOTE_SSH_PORT:-22}" \
     -- \
-    python3 -c 'import hashlib, pathlib, sys
-path = pathlib.Path(sys.argv[1])
-digest = hashlib.sha256()
-with path.open("rb") as infile:
-    for chunk in iter(lambda: infile.read(1024 * 1024), b""):
-        digest.update(chunk)
-print(digest.hexdigest())' \
+    python3 -c 'import hashlib, pathlib, sys; path = pathlib.Path(sys.argv[1]); digest = hashlib.sha256(); infile = path.open("rb"); [digest.update(chunk) for chunk in iter(lambda: infile.read(1024 * 1024), b"")]; infile.close(); print(digest.hexdigest())' \
     "$remote_path"
 }
 
@@ -203,17 +197,14 @@ stage_current_artifact_from_local_source() {
   remote_stage_dir="${remote_stage_root%/}/.openamp_demo_current/${local_sha256}"
   remote_stage_path="${remote_stage_dir}/optimized_model.so"
 
+  echo "[current-real] staging trusted current artifact source=$local_source remote_artifact=$remote_stage_path"
   base64 "$local_source" | bash "$SCRIPT_DIR/ssh_with_password.sh" \
     --host "$REMOTE_HOST" \
     --user "$REMOTE_USER" \
     --pass "$REMOTE_PASS" \
     --port "${REMOTE_SSH_PORT:-22}" \
     -- \
-    python3 -c 'import base64, pathlib, sys
-payload = base64.b64decode(sys.stdin.buffer.read())
-path = pathlib.Path(sys.argv[1])
-path.parent.mkdir(parents=True, exist_ok=True)
-path.write_bytes(payload)' \
+    python3 -c 'import base64, pathlib, sys; payload = base64.b64decode(sys.stdin.buffer.read()); path = pathlib.Path(sys.argv[1]); path.parent.mkdir(parents=True, exist_ok=True); path.write_bytes(payload)' \
     "$remote_stage_path"
 
   remote_sha256="$(remote_sha256_file "$remote_stage_path" | tr -d '\r\n')"

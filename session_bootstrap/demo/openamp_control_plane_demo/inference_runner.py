@@ -29,6 +29,7 @@ RUNNER_SAMPLE_LATENCY_PATTERNS = (
     re.compile(r"批量推理时间.*?:\s*([0-9]+(?:\.[0-9]+)?)\s*秒"),
     re.compile(r"batch\s+infer(?:ence)?\s+time.*?:\s*([0-9]+(?:\.[0-9]+)?)\s*s(?:ec(?:onds?)?)?", re.I),
 )
+RUNNER_LOG_TAIL_LINES = 40
 DEFAULT_HEARTBEAT_INTERVAL_SEC = 0.5
 DEFAULT_LIVE_CONTROL_HOOK_TIMEOUT_SEC = 30.0
 MIN_LIVE_CONTROL_HOOK_TIMEOUT_SEC = 5.0
@@ -97,6 +98,15 @@ def count_completed_images_from_runner_log(path: Path) -> int:
         except (TypeError, ValueError):
             continue
     return completed
+
+
+def read_runner_log_tail(path: Path, *, max_lines: int = RUNNER_LOG_TAIL_LINES) -> str:
+    if not path.exists():
+        return ""
+    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    if max_lines > 0:
+        lines = lines[-max_lines:]
+    return "\n".join(line.rstrip() for line in lines if line.strip())
 
 
 def generate_live_job_id() -> str:
@@ -867,6 +877,8 @@ class LiveRemoteReconstructionJob:
         last_hook_response = latest_hook_response(trace_events)
         hook_error_text = control_hook_error_text(last_hook_response)
         classify_stdout = sanitize_wrapper_stdout_for_classification(stdout)
+        runner_log_tail = read_runner_log_tail(self._runner_log_path)
+        classification_error_text = "\n".join(part for part in (hook_error_text, runner_log_tail) if part)
 
         if timed_out:
             status = "timeout"
@@ -882,7 +894,7 @@ class LiveRemoteReconstructionJob:
                     status="parse_error",
                     stdout=classify_stdout,
                     stderr=stderr,
-                    error="\n".join(part for part in (str(exc), hook_error_text) if part),
+                    error="\n".join(part for part in (str(exc), classification_error_text) if part),
                 )
                 runner_summary = {}
                 message = build_inference_message(status_category, variant=self.variant, include_fallback=True)
@@ -896,7 +908,7 @@ class LiveRemoteReconstructionJob:
                 status="error",
                 stdout=classify_stdout,
                 stderr=stderr,
-                error=hook_error_text,
+                error=classification_error_text,
             )
             runner_summary = {}
             if wrapper_summary.get("result") == "denied_by_control_hook":
@@ -908,8 +920,10 @@ class LiveRemoteReconstructionJob:
                 message = build_inference_message(status_category, variant=self.variant, include_fallback=True)
 
         diagnostics = build_diagnostics(stdout=stdout, stderr=stderr, returncode=self._process.returncode)
+        if runner_log_tail and status != "success":
+            diagnostics["runner_log_tail"] = runner_log_tail
         if status_category == "artifact_mismatch":
-            diagnostics.update(extract_artifact_sha_mismatch(stderr, stdout))
+            diagnostics.update(extract_artifact_sha_mismatch(stderr, stdout, runner_log_tail, hook_error_text))
         hook_diagnostics = control_hook_diagnostics(last_hook_response)
         if hook_diagnostics:
             diagnostics["control_hook"] = hook_diagnostics
