@@ -674,26 +674,45 @@ PY
             )
             write_executable(
                 runner_dir / "ssh_with_password.sh",
+                (REPO_ROOT / "session_bootstrap" / "scripts" / "ssh_with_password.sh").read_text(encoding="utf-8"),
+            )
+            fake_ssh = temp_dir / "ssh"
+            write_executable(
+                fake_ssh,
                 textwrap.dedent(
                     """\
                     #!/usr/bin/env bash
                     set -euo pipefail
                     while [[ $# -gt 0 ]]; do
                       case "$1" in
-                        --host|--user|--pass|--port)
+                        -p|-o)
                           shift 2
                           ;;
-                        --)
+                        -*)
+                          shift
+                          ;;
+                        *@*)
                           shift
                           break
                           ;;
                         *)
-                          echo "unexpected ssh helper arg: $1" >&2
-                          exit 1
+                          break
                           ;;
                       esac
                     done
-                    exec "$@"
+
+                    if [[ $# -eq 0 ]]; then
+                      echo "missing remote command" >&2
+                      exit 1
+                    fi
+
+                    remote_command="$1"
+                    shift
+                    for arg in "$@"; do
+                      remote_command+=" $arg"
+                    done
+
+                    exec bash -lc "$remote_command"
                     """
                 ),
             )
@@ -851,6 +870,7 @@ PY
                     "INFERENCE_CURRENT_EXPECTED_SHA256": expected_sha,
                 }
             )
+            env["PATH"] = f"{temp_dir}:{env.get('PATH', '')}"
 
             result = subprocess.run(
                 ["bash", str(staged_runner), "--variant", "current", "--max-inputs", "1"],
