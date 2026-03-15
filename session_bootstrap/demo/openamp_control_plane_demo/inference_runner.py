@@ -25,6 +25,8 @@ ARTIFACT_SHA_MISMATCH_RE = re.compile(
     r"artifact sha256 mismatch path=(?P<path>\S+) expected=(?P<expected>[0-9A-Fa-f]{64}) actual=(?P<actual>[0-9A-Fa-f]{64})"
 )
 DEFAULT_HEARTBEAT_INTERVAL_SEC = 0.5
+DEFAULT_LIVE_CONTROL_HOOK_TIMEOUT_SEC = 30.0
+MIN_LIVE_CONTROL_HOOK_TIMEOUT_SEC = 5.0
 DEFAULT_MAX_INPUTS = 1
 DEFAULT_SEED = 0
 UINT32_MAX = (1 << 32) - 1
@@ -480,6 +482,12 @@ def parse_runner_summary_from_log(path: Path) -> dict[str, Any]:
     return parse_json_stdout(path.read_text(encoding="utf-8"))
 
 
+def live_control_hook_timeout_sec(timeout_sec: float) -> float:
+    if timeout_sec <= 0:
+        return DEFAULT_LIVE_CONTROL_HOOK_TIMEOUT_SEC
+    return max(MIN_LIVE_CONTROL_HOOK_TIMEOUT_SEC, min(timeout_sec, DEFAULT_LIVE_CONTROL_HOOK_TIMEOUT_SEC))
+
+
 class LiveRemoteReconstructionJob:
     def __init__(
         self,
@@ -550,6 +558,7 @@ class LiveRemoteReconstructionJob:
 
         runner_cmd = build_runner_command(access, variant=variant, max_inputs=max_inputs, seed=seed)
         hook_cmd = self._build_hook_command(access)
+        hook_timeout_sec = live_control_hook_timeout_sec(timeout_sec)
         command = [
             "python3",
             str(OPENAMP_CONTROL_WRAPPER_SCRIPT),
@@ -571,6 +580,8 @@ class LiveRemoteReconstructionJob:
             str(timeout_sec),
             "--transport",
             "hook",
+            "--control-hook-timeout-sec",
+            str(hook_timeout_sec),
             "--control-hook-cmd",
             hook_cmd,
         ]
