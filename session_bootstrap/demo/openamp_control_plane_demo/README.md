@@ -19,6 +19,7 @@ bash ./session_bootstrap/scripts/run_openamp_demo.sh
 ```
 
 Open it at `http://127.0.0.1:8079`.
+If that port is still held by an older instance of this same OpenAMP demo server, the launcher will stop it and restart cleanly. If some other service owns the port, the launcher exits with a targeted error instead of killing it.
 
 Optional live board probe wiring:
 
