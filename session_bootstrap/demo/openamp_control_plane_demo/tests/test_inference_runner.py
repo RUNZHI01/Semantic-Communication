@@ -80,16 +80,8 @@ class RunRemoteReconstructionTest(unittest.TestCase):
 
     def test_auth_failure_keeps_raw_stderr_in_diagnostics_only(self) -> None:
         access = make_access()
-        command = [
-            "bash",
-            str(REMOTE_RECONSTRUCTION_SCRIPT),
-            "--variant",
-            "current",
-            "--max-inputs",
-            "1",
-            "--seed",
-            "0",
-        ]
+        runner_cmd = inference_runner.build_runner_command(access, variant="current", max_inputs=1, seed=0)
+        command = ["bash", "-lc", runner_cmd]
         completed = subprocess.CompletedProcess(
             command,
             255,
@@ -129,8 +121,9 @@ class RunRemoteReconstructionTest(unittest.TestCase):
         expected_sha = "1946b08e6cf20a1259fa43f9e849a06f50ae1230c08d4df7081fba1edae4c644"
         actual_sha = "6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1"
         artifact_path = "/home/user/Downloads/jscc-test/jscc/tvm_tune_logs/optimized_model.so"
+        command = ["bash", "-lc", inference_runner.build_runner_command(access, variant="current", max_inputs=1, seed=0)]
         completed = subprocess.CompletedProcess(
-            ["bash", str(REMOTE_RECONSTRUCTION_SCRIPT)],
+            command,
             1,
             stdout="",
             stderr=(
@@ -171,6 +164,35 @@ class RunRemoteReconstructionTest(unittest.TestCase):
         self.assertEqual(
             command[command.index("--remote-project-root") + 1],
             "/tmp/openamp_wrong_sha_fit/project",
+        )
+
+    def test_build_runner_command_prefers_configured_legacy_baseline_cmd(self) -> None:
+        access = make_access(
+            {
+                "REMOTE_SNR_BASELINE": "10",
+                "REMOTE_BATCH_BASELINE": "1",
+                "INFERENCE_BASELINE_EXPECTED_SHA256": "b" * 64,
+                "INFERENCE_BASELINE_CMD": "bash ./session_bootstrap/scripts/run_remote_legacy_tvm_compat.sh --variant baseline",
+            }
+        )
+
+        command = inference_runner.build_runner_command(access, variant="baseline", max_inputs=1, seed=0)
+
+        self.assertEqual(command, "bash ./session_bootstrap/scripts/run_remote_legacy_tvm_compat.sh --variant baseline")
+        self.assertNotIn(REMOTE_RECONSTRUCTION_SCRIPT.name, command)
+
+    def test_build_runner_command_keeps_sampling_args_for_current_reconstruction_cmd(self) -> None:
+        access = make_access(
+            {
+                "INFERENCE_CURRENT_CMD": "bash ./session_bootstrap/scripts/run_remote_current_real_reconstruction.sh --variant current",
+            }
+        )
+
+        command = inference_runner.build_runner_command(access, variant="current", max_inputs=3, seed=7)
+
+        self.assertEqual(
+            command,
+            "bash ./session_bootstrap/scripts/run_remote_current_real_reconstruction.sh --variant current --max-inputs 3 --seed 7",
         )
 
     def test_baseline_live_job_requires_formal_baseline_expected_sha_before_launch(self) -> None:
