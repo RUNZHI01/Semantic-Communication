@@ -326,6 +326,103 @@ class RunRemoteReconstructionTest(unittest.TestCase):
             self.assertIn("/dev/rpmsg0", snapshot["progress"]["stages"][2]["detail"])
             self.assertIn("transport=permission_gate", snapshot["progress"]["event_log"][2])
 
+    def test_ssh_bridge_launch_failure_surfaces_host_env_error_and_stage_gate(self) -> None:
+        with tempfile.TemporaryDirectory(dir=PROJECT_ROOT) as temp_dir:
+            output_dir = Path(temp_dir)
+            trace_path = output_dir / "control_trace.jsonl"
+            summary_path = output_dir / "wrapper_summary.json"
+
+            summary_path.write_text(
+                json.dumps({"result": "denied_by_control_hook"}, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+            trace_events = [
+                {
+                    "at": "2026-03-15T20:10:00+0800",
+                    "phase": "STATUS_REQ",
+                    "payload": {"job_id": 4242},
+                    "hook_result": {
+                        "returncode": 255,
+                        "response": {
+                            "phase": "STATUS_REQ",
+                            "source": "openamp_demo_remote_hook_proxy",
+                            "transport_status": "ssh_bridge_launch_failed",
+                            "protocol_semantics": "not_verified",
+                            "note": "远端 bridge 启动失败，rc=255。",
+                        },
+                    },
+                },
+                {
+                    "at": "2026-03-15T20:10:01+0800",
+                    "phase": "JOB_REQ",
+                    "payload": {"job_id": 4242, "expected_sha256": "abcd" * 16},
+                    "hook_result": {
+                        "returncode": 255,
+                        "response": {
+                            "phase": "JOB_REQ",
+                            "source": "openamp_demo_remote_hook_proxy",
+                            "transport_status": "ssh_bridge_launch_failed",
+                            "protocol_semantics": "not_verified",
+                            "note": "远端 bridge 启动失败，rc=255。",
+                        },
+                    },
+                },
+                {
+                    "at": "2026-03-15T20:10:01+0800",
+                    "phase": "JOB_ACK",
+                    "payload": {
+                        "job_id": 4242,
+                        "decision": "DENY",
+                        "fault_code": 0,
+                        "fault_name": "NONE",
+                        "guard_state": 0,
+                        "guard_state_name": "UNKNOWN",
+                        "source": "openamp_demo_remote_hook_proxy",
+                        "transport_status": "ssh_bridge_launch_failed",
+                        "protocol_semantics": "not_verified",
+                        "note": "远端 bridge 启动失败，rc=255。",
+                    },
+                },
+            ]
+            trace_path.write_text(
+                "\n".join(json.dumps(event, ensure_ascii=False) for event in trace_events) + "\n",
+                encoding="utf-8",
+            )
+
+            job = LiveRemoteReconstructionJob.__new__(LiveRemoteReconstructionJob)
+            job.job_id = "4242"
+            job.variant = "current"
+            job._timeout_sec = 10.0
+            job._output_dir = output_dir
+            job._trace_path = trace_path
+            job._summary_path = summary_path
+            job._runner_log_path = output_dir / "runner.log"
+            job._lock = Lock()
+            job._final_snapshot = None
+
+            fake_process = Mock()
+            fake_process.communicate.return_value = (
+                "",
+                "socket: Operation not permitted\nssh: connect to host demo-board port 22: failure\n",
+            )
+            fake_process.returncode = 2
+            job._process = fake_process
+
+            job._wait_for_completion()
+
+            snapshot = job._final_snapshot
+            assert snapshot is not None
+            self.assertEqual(snapshot["status"], "error")
+            self.assertEqual(snapshot["status_category"], "host_env_error")
+            self.assertIn("当前主机环境禁止建立 SSH socket", snapshot["message"])
+            self.assertNotIn("passwordless sudo", snapshot["message"])
+            self.assertEqual(snapshot["diagnostics"]["control_hook"]["transport_status"], "ssh_bridge_launch_failed")
+            self.assertEqual(snapshot["progress"]["current_stage"], "已连接")
+            self.assertEqual(snapshot["progress"]["stages"][0]["status"], "error")
+            self.assertEqual(snapshot["progress"]["stages"][1]["status"], "error")
+            self.assertEqual(snapshot["progress"]["stages"][0]["detail"], "远端 bridge 启动失败，rc=255。")
+            self.assertEqual(snapshot["progress"]["stages"][1]["detail"], "远端 bridge 启动失败，rc=255。")
+
 
 if __name__ == "__main__":
     unittest.main()
