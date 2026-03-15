@@ -8,6 +8,7 @@ import time
 from typing import Any
 
 from board_access import BoardAccessConfig
+from remote_failure import build_diagnostics, build_operator_message, classify_status_category
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -451,32 +452,55 @@ def run_remote_driver(access: BoardAccessConfig, config: dict[str, Any], timeout
     except subprocess.TimeoutExpired:
         return {
             "status": "timeout",
+            "status_category": "timeout",
             "action": config["action"],
-            "message": "远端 RPMsg 控制动作超时。",
+            "message": build_operator_message(config["action"], "timeout"),
             "logs": [],
+            "diagnostics": {},
         }
     except OSError as exc:
+        status_category = classify_status_category(status="launch_error", error=str(exc))
         return {
             "status": "launch_error",
+            "status_category": status_category,
             "action": config["action"],
-            "message": str(exc),
+            "message": build_operator_message(config["action"], status_category),
             "logs": [],
+            "diagnostics": build_diagnostics(error=str(exc)),
         }
 
     try:
         payload = parse_json_stdout(result.stdout)
     except (json.JSONDecodeError, ValueError) as exc:
+        stderr = result.stderr.strip()
+        stdout = result.stdout.strip()
+        status_category = classify_status_category(
+            status="parse_error",
+            stderr=stderr,
+            stdout=stdout,
+            error=str(exc),
+        )
         return {
             "status": "parse_error",
+            "status_category": status_category,
             "action": config["action"],
-            "message": str(exc),
-            "stdout": result.stdout.strip(),
-            "stderr": result.stderr.strip(),
+            "message": build_operator_message(config["action"], status_category),
             "logs": [],
+            "diagnostics": build_diagnostics(stdout=stdout, stderr=stderr, error=str(exc), returncode=result.returncode),
         }
 
     payload["stdout"] = result.stdout.strip()
     payload["stderr"] = result.stderr.strip()
+    payload["status_category"] = "success" if payload.get("status") == "success" else classify_status_category(
+        status=str(payload.get("status") or "error"),
+        stdout=result.stdout,
+        stderr=result.stderr,
+    )
+    payload["diagnostics"] = build_diagnostics(
+        stdout=result.stdout,
+        stderr=result.stderr,
+        returncode=result.returncode,
+    )
     return payload
 
 

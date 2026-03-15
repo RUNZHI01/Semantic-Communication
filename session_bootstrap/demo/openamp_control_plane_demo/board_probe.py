@@ -7,6 +7,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from remote_failure import build_diagnostics, build_operator_message, classify_status_category
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 REPORTS_ROOT = PROJECT_ROOT / "session_bootstrap" / "reports"
@@ -202,49 +204,71 @@ def run_live_probe(
             "requested_at": requested_at,
             "reachable": False,
             "status": "timeout",
-            "summary": "The read-only SSH probe timed out before a response arrived.",
-            "error": "probe timeout",
+            "status_category": "timeout",
+            "summary": build_operator_message("probe", "timeout"),
+            "error": build_operator_message("probe", "timeout"),
             "details": {},
+            "diagnostics": {},
         }
     except OSError as exc:
+        status_category = classify_status_category(status="launch_error", error=str(exc))
         return {
             "requested_at": requested_at,
             "reachable": False,
-            "status": "error",
-            "summary": "The read-only SSH probe could not be launched from this environment.",
-            "error": str(exc),
+            "status": "launch_error",
+            "status_category": status_category,
+            "summary": build_operator_message("probe", status_category),
+            "error": build_operator_message("probe", status_category),
             "details": {},
+            "diagnostics": build_diagnostics(error=str(exc)),
         }
 
     if result.returncode != 0:
+        stderr = (result.stderr or "").strip()
+        stdout = (result.stdout or "").strip()
+        status_category = classify_status_category(status="error", stderr=stderr, stdout=stdout)
         return {
             "requested_at": requested_at,
             "reachable": False,
             "status": "error",
-            "summary": "The read-only SSH probe could not reach the board from this environment.",
-            "error": (result.stderr or result.stdout).strip(),
+            "status_category": status_category,
+            "summary": build_operator_message("probe", status_category),
+            "error": build_operator_message("probe", status_category),
             "details": {},
+            "diagnostics": build_diagnostics(stdout=stdout, stderr=stderr, returncode=result.returncode),
         }
 
     try:
         details = parse_json_stdout(result.stdout)
     except (json.JSONDecodeError, ValueError) as exc:
+        stderr = result.stderr.strip()
+        stdout = result.stdout.strip()
+        status_category = classify_status_category(
+            status="parse_error",
+            stderr=stderr,
+            stdout=stdout,
+            error=str(exc),
+        )
         return {
             "requested_at": requested_at,
             "reachable": False,
             "status": "parse_error",
-            "summary": "The read-only SSH probe returned output that could not be parsed as JSON.",
-            "error": str(exc),
+            "status_category": status_category,
+            "summary": build_operator_message("probe", status_category),
+            "error": build_operator_message("probe", status_category),
             "details": {"stdout": result.stdout.strip(), "stderr": result.stderr.strip()},
+            "diagnostics": build_diagnostics(stdout=stdout, stderr=stderr, error=str(exc)),
         }
 
     return {
         "requested_at": requested_at,
         "reachable": True,
         "status": "success",
+        "status_category": "success",
         "summary": summarize_probe(details),
         "error": "",
         "details": details,
+        "diagnostics": {},
     }
 
 

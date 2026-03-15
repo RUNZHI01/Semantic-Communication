@@ -1,0 +1,104 @@
+from __future__ import annotations
+
+from pathlib import Path
+import subprocess
+import sys
+import unittest
+from unittest.mock import patch
+
+
+DEMO_ROOT = Path(__file__).resolve().parents[1]
+if str(DEMO_ROOT) not in sys.path:
+    sys.path.insert(0, str(DEMO_ROOT))
+
+from board_access import BoardAccessConfig  # noqa: E402
+from inference_runner import PROJECT_ROOT, REMOTE_RECONSTRUCTION_SCRIPT, run_remote_reconstruction  # noqa: E402
+
+
+def make_access(env_values: dict[str, str] | None = None) -> BoardAccessConfig:
+    values = {
+        "REMOTE_TVM_PYTHON": "/usr/bin/python3",
+        "REMOTE_INPUT_DIR": "/tmp/input",
+        "REMOTE_OUTPUT_BASE": "/tmp/output",
+        "REMOTE_SNR_CURRENT": "12",
+        "REMOTE_BATCH_CURRENT": "1",
+    }
+    values.update(env_values or {})
+    return BoardAccessConfig(
+        host="demo-board",
+        user="demo-user",
+        password="demo-pass",
+        port="22",
+        env_file=None,
+        env_values=values,
+        source_summary="unit test",
+    )
+
+
+class RunRemoteReconstructionTest(unittest.TestCase):
+    def test_missing_required_config_returns_operator_friendly_config_error(self) -> None:
+        access = make_access(
+            {
+                "REMOTE_TVM_PYTHON": "",
+                "REMOTE_INPUT_DIR": "",
+            }
+        )
+
+        payload = run_remote_reconstruction(access, variant="current")
+
+        self.assertEqual(payload["status"], "config_error")
+        self.assertEqual(payload["status_category"], "config_error")
+        self.assertIn("远端推理配置不完整或不可用", payload["message"])
+        self.assertNotIn("REMOTE_TVM_PYTHON", payload["message"])
+        self.assertIn("REMOTE_TVM_PYTHON", payload["diagnostics"]["missing_fields"])
+        self.assertIn("REMOTE_INPUT_DIR", payload["diagnostics"]["missing_fields"])
+
+    def test_auth_failure_keeps_raw_stderr_in_diagnostics_only(self) -> None:
+        access = make_access()
+        command = [
+            "bash",
+            str(REMOTE_RECONSTRUCTION_SCRIPT),
+            "--variant",
+            "current",
+            "--max-inputs",
+            "1",
+            "--seed",
+            "0",
+        ]
+        completed = subprocess.CompletedProcess(
+            command,
+            255,
+            stdout="",
+            stderr="Permission denied (publickey,password).\n",
+        )
+
+        with patch("inference_runner.subprocess.run", return_value=completed) as run_mock:
+            payload = run_remote_reconstruction(access, variant="current", timeout_sec=12.0)
+
+        run_mock.assert_called_once_with(
+            command,
+            cwd=PROJECT_ROOT,
+            check=False,
+            text=True,
+            capture_output=True,
+            timeout=12.0,
+            env={
+                **access.build_subprocess_env(),
+                "REMOTE_MODE": "ssh",
+            },
+        )
+        self.assertEqual(payload["status"], "error")
+        self.assertEqual(payload["status_category"], "auth_error")
+        self.assertIn("认证失败", payload["message"])
+        self.assertNotIn("Permission denied", payload["message"])
+        self.assertEqual(
+            payload["diagnostics"],
+            {
+                "stderr": "Permission denied (publickey,password).",
+                "returncode": 255,
+            },
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

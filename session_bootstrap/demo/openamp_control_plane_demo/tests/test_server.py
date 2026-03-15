@@ -457,6 +457,89 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(payload["artifact_sha"], "abcd" * 16)
         run_reconstruction.assert_called_once()
 
+    def test_run_inference_endpoint_hides_raw_auth_stderr_in_primary_message(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        request_json(
+            state,
+            "POST",
+            "/api/session/board-access",
+            body=json.dumps(
+                {
+                    "host": "demo-board",
+                    "user": "demo-user",
+                    "password": "placeholder-pass",
+                    "port": "22",
+                    "env_file": "session_bootstrap/config/inference_tvm310_safe.2026-03-10.phytium_pi.env",
+                }
+            ).encode("utf-8"),
+        )
+
+        with patch(
+            "server.run_remote_reconstruction",
+            return_value={
+                "status": "error",
+                "status_category": "auth_error",
+                "execution_mode": "fallback",
+                "variant": "current",
+                "message": "远端推理认证失败，请检查板卡用户名、密码或 SSH 端口设置。 当前已回退到预录结果。",
+                "missing_fields": [],
+                "diagnostics": {"stderr": "Permission denied (publickey,password).", "returncode": 255},
+            },
+        ):
+            status, _, payload = request_json(
+                state,
+                "POST",
+                "/api/run-inference",
+                body=json.dumps({"image_index": 0, "mode": "current"}).encode("utf-8"),
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["execution_mode"], "prerecorded")
+        self.assertEqual(payload["status_category"], "auth_error")
+        self.assertIn("认证失败", payload["message"])
+        self.assertNotIn("Permission denied", payload["message"])
+        self.assertEqual(payload["live_attempt"]["diagnostics"]["stderr"], "Permission denied (publickey,password).")
+
+    def test_inject_fault_endpoint_keeps_live_attempt_diagnostics_on_replay_fallback(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        request_json(
+            state,
+            "POST",
+            "/api/session/board-access",
+            body=json.dumps(
+                {
+                    "host": "demo-board",
+                    "user": "demo-user",
+                    "password": "placeholder-pass",
+                    "port": "22",
+                }
+            ).encode("utf-8"),
+        )
+
+        with patch(
+            "server.run_fault_action",
+            return_value={
+                "status": "parse_error",
+                "status_category": "auth_error",
+                "message": "远端故障注入认证失败，请检查板卡用户名、密码或 SSH 端口设置。",
+                "diagnostics": {"stderr": "Permission denied (publickey,password).", "returncode": 255},
+                "logs": [],
+            },
+        ):
+            status, _, payload = request_json(
+                state,
+                "POST",
+                "/api/inject-fault",
+                body=json.dumps({"fault_type": "wrong_sha"}).encode("utf-8"),
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["execution_mode"], "replay")
+        self.assertEqual(payload["status_category"], "auth_error")
+        self.assertIn("认证失败", payload["message"])
+        self.assertNotIn("Permission denied", payload["message"])
+        self.assertEqual(payload["live_attempt"]["diagnostics"]["stderr"], "Permission denied (publickey,password).")
+
     def test_inject_fault_endpoint_returns_replay_when_not_configured(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
 
