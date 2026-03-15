@@ -236,12 +236,19 @@ def discover_trusted_current_local_artifact_source(
     env_values: dict[str, str],
     report_candidates: tuple[str, ...] = TRUSTED_CURRENT_ARTIFACT_REPORT_CANDIDATES,
 ) -> str:
+    binding = discover_trusted_current_artifact_binding(env_values, report_candidates)
+    return str(binding.get("local_current_artifact_source") or "").strip()
+
+
+def discover_trusted_current_artifact_binding(
+    env_values: dict[str, str],
+    report_candidates: tuple[str, ...] = TRUSTED_CURRENT_ARTIFACT_REPORT_CANDIDATES,
+) -> dict[str, str]:
     expected_sha = valid_sha256_text(
         env_values.get("INFERENCE_CURRENT_EXPECTED_SHA256") or env_values.get("INFERENCE_EXPECTED_SHA256") or ""
     )
-    current_artifact_path = resolve_current_artifact_path(env_values)
-    if not expected_sha or not current_artifact_path:
-        return ""
+    if not expected_sha:
+        return {}
 
     for raw_report_path in report_candidates:
         report_path = resolve_existing_env(raw_report_path)
@@ -261,13 +268,43 @@ def discover_trusted_current_local_artifact_source(
         local_sha = valid_sha256_text(local_build.get("optimized_model_sha256", ""))
         if local_sha != expected_sha:
             continue
-        report_artifact_path = str(remote_artifact.get("optimized_model_so") or "").strip()
-        if report_artifact_path and report_artifact_path != current_artifact_path:
+        remote_sha = valid_sha256_text(remote_artifact.get("optimized_model_sha256", ""))
+        if remote_sha and remote_sha != expected_sha:
             continue
         local_path = resolve_existing_env(local_source)
-        if local_path is not None:
-            return str(local_path)
-    return ""
+        if local_source and local_path is None:
+            continue
+        return {
+            "expected_sha256": expected_sha,
+            "local_current_artifact_source": str(local_path) if local_path is not None else "",
+            "remote_current_artifact": str(remote_artifact.get("optimized_model_so") or "").strip(),
+            "remote_current_archive_dir": str(remote_artifact.get("archive_dir") or "").strip(),
+        }
+    return {}
+
+
+def apply_trusted_current_artifact_binding(
+    env_values: dict[str, str],
+    report_candidates: tuple[str, ...] = TRUSTED_CURRENT_ARTIFACT_REPORT_CANDIDATES,
+) -> dict[str, str]:
+    binding = discover_trusted_current_artifact_binding(env_values, report_candidates)
+    if not binding:
+        return dict(env_values)
+
+    values = dict(env_values)
+    remote_artifact = str(binding.get("remote_current_artifact") or "").strip()
+    remote_archive_dir = str(binding.get("remote_current_archive_dir") or "").strip()
+    local_source = str(binding.get("local_current_artifact_source") or "").strip()
+
+    if remote_artifact:
+        values["REMOTE_CURRENT_ARTIFACT"] = remote_artifact
+    if remote_archive_dir:
+        values["INFERENCE_CURRENT_ARCHIVE"] = remote_archive_dir
+        values["REMOTE_TVM_JSCC_BASE_DIR"] = remote_archive_dir
+        values["REMOTE_CURRENT_ARTIFACT_STAGE_DIR"] = remote_archive_dir
+    if local_source:
+        values["LOCAL_CURRENT_ARTIFACT_SOURCE"] = local_source
+    return values
 
 
 def merge_env_values(
@@ -295,7 +332,7 @@ def merge_env_values(
     else:
         for key in PASSWORD_KEYS:
             values.pop(key, None)
-    return values
+    return apply_trusted_current_artifact_binding(values)
 
 
 def build_field_sources(
