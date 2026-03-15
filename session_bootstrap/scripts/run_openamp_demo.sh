@@ -7,8 +7,10 @@ SERVER="$PROJECT_ROOT/session_bootstrap/demo/openamp_control_plane_demo/server.p
 SERVER_SUFFIX="/session_bootstrap/demo/openamp_control_plane_demo/server.py"
 DEFAULT_HOST="127.0.0.1"
 DEFAULT_PORT="8079"
-PORT_RECLAIM_WAIT_STEPS=50
-PORT_RECLAIM_WAIT_SEC="0.1"
+PORT_RECLAIM_TERM_WAIT_STEPS=10
+PORT_RECLAIM_TERM_WAIT_SEC="0.1"
+PORT_RECLAIM_KILL_WAIT_STEPS=50
+PORT_RECLAIM_KILL_WAIT_SEC="0.1"
 
 parse_bind_args() {
     local -n host_ref="$1"
@@ -117,6 +119,20 @@ join_listener_addresses() {
     printf '%s\n' "$joined"
 }
 
+join_values() {
+    local joined=""
+    local value
+
+    for value in "$@"; do
+        if [[ -n "$joined" ]]; then
+            joined+=", "
+        fi
+        joined+="$value"
+    done
+
+    printf '%s\n' "$joined"
+}
+
 list_conflicting_listeners() {
     local line
     local listener_addr
@@ -170,9 +186,67 @@ list_demo_processes_for_requested_bind() {
     done < <(ps -eo pid=,args=)
 }
 
-reclaim_demo_listener_if_safe() {
-    local -a conflicting_listeners=()
-    local -a demo_processes=()
+list_listener_owner_pids_for_requested_bind() {
+    local line
+    local pid=""
+    local listener_addr
+
+    if ! command -v lsof >/dev/null 2>&1; then
+        return 0
+    fi
+
+    while IFS= read -r line; do
+        [[ -n "$line" ]] || continue
+        case "$line" in
+            p*)
+                pid="${line#p}"
+                ;;
+            n*)
+                listener_addr="${line#n}"
+                if [[ -n "$pid" ]] && bind_listener_conflicts "$listener_addr" "$REQUESTED_HOST" "$REQUESTED_PORT"; then
+                    printf '%s\n' "$pid"
+                fi
+                ;;
+        esac
+    done < <(lsof -nP -iTCP:"$REQUESTED_PORT" -sTCP:LISTEN -Fpn 2>/dev/null || true)
+}
+
+pid_is_in_list() {
+    local needle="$1"
+    shift
+    local value
+
+    for value in "$@"; do
+        if [[ "$value" == "$needle" ]]; then
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+demo_process_records_include_pid() {
+    local needle="$1"
+    shift
+    local demo_record
+    local pid
+    local process_host
+    local process_port
+    local cmdline
+
+    for demo_record in "$@"; do
+        IFS=$'\t' read -r pid process_host process_port cmdline <<<"$demo_record"
+        if [[ "$pid" == "$needle" ]]; then
+            return 0
+        fi
+    done
+
+    return 1
+}
+
+listeners_are_clearly_owned_by_demo_processes() {
+    local -n listener_records_ref="$1"
+    local -n demo_records_ref="$2"
     local listener_record
     local listener_addr
     local demo_record
@@ -184,9 +258,65 @@ reclaim_demo_listener_if_safe() {
     local process_host
     local process_port
     local cmdline
+
+    for listener_record in "${listener_records_ref[@]}"; do
+        listener_addr="${listener_record%%$'\t'*}"
+        covered=1
+        cover_count=0
+        listener_count=0
+        for demo_record in "${demo_records_ref[@]}"; do
+            IFS=$'\t' read -r pid process_host process_port cmdline <<<"$demo_record"
+            if bind_listener_conflicts "$listener_addr" "$process_host" "$process_port"; then
+                covered=0
+                ((cover_count += 1))
+            fi
+        done
+        for other_listener_record in "${listener_records_ref[@]}"; do
+            if [[ "${other_listener_record%%$'\t'*}" == "$listener_addr" ]]; then
+                ((listener_count += 1))
+            fi
+        done
+        if ((covered || cover_count < listener_count)); then
+            return 1
+        fi
+    done
+
+    return 0
+}
+
+wait_for_conflicting_listeners_to_clear() {
+    local steps="$1"
+    local wait_sec="$2"
+    local -n listener_records_ref="$3"
+    local attempt
+
+    for ((attempt = 0; attempt < steps; attempt++)); do
+        mapfile -t listener_records_ref < <(list_conflicting_listeners)
+        if ((${#listener_records_ref[@]} == 0)); then
+            return 0
+        fi
+        sleep "$wait_sec"
+    done
+
+    return 1
+}
+
+reclaim_demo_listener_if_safe() {
+    local -a conflicting_listeners=()
+    local -a demo_processes=()
+    local -a blocking_demo_processes=()
+    local -a original_demo_pids=()
+    local -a current_demo_processes=()
+    local -a stubborn_demo_processes=()
+    local -a listener_owner_pids=()
+    local listener_record
+    local demo_record
+    local pid
+    local process_host
+    local process_port
+    local cmdline
     local listener_summary=""
     local pid_summary=""
-    local attempt
 
     mapfile -t conflicting_listeners < <(list_conflicting_listeners)
     if ((${#conflicting_listeners[@]} == 0)); then
@@ -201,52 +331,104 @@ reclaim_demo_listener_if_safe() {
         exit 1
     fi
 
-    for listener_record in "${conflicting_listeners[@]}"; do
-        listener_addr="${listener_record%%$'\t'*}"
-        covered=1
-        cover_count=0
-        listener_count=0
+    mapfile -t listener_owner_pids < <(list_listener_owner_pids_for_requested_bind)
+    if ((${#listener_owner_pids[@]} > 0)); then
+        for pid in "${listener_owner_pids[@]}"; do
+            if ! demo_process_records_include_pid "$pid" "${demo_processes[@]}"; then
+                listener_summary="$(join_listener_addresses "${conflicting_listeners[@]}")"
+                printf 'Requested OpenAMP demo port %s is already in use at %s.\n' "$REQUESTED_PORT" "$listener_summary" >&2
+                printf 'Refusing to stop a non-OpenAMP listener. Use --port or stop that service manually.\n' >&2
+                exit 1
+            fi
+        done
         for demo_record in "${demo_processes[@]}"; do
             IFS=$'\t' read -r pid process_host process_port cmdline <<<"$demo_record"
-            if bind_listener_conflicts "$listener_addr" "$process_host" "$process_port"; then
-                covered=0
-                ((cover_count += 1))
+            if pid_is_in_list "$pid" "${listener_owner_pids[@]}"; then
+                blocking_demo_processes+=("$demo_record")
             fi
         done
-        for other_listener_record in "${conflicting_listeners[@]}"; do
-            if [[ "${other_listener_record%%$'\t'*}" == "$listener_addr" ]]; then
-                ((listener_count += 1))
-            fi
-        done
-        if ((covered || cover_count < listener_count)); then
-            listener_summary="$(join_listener_addresses "${conflicting_listeners[@]}")"
-            printf 'Requested OpenAMP demo port %s is already in use at %s.\n' "$REQUESTED_PORT" "$listener_summary" >&2
-            printf 'Listener ownership is not clearly limited to %s.\n' "$SERVER" >&2
-            printf 'Refusing to kill by port. Use --port or stop the other service manually.\n' >&2
-            exit 1
-        fi
+    else
+        blocking_demo_processes=("${demo_processes[@]}")
+    fi
+
+    if ! listeners_are_clearly_owned_by_demo_processes conflicting_listeners blocking_demo_processes; then
+        listener_summary="$(join_listener_addresses "${conflicting_listeners[@]}")"
+        printf 'Requested OpenAMP demo port %s is already in use at %s.\n' "$REQUESTED_PORT" "$listener_summary" >&2
+        printf 'Listener ownership is not clearly limited to %s.\n' "$SERVER" >&2
+        printf 'Refusing to kill by port. Use --port or stop the other service manually.\n' >&2
+        exit 1
+    fi
+
+    for demo_record in "${blocking_demo_processes[@]}"; do
+        IFS=$'\t' read -r pid process_host process_port cmdline <<<"$demo_record"
+        printf 'Reclaiming port %s from existing OpenAMP demo server PID %s with TERM.\n' "$REQUESTED_PORT" "$pid" >&2
+        kill -TERM "$pid" 2>/dev/null || true
+        original_demo_pids+=("$pid")
     done
 
-    for demo_record in "${demo_processes[@]}"; do
+    if wait_for_conflicting_listeners_to_clear "$PORT_RECLAIM_TERM_WAIT_STEPS" "$PORT_RECLAIM_TERM_WAIT_SEC" conflicting_listeners; then
+        return 0
+    fi
+
+    pid_summary="$(join_values "${original_demo_pids[@]}")"
+    listener_summary="$(join_listener_addresses "${conflicting_listeners[@]}")"
+    printf 'Existing OpenAMP demo server PID(s) %s still hold port %s after TERM grace period (%s).\n' "$pid_summary" "$REQUESTED_PORT" "$listener_summary" >&2
+
+    mapfile -t current_demo_processes < <(list_demo_processes_for_requested_bind)
+    mapfile -t listener_owner_pids < <(list_listener_owner_pids_for_requested_bind)
+    if ((${#listener_owner_pids[@]} > 0)); then
+        for pid in "${listener_owner_pids[@]}"; do
+            if ! pid_is_in_list "$pid" "${original_demo_pids[@]}"; then
+                printf 'Refusing to escalate to KILL because the remaining listener is no longer the same OpenAMP demo server PID(s).\n' >&2
+                exit 1
+            fi
+            if ! demo_process_records_include_pid "$pid" "${current_demo_processes[@]}"; then
+                printf 'Refusing to escalate to KILL because listener ownership is no longer clearly limited to the same OpenAMP demo server PID(s).\n' >&2
+                exit 1
+            fi
+        done
+        for demo_record in "${current_demo_processes[@]}"; do
+            IFS=$'\t' read -r pid process_host process_port cmdline <<<"$demo_record"
+            if pid_is_in_list "$pid" "${listener_owner_pids[@]}"; then
+                stubborn_demo_processes+=("$demo_record")
+            fi
+        done
+    else
+        for demo_record in "${current_demo_processes[@]}"; do
+            IFS=$'\t' read -r pid process_host process_port cmdline <<<"$demo_record"
+            if pid_is_in_list "$pid" "${original_demo_pids[@]}"; then
+                stubborn_demo_processes+=("$demo_record")
+            fi
+        done
+    fi
+
+    if ((${#stubborn_demo_processes[@]} == 0)); then
+        printf 'Refusing to escalate to KILL because the remaining listener is no longer the same OpenAMP demo server PID(s).\n' >&2
+        exit 1
+    fi
+
+    if ! listeners_are_clearly_owned_by_demo_processes conflicting_listeners stubborn_demo_processes; then
+        printf 'Refusing to escalate to KILL because listener ownership is no longer clearly limited to the same OpenAMP demo server PID(s).\n' >&2
+        exit 1
+    fi
+
+    pid_summary=""
+    for demo_record in "${stubborn_demo_processes[@]}"; do
         IFS=$'\t' read -r pid process_host process_port cmdline <<<"$demo_record"
-        printf 'Reclaiming port %s from existing OpenAMP demo server PID %s.\n' "$REQUESTED_PORT" "$pid" >&2
-        kill "$pid" 2>/dev/null || true
+        printf 'Escalating reclaim of port %s to KILL for existing OpenAMP demo server PID %s.\n' "$REQUESTED_PORT" "$pid" >&2
+        kill -KILL "$pid" 2>/dev/null || true
         if [[ -n "$pid_summary" ]]; then
             pid_summary+=", "
         fi
         pid_summary+="$pid"
     done
 
-    for ((attempt = 0; attempt < PORT_RECLAIM_WAIT_STEPS; attempt++)); do
-        mapfile -t conflicting_listeners < <(list_conflicting_listeners)
-        if ((${#conflicting_listeners[@]} == 0)); then
-            return 0
-        fi
-        sleep "$PORT_RECLAIM_WAIT_SEC"
-    done
+    if wait_for_conflicting_listeners_to_clear "$PORT_RECLAIM_KILL_WAIT_STEPS" "$PORT_RECLAIM_KILL_WAIT_SEC" conflicting_listeners; then
+        return 0
+    fi
 
     listener_summary="$(join_listener_addresses "${conflicting_listeners[@]}")"
-    printf 'Timed out waiting for existing OpenAMP demo server PID(s) %s to release port %s (%s).\n' "$pid_summary" "$REQUESTED_PORT" "$listener_summary" >&2
+    printf 'Timed out waiting for existing OpenAMP demo server PID(s) %s to release port %s after KILL (%s).\n' "$pid_summary" "$REQUESTED_PORT" "$listener_summary" >&2
     exit 1
 }
 
