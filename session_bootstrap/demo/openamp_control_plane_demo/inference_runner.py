@@ -136,9 +136,40 @@ def hook_transport_failed(response: dict[str, Any]) -> bool:
     return transport_status.endswith("_failed")
 
 
+def hook_fault_name(response: dict[str, Any]) -> str:
+    candidates = (
+        response.get("fault_name"),
+        safe_nested(response, "rx_frame", "job_ack", "fault_name"),
+        response.get("last_fault_name"),
+        safe_nested(response, "rx_frame", "status_resp", "last_fault_name"),
+    )
+    for raw in candidates:
+        value = str(raw or "").strip().upper()
+        if value:
+            return value
+    return ""
+
+
+def hook_status_category(response: dict[str, Any]) -> str | None:
+    if hook_fault_name(response) == "ARTIFACT_SHA_MISMATCH":
+        return "artifact_mismatch"
+    return None
+
+
 def control_hook_error_text(response: dict[str, Any]) -> str:
     parts: list[str] = []
-    for key in ("phase", "source", "transport_status", "protocol_semantics", "note", "rpmsg_ctrl", "rpmsg_dev"):
+    for key in (
+        "phase",
+        "decision",
+        "fault_name",
+        "last_fault_name",
+        "source",
+        "transport_status",
+        "protocol_semantics",
+        "note",
+        "rpmsg_ctrl",
+        "rpmsg_dev",
+    ):
         value = response.get(key)
         if value:
             parts.append(str(value))
@@ -147,7 +178,18 @@ def control_hook_error_text(response: dict[str, Any]) -> str:
 
 def control_hook_diagnostics(response: dict[str, Any]) -> dict[str, Any]:
     details: dict[str, Any] = {}
-    for key in ("phase", "source", "transport_status", "protocol_semantics", "note", "rpmsg_ctrl", "rpmsg_dev"):
+    for key in (
+        "phase",
+        "decision",
+        "fault_name",
+        "last_fault_name",
+        "source",
+        "transport_status",
+        "protocol_semantics",
+        "note",
+        "rpmsg_ctrl",
+        "rpmsg_dev",
+    ):
         value = response.get(key)
         if value not in (None, ""):
             details[key] = value
@@ -373,6 +415,18 @@ def expected_sha_for_variant(access: BoardAccessConfig, variant: str) -> str:
     return str(values.get("INFERENCE_CURRENT_EXPECTED_SHA256") or values.get("INFERENCE_EXPECTED_SHA256") or "")
 
 
+def build_inference_message(status_category: str, *, variant: str, include_fallback: bool = False) -> str:
+    if status_category == "artifact_mismatch" and variant == "baseline":
+        message = (
+            "板端 baseline 工件与界面展示的 formal baseline expected SHA 不一致，"
+            "OpenAMP 控制面已返回 ARTIFACT_SHA_MISMATCH。"
+        )
+        if include_fallback:
+            message += " 当前已回退到预录结果。"
+        return message
+    return build_operator_message("inference", status_category, include_fallback=include_fallback)
+
+
 def missing_control_plane_fields(access: BoardAccessConfig, variant: str) -> list[str]:
     if expected_sha_for_variant(access, variant):
         return []
@@ -418,7 +472,7 @@ class LiveRemoteReconstructionJob:
                 "status_category": status_category,
                 "execution_mode": "fallback",
                 "variant": variant,
-                "message": build_operator_message("inference", status_category, include_fallback=True),
+                "message": build_inference_message(status_category, variant=variant, include_fallback=True),
                 "runner_summary": {},
                 "wrapper_summary": {},
                 "diagnostics": build_diagnostics(missing_fields=missing),
@@ -436,7 +490,7 @@ class LiveRemoteReconstructionJob:
                     "界面将保留正式 baseline 对比结果。"
                 )
             else:
-                message = build_operator_message("inference", status_category, include_fallback=True)
+                message = build_inference_message(status_category, variant=variant, include_fallback=True)
             self._final_snapshot = {
                 "status": "config_error",
                 "request_state": "completed",
@@ -510,7 +564,7 @@ class LiveRemoteReconstructionJob:
                 "status_category": status_category,
                 "execution_mode": "fallback",
                 "variant": variant,
-                "message": build_operator_message("inference", status_category, include_fallback=True),
+                "message": build_inference_message(status_category, variant=variant, include_fallback=True),
                 "runner_summary": {},
                 "wrapper_summary": {},
                 "diagnostics": build_diagnostics(error=str(exc)),
@@ -584,7 +638,7 @@ class LiveRemoteReconstructionJob:
             status = "timeout"
             status_category = "timeout"
             runner_summary: dict[str, Any] = {}
-            message = build_operator_message("inference", status_category, include_fallback=True)
+            message = build_inference_message(status_category, variant=self.variant, include_fallback=True)
         elif (self._process.returncode or 0) == 0:
             try:
                 runner_summary = parse_runner_summary_from_log(self._runner_log_path)
@@ -597,14 +651,14 @@ class LiveRemoteReconstructionJob:
                     error="\n".join(part for part in (str(exc), hook_error_text) if part),
                 )
                 runner_summary = {}
-                message = build_operator_message("inference", status_category, include_fallback=True)
+                message = build_inference_message(status_category, variant=self.variant, include_fallback=True)
             else:
                 status = "success"
                 status_category = "success"
                 message = "OpenAMP 控制面已完成作业下发、板端执行与结果回收。"
         else:
             status = "error"
-            status_category = classify_status_category(
+            status_category = hook_status_category(last_hook_response) or classify_status_category(
                 status="error",
                 stdout=stdout,
                 stderr=stderr,
@@ -613,11 +667,11 @@ class LiveRemoteReconstructionJob:
             runner_summary = {}
             if wrapper_summary.get("result") == "denied_by_control_hook":
                 if status_category != "error":
-                    message = build_operator_message("inference", status_category, include_fallback=True)
+                    message = build_inference_message(status_category, variant=self.variant, include_fallback=True)
                 else:
                     message = "OpenAMP 控制面未放行本次作业，界面已回退到归档样例。"
             else:
-                message = build_operator_message("inference", status_category, include_fallback=True)
+                message = build_inference_message(status_category, variant=self.variant, include_fallback=True)
 
         diagnostics = build_diagnostics(stdout=stdout, stderr=stderr, returncode=self._process.returncode)
         if status_category == "artifact_mismatch":
@@ -696,7 +750,7 @@ def run_remote_reconstruction(
             "status_category": status_category,
             "execution_mode": "fallback",
             "variant": variant,
-            "message": build_operator_message("inference", status_category, include_fallback=True),
+            "message": build_inference_message(status_category, variant=variant, include_fallback=True),
             "missing_fields": missing,
             "diagnostics": build_diagnostics(missing_fields=missing),
         }
@@ -730,7 +784,7 @@ def run_remote_reconstruction(
             "status_category": "timeout",
             "execution_mode": "fallback",
             "variant": variant,
-            "message": build_operator_message("inference", "timeout", include_fallback=True),
+            "message": build_inference_message("timeout", variant=variant, include_fallback=True),
             "missing_fields": [],
             "diagnostics": {},
         }
@@ -741,7 +795,7 @@ def run_remote_reconstruction(
             "status_category": status_category,
             "execution_mode": "fallback",
             "variant": variant,
-            "message": build_operator_message("inference", status_category, include_fallback=True),
+            "message": build_inference_message(status_category, variant=variant, include_fallback=True),
             "missing_fields": [],
             "diagnostics": build_diagnostics(error=str(exc)),
         }
@@ -758,7 +812,7 @@ def run_remote_reconstruction(
             "status_category": status_category,
             "execution_mode": "fallback",
             "variant": variant,
-            "message": build_operator_message("inference", status_category, include_fallback=True),
+            "message": build_inference_message(status_category, variant=variant, include_fallback=True),
             "missing_fields": [],
             "diagnostics": diagnostics,
         }
@@ -779,7 +833,7 @@ def run_remote_reconstruction(
             "status_category": status_category,
             "execution_mode": "fallback",
             "variant": variant,
-            "message": build_operator_message("inference", status_category, include_fallback=True),
+            "message": build_inference_message(status_category, variant=variant, include_fallback=True),
             "missing_fields": [],
             "diagnostics": build_diagnostics(stdout=stdout, stderr=stderr, error=str(exc)),
         }
