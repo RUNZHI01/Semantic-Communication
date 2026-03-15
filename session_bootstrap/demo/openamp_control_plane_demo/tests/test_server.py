@@ -7,9 +7,11 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+import threading
 import unittest
 from unittest.mock import Mock, patch
 from urllib.parse import quote
+import urllib.request
 
 
 DEMO_ROOT = Path(__file__).resolve().parents[1]
@@ -409,6 +411,36 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(headers["cache-control"], "no-store")
         self.assertIn(f'<div class="path">{doc_path}</div>', body)
         self.assertIn(expected_json, body)
+
+
+class DemoHTTPServerSocketSmokeTest(unittest.TestCase):
+    def test_health_endpoint_smoke_via_real_localhost_socket(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        try:
+            http_server = server.DemoHTTPServer(("127.0.0.1", 0), DemoRequestHandler, state)
+        except PermissionError as exc:
+            self.skipTest(f"Local socket binding is not permitted in this runtime: {exc}")
+
+        server_thread = threading.Thread(target=http_server.serve_forever, daemon=True)
+        server_thread.start()
+
+        try:
+            host, port = http_server.server_address
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            with opener.open(f"http://{host}:{port}/api/health", timeout=2) as response:
+                status = response.status
+                headers = dict(response.headers.items())
+                payload = json.loads(response.read().decode("utf-8"))
+        finally:
+            http_server.shutdown()
+            http_server.server_close()
+            server_thread.join(timeout=2)
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["Content-Type"], "application/json; charset=utf-8")
+        self.assertEqual(headers["Cache-Control"], "no-store")
+        self.assertEqual(payload, {"status": "ok"})
+        self.assertFalse(server_thread.is_alive())
 
 
 if __name__ == "__main__":
