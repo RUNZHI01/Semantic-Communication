@@ -264,6 +264,7 @@ except Exception:
 PY
 
 legacy_log="$(mktemp)"
+run_started_at="$(date +%s)"
 set +e
 run_remote_python - "$legacy_script" --input_dir "$selected_input_dir" --output_dir "$output_dir" --snr "$snr" --batch_size "$batch_size" <<'PY' 2>&1 | tee "$legacy_log"
 import runpy
@@ -301,7 +302,7 @@ else
 fi
 
 summary_artifact_path="${legacy_artifact:-$artifact_target}"
-run_remote_python - "$legacy_log" "$summary_artifact_path" "$input_dir" "$output_dir" "$variant" "$snr" "$batch_size" "$summary_expected_sha" "$max_inputs" <<'PY'
+run_remote_python - "$legacy_log" "$summary_artifact_path" "$input_dir" "$selected_input_dir" "$output_dir" "$variant" "$snr" "$batch_size" "$summary_expected_sha" "$max_inputs" "$run_started_at" <<'PY'
 import hashlib
 import json
 import re
@@ -320,13 +321,15 @@ def file_sha256(path: Path) -> str:
 
 log_path = Path(sys.argv[1])
 artifact_path = Path(sys.argv[2])
-input_dir = Path(sys.argv[3])
-output_dir = Path(sys.argv[4])
-variant = sys.argv[5]
-snr = float(sys.argv[6])
-batch_size = int(sys.argv[7])
-expected_sha256 = sys.argv[8].strip().lower()
-max_inputs = int(sys.argv[9])
+original_input_dir = Path(sys.argv[3])
+selected_input_dir = Path(sys.argv[4])
+output_dir = Path(sys.argv[5])
+variant = sys.argv[6]
+snr = float(sys.argv[7])
+batch_size = int(sys.argv[8])
+expected_sha256 = sys.argv[9].strip().lower()
+max_inputs = int(sys.argv[10])
+run_started_at = int(sys.argv[11])
 
 patterns = (
     re.compile(r"批量推理时间.*?:\s*([0-9]+(?:\.[0-9]+)?)\s*秒"),
@@ -344,21 +347,50 @@ for raw_line in log_path.read_text(encoding="utf-8", errors="replace").splitline
 
 artifact_sha256 = file_sha256(artifact_path) if artifact_path.is_file() else ""
 supported_suffixes = {".pt", ".npz", ".npy"}
-available_input_count = (
-    len(
-        [
-            path
-            for path in sorted(input_dir.iterdir())
-            if path.is_file() and path.suffix.lower() in supported_suffixes
-        ]
-    )
-    if input_dir.exists()
-    else 0
-)
-selected_input_count = available_input_count if max_inputs == 0 else min(available_input_count, max_inputs)
+
+
+def list_supported_inputs(path: Path) -> list[Path]:
+    if not path.exists() or not path.is_dir():
+        return []
+    return [
+        candidate
+        for candidate in sorted(path.iterdir())
+        if candidate.is_file() and candidate.suffix.lower() in supported_suffixes
+    ]
+
+
+def list_output_files(path: Path, *, run_started_at: int, selected_inputs: list[Path]) -> list[Path]:
+    if not path.exists() or not path.is_dir():
+        return []
+    selected_stems = {candidate.stem for candidate in selected_inputs}
+    files: list[Path] = []
+    for candidate in sorted(path.iterdir()):
+        if not candidate.is_file():
+            continue
+        stem = candidate.stem
+        stem_matches_selected = stem in selected_stems or any(
+            stem.startswith(f"{selected_stem}_") for selected_stem in selected_stems
+        )
+        try:
+            modified_during_run = int(candidate.stat().st_mtime) >= run_started_at
+        except OSError:
+            modified_during_run = False
+        if stem_matches_selected or modified_during_run:
+            files.append(candidate)
+    return files
+
+
+available_inputs = list_supported_inputs(original_input_dir)
+selected_inputs = list_supported_inputs(selected_input_dir)
+available_input_count = len(available_inputs)
+selected_input_count = len(selected_inputs)
 reconstructions_dir = output_dir / "reconstructions"
 effective_output_dir = reconstructions_dir if reconstructions_dir.is_dir() else output_dir
-output_files = [path for path in sorted(effective_output_dir.iterdir()) if path.is_file()] if effective_output_dir.exists() else []
+output_files = list_output_files(
+    effective_output_dir,
+    run_started_at=run_started_at,
+    selected_inputs=selected_inputs,
+)
 
 summary = {
     "variant": variant,
@@ -368,7 +400,7 @@ summary = {
     "artifact_sha256_match": None
     if not expected_sha256 or not artifact_sha256
     else artifact_sha256 == expected_sha256,
-    "input_dir": str(input_dir),
+    "input_dir": str(original_input_dir),
     "output_dir": str(effective_output_dir),
     "output_count": len(output_files),
     "processed_count": len(run_samples_ms),

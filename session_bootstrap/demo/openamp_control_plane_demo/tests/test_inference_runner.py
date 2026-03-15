@@ -81,7 +81,12 @@ class RunRemoteReconstructionTest(unittest.TestCase):
 
     def test_auth_failure_keeps_raw_stderr_in_diagnostics_only(self) -> None:
         access = make_access()
-        runner_cmd = inference_runner.build_runner_command(access, variant="current", max_inputs=1, seed=0)
+        runner_cmd = inference_runner.build_runner_command(
+            access,
+            variant="current",
+            max_inputs=inference_runner.DEFAULT_MAX_INPUTS,
+            seed=0,
+        )
         command = ["bash", "-lc", runner_cmd]
         completed = subprocess.CompletedProcess(
             command,
@@ -237,6 +242,13 @@ class RunRemoteReconstructionTest(unittest.TestCase):
             command[command.index("--control-hook-timeout-sec") + 1],
             str(live_control_hook_timeout_sec(900.0)),
         )
+        self.assertEqual(
+            command[command.index("--expected-outputs") + 1],
+            str(inference_runner.DEFAULT_MAX_INPUTS),
+        )
+        runner_cmd = command[command.index("--runner-cmd") + 1]
+        self.assertIn(f"--max-inputs {inference_runner.DEFAULT_MAX_INPUTS}", runner_cmd)
+        self.assertIn("--seed 0", runner_cmd)
         hook_command = command[command.index("--control-hook-cmd") + 1]
         self.assertIn("--remote-output-root", hook_command)
         self.assertIn("/tmp/openamp_demo_hook/4242", hook_command)
