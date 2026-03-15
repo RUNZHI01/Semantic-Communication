@@ -31,6 +31,9 @@ DEFAULT_INFERENCE_ENV_CANDIDATES = (
     "session_bootstrap/config/inference_real_reconstruction_compare.2026-03-11.phytium_pi.env",
     "session_bootstrap/config/inference_tvm310_safe.2026-03-10.phytium_pi.env",
 )
+VALIDATED_INFERENCE_REPORT_CANDIDATES = (
+    "session_bootstrap/reports/inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md",
+)
 
 
 def repo_relative(path: Path) -> str:
@@ -113,6 +116,31 @@ def first_existing_env(candidates: tuple[str, ...]) -> Path | None:
         path = resolve_existing_env(raw_path)
         if path is not None:
             return path
+    return None
+
+
+def load_markdown_key_values(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line.startswith("- ") or ":" not in line:
+            continue
+        key, value = line[2:].split(":", 1)
+        values[key.strip()] = value.strip()
+    return values
+
+
+def discover_validated_inference_env(
+    report_candidates: tuple[str, ...] = VALIDATED_INFERENCE_REPORT_CANDIDATES,
+) -> Path | None:
+    for raw_report_path in report_candidates:
+        report_path = resolve_existing_env(raw_report_path)
+        if report_path is None:
+            continue
+        env_file = load_markdown_key_values(report_path).get("env_file", "")
+        env_path = resolve_existing_env(env_file)
+        if env_path is not None:
+            return env_path
     return None
 
 
@@ -378,7 +406,7 @@ def build_board_access_config(
 
 def build_demo_default_board_access(probe_env: str | None) -> BoardAccessConfig:
     ssh_env_path = resolve_existing_env(probe_env) or first_existing_env(DEFAULT_SSH_ENV_CANDIDATES)
-    inference_env_path = first_existing_env(DEFAULT_INFERENCE_ENV_CANDIDATES)
+    inference_env_path = discover_validated_inference_env() or first_existing_env(DEFAULT_INFERENCE_ENV_CANDIDATES)
 
     ssh_env_values = sanitize_env_values(load_env_path(ssh_env_path)) if ssh_env_path else {}
     inference_env_values = sanitize_env_values(load_env_path(inference_env_path)) if inference_env_path else {}
