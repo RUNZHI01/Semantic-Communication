@@ -167,7 +167,7 @@ class RunRemoteReconstructionTest(unittest.TestCase):
             "/tmp/openamp_wrong_sha_fit/project",
         )
 
-    def test_build_runner_command_prefers_configured_legacy_baseline_cmd(self) -> None:
+    def test_build_runner_command_adds_sample_cap_for_configured_legacy_baseline_cmd(self) -> None:
         access = make_access(
             {
                 "REMOTE_SNR_BASELINE": "10",
@@ -179,8 +179,12 @@ class RunRemoteReconstructionTest(unittest.TestCase):
 
         command = inference_runner.build_runner_command(access, variant="baseline", max_inputs=1, seed=0)
 
-        self.assertEqual(command, "bash ./session_bootstrap/scripts/run_remote_legacy_tvm_compat.sh --variant baseline")
+        self.assertEqual(
+            command,
+            "bash ./session_bootstrap/scripts/run_remote_legacy_tvm_compat.sh --variant baseline --max-inputs 1",
+        )
         self.assertNotIn(REMOTE_RECONSTRUCTION_SCRIPT.name, command)
+        self.assertNotIn("--seed", command)
 
     def test_build_runner_command_keeps_sampling_args_for_current_reconstruction_cmd(self) -> None:
         access = make_access(
