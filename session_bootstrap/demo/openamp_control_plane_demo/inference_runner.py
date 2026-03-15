@@ -27,7 +27,9 @@ ARTIFACT_SHA_MISMATCH_RE = re.compile(
 DEFAULT_HEARTBEAT_INTERVAL_SEC = 0.5
 DEFAULT_LIVE_CONTROL_HOOK_TIMEOUT_SEC = 30.0
 MIN_LIVE_CONTROL_HOOK_TIMEOUT_SEC = 5.0
-DEFAULT_MAX_INPUTS = 1
+# Demo live runs stay on a fixed 100-image budget so baseline/current remain aligned
+# without drifting into a full dataset benchmark.
+DEFAULT_MAX_INPUTS = 100
 DEFAULT_SEED = 0
 UINT32_MAX = (1 << 32) - 1
 
@@ -787,7 +789,7 @@ def run_remote_reconstruction(
     access: BoardAccessConfig,
     *,
     variant: str,
-    max_inputs: int = 1,
+    max_inputs: int = DEFAULT_MAX_INPUTS,
     seed: int = 0,
     timeout_sec: float = 900.0,
 ) -> dict[str, Any]:
