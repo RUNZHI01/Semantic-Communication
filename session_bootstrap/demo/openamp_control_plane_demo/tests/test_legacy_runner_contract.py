@@ -309,7 +309,7 @@ class LegacyCompatRunnerContractTest(unittest.TestCase):
             )
 
             result = subprocess.run(
-                ["bash", str(LEGACY_RUNNER), "--variant", "baseline", "--max-inputs", "100"],
+                ["bash", str(LEGACY_RUNNER), "--variant", "baseline", "--max-inputs", "300"],
                 cwd=REPO_ROOT,
                 env=env,
                 capture_output=True,
@@ -326,12 +326,12 @@ class LegacyCompatRunnerContractTest(unittest.TestCase):
             self.assertEqual(summary["artifact_sha256_expected"], expected_sha)
             self.assertTrue(summary["artifact_sha256_match"])
             self.assertEqual(summary["available_input_count"], 105)
-            self.assertEqual(summary["input_count"], 100)
-            self.assertEqual(summary["processed_count"], 100)
-            self.assertEqual(summary["run_count"], 100)
-            self.assertEqual(len(summary["run_samples_ms"]), 100)
-            self.assertEqual(summary["output_count"], 100)
-            self.assertEqual(summary["max_inputs"], 100)
+            self.assertEqual(summary["input_count"], 105)
+            self.assertEqual(summary["processed_count"], 105)
+            self.assertEqual(summary["run_count"], 105)
+            self.assertEqual(len(summary["run_samples_ms"]), 105)
+            self.assertEqual(summary["output_count"], 105)
+            self.assertEqual(summary["max_inputs"], 300)
             self.assertEqual(summary["save_format"], "png")
             self.assertTrue(summary["output_dir"].endswith("/reconstructions"))
 
@@ -447,7 +447,7 @@ class LegacyCompatRunnerContractTest(unittest.TestCase):
                     "REMOTE_BASELINE_ARTIFACT": str(artifact_path),
                     "INFERENCE_BASELINE_EXPECTED_SHA256": expected_sha,
                     "OPENAMP_DEMO_MODE": "1",
-                    "OPENAMP_DEMO_MAX_INPUTS": "100",
+                    "OPENAMP_DEMO_MAX_INPUTS": "300",
                 }
             )
 
@@ -463,10 +463,10 @@ class LegacyCompatRunnerContractTest(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             summary = json.loads([line.strip() for line in result.stdout.splitlines() if line.strip()][-1])
-            self.assertEqual(summary["max_inputs"], 100)
-            self.assertEqual(summary["input_count"], 100)
-            self.assertEqual(summary["processed_count"], 100)
-            self.assertEqual(summary["output_count"], 100)
+            self.assertEqual(summary["max_inputs"], 300)
+            self.assertEqual(summary["input_count"], 105)
+            self.assertEqual(summary["processed_count"], 105)
+            self.assertEqual(summary["output_count"], 105)
             self.assertEqual(summary["available_input_count"], 105)
 
 

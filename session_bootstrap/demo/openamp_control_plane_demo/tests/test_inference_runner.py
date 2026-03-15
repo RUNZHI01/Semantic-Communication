@@ -116,7 +116,7 @@ class RunRemoteReconstructionTest(unittest.TestCase):
             job.job_id = "4242"
             job.variant = "current"
             job._timeout_sec = 10.0
-            job._expected_outputs = 100
+            job._expected_outputs = inference_runner.DEFAULT_MAX_INPUTS
             job._output_dir = output_dir
             job._trace_path = trace_path
             job._summary_path = output_dir / "wrapper_summary.json"
@@ -129,11 +129,11 @@ class RunRemoteReconstructionTest(unittest.TestCase):
 
         self.assertEqual(snapshot["request_state"], "running")
         self.assertEqual(snapshot["progress"]["completed_count"], 2)
-        self.assertEqual(snapshot["progress"]["expected_count"], 100)
-        self.assertEqual(snapshot["progress"]["remaining_count"], 98)
-        self.assertEqual(snapshot["progress"]["count_label"], "2 / 100")
+        self.assertEqual(snapshot["progress"]["expected_count"], inference_runner.DEFAULT_MAX_INPUTS)
+        self.assertEqual(snapshot["progress"]["remaining_count"], inference_runner.DEFAULT_MAX_INPUTS - 2)
+        self.assertEqual(snapshot["progress"]["count_label"], f"2 / {inference_runner.DEFAULT_MAX_INPUTS}")
         self.assertEqual(snapshot["progress"]["count_source"], "runner_log.sample_latency_lines")
-        self.assertEqual(snapshot["progress"]["percent"], 2)
+        self.assertEqual(snapshot["progress"]["percent"], 1)
 
     def test_missing_required_config_returns_operator_friendly_config_error(self) -> None:
         access = make_access(

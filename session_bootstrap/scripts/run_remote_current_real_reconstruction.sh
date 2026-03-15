@@ -89,7 +89,7 @@ done
 
 demo_mode_flag="$(printf '%s' "${OPENAMP_DEMO_MODE:-}" | tr '[:upper:]' '[:lower:]')"
 if [[ -z "$MAX_INPUTS" && ( "$demo_mode_flag" == "1" || "$demo_mode_flag" == "true" || "$demo_mode_flag" == "yes" || "$demo_mode_flag" == "on" ) ]]; then
-  MAX_INPUTS="${OPENAMP_DEMO_MAX_INPUTS:-100}"
+  MAX_INPUTS="${OPENAMP_DEMO_MAX_INPUTS:-300}"
 fi
 
 if [[ "$VARIANT" != "baseline" && "$VARIANT" != "current" ]]; then
