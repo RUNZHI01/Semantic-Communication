@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 import json
 import os
 from pathlib import Path
+import re
 from typing import Any
 
 
@@ -39,6 +40,11 @@ VALIDATED_OPENAMP_RUN_MANIFEST_CANDIDATES = (
     "session_bootstrap/reports/openamp_input_contract_fit_20260315_014542/run_manifest.json",
     "session_bootstrap/reports/openamp_wrong_sha_fit_20260315_012403/run_manifest.json",
     "session_bootstrap/reports/openamp_wrong_sha_fit_20260315_010828/run_manifest.json",
+)
+TRUSTED_BASELINE_SHA_REPORT_CANDIDATES = (
+    "session_bootstrap/reports/inference_compare_scheme_a_fair_fixed_20260311_154243.md",
+    "session_bootstrap/reports/inference_local_scheme_a_payload_20260311_133729.md",
+    "session_bootstrap/reports/inference_local_legacy_wrapper_20260311_015655.md",
 )
 
 
@@ -169,6 +175,46 @@ def discover_validated_openamp_remote_project_root(
         remote_project_root = str(board_access.get("remote_project_root") or "").strip()
         if remote_project_root:
             return remote_project_root
+    return ""
+
+
+def valid_sha256_text(raw: str) -> str:
+    value = str(raw or "").strip().lower()
+    if re.fullmatch(r"[0-9a-f]{64}", value):
+        return value
+    return ""
+
+
+def resolve_baseline_artifact_path(values: dict[str, str]) -> str:
+    explicit = str(values.get("REMOTE_BASELINE_ARTIFACT") or "").strip()
+    if explicit:
+        return explicit
+    archive = str(values.get("INFERENCE_BASELINE_ARCHIVE") or values.get("REMOTE_TVM_PRIMARY_DIR") or "").strip()
+    if archive:
+        return f"{archive.rstrip('/')}/tvm_tune_logs/optimized_model.so"
+    return ""
+
+
+def discover_trusted_baseline_expected_sha(
+    env_values: dict[str, str],
+    report_candidates: tuple[str, ...] = TRUSTED_BASELINE_SHA_REPORT_CANDIDATES,
+) -> str:
+    baseline_artifact_path = resolve_baseline_artifact_path(env_values)
+    if not baseline_artifact_path:
+        return ""
+
+    for raw_report_path in report_candidates:
+        report_path = resolve_existing_env(raw_report_path)
+        if report_path is None:
+            continue
+        values = load_markdown_key_values(report_path)
+        baseline_expected_sha = valid_sha256_text(values.get("baseline_expected_sha256_configured", ""))
+        if not baseline_expected_sha:
+            continue
+        report_artifact_path = str(values.get("baseline_artifact_path") or "").strip()
+        if report_artifact_path and report_artifact_path != baseline_artifact_path:
+            continue
+        return baseline_expected_sha
     return ""
 
 
@@ -446,6 +492,10 @@ def build_demo_default_board_access(probe_env: str | None) -> BoardAccessConfig:
         and not str(inference_env_values.get("OPENAMP_REMOTE_PROJECT_ROOT") or "").strip()
     ):
         startup_env_values["REMOTE_PROJECT_ROOT"] = remote_project_root
+    if not str(inference_env_values.get("INFERENCE_BASELINE_EXPECTED_SHA256") or "").strip():
+        baseline_expected_sha = discover_trusted_baseline_expected_sha(inference_env_values)
+        if baseline_expected_sha:
+            startup_env_values["INFERENCE_BASELINE_EXPECTED_SHA256"] = baseline_expected_sha
 
     host = first_non_empty(ssh_env_values, HOST_KEYS) or first_non_empty(inference_env_values, HOST_KEYS)
     user = first_non_empty(ssh_env_values, USER_KEYS) or first_non_empty(inference_env_values, USER_KEYS)

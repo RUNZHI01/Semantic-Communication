@@ -15,6 +15,7 @@ from board_access import (  # noqa: E402
     DEFAULT_INFERENCE_ENV_CANDIDATES,
     build_board_access_config,
     build_demo_default_board_access,
+    discover_trusted_baseline_expected_sha,
     discover_validated_inference_env,
     discover_validated_openamp_remote_project_root,
     first_existing_env,
@@ -47,6 +48,39 @@ class DemoBoardAccessDefaultsTest(unittest.TestCase):
 
         self.assertEqual(discovered, "/tmp/openamp_demo/project")
 
+    def test_discover_trusted_baseline_expected_sha_requires_matching_artifact_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            matching_report = temp_root / "matching.md"
+            mismatched_report = temp_root / "mismatched.md"
+            matching_report.write_text(
+                "\n".join(
+                    [
+                        "- baseline_expected_sha256_configured: 85d701db0021c26412c3e5e08a4ca043470aaa01fb2d6792cb3b3b29e93bf849",
+                        "- baseline_artifact_path: /remote/baseline/tvm_tune_logs/optimized_model.so",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            mismatched_report.write_text(
+                "\n".join(
+                    [
+                        "- baseline_expected_sha256_configured: 9478c8277b013ccbcae9dabaf72dd123efc7908405a359b951d7c85f780b8df8",
+                        "- baseline_artifact_path: /remote/other/tvm_tune_logs/optimized_model.so",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            discovered = discover_trusted_baseline_expected_sha(
+                {"REMOTE_BASELINE_ARTIFACT": "/remote/baseline/tvm_tune_logs/optimized_model.so"},
+                (str(mismatched_report), str(matching_report)),
+            )
+
+        self.assertEqual(discovered, "85d701db0021c26412c3e5e08a4ca043470aaa01fb2d6792cb3b3b29e93bf849")
+
     def test_demo_defaults_prefill_real_repo_files_without_password(self) -> None:
         access = build_demo_default_board_access(None)
         expected_inference_env = discover_validated_inference_env() or first_existing_env(DEFAULT_INFERENCE_ENV_CANDIDATES)
@@ -70,6 +104,10 @@ class DemoBoardAccessDefaultsTest(unittest.TestCase):
         self.assertNotIn("REMOTE_PASS", access.env_values)
         self.assertNotIn("PHYTIUM_PI_PASSWORD", access.env_values)
         self.assertEqual(access.build_env().get("REMOTE_PROJECT_ROOT", ""), expected_remote_project_root)
+        self.assertEqual(
+            access.build_env().get("INFERENCE_BASELINE_EXPECTED_SHA256", ""),
+            "85d701db0021c26412c3e5e08a4ca043470aaa01fb2d6792cb3b3b29e93bf849",
+        )
 
     def test_password_only_update_reuses_preloaded_ssh_and_inference_defaults(self) -> None:
         defaults = build_demo_default_board_access(None)
