@@ -13,9 +13,11 @@ if str(DEMO_ROOT) not in sys.path:
 
 from board_access import (  # noqa: E402
     DEFAULT_INFERENCE_ENV_CANDIDATES,
+    apply_trusted_current_artifact_binding,
     build_board_access_config,
     build_demo_default_board_access,
     discover_trusted_baseline_expected_sha,
+    discover_trusted_current_artifact_binding,
     discover_trusted_current_local_artifact_source,
     discover_validated_inference_env,
     discover_validated_openamp_remote_project_root,
@@ -82,7 +84,7 @@ class DemoBoardAccessDefaultsTest(unittest.TestCase):
 
         self.assertEqual(discovered, "85d701db0021c26412c3e5e08a4ca043470aaa01fb2d6792cb3b3b29e93bf849")
 
-    def test_discover_trusted_current_local_artifact_source_requires_matching_sha_and_remote_path(self) -> None:
+    def test_discover_trusted_current_local_artifact_source_uses_matching_sha_lineage(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)
             trusted_local_artifact = temp_root / "trusted_current.so"
@@ -128,6 +130,56 @@ class DemoBoardAccessDefaultsTest(unittest.TestCase):
             )
 
         self.assertEqual(discovered, str(trusted_local_artifact.resolve()))
+
+    def test_apply_trusted_current_artifact_binding_rebinds_current_from_baseline_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            trusted_local_artifact = temp_root / "trusted_current.so"
+            trusted_local_artifact.write_bytes(b"trusted-current")
+            report_path = temp_root / "chunk4.json"
+            expected_sha = "6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1"
+            report_path.write_text(
+                json.dumps(
+                    {
+                        "local_build": {
+                            "optimized_model_so": str(trusted_local_artifact),
+                            "optimized_model_sha256": expected_sha,
+                        },
+                        "remote_artifact": {
+                            "archive_dir": "/remote/current",
+                            "optimized_model_so": "/remote/current/tvm_tune_logs/optimized_model.so",
+                            "optimized_model_sha256": expected_sha,
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            binding = discover_trusted_current_artifact_binding(
+                {
+                    "REMOTE_CURRENT_ARTIFACT": "/remote/baseline/tvm_tune_logs/optimized_model.so",
+                    "INFERENCE_CURRENT_EXPECTED_SHA256": expected_sha,
+                },
+                (str(report_path),),
+            )
+            corrected = apply_trusted_current_artifact_binding(
+                {
+                    "REMOTE_CURRENT_ARTIFACT": "/remote/baseline/tvm_tune_logs/optimized_model.so",
+                    "REMOTE_TVM_JSCC_BASE_DIR": "/remote/baseline",
+                    "REMOTE_CURRENT_ARTIFACT_STAGE_DIR": "/remote/baseline",
+                    "INFERENCE_CURRENT_EXPECTED_SHA256": expected_sha,
+                },
+                (str(report_path),),
+            )
+
+        self.assertEqual(binding["remote_current_artifact"], "/remote/current/tvm_tune_logs/optimized_model.so")
+        self.assertEqual(binding["remote_current_archive_dir"], "/remote/current")
+        self.assertEqual(binding["local_current_artifact_source"], str(trusted_local_artifact.resolve()))
+        self.assertEqual(corrected["REMOTE_CURRENT_ARTIFACT"], "/remote/current/tvm_tune_logs/optimized_model.so")
+        self.assertEqual(corrected["INFERENCE_CURRENT_ARCHIVE"], "/remote/current")
+        self.assertEqual(corrected["REMOTE_TVM_JSCC_BASE_DIR"], "/remote/current")
+        self.assertEqual(corrected["REMOTE_CURRENT_ARTIFACT_STAGE_DIR"], "/remote/current")
+        self.assertEqual(corrected["LOCAL_CURRENT_ARTIFACT_SOURCE"], str(trusted_local_artifact.resolve()))
 
     def test_demo_defaults_prefill_real_repo_files_without_password(self) -> None:
         access = build_demo_default_board_access(None)
