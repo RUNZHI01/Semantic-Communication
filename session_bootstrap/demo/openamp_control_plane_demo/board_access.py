@@ -46,6 +46,10 @@ TRUSTED_BASELINE_SHA_REPORT_CANDIDATES = (
     "session_bootstrap/reports/inference_local_scheme_a_payload_20260311_133729.md",
     "session_bootstrap/reports/inference_local_legacy_wrapper_20260311_015655.md",
 )
+TRUSTED_CURRENT_ARTIFACT_REPORT_CANDIDATES = (
+    "session_bootstrap/reports/phytium_baseline_seeded_warm_start_current_incremental_chunk4_20260313_131545.json",
+    "session_bootstrap/reports/phytium_baseline_seeded_warm_start_current_incremental_chunk3_20260313_131545.json",
+)
 
 
 def repo_relative(path: Path) -> str:
@@ -195,6 +199,16 @@ def resolve_baseline_artifact_path(values: dict[str, str]) -> str:
     return ""
 
 
+def resolve_current_artifact_path(values: dict[str, str]) -> str:
+    explicit = str(values.get("REMOTE_CURRENT_ARTIFACT") or "").strip()
+    if explicit:
+        return explicit
+    archive = str(values.get("INFERENCE_CURRENT_ARCHIVE") or values.get("REMOTE_TVM_JSCC_BASE_DIR") or "").strip()
+    if archive:
+        return f"{archive.rstrip('/')}/tvm_tune_logs/optimized_model.so"
+    return ""
+
+
 def discover_trusted_baseline_expected_sha(
     env_values: dict[str, str],
     report_candidates: tuple[str, ...] = TRUSTED_BASELINE_SHA_REPORT_CANDIDATES,
@@ -215,6 +229,44 @@ def discover_trusted_baseline_expected_sha(
         if report_artifact_path and report_artifact_path != baseline_artifact_path:
             continue
         return baseline_expected_sha
+    return ""
+
+
+def discover_trusted_current_local_artifact_source(
+    env_values: dict[str, str],
+    report_candidates: tuple[str, ...] = TRUSTED_CURRENT_ARTIFACT_REPORT_CANDIDATES,
+) -> str:
+    expected_sha = valid_sha256_text(
+        env_values.get("INFERENCE_CURRENT_EXPECTED_SHA256") or env_values.get("INFERENCE_EXPECTED_SHA256") or ""
+    )
+    current_artifact_path = resolve_current_artifact_path(env_values)
+    if not expected_sha or not current_artifact_path:
+        return ""
+
+    for raw_report_path in report_candidates:
+        report_path = resolve_existing_env(raw_report_path)
+        if report_path is None:
+            continue
+        try:
+            payload = json.loads(report_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        local_build = payload.get("local_build")
+        remote_artifact = payload.get("remote_artifact")
+        if not isinstance(local_build, dict) or not isinstance(remote_artifact, dict):
+            continue
+        local_source = str(local_build.get("optimized_model_so") or "").strip()
+        local_sha = valid_sha256_text(local_build.get("optimized_model_sha256", ""))
+        if local_sha != expected_sha:
+            continue
+        report_artifact_path = str(remote_artifact.get("optimized_model_so") or "").strip()
+        if report_artifact_path and report_artifact_path != current_artifact_path:
+            continue
+        local_path = resolve_existing_env(local_source)
+        if local_path is not None:
+            return str(local_path)
     return ""
 
 
@@ -496,6 +548,10 @@ def build_demo_default_board_access(probe_env: str | None) -> BoardAccessConfig:
         baseline_expected_sha = discover_trusted_baseline_expected_sha(inference_env_values)
         if baseline_expected_sha:
             startup_env_values["INFERENCE_BASELINE_EXPECTED_SHA256"] = baseline_expected_sha
+    if not str(inference_env_values.get("LOCAL_CURRENT_ARTIFACT_SOURCE") or "").strip():
+        trusted_current_local_source = discover_trusted_current_local_artifact_source(inference_env_values)
+        if trusted_current_local_source:
+            startup_env_values["LOCAL_CURRENT_ARTIFACT_SOURCE"] = trusted_current_local_source
 
     host = first_non_empty(ssh_env_values, HOST_KEYS) or first_non_empty(inference_env_values, HOST_KEYS)
     user = first_non_empty(ssh_env_values, USER_KEYS) or first_non_empty(inference_env_values, USER_KEYS)

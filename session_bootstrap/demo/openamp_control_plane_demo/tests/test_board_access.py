@@ -16,6 +16,7 @@ from board_access import (  # noqa: E402
     build_board_access_config,
     build_demo_default_board_access,
     discover_trusted_baseline_expected_sha,
+    discover_trusted_current_local_artifact_source,
     discover_validated_inference_env,
     discover_validated_openamp_remote_project_root,
     first_existing_env,
@@ -81,6 +82,53 @@ class DemoBoardAccessDefaultsTest(unittest.TestCase):
 
         self.assertEqual(discovered, "85d701db0021c26412c3e5e08a4ca043470aaa01fb2d6792cb3b3b29e93bf849")
 
+    def test_discover_trusted_current_local_artifact_source_requires_matching_sha_and_remote_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            trusted_local_artifact = temp_root / "trusted_current.so"
+            trusted_local_artifact.write_bytes(b"trusted-current")
+            matching_report = temp_root / "matching.json"
+            mismatched_report = temp_root / "mismatched.json"
+            expected_sha = "6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1"
+            matching_report.write_text(
+                json.dumps(
+                    {
+                        "local_build": {
+                            "optimized_model_so": str(trusted_local_artifact),
+                            "optimized_model_sha256": expected_sha,
+                        },
+                        "remote_artifact": {
+                            "optimized_model_so": "/remote/current/tvm_tune_logs/optimized_model.so",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            mismatched_report.write_text(
+                json.dumps(
+                    {
+                        "local_build": {
+                            "optimized_model_so": str(temp_root / "wrong.so"),
+                            "optimized_model_sha256": "85d701db0021c26412c3e5e08a4ca043470aaa01fb2d6792cb3b3b29e93bf849",
+                        },
+                        "remote_artifact": {
+                            "optimized_model_so": "/remote/baseline/tvm_tune_logs/optimized_model.so",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            discovered = discover_trusted_current_local_artifact_source(
+                {
+                    "REMOTE_CURRENT_ARTIFACT": "/remote/current/tvm_tune_logs/optimized_model.so",
+                    "INFERENCE_CURRENT_EXPECTED_SHA256": expected_sha,
+                },
+                (str(mismatched_report), str(matching_report)),
+            )
+
+        self.assertEqual(discovered, str(trusted_local_artifact.resolve()))
+
     def test_demo_defaults_prefill_real_repo_files_without_password(self) -> None:
         access = build_demo_default_board_access(None)
         expected_inference_env = discover_validated_inference_env() or first_existing_env(DEFAULT_INFERENCE_ENV_CANDIDATES)
@@ -108,6 +156,15 @@ class DemoBoardAccessDefaultsTest(unittest.TestCase):
             access.build_env().get("INFERENCE_BASELINE_EXPECTED_SHA256", ""),
             "85d701db0021c26412c3e5e08a4ca043470aaa01fb2d6792cb3b3b29e93bf849",
         )
+        self.assertEqual(
+            access.build_env().get("LOCAL_CURRENT_ARTIFACT_SOURCE", ""),
+            str(
+                (
+                    DEMO_ROOT.parents[2]
+                    / "session_bootstrap/tmp/phytium_baseline_seeded_warm_start_current_incremental_chunk4_20260313_131545/optimized_model.so"
+                ).resolve()
+            ),
+        )
 
     def test_password_only_update_reuses_preloaded_ssh_and_inference_defaults(self) -> None:
         defaults = build_demo_default_board_access(None)
@@ -126,6 +183,10 @@ class DemoBoardAccessDefaultsTest(unittest.TestCase):
         self.assertEqual(
             access.build_env().get("REMOTE_PROJECT_ROOT", ""),
             defaults.build_env().get("REMOTE_PROJECT_ROOT", ""),
+        )
+        self.assertEqual(
+            access.build_env().get("LOCAL_CURRENT_ARTIFACT_SOURCE", ""),
+            defaults.build_env().get("LOCAL_CURRENT_ARTIFACT_SOURCE", ""),
         )
         self.assertEqual(access.field_sources["password"], "session")
 
