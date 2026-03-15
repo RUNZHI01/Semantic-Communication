@@ -674,7 +674,7 @@ async function injectFault(faultType) {
 
 async function recoverFault() {
   try {
-    setFeedback("正在执行 SAFE_STOP 恢复...", "warning");
+    setFeedback("正在执行 SAFE_STOP 收口...", "warning");
     state.faultResult = await fetchJSON("/api/recover", {
       method: "POST",
       body: JSON.stringify({}),

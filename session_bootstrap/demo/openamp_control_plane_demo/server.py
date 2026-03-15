@@ -58,6 +58,24 @@ def json_bytes(payload: dict[str, Any]) -> bytes:
     return (json.dumps(payload, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
 
 
+def recover_status_lamp(guard_state: str, last_fault_code: str) -> str:
+    if str(guard_state or "").upper() != "READY":
+        return "red"
+    if str(last_fault_code or "").upper() == "NONE":
+        return "green"
+    return "yellow"
+
+
+def recover_message(guard_state: str, last_fault_code: str) -> str:
+    guard = str(guard_state or "").upper()
+    fault = str(last_fault_code or "").upper()
+    if guard == "READY" and fault == "NONE":
+        return "已使用当前会话凭据执行 SAFE_STOP，板端已回到 READY。"
+    if guard == "READY":
+        return "已使用当前会话凭据执行 SAFE_STOP，板端已回到 READY；last_fault_code 保留最近故障证据，不宣称已清零。"
+    return "已使用当前会话凭据执行 SAFE_STOP，请以当前 guard_state / last_fault_code 为准。"
+
+
 class DashboardState:
     def __init__(
         self,
@@ -426,20 +444,30 @@ class DashboardState:
     def recover_fault(self) -> dict[str, Any]:
         with self._lock:
             board_access = self._board_access
+            control_status = self._last_control_status
+            last_fault = self._last_fault_result
+
+        retained_fault_code = ""
+        if last_fault and last_fault.get("last_fault_code"):
+            retained_fault_code = str(last_fault.get("last_fault_code") or "")
+        elif control_status and control_status.get("last_fault_code"):
+            retained_fault_code = str(control_status.get("last_fault_code") or "")
 
         if board_access.probe_ready:
             live_result = run_recover_action(board_access, trusted_sha=self._trusted_current_sha)
             if live_result.get("status") == "success":
+                guard_state = live_result.get("guard_state", "UNKNOWN")
+                last_fault_code = live_result.get("last_fault_code", "UNKNOWN")
                 response = {
                     "status": "recovered",
                     "status_category": "success",
                     "execution_mode": "live",
-                    "source_label": "真机恢复",
-                    "message": "已使用当前会话凭据执行 SAFE_STOP 恢复。",
+                    "source_label": "真机 SAFE_STOP 收口",
+                    "message": recover_message(guard_state, last_fault_code),
                     "board_response": live_result.get("board_response", {}),
-                    "guard_state": live_result.get("guard_state", "UNKNOWN"),
-                    "last_fault_code": live_result.get("last_fault_code", "UNKNOWN"),
-                    "status_lamp": "green",
+                    "guard_state": guard_state,
+                    "last_fault_code": last_fault_code,
+                    "status_lamp": recover_status_lamp(guard_state, last_fault_code),
                     "log_entries": live_result.get("logs", []),
                     "details": live_result,
                 }
@@ -455,12 +483,12 @@ class DashboardState:
                         "last_fault_code": response["last_fault_code"],
                     }
                 return response
-            replay = build_recover_replay()
+            replay = build_recover_replay(retained_fault_code)
             replay["status_category"] = live_result.get("status_category", "fallback")
             replay["live_attempt"] = live_result
             replay["message"] = f"{live_result.get('message', '真机恢复失败')} 已切换到安全恢复回放。"
         else:
-            replay = build_recover_replay()
+            replay = build_recover_replay(retained_fault_code)
             replay["status_category"] = "fallback"
         with self._lock:
             self._last_fault_result = {

@@ -32,6 +32,7 @@ def make_access(env_values: dict[str, str] | None = None) -> BoardAccessConfig:
         "REMOTE_OUTPUT_BASE": "/tmp/output",
         "REMOTE_SNR_CURRENT": "12",
         "REMOTE_BATCH_CURRENT": "1",
+        "INFERENCE_CURRENT_EXPECTED_SHA256": "a" * 64,
     }
     values.update(env_values or {})
     return BoardAccessConfig(
@@ -171,6 +172,24 @@ class RunRemoteReconstructionTest(unittest.TestCase):
             command[command.index("--remote-project-root") + 1],
             "/tmp/openamp_wrong_sha_fit/project",
         )
+
+    def test_baseline_live_job_requires_formal_baseline_expected_sha_before_launch(self) -> None:
+        access = make_access(
+            {
+                "REMOTE_SNR_BASELINE": "12",
+                "REMOTE_BATCH_BASELINE": "1",
+            }
+        )
+
+        with patch("inference_runner.subprocess.Popen") as popen_mock:
+            live_job = LiveRemoteReconstructionJob(access, variant="baseline")
+
+        snapshot = live_job.snapshot()
+        self.assertEqual(snapshot["status"], "config_error")
+        self.assertEqual(snapshot["status_category"], "config_error")
+        self.assertIn("formal baseline expected SHA", snapshot["message"])
+        self.assertEqual(snapshot["diagnostics"]["missing_fields"], ["INFERENCE_BASELINE_EXPECTED_SHA256"])
+        popen_mock.assert_not_called()
 
     def test_live_job_constructor_passes_generated_uint32_job_id_to_wrapper_and_hook(self) -> None:
         access = make_access({"REMOTE_PROJECT_ROOT": "/tmp/openamp_demo/project"})
