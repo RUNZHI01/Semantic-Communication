@@ -29,6 +29,67 @@ GUARD_STATE_NAMES = {
     5: "FAULT_LATCHED",
 }
 
+DISPLAY_GUARD_STATE_NAMES = {
+    "BOOT": "启动中 BOOT",
+    "READY": "就绪 READY",
+    "JOB_ACTIVE": "任务执行中 JOB_ACTIVE",
+    "WAIT_DONE": "等待完成 WAIT_DONE",
+    "DENY_PENDING": "拒绝待确认 DENY_PENDING",
+    "FAULT_LATCHED": "故障锁存 FAULT_LATCHED",
+}
+
+DISPLAY_FAULT_CODE_NAMES = {
+    "NONE": "无故障 NONE",
+    "ARTIFACT_SHA_MISMATCH": "工件 SHA 不匹配 ARTIFACT_SHA_MISMATCH",
+    "HEARTBEAT_TIMEOUT": "心跳超时 HEARTBEAT_TIMEOUT",
+    "ILLEGAL_PARAM_RANGE": "参数范围非法 ILLEGAL_PARAM_RANGE",
+    "MANUAL_SAFE_STOP": "人工安全停止 MANUAL_SAFE_STOP",
+}
+
+FIT_SCENARIO_LABELS = {
+    "wrong expected_sha256 JOB_REQ on real board path": "真机路径下发送错误 expected_sha256 的 JOB_REQ",
+    "illegal expected_outputs JOB_REQ on real board path": "真机路径下发送非法 expected_outputs 的 JOB_REQ",
+    "heartbeat timeout / watchdog semantics on real board path": "真机路径下验证 heartbeat timeout / watchdog 语义",
+    "heartbeat timeout / watchdog semantics on real board path after watchdog fix": (
+        "部署 watchdog 修复后，在真机路径下复验 heartbeat timeout / watchdog 语义"
+    ),
+}
+
+FIT_RISK_LABELS = {
+    "unknown artifact execution risk": "未知工件被放行执行的风险",
+    "input contract / param range violation": "输入契约或参数范围违规风险",
+    "runaway active job due to missing heartbeat timeout watchdog": "缺少 heartbeat timeout watchdog 导致任务失控持续运行的风险",
+}
+
+FIT_CONCLUSION_LABELS = {
+    (
+        "After deploying the lazy watchdog firmware fix, a follow-up STATUS_REQ after 5s with no "
+        "heartbeat now exposes HEARTBEAT_TIMEOUT(F003) and returns the board to READY."
+    ): "部署 watchdog 修复固件后，停发 heartbeat 5 秒再发 STATUS_REQ，板卡会返回 READY，并显式暴露 HEARTBEAT_TIMEOUT(F003)。",
+    (
+        "Current live firmware does not auto-trigger HEARTBEAT_TIMEOUT / SAFE_STOP after the tested "
+        "5s no-heartbeat window; manual SAFE_STOP was required to return the board to READY."
+    ): "旧 live firmware 在停发 heartbeat 5 秒后不会自动触发 HEARTBEAT_TIMEOUT / SAFE_STOP，必须手动 SAFE_STOP 才能回到 READY。",
+}
+
+FIT_EVIDENCE_LABELS = {
+    "fit_report": "FIT 报告",
+    "coverage_matrix": "覆盖矩阵",
+    "remote_probe": "远程探板结果",
+    "wrapper_summary": "wrapper 摘要",
+    "job_req_bridge_summary": "JOB_REQ bridge 摘要",
+    "post_status_snapshot": "事后状态快照",
+    "final_status_snapshot": "最终状态快照",
+}
+
+INLINE_LINK_LABELS = {
+    "summary": "摘要",
+    "probe": "原始探板",
+    "probe log": "探针日志",
+    "history summary": "历史摘要",
+    "fit": "FIT 报告",
+}
+
 
 def now_iso() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%S%z")
@@ -75,6 +136,65 @@ def short_sha(value: str) -> str:
     return value[:12] if value else ""
 
 
+def display_guard_state(value: int | str | None) -> str:
+    raw = format_guard_state(value)
+    return DISPLAY_GUARD_STATE_NAMES.get(raw, raw)
+
+
+def display_fault_code(value: int | str | None) -> str:
+    raw = format_fault_code(value)
+    return DISPLAY_FAULT_CODE_NAMES.get(raw, raw)
+
+
+def localize_fit_scenario(value: str) -> str:
+    return FIT_SCENARIO_LABELS.get(value, value)
+
+
+def localize_fit_risk(value: str) -> str:
+    return FIT_RISK_LABELS.get(value, value)
+
+
+def localize_fit_conclusion(value: str) -> str:
+    return FIT_CONCLUSION_LABELS.get(value, value)
+
+
+def localize_fit_evidence_label(value: str) -> str:
+    return FIT_EVIDENCE_LABELS.get(value, value.replace("_", " "))
+
+
+def localize_inline_link_label(value: str) -> str:
+    return INLINE_LINK_LABELS.get(value, value)
+
+
+def localize_live_probe_summary(summary: str, loaded_from_cache: bool) -> str:
+    if summary:
+        message = f"当前板卡可达。探板摘要：{summary}"
+    else:
+        message = "当前板卡可达，已拿到最新只读 SSH 探板结果。"
+    if loaded_from_cache:
+        message += " 该结果来自上一次成功探板的保存记录。"
+    return message
+
+
+def localize_coverage_item(value: str) -> str:
+    mapping = {
+        "wrapper-backed board smoke": "wrapper 板级冒烟",
+        "wrong-SHA denial": "错误 SHA 拒绝",
+        "input contract violation denial": "输入契约违规拒绝",
+        "heartbeat timeout / watchdog on old live firmware": "旧固件心跳超时 / watchdog",
+        "heartbeat timeout / watchdog after fix": "修复后心跳超时 / watchdog",
+    }
+    return mapping.get(value, value)
+
+
+def localize_mapped_id(value: str) -> str:
+    mapping = {
+        "bring-up gate": "bring-up 门禁",
+        "manual stop milestone": "手动停止里程碑",
+    }
+    return mapping.get(value, value)
+
+
 def format_guard_state(value: int | str | None) -> str:
     if value is None:
         return "UNKNOWN"
@@ -104,11 +224,12 @@ def parse_markdown_key_values(path: Path) -> dict[str, str]:
 def parse_links(cell: str, base_dir: Path) -> list[dict[str, Any]]:
     links: list[dict[str, Any]] = []
     for label, target in re.findall(r"\[([^\]]+)\]\(([^)]+)\)", cell):
+        localized_label = localize_inline_link_label(label)
         if target.startswith("http://") or target.startswith("https://"):
-            links.append({"label": label, "path": target, "external": True})
+            links.append({"label": localized_label, "path": target, "external": True})
             continue
         resolved = (base_dir / target).resolve()
-        links.append({"label": label, "path": repo_relative(resolved), "external": False})
+        links.append({"label": localized_label, "path": repo_relative(resolved), "external": False})
     return links
 
 
@@ -167,18 +288,18 @@ def load_fit_summary(path: Path) -> dict[str, Any]:
         raw = evidence.get(key)
         if not raw:
             continue
-        links.append(link_entry(resolve_repo_path(raw), key.replace("_", " ")))
+        links.append(link_entry(resolve_repo_path(raw), localize_fit_evidence_label(key)))
     return {
         "fit_id": payload["fit_id"],
         "status": payload["status"],
-        "scenario": payload["scenario"],
-        "risk_item": payload["risk_item"],
+        "scenario": localize_fit_scenario(payload["scenario"]),
+        "risk_item": localize_fit_risk(payload["risk_item"]),
         "trusted_current_sha": payload.get("trusted_current_sha", ""),
         "live_firmware_sha256": payload.get("live_firmware_sha256", ""),
         "generated_at": payload["generated_at"],
         "board_access": payload.get("board_access", {}),
         "observed_result": payload.get("observed_result", {}),
-        "conclusion": payload.get("conclusion", ""),
+        "conclusion": localize_fit_conclusion(payload.get("conclusion", "")),
         "evidence": links,
         "run_id": payload["run_id"],
     }
@@ -189,21 +310,21 @@ def synthesize_fit_readout(summary: dict[str, Any]) -> str:
     observed = summary.get("observed_result", {})
     if fit_id == "FIT-01":
         return (
-            f"Decision {observed.get('decision', 'UNKNOWN')}; "
-            f"fault {observed.get('fault_name', 'UNKNOWN')}; "
-            f"guard stayed {observed.get('guard_final', 'UNKNOWN')}."
+            f"判定={observed.get('decision', 'UNKNOWN')}；"
+            f"故障={display_fault_code(observed.get('fault_name', 'UNKNOWN'))}；"
+            f"守护状态保持 {display_guard_state(observed.get('guard_final', 'UNKNOWN'))}。"
         )
     if fit_id == "FIT-02":
         return (
-            f"Decision {observed.get('decision', 'UNKNOWN')}; "
-            f"fault {observed.get('fault_name', 'UNKNOWN')}; "
-            f"wrapper result {observed.get('wrapper_result', 'UNKNOWN')}."
+            f"判定={observed.get('decision', 'UNKNOWN')}；"
+            f"故障={display_fault_code(observed.get('fault_name', 'UNKNOWN'))}；"
+            f"wrapper 结果={observed.get('wrapper_result', 'UNKNOWN')}。"
         )
     timeout_status = observed.get("timeout_status") or observed.get("status_after_5s_without_heartbeat") or {}
     return (
-        f"Timeout status {format_guard_state(timeout_status.get('guard_state'))}; "
-        f"fault {format_fault_code(timeout_status.get('last_fault_code'))}; "
-        f"active_job_id={timeout_status.get('active_job_id', 'NA')}."
+        f"停发 heartbeat 5 秒后，状态={display_guard_state(timeout_status.get('guard_state'))}；"
+        f"故障={display_fault_code(timeout_status.get('last_fault_code'))}；"
+        f"active_job_id={timeout_status.get('active_job_id', 'NA')}。"
     )
 
 
@@ -215,24 +336,21 @@ def build_mode_snapshot(live_probe: dict[str, Any] | None) -> dict[str, Any]:
     materials = parse_markdown_key_values(PACKAGE_ROOT / "demo_materials_index.md")
     has_live = bool(live_probe and live_probe.get("reachable"))
     if has_live:
-        effective_label = "Live cue active"
+        effective_label = "在线读数可用"
         effective_tone = "live"
         if live_probe_loaded_from_cache(live_probe):
             summary = (
-                "The dashboard recovered the last successful read-only SSH probe from the saved "
-                "probe file. Trigger a refresh for a new board read."
+                "界面已从保存的成功探板记录恢复最近一次只读 SSH 结果；若需最新板卡状态，可手动再次读取。"
             )
         else:
             summary = (
-                "A fresh read-only SSH probe is available. The dashboard is still evidence-led, "
-                "but it can show a current board read without touching the control flow."
+                "界面已拿到新的只读 SSH 探板结果；整体仍以证据包为主，只额外展示当前板卡状态，不改变控制流。"
             )
     else:
-        effective_label = "Fallback evidence mode"
+        effective_label = "仅展示证据"
         effective_tone = "fallback"
         summary = (
-            "No fresh live probe is attached. The dashboard renders the board-backed evidence "
-            "package and last proven control-plane state."
+            "当前没有新的在线探板结果，界面展示仓库内证据包和最近一次已验证的控制面状态。"
         )
     return {
         "default_mode": materials.get("default_mode", "offline-first, evidence-led"),
@@ -255,11 +373,9 @@ def build_board_snapshot(live_probe: dict[str, Any] | None) -> dict[str, Any]:
 
     timeout_status = fit03_pass["observed_result"]["timeout_status"]
     evidence_status = {
-        "label": "Board-backed ready state proved",
+        "label": "板级证据已确认",
         "summary": (
-            "The control plane was proven on real hardware through JOB_DONE cleanup and the "
-            "post-fix FIT-03 timeout path. Current evidence shows the board can return to READY "
-            "without rebooting."
+            "真机已通过 JOB_DONE 清理路径和修复后的 FIT-03 超时路径完成验证。现有证据表明：板卡无需重启即可回到 READY。"
         ),
         "confirmed_at": fit03_pass["generated_at"],
         "trusted_current_sha": fit03_pass["trusted_current_sha"],
@@ -282,12 +398,12 @@ def build_board_snapshot(live_probe: dict[str, Any] | None) -> dict[str, Any]:
             "last_fault": format_fault_code(job_done_probe["status_after_job_done"]["last_fault_code"]),
         },
         "evidence": [
-            link_entry(REPORTS_ROOT / "openamp_phase5_job_done_success_2026-03-15.md", "job done summary"),
-            link_entry(REPORTS_ROOT / "openamp_phase5_fit03_watchdog_success_2026-03-15.md", "fit-03 post-fix summary"),
-            link_entry(REPORTS_ROOT / "openamp_job_done_real_probe_20260315_001.json", "job done raw probe"),
+            link_entry(REPORTS_ROOT / "openamp_phase5_job_done_success_2026-03-15.md", "JOB_DONE 摘要"),
+            link_entry(REPORTS_ROOT / "openamp_phase5_fit03_watchdog_success_2026-03-15.md", "FIT-03 修复后摘要"),
+            link_entry(REPORTS_ROOT / "openamp_job_done_real_probe_20260315_001.json", "JOB_DONE 原始探板"),
             link_entry(
                 REPORTS_ROOT / "openamp_heartbeat_timeout_fit_watchdogfix_20260315_023410" / "remote_probe.json",
-                "fit-03 post-fix remote probe",
+                "FIT-03 修复后远程探板",
             ),
         ],
         "history_note": fit03_fail["conclusion"],
@@ -295,22 +411,23 @@ def build_board_snapshot(live_probe: dict[str, Any] | None) -> dict[str, Any]:
 
     if live_probe and live_probe.get("reachable"):
         loaded_from_cache = live_probe_loaded_from_cache(live_probe)
-        summary = live_probe.get("summary", "")
-        if loaded_from_cache:
-            summary = f"{summary} Loaded from the last successful probe artifact."
+        summary = localize_live_probe_summary(str(live_probe.get("summary", "")), loaded_from_cache)
         current = {
-            "label": "Saved read-only SSH probe" if loaded_from_cache else "Fresh read-only SSH probe",
+            "label": "保存的只读 SSH 探板" if loaded_from_cache else "最新只读 SSH 探板",
             "summary": summary,
             "reachable": True,
             "requested_at": live_probe.get("requested_at", ""),
             "details": live_probe.get("details", {}),
-            "evidence": [link_entry(REPORTS_ROOT / "openamp_demo_live_probe_latest.json", "saved live probe JSON")],
+            "evidence": [link_entry(REPORTS_ROOT / "openamp_demo_live_probe_latest.json", "在线探板 JSON")],
         }
     else:
-        reason = live_probe.get("error", "") if live_probe else "No live probe executed."
+        reason = live_probe.get("error", "") if live_probe else ""
+        summary = "当前未拿到新的在线探板结果，界面将继续展示最近一次已验证的证据。"
+        if reason:
+            summary = f"{summary} 原因：{reason}"
         current = {
-            "label": "No fresh live probe",
-            "summary": reason or "Using last proven evidence instead of a live board read.",
+            "label": "暂无在线探板",
+            "summary": summary,
             "reachable": False,
             "requested_at": live_probe.get("requested_at", "") if live_probe else "",
             "details": live_probe.get("details", {}) if live_probe else {},
@@ -329,17 +446,16 @@ def build_milestones_snapshot() -> list[dict[str, Any]]:
     milestones = [
         {
             "stage": "P0",
-            "coverage_item": "cold boot / remoteproc / rpmsg demo gate",
-            "mapped_id": "bring-up gate",
+            "coverage_item": "冷启动 / remoteproc / RPMsg 演示门禁",
+            "mapped_id": "bring-up 门禁",
             "status": "PASS",
             "key_proof_point": (
-                "release_v1.4.0-derived firmware cleared the board boot, remoteproc, and RPMsg "
-                "demo entry gate before the finer control-plane milestones were collected."
+                "基于 release_v1.4.0 派生的固件已先打通板卡启动、remoteproc 和 RPMsg 演示门禁，然后才继续收集更细的控制面里程碑证据。"
             ),
             "evidence": [
                 link_entry(
                     REPORTS_ROOT / "openamp_phase5_release_v1.4.0_cold_boot_and_demo_success_2026-03-14.md",
-                    "cold boot summary",
+                    "冷启动摘要",
                 )
             ],
         }
@@ -350,8 +466,8 @@ def build_milestones_snapshot() -> list[dict[str, Any]]:
         milestones.append(
             {
                 "stage": row["Stage"],
-                "coverage_item": row["Coverage Item"].strip("`"),
-                "mapped_id": row["Mapped ID"].strip("`"),
+                "coverage_item": localize_coverage_item(row["Coverage Item"].strip("`")),
+                "mapped_id": localize_mapped_id(row["Mapped ID"].strip("`")),
                 "status": row["Status"],
                 "key_proof_point": row["Key Proof Point"],
                 "evidence": parse_links(row["Evidence"], PACKAGE_ROOT),
@@ -368,7 +484,7 @@ def build_fit_snapshot() -> list[dict[str, Any]]:
         REPORTS_ROOT / "openamp_heartbeat_timeout_fit_watchdogfix_20260315_023410" / "fit_summary.json"
     )
     fit03_pass["history"] = {
-        "label": "pre-fix history",
+        "label": "修复前历史",
         "status": fit03_fail["status"],
         "summary": fit03_fail["conclusion"],
         "evidence": fit03_fail["evidence"],
@@ -391,41 +507,39 @@ def build_performance_snapshot() -> dict[str, Any]:
     return {
         "artifact_sha": artifact_sha,
         "positioning_note": (
-            "The same trusted current SHA used by the OpenAMP FITs is also backed by the latest "
-            "validated decoder performance reports. The OpenAMP wrapper only gates admission and "
-            "status; it does not replace the existing inference data path."
+            "OpenAMP FIT 使用的 trusted current SHA，也有最新解码性能报告做交叉支撑。OpenAMP wrapper 负责准入和状态控制，不替代现有推理数据通路。"
         ),
         "metrics": [
             {
-                "label": "Payload median",
+                "label": "Payload 中位延迟",
                 "current": f"{payload['current_run_median_ms']} ms",
                 "baseline": f"{payload['baseline_run_median_ms']} ms",
                 "improvement": f"{payload['improvement_pct']}%",
                 "report": link_entry(
                     REPORTS_ROOT / "inference_compare_currentsafe_chunk4_refresh_20260313_1758.md",
-                    "payload compare report",
+                    "Payload 对比报告",
                 ),
                 "delta_ms": payload["delta_ms_current_minus_baseline"],
             },
             {
-                "label": "End-to-end median",
+                "label": "端到端中位延迟",
                 "current": f"{end_to_end['current_run_median_ms']} ms/image",
                 "baseline": f"{end_to_end['baseline_run_median_ms']} ms/image",
                 "improvement": f"{end_to_end['improvement_pct']}%",
                 "report": link_entry(
                     REPORTS_ROOT / "inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md",
-                    "end-to-end compare report",
+                    "端到端对比报告",
                 ),
                 "delta_ms": end_to_end["delta_ms_current_minus_baseline"],
             },
             {
-                "label": "Incremental tuning speedup",
+                "label": "增量调优加速比",
                 "current": speedup["incremental_speedup_vs_rebuild_only"],
-                "baseline": "rebuild-only current",
+                "baseline": "仅重编译 current",
                 "improvement": speedup["incremental_improvement_vs_rebuild_only"],
                 "report": link_entry(
                     REPORTS_ROOT / "current_scheme_b_compare_20260311_195303.md",
-                    "current-only speedup report",
+                    "current-only 加速报告",
                 ),
                 "delta_ms": speedup["incremental_vs_rebuild_only_delta"],
             },
@@ -457,50 +571,47 @@ def build_operator_snapshot() -> dict[str, Any]:
         ],
         "host_side": {
             "summary": (
-                "The host side reads the evidence package, raw JSON probes, performance reports, "
-                "and wrapper summaries already stored in this repo."
+                "主机侧读取仓库内已保存的证据包、原始 JSON 探板、性能报告和 wrapper 摘要，不额外生成新的业务结论。"
             ),
             "items": [
-                link_entry(PACKAGE_ROOT / "README.md", "evidence package index"),
-                link_entry(PACKAGE_ROOT / "coverage_matrix.md", "coverage matrix"),
-                link_entry(PACKAGE_ROOT / "demo_materials_index.md", "demo materials index"),
-                link_entry(SCRIPTS_ROOT / "openamp_control_wrapper.py", "control wrapper"),
-                link_entry(SCRIPTS_ROOT / "openamp_rpmsg_bridge.py", "rpmsg bridge"),
+                link_entry(PACKAGE_ROOT / "README.md", "证据包索引"),
+                link_entry(PACKAGE_ROOT / "coverage_matrix.md", "覆盖矩阵"),
+                link_entry(PACKAGE_ROOT / "demo_materials_index.md", "演示材料索引"),
+                link_entry(SCRIPTS_ROOT / "openamp_control_wrapper.py", "控制 wrapper"),
+                link_entry(SCRIPTS_ROOT / "openamp_rpmsg_bridge.py", "RPMsg bridge"),
             ],
         },
         "slave_side": {
             "summary": (
-                "The slave/OpenAMP side depends on the live firmware and Linux RPMsg transport that "
-                "were already verified in the board-backed reports. The optional live probe only "
-                "reads hostname, remoteproc state, RPMsg devices, and firmware SHA."
+                "板端 / OpenAMP 侧依赖此前已在真机报告中验证的 live firmware 和 Linux RPMsg 传输。可选在线探板只读取主机名、remoteproc 状态、RPMsg 设备和固件 SHA。"
             ),
             "items": [
-                link_entry(REPORTS_ROOT / "openamp_phase5_fit03_watchdog_success_2026-03-15.md", "fit-03 post-fix summary"),
+                link_entry(REPORTS_ROOT / "openamp_phase5_fit03_watchdog_success_2026-03-15.md", "FIT-03 修复后摘要"),
                 link_entry(
                     REPORTS_ROOT / "openamp_heartbeat_timeout_fit_watchdogfix_20260315_023410" / "remote_probe.json",
-                    "fit-03 post-fix remote probe",
+                    "FIT-03 修复后远程探板",
                 ),
-                link_entry(SCRIPTS_ROOT / "connect_phytium_pi.sh", "ssh connector"),
-                link_entry(SCRIPTS_ROOT / "probe_openamp_board_status.py", "read-only board probe"),
+                link_entry(SCRIPTS_ROOT / "connect_phytium_pi.sh", "SSH 连接脚本"),
+                link_entry(SCRIPTS_ROOT / "probe_openamp_board_status.py", "只读板卡探板"),
             ],
         },
         "entrypoints": [
-            link_entry(SCRIPTS_ROOT / "run_openamp_demo.sh", "demo launcher"),
-            link_entry(SCRIPTS_ROOT / "probe_openamp_board_status.py", "board probe CLI"),
-            link_entry(PROJECT_ROOT / "session_bootstrap" / "demo" / "openamp_control_plane_demo" / "README.md", "demo README"),
+            link_entry(SCRIPTS_ROOT / "run_openamp_demo.sh", "演示启动脚本"),
+            link_entry(SCRIPTS_ROOT / "probe_openamp_board_status.py", "板卡探板 CLI"),
+            link_entry(PROJECT_ROOT / "session_bootstrap" / "demo" / "openamp_control_plane_demo" / "README.md", "演示 README"),
         ],
     }
 
 
 def build_docs_snapshot() -> list[dict[str, Any]]:
     return [
-        link_entry(PACKAGE_ROOT / "README.md", "OpenAMP evidence package"),
-        link_entry(PACKAGE_ROOT / "summary_report.md", "summary report"),
-        link_entry(PACKAGE_ROOT / "coverage_matrix.md", "coverage matrix"),
-        link_entry(PACKAGE_ROOT / "demo_four_act_runbook.md", "four-act runbook"),
-        link_entry(PACKAGE_ROOT / "degraded_demo_plan.md", "degraded demo plan"),
-        link_entry(REPORTS_ROOT / "phytium_speed_test_summary_20260313_162731.md", "speed summary"),
-        link_entry(PROJECT_ROOT / "README.md", "project README"),
+        link_entry(PACKAGE_ROOT / "README.md", "OpenAMP 证据包"),
+        link_entry(PACKAGE_ROOT / "summary_report.md", "总报告"),
+        link_entry(PACKAGE_ROOT / "coverage_matrix.md", "覆盖矩阵"),
+        link_entry(PACKAGE_ROOT / "demo_four_act_runbook.md", "四幕演示脚本"),
+        link_entry(PACKAGE_ROOT / "degraded_demo_plan.md", "降级演示预案"),
+        link_entry(REPORTS_ROOT / "phytium_speed_test_summary_20260313_162731.md", "性能摘要"),
+        link_entry(PROJECT_ROOT / "README.md", "项目 README"),
         link_entry(PROJECT_ROOT / "session_bootstrap" / "README.md", "session_bootstrap README"),
     ]
 
@@ -518,7 +629,7 @@ def build_snapshot(live_probe: dict[str, Any] | None = None) -> dict[str, Any]:
         "generated_at": now_iso(),
         "project": {
             "name": "TVM MetaSchedule Execution Project",
-            "focus": "OpenAMP control-plane integrated demo surface",
+            "focus": "OpenAMP 控制面集成演示看板",
             "package_id": summary["package_id"],
             "final_verdict": summary["final_verdict"],
             "trusted_current_sha": coverage["trusted_current_sha"],

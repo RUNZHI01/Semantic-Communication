@@ -142,8 +142,8 @@ class DashboardStateTest(unittest.TestCase):
             state = DashboardState(None, 30.0, cache_path)
             snapshot = state.current_snapshot()
 
-        self.assertEqual(snapshot["mode"]["effective_label"], "Live cue active")
-        self.assertEqual(snapshot["board"]["current_status"]["label"], "Saved read-only SSH probe")
+        self.assertEqual(snapshot["mode"]["effective_label"], "在线读数可用")
+        self.assertEqual(snapshot["board"]["current_status"]["label"], "保存的只读 SSH 探板")
         self.assertEqual(snapshot["board"]["current_status"]["requested_at"], payload["requested_at"])
         self.assertTrue(snapshot["board"]["current_status"]["reachable"])
 
@@ -283,7 +283,7 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(headers["content-type"], "application/json; charset=utf-8")
         self.assertIn("generated_at", payload)
         self.assertEqual(payload["project"]["name"], "TVM MetaSchedule Execution Project")
-        self.assertEqual(payload["mode"]["effective_label"], "Fallback evidence mode")
+        self.assertEqual(payload["mode"]["effective_label"], "仅展示证据")
         self.assertIn("current_status", payload["board"])
         self.assertIn("fits", payload)
         self.assertIsInstance(payload["fits"], list)
@@ -309,8 +309,8 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(probe_status, 200)
         self.assertEqual(probe_payload, success)
         self.assertEqual(snapshot_status, 200)
-        self.assertEqual(snapshot_payload["mode"]["effective_label"], "Live cue active")
-        self.assertEqual(snapshot_payload["board"]["current_status"]["label"], "Fresh read-only SSH probe")
+        self.assertEqual(snapshot_payload["mode"]["effective_label"], "在线读数可用")
+        self.assertEqual(snapshot_payload["board"]["current_status"]["label"], "最新只读 SSH 探板")
         self.assertEqual(snapshot_payload["board"]["current_status"]["requested_at"], success["requested_at"])
         self.assertTrue(snapshot_payload["board"]["current_status"]["reachable"])
 
@@ -329,8 +329,8 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(probe_status, 200)
         self.assertEqual(probe_payload, failure)
         self.assertEqual(snapshot_status, 200)
-        self.assertEqual(snapshot_payload["mode"]["effective_label"], "Fallback evidence mode")
-        self.assertEqual(snapshot_payload["board"]["current_status"]["label"], "No fresh live probe")
+        self.assertEqual(snapshot_payload["mode"]["effective_label"], "仅展示证据")
+        self.assertEqual(snapshot_payload["board"]["current_status"]["label"], "暂无在线探板")
         self.assertFalse(snapshot_payload["board"]["current_status"]["reachable"])
         self.assertEqual(snapshot_payload["board"]["current_status"]["requested_at"], "")
 
@@ -342,8 +342,8 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertTrue(headers["content-type"].startswith("text/html"))
         self.assertEqual(headers["cache-control"], "no-store")
-        self.assertIn("<title>OpenAMP Control Plane Demo</title>", body)
-        self.assertIn("OpenAMP control-plane status, FIT evidence, and performance in one place.", body)
+        self.assertIn("<title>OpenAMP 控制面演示看板</title>", body)
+        self.assertIn("一屏查看 OpenAMP 控制面状态、FIT 证据与性能结果。", body)
         self.assertIn('<script src="/app.js"></script>', body)
 
     def test_app_js_serves_dashboard_javascript(self) -> None:

@@ -40,7 +40,7 @@ class DemoDataTest(unittest.TestCase):
                 "details": {"remoteproc": [{"name": "remoteproc0", "state": "running"}]},
             }
         )
-        self.assertEqual(snapshot["mode"]["effective_label"], "Live cue active")
+        self.assertEqual(snapshot["mode"]["effective_label"], "在线读数可用")
         self.assertTrue(snapshot["board"]["current_status"]["reachable"])
 
     def test_cached_live_probe_is_labeled_as_saved(self) -> None:
@@ -54,9 +54,9 @@ class DemoDataTest(unittest.TestCase):
                 "_loaded_from_cache": True,
             }
         )
-        self.assertIn("recovered", snapshot["mode"]["summary"].lower())
-        self.assertEqual(snapshot["board"]["current_status"]["label"], "Saved read-only SSH probe")
-        self.assertIn("Loaded from the last successful probe artifact.", snapshot["board"]["current_status"]["summary"])
+        self.assertIn("恢复最近一次只读 ssh 结果", snapshot["mode"]["summary"].lower())
+        self.assertEqual(snapshot["board"]["current_status"]["label"], "保存的只读 SSH 探板")
+        self.assertIn("上一次成功探板的保存记录", snapshot["board"]["current_status"]["summary"])
 
 
 if __name__ == "__main__":
