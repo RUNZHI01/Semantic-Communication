@@ -21,6 +21,7 @@ from inference_runner import (  # noqa: E402
     PROJECT_ROOT,
     LiveRemoteReconstructionJob,
     REMOTE_RECONSTRUCTION_SCRIPT,
+    live_control_hook_timeout_sec,
     run_remote_reconstruction,
 )
 
@@ -228,9 +229,31 @@ class RunRemoteReconstructionTest(unittest.TestCase):
         self.assertEqual(live_job.job_id, "4242")
         command = popen_mock.call_args.args[0]
         self.assertEqual(command[command.index("--job-id") + 1], "4242")
+        self.assertEqual(
+            command[command.index("--control-hook-timeout-sec") + 1],
+            str(live_control_hook_timeout_sec(900.0)),
+        )
         hook_command = command[command.index("--control-hook-cmd") + 1]
         self.assertIn("--remote-output-root", hook_command)
         self.assertIn("/tmp/openamp_demo_hook/4242", hook_command)
+
+    def test_live_job_control_hook_timeout_is_capped_at_runner_timeout_when_shorter(self) -> None:
+        access = make_access()
+
+        with (
+            patch("inference_runner.generate_live_job_id", return_value="4242"),
+            patch("inference_runner.tempfile.mkdtemp", return_value="/tmp/openamp_demo_live_test"),
+            patch("inference_runner.subprocess.Popen", return_value=object()) as popen_mock,
+            patch("inference_runner.Thread") as thread_cls,
+        ):
+            thread_cls.return_value.start.return_value = None
+            LiveRemoteReconstructionJob(access, variant="current", timeout_sec=12.0)
+
+        command = popen_mock.call_args.args[0]
+        self.assertEqual(
+            command[command.index("--control-hook-timeout-sec") + 1],
+            str(live_control_hook_timeout_sec(12.0)),
+        )
 
     def test_permission_gate_failure_surfaces_explicit_live_contract(self) -> None:
         with tempfile.TemporaryDirectory(dir=PROJECT_ROOT) as temp_dir:
