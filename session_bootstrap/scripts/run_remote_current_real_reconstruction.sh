@@ -208,6 +208,7 @@ profile_ops="$PROFILE_OPS"
 profile_samples="$PROFILE_SAMPLES"
 
 mkdir -p "$output_dir"
+rm -rf "$output_dir/reconstructions"
 
 if [[ -n "$extra_pythonpath" ]]; then
   export PYTHONPATH="$extra_pythonpath${PYTHONPATH:+:$PYTHONPATH}"

@@ -48,18 +48,18 @@ def make_access(env_values: dict[str, str] | None = None) -> BoardAccessConfig:
 
 
 class RunRemoteReconstructionTest(unittest.TestCase):
-    def test_generate_live_job_id_wraps_to_non_zero_uint32_and_stays_unique(self) -> None:
+    def test_generate_live_job_id_uses_non_zero_uint32_nonce_and_stays_unique(self) -> None:
         original_last_job_id = inference_runner._LAST_LIVE_JOB_ID
         try:
             inference_runner._LAST_LIVE_JOB_ID = 0
-            with patch("inference_runner.time.time", side_effect=[4294967.296, 4294967.296]):
+            with patch("inference_runner.secrets.randbelow", side_effect=[0, 0, inference_runner.UINT32_MAX - 1]):
                 first = inference_runner.generate_live_job_id()
                 second = inference_runner.generate_live_job_id()
         finally:
             inference_runner._LAST_LIVE_JOB_ID = original_last_job_id
 
         self.assertEqual(first, "1")
-        self.assertEqual(second, "2")
+        self.assertEqual(second, str(inference_runner.UINT32_MAX))
         self.assertLessEqual(int(second), inference_runner.UINT32_MAX)
 
     def test_count_completed_images_from_runner_log_uses_real_latency_lines(self) -> None:
@@ -269,7 +269,10 @@ class RunRemoteReconstructionTest(unittest.TestCase):
     def test_build_runner_command_keeps_sampling_args_for_current_reconstruction_cmd(self) -> None:
         access = make_access(
             {
-                "INFERENCE_CURRENT_CMD": "bash ./session_bootstrap/scripts/run_remote_current_real_reconstruction.sh --variant current",
+                "INFERENCE_CURRENT_CMD": (
+                    "bash ./session_bootstrap/scripts/run_remote_current_real_reconstruction.sh "
+                    "--variant current --max-inputs 1 --seed 99 --profile-ops"
+                ),
             }
         )
 
@@ -277,8 +280,30 @@ class RunRemoteReconstructionTest(unittest.TestCase):
 
         self.assertEqual(
             command,
-            "bash ./session_bootstrap/scripts/run_remote_current_real_reconstruction.sh --variant current --max-inputs 3 --seed 7",
+            (
+                f"bash {REMOTE_RECONSTRUCTION_SCRIPT} --variant current --max-inputs 3 --seed 7"
+            ),
         )
+        self.assertNotIn("--profile-ops", command)
+        self.assertNotIn("--max-inputs 1", command)
+        self.assertNotIn("--seed 99", command)
+
+    def test_build_runner_command_for_current_ignores_legacy_current_cmd_residue(self) -> None:
+        access = make_access(
+            {
+                "INFERENCE_CURRENT_CMD": "bash ./session_bootstrap/scripts/run_remote_legacy_tvm_compat.sh --variant current --max-inputs 1",
+            }
+        )
+
+        command = inference_runner.build_runner_command(access, variant="current", max_inputs=300, seed=0)
+
+        self.assertEqual(
+            command,
+            (
+                f"bash {REMOTE_RECONSTRUCTION_SCRIPT} --variant current --max-inputs 300 --seed 0"
+            ),
+        )
+        self.assertNotIn("run_remote_legacy_tvm_compat.sh", command)
 
     def test_baseline_live_job_requires_formal_baseline_expected_sha_before_launch(self) -> None:
         access = make_access(
@@ -299,7 +324,12 @@ class RunRemoteReconstructionTest(unittest.TestCase):
         popen_mock.assert_not_called()
 
     def test_live_job_constructor_passes_generated_uint32_job_id_to_wrapper_and_hook(self) -> None:
-        access = make_access({"REMOTE_PROJECT_ROOT": "/tmp/openamp_demo/project"})
+        access = make_access(
+            {
+                "REMOTE_PROJECT_ROOT": "/tmp/openamp_demo/project",
+                "INFERENCE_CURRENT_CMD": "bash ./session_bootstrap/scripts/run_remote_legacy_tvm_compat.sh --variant current --max-inputs 1",
+            }
+        )
 
         with (
             patch("inference_runner.generate_live_job_id", return_value="4242"),
@@ -322,6 +352,8 @@ class RunRemoteReconstructionTest(unittest.TestCase):
             str(inference_runner.DEFAULT_MAX_INPUTS),
         )
         runner_cmd = command[command.index("--runner-cmd") + 1]
+        self.assertIn(str(REMOTE_RECONSTRUCTION_SCRIPT), runner_cmd)
+        self.assertNotIn("run_remote_legacy_tvm_compat.sh", runner_cmd)
         self.assertIn(f"--max-inputs {inference_runner.DEFAULT_MAX_INPUTS}", runner_cmd)
         self.assertIn("--seed 0", runner_cmd)
         hook_command = command[command.index("--control-hook-cmd") + 1]
@@ -570,6 +602,112 @@ class RunRemoteReconstructionTest(unittest.TestCase):
             self.assertEqual(snapshot["diagnostics"]["control_hook"]["fault_name"], "ARTIFACT_SHA_MISMATCH")
             self.assertEqual(snapshot["diagnostics"]["control_hook"]["transport_status"], "job_ack_received")
             self.assertIn("ARTIFACT_SHA_MISMATCH", snapshot["progress"]["stages"][2]["detail"])
+
+    def test_duplicate_job_ack_is_not_mislabeled_as_permission_error(self) -> None:
+        with tempfile.TemporaryDirectory(dir=PROJECT_ROOT) as temp_dir:
+            output_dir = Path(temp_dir)
+            trace_path = output_dir / "control_trace.jsonl"
+            summary_path = output_dir / "wrapper_summary.json"
+
+            summary_path.write_text(
+                json.dumps({"result": "denied_by_control_hook"}, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+            trace_events = [
+                {
+                    "at": "2026-03-16T02:27:47+0800",
+                    "phase": "STATUS_REQ",
+                    "payload": {"job_id": 4072741809},
+                    "hook_result": {
+                        "returncode": 0,
+                        "response": {
+                            "phase": "STATUS_REQ",
+                            "source": "firmware_status_resp",
+                            "transport_status": "status_resp_received",
+                            "protocol_semantics": "implemented",
+                            "note": "Received a decodable STATUS_RESP frame.",
+                            "rpmsg_ctrl": "/dev/rpmsg_ctrl0",
+                            "rpmsg_dev": "/dev/rpmsg0",
+                            "rx_frame": {
+                                "status_resp": {
+                                    "guard_state_name": "READY",
+                                    "last_fault_name": "NONE",
+                                }
+                            },
+                        },
+                    },
+                },
+                {
+                    "at": "2026-03-16T02:27:52+0800",
+                    "phase": "JOB_REQ",
+                    "payload": {"job_id": 4072741809, "expected_sha256": "abcd" * 16},
+                    "hook_result": {
+                        "returncode": 2,
+                        "response": {
+                            "phase": "JOB_REQ",
+                            "decision": "DENY",
+                            "fault_code": 8,
+                            "fault_name": "DUPLICATE_JOB_ID",
+                            "guard_state": 2,
+                            "guard_state_name": "JOB_ACTIVE",
+                            "source": "firmware_job_ack",
+                            "transport_status": "job_ack_received",
+                            "protocol_semantics": "implemented",
+                            "note": "Received a decodable JOB_ACK frame from firmware.",
+                            "rpmsg_ctrl": "/dev/rpmsg_ctrl0",
+                            "rpmsg_dev": "/dev/rpmsg0",
+                        },
+                    },
+                },
+                {
+                    "at": "2026-03-16T02:27:52+0800",
+                    "phase": "JOB_ACK",
+                    "payload": {
+                        "job_id": 4072741809,
+                        "decision": "DENY",
+                        "fault_code": 8,
+                        "fault_name": "DUPLICATE_JOB_ID",
+                        "guard_state": 2,
+                        "guard_state_name": "JOB_ACTIVE",
+                        "source": "firmware_job_ack",
+                        "transport_status": "job_ack_received",
+                        "protocol_semantics": "implemented",
+                        "note": "Received a decodable JOB_ACK frame from firmware.",
+                    },
+                },
+            ]
+            trace_path.write_text(
+                "\n".join(json.dumps(event, ensure_ascii=False) for event in trace_events) + "\n",
+                encoding="utf-8",
+            )
+
+            job = LiveRemoteReconstructionJob.__new__(LiveRemoteReconstructionJob)
+            job.job_id = "4072741809"
+            job.variant = "current"
+            job._timeout_sec = 10.0
+            job._output_dir = output_dir
+            job._trace_path = trace_path
+            job._summary_path = summary_path
+            job._runner_log_path = output_dir / "runner.log"
+            job._lock = Lock()
+            job._final_snapshot = None
+
+            fake_process = Mock()
+            fake_process.communicate.return_value = ("", "")
+            fake_process.returncode = 2
+            job._process = fake_process
+
+            job._wait_for_completion()
+
+            snapshot = job._final_snapshot
+            assert snapshot is not None
+            self.assertEqual(snapshot["status"], "error")
+            self.assertEqual(snapshot["status_category"], "error")
+            self.assertEqual(snapshot["diagnostics"]["control_hook"]["fault_name"], "DUPLICATE_JOB_ID")
+            self.assertEqual(snapshot["diagnostics"]["control_hook"]["rpmsg_dev"], "/dev/rpmsg0")
+            self.assertNotIn("passwordless sudo", snapshot["message"])
+            self.assertIn("OpenAMP 控制面未放行", snapshot["message"])
+            self.assertIn("DUPLICATE_JOB_ID", snapshot["progress"]["stages"][2]["detail"])
 
     def test_ssh_bridge_launch_failure_surfaces_host_env_error_and_stage_gate(self) -> None:
         with tempfile.TemporaryDirectory(dir=PROJECT_ROOT) as temp_dir:
