@@ -285,6 +285,45 @@ select:focus {
   font-weight: 700;
 }
 
+.credential-hints {
+  margin-top: 0.95rem;
+  display: grid;
+  gap: 0.7rem;
+}
+
+.credential-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem;
+}
+
+.field-chip {
+  display: inline-grid;
+  gap: 0.18rem;
+  min-width: 10rem;
+  padding: 0.7rem 0.85rem;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(19, 44, 61, 0.05);
+}
+
+.field-chip span {
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.field-chip strong {
+  font-size: 0.95rem;
+  word-break: break-word;
+}
+
+.credential-note {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
 .status-banner[data-tone="success"] {
   background: var(--teal-soft);
   color: var(--teal);

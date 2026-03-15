@@ -298,6 +298,38 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(headers["cache-control"], "no-store")
         self.assertEqual(payload, {"status": "ok"})
 
+    def test_system_status_endpoint_preloads_repo_defaults_without_password(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+
+        status, headers, payload = request_json(state, "GET", "/api/system-status")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["content-type"], "application/json; charset=utf-8")
+        self.assertEqual(payload["execution_mode"]["label"], "待补全密码")
+        self.assertTrue(payload["board_access"]["configured"])
+        self.assertFalse(payload["board_access"]["has_password"])
+        self.assertEqual(payload["board_access"]["host"], "100.121.87.73")
+        self.assertEqual(payload["board_access"]["user"], "user")
+        self.assertEqual(payload["board_access"]["port"], 22)
+        self.assertEqual(
+            payload["board_access"]["env_file"],
+            "session_bootstrap/config/inference_real_reconstruction_compare.2026-03-11.phytium_pi.env",
+        )
+        self.assertEqual(payload["board_access"]["missing_connection_fields"], ["password"])
+        self.assertEqual(payload["board_access"]["missing_inference_fields_by_variant"]["current"], ["password"])
+        self.assertEqual(payload["board_access"]["missing_inference_fields_by_variant"]["baseline"], ["password"])
+        self.assertEqual(payload["board_access"]["field_sources"]["host"], "preloaded")
+        self.assertEqual(payload["board_access"]["field_sources"]["password"], "missing")
+        self.assertEqual(
+            payload["board_access"]["preloaded_defaults"]["ssh_env_file"],
+            "session_bootstrap/config/phytium_pi_login.example.env",
+        )
+        self.assertEqual(
+            payload["board_access"]["preloaded_defaults"]["inference_env_file"],
+            "session_bootstrap/config/inference_real_reconstruction_compare.2026-03-11.phytium_pi.env",
+        )
+        self.assertNotIn("password", payload["board_access"])
+
     def test_system_status_endpoint_exposes_redacted_board_access(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
 
@@ -325,6 +357,30 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(payload["board_access"]["user"], "demo-user")
         self.assertTrue(payload["board_access"]["has_password"])
         self.assertNotIn("password", payload["board_access"])
+
+    def test_board_access_endpoint_accepts_password_only_and_keeps_preloaded_defaults(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+
+        status, _, payload = request_json(
+            state,
+            "POST",
+            "/api/session/board-access",
+            body=json.dumps({"password": "demo-pass"}).encode("utf-8"),
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["board_access"]["host"], "100.121.87.73")
+        self.assertEqual(payload["board_access"]["user"], "user")
+        self.assertEqual(payload["board_access"]["port"], 22)
+        self.assertEqual(
+            payload["board_access"]["env_file"],
+            "session_bootstrap/config/inference_real_reconstruction_compare.2026-03-11.phytium_pi.env",
+        )
+        self.assertTrue(payload["board_access"]["has_password"])
+        self.assertTrue(payload["board_access"]["connection_ready"])
+        self.assertTrue(payload["board_access"]["inference_ready_variants"]["current"])
+        self.assertTrue(payload["board_access"]["inference_ready_variants"]["baseline"])
+        self.assertEqual(payload["board_access"]["field_sources"]["password"], "session")
 
     def test_probe_board_endpoint_updates_snapshot_after_success(self) -> None:
         success = live_probe_payload("2026-03-15T12:00:00+0800", "board reachable")
@@ -394,7 +450,7 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertFalse(snapshot_payload["board"]["current_status"]["reachable"])
         self.assertEqual(snapshot_payload["board"]["current_status"]["requested_at"], "")
 
-    def test_run_inference_endpoint_falls_back_without_session_access(self) -> None:
+    def test_run_inference_endpoint_falls_back_until_password_is_provided(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
 
         status, headers, payload = request_json(
@@ -408,8 +464,53 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(headers["content-type"], "application/json; charset=utf-8")
         self.assertEqual(payload["execution_mode"], "prerecorded")
         self.assertEqual(payload["variant"], "current")
-        self.assertIn("预录", payload["message"])
+        self.assertEqual(payload["status_category"], "config_error")
+        self.assertIn("配置不完整或不可用", payload["message"])
+        self.assertEqual(payload["live_attempt"]["status"], "config_error")
+        self.assertEqual(payload["live_attempt"]["missing_fields"], ["password"])
         self.assertIn("guided_demo", state.current_snapshot())
+
+    def test_run_inference_endpoint_uses_preloaded_env_after_password_only_save(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        request_json(
+            state,
+            "POST",
+            "/api/session/board-access",
+            body=json.dumps({"password": "demo-pass"}).encode("utf-8"),
+        )
+
+        with patch(
+            "server.run_remote_reconstruction",
+            return_value={
+                "status": "success",
+                "execution_mode": "live",
+                "variant": "current",
+                "message": "live ok",
+                "runner_summary": {
+                    "load_ms": 3.2,
+                    "vm_init_ms": 0.8,
+                    "run_median_ms": 128.4,
+                    "artifact_sha256": "abcd" * 16,
+                },
+            },
+        ) as run_reconstruction:
+            status, _, payload = request_json(
+                state,
+                "POST",
+                "/api/run-inference",
+                body=json.dumps({"image_index": 0, "mode": "current"}).encode("utf-8"),
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["execution_mode"], "live")
+        access = run_reconstruction.call_args.args[0]
+        self.assertEqual(access.host, "100.121.87.73")
+        self.assertEqual(access.user, "user")
+        self.assertEqual(access.password, "demo-pass")
+        self.assertEqual(
+            access.env_file,
+            REPO_ROOT / "session_bootstrap/config/inference_real_reconstruction_compare.2026-03-11.phytium_pi.env",
+        )
 
     def test_run_inference_endpoint_uses_live_runner_when_available(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
