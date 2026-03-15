@@ -42,7 +42,7 @@
  /************************** Variable Definitions *****************************/
  static volatile int shutdown_req = 0;
  
-@@ -128,34 +156,721 @@
+@@ -128,34 +156,782 @@
  /*******************例程全局变量***********************************************/
  struct remoteproc remoteproc_slave_00;
  static struct rpmsg_device *rpdev_slave_00 = NULL;
@@ -124,11 +124,37 @@
 +    ScStatusResp payload;
 +} ScStatusRespFrame;
 +
-+static const uint8_t sc_trusted_sha256[32] = {
-+    0x6f, 0x23, 0x6b, 0x07, 0xf9, 0xb0, 0xbf, 0x98,
-+    0x1b, 0x67, 0x62, 0xdd, 0xb7, 0x24, 0x49, 0xe2,
-+    0x33, 0x32, 0xd2, 0xd9, 0x2c, 0x76, 0xb3, 0x8a,
-+    0xcd, 0xca, 0xdc, 0x1d, 0x9b, 0x53, 0x6d, 0xc1,
++typedef struct
++{
++    const char *label;
++    uint8_t sha256[32];
++    uint32_t enabled;
++    const char *source;
++} ScTrustedArtifactEntry;
++
++static const ScTrustedArtifactEntry sc_trusted_artifact_allowlist[] = {
++    {
++        "baseline",
++        {
++            0x94, 0x78, 0xc8, 0x27, 0x7b, 0x01, 0x3c, 0xcb,
++            0xca, 0xe9, 0xda, 0xba, 0xf7, 0x2d, 0xd1, 0x23,
++            0xef, 0xc7, 0x90, 0x84, 0x05, 0xa3, 0x59, 0xb9,
++            0x51, 0xd7, 0xc8, 0x5f, 0x78, 0x0b, 0x8d, 0xf8,
++        },
++        1U,
++        "session_bootstrap/reports/inference_local_scheme_a_payload_20260311_133729.md",
++    }, /* sha256=9478c8277b013ccbcae9dabaf72dd123efc7908405a359b951d7c85f780b8df8 */
++    {
++        "current",
++        {
++            0x6f, 0x23, 0x6b, 0x07, 0xf9, 0xb0, 0xbf, 0x98,
++            0x1b, 0x67, 0x62, 0xdd, 0xb7, 0x24, 0x49, 0xe2,
++            0x33, 0x32, 0xd2, 0xd9, 0x2c, 0x76, 0xb3, 0x8a,
++            0xcd, 0xca, 0xdc, 0x1d, 0x9b, 0x53, 0x6d, 0xc1,
++        },
++        1U,
++        "session_bootstrap/reports/inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md",
++    }, /* sha256=6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1 */
 +};
 +
 +static uint32_t sc_guard_state = SC_GUARD_STATE_READY;
@@ -200,6 +226,40 @@
 +static uint32_t sc_ctrl_compute_header_crc(const ScCtrlHdr *header)
 +{
 +    return sc_ctrl_crc32(header, 20U);
++}
++
++static int sc_ctrl_is_trusted_artifact_sha(const uint8_t expected_sha256[32],
++                                           const ScTrustedArtifactEntry **matched_entry)
++{
++    size_t entry_index;
++
++    for (entry_index = 0; entry_index < (sizeof(sc_trusted_artifact_allowlist) /
++                                         sizeof(sc_trusted_artifact_allowlist[0]));
++         ++entry_index)
++    {
++        const ScTrustedArtifactEntry *entry = &sc_trusted_artifact_allowlist[entry_index];
++
++        if (entry->enabled == 0U)
++        {
++            continue;
++        }
++
++        if (memcmp(expected_sha256, entry->sha256, sizeof(entry->sha256)) == 0)
++        {
++            if (matched_entry != NULL)
++            {
++                *matched_entry = entry;
++            }
++            return 1;
++        }
++    }
++
++    if (matched_entry != NULL)
++    {
++        *matched_entry = NULL;
++    }
++
++    return 0;
 +}
 +
 +static uint64_t sc_ctrl_read_timer_frequency(void)
@@ -401,6 +461,7 @@
 +                                  const void *payload_data)
 +{
 +    ScJobReq request;
++    const ScTrustedArtifactEntry *matched_artifact = NULL;
 +    uint32_t fault_code = SC_FAULT_NONE;
 +    int ret;
 +
@@ -420,8 +481,7 @@
 +        goto deny_request;
 +    }
 +
-+    if (memcmp(request.expected_sha256, sc_trusted_sha256,
-+               sizeof(sc_trusted_sha256)) != 0)
++    if (!sc_ctrl_is_trusted_artifact_sha(request.expected_sha256, &matched_artifact))
 +    {
 +        fault_code = SC_FAULT_ARTIFACT_SHA;
 +        goto deny_request;
@@ -459,9 +519,10 @@
 +        return ret;
 +    }
 +
-+    SLAVE_DEBUG_I("JOB_REQ allow seq:%u job_id:%u outputs:%u flags:%u",
++    SLAVE_DEBUG_I("JOB_REQ allow seq:%u job_id:%u artifact:%s outputs:%u flags:%u",
 +                  (unsigned int)request_header->seq,
 +                  (unsigned int)request_header->job_id,
++                  (matched_artifact != NULL) ? matched_artifact->label : "unknown",
 +                  (unsigned int)request.expected_outputs,
 +                  (unsigned int)request.flags);
 +    return RPMSG_SUCCESS;
@@ -777,7 +838,7 @@
  }
  
  static void rpmsg_service_unbind(struct rpmsg_endpoint *ept)
-@@ -247,7 +962,8 @@
+@@ -247,7 +1023,8 @@
      SLAVE_DEBUG_I("Starting application...");
      if(!slave_init())
      {

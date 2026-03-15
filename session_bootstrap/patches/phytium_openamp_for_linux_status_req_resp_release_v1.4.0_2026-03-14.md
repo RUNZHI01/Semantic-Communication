@@ -57,8 +57,9 @@ Implemented behavior:
 Minimal admission checks in the patch:
 
 - Guard must be `READY` and `active_job_id` must be `0`.
-- `expected_sha256` must match the built-in trusted-current SHA constant
-  - `6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1`
+- `expected_sha256` must match any enabled entry in the built-in trusted-artifact allowlist
+  - `baseline`: `9478c8277b013ccbcae9dabaf72dd123efc7908405a359b951d7c85f780b8df8`
+  - `current`: `6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1`
 - `deadline_ms > 0`
 - `expected_outputs` must be `1` or `300`
 - `flags` must be one of the known wire values `1/2/3`
