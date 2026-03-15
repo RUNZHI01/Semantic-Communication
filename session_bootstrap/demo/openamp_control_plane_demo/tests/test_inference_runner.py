@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 import unittest
@@ -12,7 +13,12 @@ if str(DEMO_ROOT) not in sys.path:
     sys.path.insert(0, str(DEMO_ROOT))
 
 from board_access import BoardAccessConfig  # noqa: E402
-from inference_runner import PROJECT_ROOT, REMOTE_RECONSTRUCTION_SCRIPT, run_remote_reconstruction  # noqa: E402
+from inference_runner import (  # noqa: E402
+    PROJECT_ROOT,
+    LiveRemoteReconstructionJob,
+    REMOTE_RECONSTRUCTION_SCRIPT,
+    run_remote_reconstruction,
+)
 
 
 def make_access(env_values: dict[str, str] | None = None) -> BoardAccessConfig:
@@ -133,6 +139,19 @@ class RunRemoteReconstructionTest(unittest.TestCase):
                 "expected_sha256": expected_sha,
                 "actual_sha256": actual_sha,
             },
+        )
+
+    def test_build_hook_command_forwards_remote_project_root_to_proxy(self) -> None:
+        access = make_access({"REMOTE_PROJECT_ROOT": "/tmp/openamp_wrong_sha_fit/project"})
+        job = LiveRemoteReconstructionJob.__new__(LiveRemoteReconstructionJob)
+        job.job_id = "job-123"
+
+        command = shlex.split(job._build_hook_command(access))
+
+        self.assertIn("--remote-project-root", command)
+        self.assertEqual(
+            command[command.index("--remote-project-root") + 1],
+            "/tmp/openamp_wrong_sha_fit/project",
         )
 
 

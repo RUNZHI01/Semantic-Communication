@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import sys
 import tempfile
@@ -15,6 +16,7 @@ from board_access import (  # noqa: E402
     build_board_access_config,
     build_demo_default_board_access,
     discover_validated_inference_env,
+    discover_validated_openamp_remote_project_root,
     first_existing_env,
 )
 
@@ -32,9 +34,23 @@ class DemoBoardAccessDefaultsTest(unittest.TestCase):
 
         self.assertEqual(discovered, env_path.resolve())
 
+    def test_discover_validated_openamp_remote_project_root_uses_run_manifest_board_access(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            manifest_path = temp_root / "run_manifest.json"
+            manifest_path.write_text(
+                json.dumps({"board_access": {"remote_project_root": "/tmp/openamp_demo/project"}}),
+                encoding="utf-8",
+            )
+
+            discovered = discover_validated_openamp_remote_project_root((str(manifest_path),))
+
+        self.assertEqual(discovered, "/tmp/openamp_demo/project")
+
     def test_demo_defaults_prefill_real_repo_files_without_password(self) -> None:
         access = build_demo_default_board_access(None)
         expected_inference_env = discover_validated_inference_env() or first_existing_env(DEFAULT_INFERENCE_ENV_CANDIDATES)
+        expected_remote_project_root = discover_validated_openamp_remote_project_root()
 
         self.assertEqual(access.host, "100.121.87.73")
         self.assertEqual(access.user, "user")
@@ -53,6 +69,7 @@ class DemoBoardAccessDefaultsTest(unittest.TestCase):
         self.assertEqual(access.missing_inference_fields("baseline"), ["password"])
         self.assertNotIn("REMOTE_PASS", access.env_values)
         self.assertNotIn("PHYTIUM_PI_PASSWORD", access.env_values)
+        self.assertEqual(access.build_env().get("REMOTE_PROJECT_ROOT", ""), expected_remote_project_root)
 
     def test_password_only_update_reuses_preloaded_ssh_and_inference_defaults(self) -> None:
         defaults = build_demo_default_board_access(None)
@@ -68,6 +85,10 @@ class DemoBoardAccessDefaultsTest(unittest.TestCase):
         self.assertEqual(access.missing_inference_fields("current"), [])
         self.assertEqual(access.missing_inference_fields("baseline"), [])
         self.assertEqual(access.build_env()["REMOTE_PASS"], "demo-pass")
+        self.assertEqual(
+            access.build_env().get("REMOTE_PROJECT_ROOT", ""),
+            defaults.build_env().get("REMOTE_PROJECT_ROOT", ""),
+        )
         self.assertEqual(access.field_sources["password"], "session")
 
 
