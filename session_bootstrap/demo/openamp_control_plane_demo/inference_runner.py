@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import re
+import secrets
 import shlex
 import subprocess
 import tempfile
@@ -31,7 +32,7 @@ RUNNER_SAMPLE_LATENCY_PATTERNS = (
 DEFAULT_HEARTBEAT_INTERVAL_SEC = 0.5
 DEFAULT_LIVE_CONTROL_HOOK_TIMEOUT_SEC = 30.0
 MIN_LIVE_CONTROL_HOOK_TIMEOUT_SEC = 5.0
-# Demo live runs stay on a fixed 100-image budget so baseline/current remain aligned
+# Demo live runs stay on a fixed 300-image budget so baseline/current remain aligned
 # without drifting into a full dataset benchmark.
 DEFAULT_MAX_INPUTS = 300
 DEFAULT_SEED = 0
@@ -85,11 +86,13 @@ def generate_live_job_id() -> str:
     global _LAST_LIVE_JOB_ID
 
     # The board-side OpenAMP frame header packs job_id as an unsigned 32-bit integer.
-    candidate = int(time.time() * 1000) & UINT32_MAX
-    if candidate == 0:
-        candidate = 1
     with _LIVE_JOB_ID_LOCK:
-        if candidate <= _LAST_LIVE_JOB_ID:
+        candidate = 0
+        for _ in range(8):
+            candidate = secrets.randbelow(UINT32_MAX) + 1
+            if candidate != _LAST_LIVE_JOB_ID:
+                break
+        if candidate == 0 or candidate == _LAST_LIVE_JOB_ID:
             candidate = (_LAST_LIVE_JOB_ID % UINT32_MAX) + 1
         _LAST_LIVE_JOB_ID = candidate
     return str(candidate)
@@ -194,6 +197,21 @@ def hook_status_category(response: dict[str, Any]) -> str | None:
     return None
 
 
+def hook_uses_permission_gate(response: dict[str, Any]) -> bool:
+    transport_status = str(response.get("transport_status") or "").strip().lower()
+    if transport_status == "permission_gate":
+        return True
+    note = str(response.get("note") or "").strip().lower()
+    return any(
+        marker in note
+        for marker in (
+            "passwordless sudo",
+            "permission denied",
+            "/dev/rpmsg",
+        )
+    )
+
+
 def control_hook_error_text(response: dict[str, Any]) -> str:
     parts: list[str] = []
     for key in (
@@ -205,12 +223,15 @@ def control_hook_error_text(response: dict[str, Any]) -> str:
         "transport_status",
         "protocol_semantics",
         "note",
-        "rpmsg_ctrl",
-        "rpmsg_dev",
     ):
         value = response.get(key)
         if value:
             parts.append(str(value))
+    if hook_uses_permission_gate(response):
+        for key in ("rpmsg_ctrl", "rpmsg_dev"):
+            value = response.get(key)
+            if value:
+                parts.append(str(value))
     return "\n".join(parts)
 
 
@@ -555,6 +576,21 @@ def append_runner_options(command: str, *, max_inputs: int, seed: int) -> str:
     return shlex.join(parts)
 
 
+def build_current_live_runner_command(*, max_inputs: int, seed: int) -> str:
+    return shlex.join(
+        [
+            "bash",
+            str(REMOTE_RECONSTRUCTION_SCRIPT),
+            "--variant",
+            "current",
+            "--max-inputs",
+            str(max_inputs),
+            "--seed",
+            str(seed),
+        ]
+    )
+
+
 def build_runner_command(
     access: BoardAccessConfig,
     *,
@@ -562,6 +598,10 @@ def build_runner_command(
     max_inputs: int,
     seed: int,
 ) -> str:
+    if variant == "current":
+        # Demo live mode pins Current to the reconstruction runner so stale env files
+        # cannot drag the UI back onto old single-image or compat semantics.
+        return build_current_live_runner_command(max_inputs=max_inputs, seed=seed)
     command = configured_runner_command(access, variant) or default_runner_command(variant)
     return append_runner_options(command, max_inputs=max_inputs, seed=seed)
 

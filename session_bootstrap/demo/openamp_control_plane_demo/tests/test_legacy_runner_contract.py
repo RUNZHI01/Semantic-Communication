@@ -17,6 +17,7 @@ from unittest.mock import Mock
 DEMO_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = DEMO_ROOT.parents[2]
 LEGACY_RUNNER = REPO_ROOT / "session_bootstrap" / "scripts" / "run_remote_legacy_tvm_compat.sh"
+CURRENT_RUNNER = REPO_ROOT / "session_bootstrap" / "scripts" / "run_remote_current_real_reconstruction.sh"
 
 if str(DEMO_ROOT) not in sys.path:
     sys.path.insert(0, str(DEMO_ROOT))
@@ -468,6 +469,188 @@ class LegacyCompatRunnerContractTest(unittest.TestCase):
             self.assertEqual(summary["processed_count"], 105)
             self.assertEqual(summary["output_count"], 105)
             self.assertEqual(summary["available_input_count"], 105)
+
+
+class CurrentReconstructionRunnerContractTest(unittest.TestCase):
+    def test_local_runner_defaults_to_demo_300_image_cap_and_clears_stale_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir_name:
+            temp_dir = Path(temp_dir_name)
+            fake_python = temp_dir / "fake_python.sh"
+            write_executable(
+                fake_python,
+                textwrap.dedent(
+                    """\
+                    #!/usr/bin/env bash
+                    set -euo pipefail
+                    cat >/dev/null
+
+                    artifact_path=""
+                    input_dir=""
+                    output_dir=""
+                    variant=""
+                    expected_sha256=""
+                    max_inputs="0"
+
+                    while [[ $# -gt 0 ]]; do
+                      case "$1" in
+                        --artifact-path)
+                          artifact_path="$2"
+                          shift 2
+                          ;;
+                        --input-dir)
+                          input_dir="$2"
+                          shift 2
+                          ;;
+                        --output-dir)
+                          output_dir="$2"
+                          shift 2
+                          ;;
+                        --variant)
+                          variant="$2"
+                          shift 2
+                          ;;
+                        --expected-sha256)
+                          expected_sha256="$2"
+                          shift 2
+                          ;;
+                        --max-inputs)
+                          max_inputs="$2"
+                          shift 2
+                          ;;
+                        *)
+                          shift
+                          ;;
+                      esac
+                    done
+
+                    mapfile -t input_files < <(find "$input_dir" -maxdepth 1 -type f -name '*.npy' | LC_ALL=C sort)
+                    available_input_count="${#input_files[@]}"
+                    selected_input_count="$available_input_count"
+                    if [[ "$max_inputs" != "0" && "$available_input_count" -gt "$max_inputs" ]]; then
+                      selected_input_count="$max_inputs"
+                    fi
+
+                    recon_dir="$output_dir/reconstructions"
+                    mkdir -p "$recon_dir"
+                    for ((index = 0; index < selected_input_count; index++)); do
+                      input_path="${input_files[$index]}"
+                      stem="$(basename "${input_path%.*}")"
+                      printf 'fake-recon' > "$recon_dir/${stem}_recon.npy"
+                    done
+
+                    python3 - "$artifact_path" "$expected_sha256" "$input_dir" "$recon_dir" "$variant" "$available_input_count" "$selected_input_count" "$max_inputs" <<'PY'
+import json
+import sys
+
+(
+    artifact_path,
+    expected_sha256,
+    input_dir,
+    recon_dir,
+    variant,
+    available_input_count,
+    selected_input_count,
+    max_inputs,
+) = sys.argv[1:]
+
+selected_input_count = int(selected_input_count)
+available_input_count = int(available_input_count)
+max_inputs = int(max_inputs)
+
+summary = {
+    "variant": variant,
+    "artifact_path": artifact_path,
+    "artifact_sha256": expected_sha256,
+    "artifact_sha256_expected": expected_sha256,
+    "artifact_sha256_match": True,
+    "input_dir": input_dir,
+    "output_dir": recon_dir,
+    "output_count": selected_input_count,
+    "processed_count": selected_input_count,
+    "input_count": selected_input_count,
+    "available_input_count": available_input_count,
+    "load_ms": 0.0,
+    "vm_init_ms": 0.0,
+    "run_count": selected_input_count,
+    "run_samples_ms": [12.0] * selected_input_count,
+    "run_median_ms": 12.0,
+    "run_mean_ms": 12.0,
+    "run_min_ms": 12.0,
+    "run_max_ms": 12.0,
+    "run_variance_ms2": 0.0,
+    "output_shape": [1, 1, 2, 2],
+    "output_dtype": "float32",
+    "snr": 12.0,
+    "batch_size": 1,
+    "save_format": "npy",
+    "seed": None,
+    "max_inputs": max_inputs,
+}
+print(json.dumps(summary, ensure_ascii=False))
+PY
+                    """
+                ),
+            )
+
+            artifact_path = temp_dir / "optimized_model.so"
+            artifact_bytes = b"current-openamp-artifact"
+            artifact_path.write_bytes(artifact_bytes)
+            expected_sha = hashlib.sha256(artifact_bytes).hexdigest()
+
+            input_dir = temp_dir / "inputs"
+            input_dir.mkdir()
+            for index in range(305):
+                (input_dir / f"sample_{index:03d}.npy").write_bytes(f"latent-{index:03d}".encode("utf-8"))
+
+            output_base = temp_dir / "outputs"
+            output_base.mkdir()
+            stale_recon_dir = output_base / "inference_real_reconstruction_current" / "reconstructions"
+            stale_recon_dir.mkdir(parents=True)
+            stale_output = stale_recon_dir / "stale_single_image.npy"
+            stale_output.write_bytes(b"stale")
+            os.utime(stale_output, (1, 1))
+
+            env = os.environ.copy()
+            env.update(
+                {
+                    "REMOTE_MODE": "local",
+                    "REMOTE_TVM_PYTHON": str(fake_python),
+                    "REMOTE_INPUT_DIR": str(input_dir),
+                    "REMOTE_OUTPUT_BASE": str(output_base),
+                    "REMOTE_SNR_CURRENT": "12",
+                    "REMOTE_BATCH_CURRENT": "1",
+                    "REMOTE_CURRENT_ARTIFACT": str(artifact_path),
+                    "INFERENCE_CURRENT_EXPECTED_SHA256": expected_sha,
+                    "OPENAMP_DEMO_MODE": "1",
+                    "OPENAMP_DEMO_MAX_INPUTS": "300",
+                }
+            )
+
+            result = subprocess.run(
+                ["bash", str(CURRENT_RUNNER), "--variant", "current"],
+                cwd=REPO_ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            summary = json.loads([line.strip() for line in result.stdout.splitlines() if line.strip()][-1])
+            self.assertEqual(summary["variant"], "current")
+            self.assertEqual(summary["artifact_path"], str(artifact_path))
+            self.assertEqual(summary["artifact_sha256"], expected_sha)
+            self.assertEqual(summary["artifact_sha256_expected"], expected_sha)
+            self.assertTrue(summary["artifact_sha256_match"])
+            self.assertEqual(summary["max_inputs"], 300)
+            self.assertEqual(summary["available_input_count"], 305)
+            self.assertEqual(summary["input_count"], 300)
+            self.assertEqual(summary["processed_count"], 300)
+            self.assertEqual(summary["run_count"], 300)
+            self.assertEqual(len(summary["run_samples_ms"]), 300)
+            self.assertEqual(summary["output_count"], 300)
+            self.assertFalse(stale_output.exists())
 
 
 class LegacyBaselineLiveConsumptionTest(unittest.TestCase):
