@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 import html
 import json
 import mimetypes
@@ -205,6 +206,23 @@ class DashboardState:
                 result["control_status"] = status_payload
         return result
 
+    def _build_inference_access(self, board_access: BoardAccessConfig, variant: str) -> BoardAccessConfig:
+        if variant != "current" or not self._trusted_current_sha:
+            return board_access
+
+        effective_env = board_access.build_env()
+        if effective_env.get("INFERENCE_CURRENT_EXPECTED_SHA256") == self._trusted_current_sha:
+            return board_access
+
+        # Keep current live inference pinned to the trusted-current line shown in the demo.
+        effective_env["INFERENCE_CURRENT_EXPECTED_SHA256"] = self._trusted_current_sha
+        return replace(
+            board_access,
+            env_values=effective_env,
+            startup_env_values={},
+            env_file_values={},
+        )
+
     def run_demo_inference(self, *, variant: str, image_index: int) -> dict[str, Any]:
         payload = build_prerecorded_inference_result(image_index, variant)
         payload["status_category"] = "fallback"
@@ -212,7 +230,8 @@ class DashboardState:
             board_access = self._board_access
 
         if board_access.configured:
-            live_result = run_remote_reconstruction(board_access, variant=variant)
+            inference_access = self._build_inference_access(board_access, variant)
+            live_result = run_remote_reconstruction(inference_access, variant=variant)
             payload["live_attempt"] = live_result
             if live_result.get("status") == "success":
                 summary = live_result["runner_summary"]

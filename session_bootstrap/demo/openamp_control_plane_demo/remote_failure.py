@@ -27,6 +27,11 @@ _TIMEOUT_PATTERNS = (
     "timeout",
 )
 
+_ARTIFACT_MISMATCH_PATTERNS = (
+    "artifact sha256 mismatch",
+    "artifact_sha256 mismatch",
+)
+
 _MESSAGE_TEMPLATES = {
     "probe": {
         "auth_error": "板卡 SSH 认证失败，请检查用户名、密码或 SSH 端口设置。",
@@ -37,6 +42,7 @@ _MESSAGE_TEMPLATES = {
     "inference": {
         "auth_error": "远端推理认证失败，请检查板卡用户名、密码或 SSH 端口设置。",
         "config_error": "远端推理配置不完整或不可用，请检查连接信息和推理环境参数。",
+        "artifact_mismatch": "远端 current 工件与界面展示的 trusted current SHA 不一致，请同步板端 optimized_model.so 后重试。",
         "timeout": "远端推理超时，请确认板卡在线后重试。",
         "error": "远端推理执行失败，请查看诊断信息。",
     },
@@ -101,6 +107,8 @@ def classify_status_category(
         return "auth_error"
     if any(pattern in text for pattern in _TIMEOUT_PATTERNS):
         return "timeout"
+    if any(pattern in text for pattern in _ARTIFACT_MISMATCH_PATTERNS):
+        return "artifact_mismatch"
     if status == "launch_error":
         return "config_error"
     if any(pattern in text for pattern in _CONFIG_PATTERNS):
