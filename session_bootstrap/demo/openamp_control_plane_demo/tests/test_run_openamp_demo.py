@@ -21,19 +21,35 @@ def write_executable(path: Path, content: str) -> None:
 
 
 class OpenAMPDemoLauncherTest(unittest.TestCase):
-    def build_mock_env(self, temp_dir: Path, ss_before: str, ss_after: str, ps_output: str) -> tuple[dict[str, str], Path]:
+    def build_mock_env(
+        self,
+        temp_dir: Path,
+        ss_outputs: list[str],
+        ps_outputs: list[str],
+        lsof_outputs: list[str],
+    ) -> tuple[dict[str, str], Path, Path]:
         bin_dir = temp_dir / "bin"
         bin_dir.mkdir()
 
-        ss_before_path = temp_dir / "ss_before.txt"
-        ss_after_path = temp_dir / "ss_after.txt"
-        ps_output_path = temp_dir / "ps_output.txt"
         ss_call_count_path = temp_dir / "ss.calls"
+        ps_call_count_path = temp_dir / "ps.calls"
+        lsof_call_count_path = temp_dir / "lsof.calls"
         python_log_path = temp_dir / "python.log"
+        kill_log_path = temp_dir / "kill.log"
+        bash_env_path = temp_dir / "bash_env.sh"
+        ss_output_dir = temp_dir / "ss"
+        ps_output_dir = temp_dir / "ps"
+        lsof_output_dir = temp_dir / "lsof"
+        ss_output_dir.mkdir()
+        ps_output_dir.mkdir()
+        lsof_output_dir.mkdir()
 
-        ss_before_path.write_text(ss_before, encoding="utf-8")
-        ss_after_path.write_text(ss_after, encoding="utf-8")
-        ps_output_path.write_text(ps_output, encoding="utf-8")
+        for index, output in enumerate(ss_outputs):
+            (ss_output_dir / f"{index}.txt").write_text(output, encoding="utf-8")
+        for index, output in enumerate(ps_outputs):
+            (ps_output_dir / f"{index}.txt").write_text(output, encoding="utf-8")
+        for index, output in enumerate(lsof_outputs):
+            (lsof_output_dir / f"{index}.txt").write_text(output, encoding="utf-8")
 
         write_executable(
             bin_dir / "ss",
@@ -45,12 +61,12 @@ class OpenAMPDemoLauncherTest(unittest.TestCase):
                 if [[ -f "${MOCK_SS_CALL_COUNT_FILE}" ]]; then
                     call_count="$(cat "${MOCK_SS_CALL_COUNT_FILE}")"
                 fi
-                if [[ "${call_count}" == "0" ]]; then
-                    printf '1' > "${MOCK_SS_CALL_COUNT_FILE}"
-                    cat "${MOCK_SS_OUTPUT_FILE}"
-                else
-                    cat "${MOCK_SS_OUTPUT_AFTER_FILE}"
+                output_index="${call_count}"
+                if (( output_index >= MOCK_SS_OUTPUT_COUNT )); then
+                    output_index=$((MOCK_SS_OUTPUT_COUNT - 1))
                 fi
+                printf '%s' "$((call_count + 1))" > "${MOCK_SS_CALL_COUNT_FILE}"
+                cat "${MOCK_SS_OUTPUT_DIR}/${output_index}.txt"
                 """
             ),
         )
@@ -61,7 +77,16 @@ class OpenAMPDemoLauncherTest(unittest.TestCase):
                 #!/usr/bin/env bash
                 set -euo pipefail
                 if [[ "${1:-}" == "-eo" && "${2:-}" == "pid=,args=" ]]; then
-                    cat "${MOCK_PS_OUTPUT_FILE}"
+                    call_count=0
+                    if [[ -f "${MOCK_PS_CALL_COUNT_FILE}" ]]; then
+                        call_count="$(cat "${MOCK_PS_CALL_COUNT_FILE}")"
+                    fi
+                    output_index="${call_count}"
+                    if (( output_index >= MOCK_PS_OUTPUT_COUNT )); then
+                        output_index=$((MOCK_PS_OUTPUT_COUNT - 1))
+                    fi
+                    printf '%s' "$((call_count + 1))" > "${MOCK_PS_CALL_COUNT_FILE}"
+                    cat "${MOCK_PS_OUTPUT_DIR}/${output_index}.txt"
                     exit 0
                 fi
                 printf 'unexpected ps invocation: %s\n' "$*" >&2
@@ -70,14 +95,38 @@ class OpenAMPDemoLauncherTest(unittest.TestCase):
             ),
         )
         write_executable(
-            bin_dir / "kill",
+            bin_dir / "lsof",
             textwrap.dedent(
                 """\
                 #!/usr/bin/env bash
                 set -euo pipefail
-                exit 0
+                call_count=0
+                if [[ -f "${MOCK_LSOF_CALL_COUNT_FILE}" ]]; then
+                    call_count="$(cat "${MOCK_LSOF_CALL_COUNT_FILE}")"
+                fi
+                output_index="${call_count}"
+                if (( output_index >= MOCK_LSOF_OUTPUT_COUNT )); then
+                    output_index=$((MOCK_LSOF_OUTPUT_COUNT - 1))
+                fi
+                printf '%s' "$((call_count + 1))" > "${MOCK_LSOF_CALL_COUNT_FILE}"
+                cat "${MOCK_LSOF_OUTPUT_DIR}/${output_index}.txt"
                 """
             ),
+        )
+        bash_env_path.write_text(
+            textwrap.dedent(
+                """\
+                kill() {
+                    printf '%s\n' "$*" >> "${MOCK_KILL_LOG_FILE}"
+                    return 0
+                }
+
+                sleep() {
+                    return 0
+                }
+                """
+            ),
+            encoding="utf-8",
         )
         write_executable(
             bin_dir / "python3",
@@ -95,24 +144,32 @@ class OpenAMPDemoLauncherTest(unittest.TestCase):
         env.update(
             {
                 "PATH": f"{bin_dir}:{env['PATH']}",
-                "MOCK_SS_OUTPUT_FILE": str(ss_before_path),
-                "MOCK_SS_OUTPUT_AFTER_FILE": str(ss_after_path),
+                "BASH_ENV": str(bash_env_path),
+                "MOCK_SS_OUTPUT_COUNT": str(len(ss_outputs)),
+                "MOCK_SS_OUTPUT_DIR": str(ss_output_dir),
                 "MOCK_SS_CALL_COUNT_FILE": str(ss_call_count_path),
-                "MOCK_PS_OUTPUT_FILE": str(ps_output_path),
+                "MOCK_PS_OUTPUT_COUNT": str(len(ps_outputs)),
+                "MOCK_PS_OUTPUT_DIR": str(ps_output_dir),
+                "MOCK_PS_CALL_COUNT_FILE": str(ps_call_count_path),
+                "MOCK_LSOF_OUTPUT_COUNT": str(len(lsof_outputs)),
+                "MOCK_LSOF_OUTPUT_DIR": str(lsof_output_dir),
+                "MOCK_LSOF_CALL_COUNT_FILE": str(lsof_call_count_path),
+                "MOCK_KILL_LOG_FILE": str(kill_log_path),
                 "MOCK_PYTHON_LOG_FILE": str(python_log_path),
             }
         )
-        return env, python_log_path
+        return env, python_log_path, kill_log_path
 
     def test_reclaims_existing_demo_server_listener_before_restart(self) -> None:
         port = "8090"
-        ss_before = f"LISTEN 0 5 127.0.0.1:{port} 0.0.0.0:*\n"
         fake_pid = "999999"
-        ps_output = f"{fake_pid} python3 {SERVER} --port {port}\n"
+        ss_outputs = [f"LISTEN 0 5 127.0.0.1:{port} 0.0.0.0:*\n", ""]
+        ps_outputs = [f"{fake_pid} python3 {SERVER} --port {port}\n"]
+        lsof_outputs = [f"p{fake_pid}\nn127.0.0.1:{port}\n", ""]
 
         with tempfile.TemporaryDirectory() as temp_dir_name:
             temp_dir = Path(temp_dir_name)
-            env, python_log_path = self.build_mock_env(temp_dir, ss_before, "", ps_output)
+            env, python_log_path, kill_log_path = self.build_mock_env(temp_dir, ss_outputs, ps_outputs, lsof_outputs)
 
             result = subprocess.run(
                 ["bash", str(LAUNCHER), "--port", port],
@@ -124,16 +181,18 @@ class OpenAMPDemoLauncherTest(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn(f"Reclaiming port {port} from existing OpenAMP demo server PID {fake_pid}.", result.stderr)
+            self.assertIn(f"Reclaiming port {port} from existing OpenAMP demo server PID {fake_pid} with TERM.", result.stderr)
+            self.assertEqual(kill_log_path.read_text(encoding="utf-8").strip(), f"-TERM {fake_pid}")
             self.assertEqual(python_log_path.read_text(encoding="utf-8").strip(), f"{SERVER} --port {port}")
 
     def test_refuses_to_kill_non_demo_listener_on_requested_port(self) -> None:
         port = "8091"
-        ss_before = f"LISTEN 0 5 127.0.0.1:{port} 0.0.0.0:*\n"
+        ss_outputs = [f"LISTEN 0 5 127.0.0.1:{port} 0.0.0.0:*\n"]
+        lsof_outputs = [f"p555555\nn127.0.0.1:{port}\n"]
 
         with tempfile.TemporaryDirectory() as temp_dir_name:
             temp_dir = Path(temp_dir_name)
-            env, python_log_path = self.build_mock_env(temp_dir, ss_before, "", "")
+            env, python_log_path, kill_log_path = self.build_mock_env(temp_dir, ss_outputs, [""], lsof_outputs)
 
             result = subprocess.run(
                 ["bash", str(LAUNCHER), f"--port={port}"],
@@ -148,6 +207,41 @@ class OpenAMPDemoLauncherTest(unittest.TestCase):
             self.assertIn(f"Requested OpenAMP demo port {port} is already in use", result.stderr)
             self.assertIn("Refusing to stop a non-OpenAMP listener.", result.stderr)
             self.assertFalse(python_log_path.exists())
+            self.assertFalse(kill_log_path.exists())
+
+    def test_escalates_to_kill_when_demo_listener_survives_term_grace(self) -> None:
+        port = "8092"
+        fake_pid = "777777"
+        ss_outputs = [f"LISTEN 0 5 127.0.0.1:{port} 0.0.0.0:*\n"] * 12 + [""]
+        ps_outputs = [f"{fake_pid} python3 {SERVER} --port {port}\n"]
+        lsof_outputs = [f"p{fake_pid}\nn127.0.0.1:{port}\n"] * 12 + [""]
+
+        with tempfile.TemporaryDirectory() as temp_dir_name:
+            temp_dir = Path(temp_dir_name)
+            env, python_log_path, kill_log_path = self.build_mock_env(temp_dir, ss_outputs, ps_outputs, lsof_outputs)
+
+            result = subprocess.run(
+                ["bash", str(LAUNCHER), "--port", port],
+                cwd=REPO_ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn(f"Reclaiming port {port} from existing OpenAMP demo server PID {fake_pid} with TERM.", result.stderr)
+            self.assertIn(
+                f"Existing OpenAMP demo server PID(s) {fake_pid} still hold port {port} after TERM grace period",
+                result.stderr,
+            )
+            self.assertIn(
+                f"Escalating reclaim of port {port} to KILL for existing OpenAMP demo server PID {fake_pid}.",
+                result.stderr,
+            )
+            self.assertEqual(kill_log_path.read_text(encoding="utf-8").splitlines(), [f"-TERM {fake_pid}", f"-KILL {fake_pid}"])
+            self.assertEqual(python_log_path.read_text(encoding="utf-8").strip(), f"{SERVER} --port {port}")
 
 
 if __name__ == "__main__":
