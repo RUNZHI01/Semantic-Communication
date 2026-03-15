@@ -26,6 +26,10 @@ ARTIFACT_SHA_MISMATCH_RE = re.compile(
 DEFAULT_HEARTBEAT_INTERVAL_SEC = 0.5
 DEFAULT_MAX_INPUTS = 1
 DEFAULT_SEED = 0
+UINT32_MAX = (1 << 32) - 1
+
+_LIVE_JOB_ID_LOCK = Lock()
+_LAST_LIVE_JOB_ID = 0
 
 
 def parse_json_stdout(raw: str) -> dict[str, Any]:
@@ -37,6 +41,20 @@ def parse_json_stdout(raw: str) -> dict[str, Any]:
         if isinstance(payload, dict):
             return payload
     raise ValueError("runner produced no JSON payload")
+
+
+def generate_live_job_id() -> str:
+    global _LAST_LIVE_JOB_ID
+
+    # The board-side OpenAMP frame header packs job_id as an unsigned 32-bit integer.
+    candidate = int(time.time() * 1000) & UINT32_MAX
+    if candidate == 0:
+        candidate = 1
+    with _LIVE_JOB_ID_LOCK:
+        if candidate <= _LAST_LIVE_JOB_ID:
+            candidate = (_LAST_LIVE_JOB_ID % UINT32_MAX) + 1
+        _LAST_LIVE_JOB_ID = candidate
+    return str(candidate)
 
 
 def extract_artifact_sha_mismatch(*values: str) -> dict[str, str]:
@@ -302,7 +320,7 @@ class LiveRemoteReconstructionJob:
         timeout_sec: float = 900.0,
         heartbeat_interval_sec: float = DEFAULT_HEARTBEAT_INTERVAL_SEC,
     ) -> None:
-        self.job_id = str(int(time.time() * 1000))
+        self.job_id = generate_live_job_id()
         self.variant = variant
         self._timeout_sec = timeout_sec
         self._output_dir = Path(tempfile.mkdtemp(prefix="openamp_demo_live_", dir="/tmp"))
