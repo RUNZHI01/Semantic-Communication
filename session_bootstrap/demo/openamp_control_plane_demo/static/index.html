@@ -127,7 +127,19 @@
           <span>测试图</span>
           <select id="imageSelect"></select>
         </label>
-        <button id="runCurrentButton" class="button button-primary" type="button">开始 Current 推理</button>
+        <button id="runCurrentButton" class="button button-primary" type="button">启动 Current 在线推进</button>
+      </div>
+      <div class="panel-lite live-progress-shell">
+        <div class="live-progress-top">
+          <div>
+            <div class="label">在线推进</div>
+            <div class="status-pill tone-neutral" id="liveProgressBadge">等待触发</div>
+          </div>
+          <div class="live-progress-percent" id="liveProgressPercent">0%</div>
+        </div>
+        <div class="progress-track"><span id="liveProgressBar"></span></div>
+        <div class="stage-chip-row" id="liveStageChips"></div>
+        <div class="log-panel live-trace-panel" id="liveTracePanel">等待板端推进。</div>
       </div>
       <div class="image-compare">
         <figure class="image-card">

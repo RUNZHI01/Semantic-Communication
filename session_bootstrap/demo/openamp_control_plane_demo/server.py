@@ -25,7 +25,7 @@ from demo_data import (
     resolve_repo_path,
 )
 from fault_injector import query_live_status, run_fault_action, run_recover_action
-from inference_runner import run_remote_reconstruction
+from inference_runner import launch_remote_reconstruction_job
 
 
 STATIC_ROOT = Path(__file__).resolve().parent / "static"
@@ -73,6 +73,7 @@ class DashboardState:
         self._last_control_status: dict[str, Any] | None = None
         self._last_inference_result: dict[str, Any] | None = None
         self._last_fault_result: dict[str, Any] | None = None
+        self._inference_jobs: dict[str, dict[str, Any]] = {}
 
         cached_probe = load_probe_output(probe_cache_path) if probe_cache_path else None
         if is_successful_probe(cached_probe):
@@ -138,19 +139,19 @@ class DashboardState:
         if board_online:
             mode_label = "在线模式"
             mode_tone = "online"
-            mode_summary = "板卡 SSH 与最新读数可用，演示动作优先尝试真机。"
+            mode_summary = "板卡 SSH 与 RPMsg 读数可用，第二幕会展示真实在线推进。"
         elif board_access.connection_ready:
             mode_label = "降级模式"
             mode_tone = "degraded"
-            mode_summary = "已记录本场凭据，但当前没有新的板卡在线读数，动作会自动回退到预录证据。"
+            mode_summary = "本场会话已就绪；若真机链路暂不可用，界面会明确切回归档证据。"
         elif board_access.has_preloaded_defaults and board_access.missing_connection_fields() == ["password"]:
             mode_label = "待补全密码"
             mode_tone = "degraded"
-            mode_summary = "已预载仓库内的 SSH / 推理默认值；只需在网页补一次密码即可尝试真机探板、Current 与 Baseline。"
+            mode_summary = "SSH 与推理默认值已预载；补一次密码即可触发真机动作。"
         elif board_access.configured:
             mode_label = "待补全会话"
             mode_tone = "degraded"
-            mode_summary = "已记录部分连接或推理信息；补齐缺失字段后才能尝试真机动作。"
+            mode_summary = "已接入部分会话信息；补齐缺失字段后即可尝试真机动作。"
         else:
             mode_label = "离线模式"
             mode_tone = "offline"
@@ -205,71 +206,165 @@ class DashboardState:
                 result["control_status"] = status_payload
         return result
 
+    def _build_inference_response(self, record: dict[str, Any], live_attempt: dict[str, Any]) -> dict[str, Any]:
+        variant = str(record["variant"])
+        image_index = int(record["image_index"])
+        payload = build_prerecorded_inference_result(image_index, variant)
+        progress = live_attempt.get("progress", {})
+        payload["job_id"] = record["job_id"]
+        payload["request_state"] = live_attempt.get("request_state", "completed")
+        payload["live_progress"] = progress
+
+        if live_attempt.get("request_state") == "running":
+            payload.update(
+                {
+                    "status": "running",
+                    "execution_mode": "live",
+                    "status_category": "running",
+                    "source_label": "真实在线推进",
+                    "message": "OpenAMP 控制面已接入本次演示，界面正在同步板端推进阶段。",
+                    "timings": {
+                        "payload_ms": None,
+                        "prepare_ms": None,
+                        "total_ms": None,
+                        "stages": [],
+                    },
+                    "quality": payload["quality"],
+                    "live_attempt": live_attempt,
+                }
+            )
+            return payload
+
+        if live_attempt.get("status") == "success":
+            summary = live_attempt["runner_summary"]
+            live_stages = [
+                {
+                    "label": "板端装载",
+                    "value_ms": round(float(summary.get("load_ms") or 0.0), 3),
+                    "emphasis": "host",
+                },
+                {
+                    "label": "板端初始化",
+                    "value_ms": round(float(summary.get("vm_init_ms") or 0.0), 3),
+                    "emphasis": "board",
+                },
+                {
+                    "label": "板端推理",
+                    "value_ms": round(float(summary.get("run_median_ms") or summary.get("run_mean_ms") or 0.0), 3),
+                    "emphasis": "total",
+                },
+            ]
+            live_total_ms = round(sum(item["value_ms"] for item in live_stages), 3)
+            payload.update(
+                {
+                    "status": "success",
+                    "execution_mode": "live",
+                    "status_category": "success",
+                    "source_label": "真实在线推进 + 归档样例图",
+                    "message": (
+                        "本次演示已通过 OpenAMP 控制面完成作业下发、板端执行与结果回收；图像对比继续使用归档样例，"
+                        "现场呈现更稳定。"
+                    ),
+                    "timings": {
+                        "payload_ms": round(float(summary.get("run_median_ms") or summary.get("run_mean_ms") or 0.0), 3),
+                        "prepare_ms": round(float(summary.get("load_ms") or 0.0) + float(summary.get("vm_init_ms") or 0.0), 3),
+                        "total_ms": live_total_ms,
+                        "stages": live_stages,
+                    },
+                    "artifact_sha": summary.get("artifact_sha256") or payload["artifact_sha"],
+                    "runner_summary": summary,
+                    "wrapper_summary": live_attempt.get("wrapper_summary", {}),
+                    "live_attempt": live_attempt,
+                }
+            )
+            return payload
+
+        payload.update(
+            {
+                "status": "fallback",
+                "execution_mode": "prerecorded",
+                "status_category": live_attempt.get("status_category", "fallback"),
+                "source_label": "回退展示（归档样例）",
+                "message": (
+                    f"{live_attempt.get('message', '在线推进未完成')} 当前画面已切回归档样例，"
+                    "上方阶段条保留本次真机推进停留点。"
+                ),
+                "live_attempt": live_attempt,
+            }
+        )
+        return payload
+
+    def _update_last_inference_summary(self, payload: dict[str, Any], variant: str) -> None:
+        self._last_inference_result = {
+            "status": payload["status"],
+            "execution_mode": payload["execution_mode"],
+            "status_category": payload.get("status_category", "fallback"),
+            "variant": variant,
+            "total_ms": payload["timings"].get("total_ms"),
+            "artifact_sha": payload["artifact_sha"],
+            "message": payload["message"],
+            "source_label": payload["source_label"],
+            "sample_label": payload["sample"]["label"],
+            "request_state": payload.get("request_state", "completed"),
+        }
+
     def run_demo_inference(self, *, variant: str, image_index: int) -> dict[str, Any]:
         payload = build_prerecorded_inference_result(image_index, variant)
-        payload["status_category"] = "fallback"
         with self._lock:
             board_access = self._board_access
 
         if board_access.configured:
-            live_result = run_remote_reconstruction(board_access, variant=variant)
-            payload["live_attempt"] = live_result
-            if live_result.get("status") == "success":
-                summary = live_result["runner_summary"]
-                live_stages = [
-                    {
-                        "label": "板端装载",
-                        "value_ms": round(float(summary.get("load_ms") or 0.0), 3),
-                        "emphasis": "host",
-                    },
-                    {
-                        "label": "板端初始化",
-                        "value_ms": round(float(summary.get("vm_init_ms") or 0.0), 3),
-                        "emphasis": "board",
-                    },
-                    {
-                        "label": "板端推理",
-                        "value_ms": round(float(summary.get("run_median_ms") or summary.get("run_mean_ms") or 0.0), 3),
-                        "emphasis": "total",
-                    },
-                ]
-                live_total_ms = round(sum(item["value_ms"] for item in live_stages), 3)
-                payload.update(
-                    {
-                        "execution_mode": "live",
-                        "status_category": "success",
-                        "source_label": "在线计时 + 预录图像",
-                        "message": (
-                            "已使用网页录入的会话凭据触发远端推理。为避免现场传图链路抖动，图像对比仍沿用已归档样例。"
-                        ),
-                        "timings": {
-                            "payload_ms": round(float(summary.get("run_median_ms") or summary.get("run_mean_ms") or 0.0), 3),
-                            "prepare_ms": round(float(summary.get("load_ms") or 0.0) + float(summary.get("vm_init_ms") or 0.0), 3),
-                            "total_ms": live_total_ms,
-                            "stages": live_stages,
-                        },
-                        "artifact_sha": summary.get("artifact_sha256") or payload["artifact_sha"],
-                        "runner_summary": summary,
-                    }
-                )
-            else:
-                payload["status_category"] = live_result.get("status_category", "fallback")
-                payload["message"] = f"{live_result.get('message', '远端推理未成功')} 界面继续展示预录图像与正式速度报告。"
+            live_job = launch_remote_reconstruction_job(board_access, variant=variant)
+            live_result = live_job.snapshot()
+            record = {
+                "job": live_job,
+                "job_id": live_job.job_id,
+                "variant": variant,
+                "image_index": image_index,
+            }
+            with self._lock:
+                self._inference_jobs[live_job.job_id] = record
+            payload = self._build_inference_response(record, live_result)
         else:
-            payload["message"] = "尚未录入本场板卡会话，当前展示预录图像与正式速度报告。"
+            payload.update(
+                {
+                    "status": "fallback",
+                    "request_state": "completed",
+                    "status_category": "config_error",
+                    "live_progress": {
+                        "state": "completed",
+                        "label": "回退展示",
+                        "tone": "degraded",
+                        "percent": 100,
+                        "current_stage": "回退展示",
+                        "stages": [],
+                        "event_log": [],
+                    },
+                    "message": "尚未录入本场板卡会话，当前展示归档样例与正式速度报告。",
+                    "live_attempt": {
+                        "status": "config_error",
+                        "request_state": "completed",
+                        "status_category": "config_error",
+                        "message": "远端推理配置不完整或不可用。 当前已回退到预录结果。",
+                        "diagnostics": {},
+                    },
+                }
+            )
 
         with self._lock:
-            self._last_inference_result = {
-                "status": payload["status"],
-                "execution_mode": payload["execution_mode"],
-                "status_category": payload.get("status_category", "fallback"),
-                "variant": variant,
-                "total_ms": payload["timings"]["total_ms"],
-                "artifact_sha": payload["artifact_sha"],
-                "message": payload["message"],
-                "source_label": payload["source_label"],
-                "sample_label": payload["sample"]["label"],
-            }
+            if payload.get("request_state") == "completed":
+                self._update_last_inference_summary(payload, variant)
+        return payload
+
+    def get_inference_progress(self, job_id: str) -> dict[str, Any]:
+        with self._lock:
+            record = self._inference_jobs.get(job_id)
+        if record is None:
+            raise KeyError(job_id)
+        payload = self._build_inference_response(record, record["job"].snapshot())
+        with self._lock:
+            if payload.get("request_state") == "completed":
+                self._update_last_inference_summary(payload, record["variant"])
         return payload
 
     def run_fault_demo(self, fault_type: str) -> dict[str, Any]:
@@ -405,6 +500,19 @@ class DemoRequestHandler(SimpleHTTPRequestHandler):
             return
         if parsed.path == "/api/health":
             self.respond_json(HTTPStatus.OK, {"status": "ok"})
+            return
+        if parsed.path == "/api/inference-progress":
+            params = parse_qs(parsed.query)
+            job_id = str(params.get("job_id", [""])[0]).strip()
+            if not job_id:
+                self.respond_json(HTTPStatus.BAD_REQUEST, {"status": "error", "message": "missing job_id"})
+                return
+            try:
+                payload = self.server.app_state.get_inference_progress(job_id)
+            except KeyError:
+                self.respond_json(HTTPStatus.NOT_FOUND, {"status": "error", "message": "job not found"})
+                return
+            self.respond_json(HTTPStatus.OK, payload)
             return
         if parsed.path == "/docs":
             self.respond_doc_view(parsed.query)

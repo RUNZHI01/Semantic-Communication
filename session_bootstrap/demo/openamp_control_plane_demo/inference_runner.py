@@ -3,7 +3,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import re
+import shlex
 import subprocess
+import tempfile
+from threading import Lock, Thread
+import time
 from typing import Any
 
 from board_access import BoardAccessConfig
@@ -14,9 +18,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 REMOTE_RECONSTRUCTION_SCRIPT = (
     PROJECT_ROOT / "session_bootstrap" / "scripts" / "run_remote_current_real_reconstruction.sh"
 )
+OPENAMP_CONTROL_WRAPPER_SCRIPT = PROJECT_ROOT / "session_bootstrap" / "scripts" / "openamp_control_wrapper.py"
+REMOTE_HOOK_PROXY_SCRIPT = Path(__file__).resolve().parent / "openamp_remote_hook_proxy.py"
 ARTIFACT_SHA_MISMATCH_RE = re.compile(
     r"artifact sha256 mismatch path=(?P<path>\S+) expected=(?P<expected>[0-9A-Fa-f]{64}) actual=(?P<actual>[0-9A-Fa-f]{64})"
 )
+DEFAULT_HEARTBEAT_INTERVAL_SEC = 0.5
+DEFAULT_MAX_INPUTS = 1
+DEFAULT_SEED = 0
 
 
 def parse_json_stdout(raw: str) -> dict[str, Any]:
@@ -40,6 +49,501 @@ def extract_artifact_sha_mismatch(*values: str) -> dict[str, str]:
                 "actual_sha256": match.group("actual").lower(),
             }
     return {}
+
+
+def read_json_file(path: Path) -> dict[str, Any]:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def load_trace_events(path: Path) -> list[dict[str, Any]]:
+    if not path.exists():
+        return []
+    events: list[dict[str, Any]] = []
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            events.append(payload)
+    return events
+
+
+def short_time_label(value: str) -> str:
+    if len(value) >= 19 and value[10] == "T":
+        return value[11:19]
+    return value
+
+
+def safe_nested(mapping: dict[str, Any] | None, *keys: str) -> Any:
+    current: Any = mapping or {}
+    for key in keys:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+    return current
+
+
+def last_event_by_phase(events: list[dict[str, Any]], phase: str) -> dict[str, Any] | None:
+    for event in reversed(events):
+        if str(event.get("phase") or "").upper() == phase:
+            return event
+    return None
+
+
+def format_trace_event(event: dict[str, Any]) -> str:
+    phase = str(event.get("phase") or "UNKNOWN").upper()
+    at = short_time_label(str(event.get("at") or ""))
+    payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+    response = safe_nested(event, "hook_result", "response") or {}
+
+    if phase == "STATUS_REQ":
+        guard = (
+            safe_nested(response, "rx_frame", "status_resp", "guard_state_name")
+            or response.get("guard_state_name")
+            or response.get("transport_status")
+            or "PENDING"
+        )
+        fault = (
+            safe_nested(response, "rx_frame", "status_resp", "last_fault_name")
+            or response.get("fault_name")
+            or "UNKNOWN"
+        )
+        return f"[{at}] STATUS_REQ -> guard={guard} / fault={fault}"
+    if phase == "JOB_REQ":
+        sha = str(payload.get("expected_sha256") or "")[:12]
+        return f"[{at}] JOB_REQ -> trusted_sha={sha or 'NA'}"
+    if phase == "JOB_ACK":
+        decision = payload.get("decision") or "UNKNOWN"
+        guard = payload.get("guard_state_name") or payload.get("guard_state") or "UNKNOWN"
+        fault = payload.get("fault_name") or payload.get("fault_code") or "NONE"
+        return f"[{at}] JOB_ACK({decision}) -> guard={guard} / fault={fault}"
+    if phase == "HEARTBEAT":
+        runtime_state = payload.get("runtime_state") or "RUNNING"
+        elapsed_ms = payload.get("elapsed_ms")
+        if elapsed_ms is None:
+            return f"[{at}] HEARTBEAT -> runtime={runtime_state}"
+        return f"[{at}] HEARTBEAT -> runtime={runtime_state} / elapsed={elapsed_ms} ms"
+    if phase == "JOB_DONE":
+        result_code = payload.get("result_code")
+        runner_exit_code = payload.get("runner_exit_code")
+        return f"[{at}] JOB_DONE -> result={result_code} / runner_exit={runner_exit_code}"
+    return f"[{at}] {phase}"
+
+
+def build_progress_payload(
+    events: list[dict[str, Any]],
+    *,
+    request_state: str,
+    final_status: str | None = None,
+) -> dict[str, Any]:
+    status_event = last_event_by_phase(events, "STATUS_REQ")
+    job_req_event = last_event_by_phase(events, "JOB_REQ")
+    job_ack_event = last_event_by_phase(events, "JOB_ACK")
+    heartbeat_event = last_event_by_phase(events, "HEARTBEAT")
+    job_done_event = last_event_by_phase(events, "JOB_DONE")
+
+    job_ack_payload = job_ack_event.get("payload") if isinstance(job_ack_event, dict) else {}
+    if not isinstance(job_ack_payload, dict):
+        job_ack_payload = {}
+    decision = str(job_ack_payload.get("decision") or "").upper()
+
+    connected_status = "done" if status_event else ("error" if final_status and final_status != "success" else "pending")
+    dispatched_status = "done" if job_req_event else ("error" if final_status and status_event else "pending")
+    if decision == "DENY":
+        running_status = "error"
+    elif job_done_event:
+        running_status = "done"
+    elif heartbeat_event or decision == "ALLOW":
+        running_status = "current"
+    else:
+        running_status = "pending"
+    if request_state == "completed":
+        if final_status == "success":
+            returned_status = "done"
+        elif final_status:
+            returned_status = "error"
+        else:
+            returned_status = "pending"
+    else:
+        returned_status = "current" if job_done_event else "pending"
+
+    connected_detail = "控制面已建立 STATUS_REQ/RESP 读数。"
+    if status_event:
+        status_response = safe_nested(status_event, "hook_result", "response", "rx_frame", "status_resp") or {}
+        guard = status_response.get("guard_state_name") or safe_nested(status_event, "hook_result", "response", "transport_status")
+        fault = status_response.get("last_fault_name") or "UNKNOWN"
+        if guard:
+            connected_detail = f"STATUS_RESP: {guard} / fault={fault}"
+    elif connected_status == "error":
+        connected_detail = "本次在线链路未能完成初始状态确认。"
+
+    dispatched_detail = "已向 OpenAMP 控制面提交 JOB_REQ。"
+    if dispatched_status == "error":
+        dispatched_detail = "作业未能送达控制面。"
+
+    running_detail = "等待板端接收并进入执行。"
+    if decision == "ALLOW":
+        guard = job_ack_payload.get("guard_state_name") or job_ack_payload.get("guard_state") or "JOB_ACTIVE"
+        running_detail = f"JOB_ACK(ALLOW) / guard={guard}"
+        if heartbeat_event:
+            heartbeat_payload = heartbeat_event.get("payload") if isinstance(heartbeat_event.get("payload"), dict) else {}
+            elapsed_ms = heartbeat_payload.get("elapsed_ms")
+            if elapsed_ms is not None:
+                running_detail = f"板端执行中，最近 HEARTBEAT elapsed={elapsed_ms} ms"
+    elif decision == "DENY":
+        fault = job_ack_payload.get("fault_name") or job_ack_payload.get("fault_code") or "UNKNOWN"
+        running_detail = f"JOB_ACK(DENY) / fault={fault}"
+
+    returned_detail = "等待 JOB_DONE。"
+    if job_done_event:
+        job_done_payload = job_done_event.get("payload") if isinstance(job_done_event.get("payload"), dict) else {}
+        returned_detail = (
+            f"JOB_DONE 已回收，runner_exit={job_done_payload.get('runner_exit_code', 'NA')} "
+            f"/ result={job_done_payload.get('result_code', 'NA')}"
+        )
+    elif returned_status == "error":
+        returned_detail = "在线推进未完成，界面将切回归档样例。"
+
+    stages = [
+        {
+            "key": "connected",
+            "label": "已连接",
+            "status": connected_status,
+            "detail": connected_detail,
+        },
+        {
+            "key": "dispatched",
+            "label": "已下发",
+            "status": dispatched_status,
+            "detail": dispatched_detail,
+        },
+        {
+            "key": "running",
+            "label": "板端执行中",
+            "status": running_status,
+            "detail": running_detail,
+        },
+        {
+            "key": "returned",
+            "label": "已返回结果",
+            "status": returned_status,
+            "detail": returned_detail,
+        },
+    ]
+
+    if request_state == "completed":
+        percent = 100
+    elif running_status == "current":
+        percent = 76
+    elif dispatched_status == "done":
+        percent = 52
+    elif connected_status == "done":
+        percent = 28
+    else:
+        percent = 8
+
+    current_stage = "准备中"
+    for stage in stages:
+        if stage["status"] in {"current", "error"}:
+            current_stage = stage["label"]
+            break
+        if stage["status"] == "done":
+            current_stage = stage["label"]
+
+    if request_state == "completed" and final_status == "success":
+        label = "真实在线推进"
+        tone = "online"
+    elif request_state == "completed":
+        label = "在线失败已回退"
+        tone = "degraded"
+    elif events:
+        label = "真实在线推进"
+        tone = "online"
+    else:
+        label = "等待板端响应"
+        tone = "degraded"
+
+    return {
+        "state": request_state,
+        "label": label,
+        "tone": tone,
+        "percent": percent,
+        "current_stage": current_stage,
+        "stages": stages,
+        "event_log": [format_trace_event(event) for event in events],
+    }
+
+
+def expected_sha_for_variant(access: BoardAccessConfig, variant: str) -> str:
+    values = access.build_env()
+    if variant == "baseline":
+        return str(values.get("INFERENCE_BASELINE_EXPECTED_SHA256") or values.get("INFERENCE_EXPECTED_SHA256") or "")
+    return str(values.get("INFERENCE_CURRENT_EXPECTED_SHA256") or values.get("INFERENCE_EXPECTED_SHA256") or "")
+
+
+def parse_runner_summary_from_log(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        raise ValueError("runner log not found")
+    return parse_json_stdout(path.read_text(encoding="utf-8"))
+
+
+class LiveRemoteReconstructionJob:
+    def __init__(
+        self,
+        access: BoardAccessConfig,
+        *,
+        variant: str,
+        max_inputs: int = DEFAULT_MAX_INPUTS,
+        seed: int = DEFAULT_SEED,
+        timeout_sec: float = 900.0,
+        heartbeat_interval_sec: float = DEFAULT_HEARTBEAT_INTERVAL_SEC,
+    ) -> None:
+        self.job_id = str(int(time.time() * 1000))
+        self.variant = variant
+        self._timeout_sec = timeout_sec
+        self._output_dir = Path(tempfile.mkdtemp(prefix="openamp_demo_live_", dir="/tmp"))
+        self._trace_path = self._output_dir / "control_trace.jsonl"
+        self._summary_path = self._output_dir / "wrapper_summary.json"
+        self._runner_log_path = self._output_dir / "runner.log"
+        self._lock = Lock()
+        self._final_snapshot: dict[str, Any] | None = None
+        self._process: subprocess.Popen[str] | None = None
+
+        missing = access.missing_inference_fields(variant)
+        if missing:
+            status_category = classify_status_category(status="config_error", missing_fields=missing)
+            self._final_snapshot = {
+                "status": "config_error",
+                "request_state": "completed",
+                "status_category": status_category,
+                "execution_mode": "fallback",
+                "variant": variant,
+                "message": build_operator_message("inference", status_category, include_fallback=True),
+                "runner_summary": {},
+                "wrapper_summary": {},
+                "diagnostics": build_diagnostics(missing_fields=missing),
+                "progress": build_progress_payload([], request_state="completed", final_status="config_error"),
+                "artifacts": self._artifact_paths(),
+            }
+            return
+
+        env = access.build_subprocess_env()
+        env["REMOTE_MODE"] = "ssh"
+
+        runner_cmd = shlex.join(
+            [
+                "bash",
+                str(REMOTE_RECONSTRUCTION_SCRIPT),
+                "--variant",
+                variant,
+                "--max-inputs",
+                str(max_inputs),
+                "--seed",
+                str(seed),
+            ]
+        )
+        hook_cmd = self._build_hook_command(access)
+        command = [
+            "python3",
+            str(OPENAMP_CONTROL_WRAPPER_SCRIPT),
+            "--job-id",
+            self.job_id,
+            "--variant",
+            f"{variant}_reconstruction",
+            "--runner-cmd",
+            runner_cmd,
+            "--expected-sha256",
+            expected_sha_for_variant(access, variant),
+            "--expected-outputs",
+            str(max_inputs),
+            "--output-dir",
+            str(self._output_dir),
+            "--heartbeat-interval-sec",
+            str(heartbeat_interval_sec),
+            "--runner-timeout-sec",
+            str(timeout_sec),
+            "--transport",
+            "hook",
+            "--control-hook-cmd",
+            hook_cmd,
+        ]
+
+        try:
+            self._process = subprocess.Popen(
+                command,
+                cwd=PROJECT_ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=env,
+            )
+        except OSError as exc:
+            status_category = classify_status_category(status="launch_error", error=str(exc))
+            self._final_snapshot = {
+                "status": "launch_error",
+                "request_state": "completed",
+                "status_category": status_category,
+                "execution_mode": "fallback",
+                "variant": variant,
+                "message": build_operator_message("inference", status_category, include_fallback=True),
+                "runner_summary": {},
+                "wrapper_summary": {},
+                "diagnostics": build_diagnostics(error=str(exc)),
+                "progress": build_progress_payload([], request_state="completed", final_status="launch_error"),
+                "artifacts": self._artifact_paths(),
+            }
+            return
+
+        watcher = Thread(target=self._wait_for_completion, daemon=True)
+        watcher.start()
+
+    def _artifact_paths(self) -> dict[str, str]:
+        return {
+            "output_dir": str(self._output_dir),
+            "control_trace_path": str(self._trace_path),
+            "wrapper_summary_path": str(self._summary_path),
+            "runner_log_path": str(self._runner_log_path),
+        }
+
+    def _build_hook_command(self, access: BoardAccessConfig) -> str:
+        values = access.build_env()
+        command = [
+            "python3",
+            str(REMOTE_HOOK_PROXY_SCRIPT),
+            "--host",
+            access.host,
+            "--user",
+            access.user,
+            "--password",
+            access.password,
+            "--port",
+            access.port,
+            "--remote-output-root",
+            f"/tmp/openamp_demo_hook/{self.job_id}",
+        ]
+        remote_project_root = str(values.get("REMOTE_PROJECT_ROOT") or values.get("OPENAMP_REMOTE_PROJECT_ROOT") or "")
+        remote_jscc_dir = str(values.get("REMOTE_JSCC_DIR") or "")
+        if remote_project_root:
+            command.extend(["--remote-project-root", remote_project_root])
+        if remote_jscc_dir:
+            command.extend(["--remote-jscc-dir", remote_jscc_dir])
+        return shlex.join(command)
+
+    def _wait_for_completion(self) -> None:
+        assert self._process is not None
+        timed_out = False
+        try:
+            stdout, stderr = self._process.communicate(timeout=self._timeout_sec + 20.0)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            self._process.kill()
+            stdout, stderr = self._process.communicate()
+
+        wrapper_summary: dict[str, Any] = {}
+        if self._summary_path.exists():
+            try:
+                wrapper_summary = read_json_file(self._summary_path)
+            except (OSError, json.JSONDecodeError):
+                wrapper_summary = {}
+        if not wrapper_summary:
+            try:
+                wrapper_summary = parse_json_stdout(stdout)
+            except (json.JSONDecodeError, ValueError):
+                wrapper_summary = {}
+
+        trace_events = load_trace_events(self._trace_path)
+
+        if timed_out:
+            status = "timeout"
+            status_category = "timeout"
+            runner_summary: dict[str, Any] = {}
+            message = build_operator_message("inference", status_category, include_fallback=True)
+        elif (self._process.returncode or 0) == 0:
+            try:
+                runner_summary = parse_runner_summary_from_log(self._runner_log_path)
+            except (OSError, ValueError, json.JSONDecodeError) as exc:
+                status = "parse_error"
+                status_category = classify_status_category(
+                    status="parse_error",
+                    stdout=stdout,
+                    stderr=stderr,
+                    error=str(exc),
+                )
+                runner_summary = {}
+                message = build_operator_message("inference", status_category, include_fallback=True)
+            else:
+                status = "success"
+                status_category = "success"
+                message = "OpenAMP 控制面已完成作业下发、板端执行与结果回收。"
+        else:
+            status = "error"
+            status_category = classify_status_category(status="error", stdout=stdout, stderr=stderr)
+            runner_summary = {}
+            if wrapper_summary.get("result") == "denied_by_control_hook":
+                message = "OpenAMP 控制面未放行本次作业，界面已回退到归档样例。"
+            else:
+                message = build_operator_message("inference", status_category, include_fallback=True)
+
+        diagnostics = build_diagnostics(stdout=stdout, stderr=stderr, returncode=self._process.returncode)
+        if status_category == "artifact_mismatch":
+            diagnostics.update(extract_artifact_sha_mismatch(stderr, stdout))
+
+        final_snapshot = {
+            "status": status,
+            "request_state": "completed",
+            "status_category": status_category,
+            "execution_mode": "live" if status == "success" else "fallback",
+            "variant": self.variant,
+            "message": message,
+            "runner_summary": runner_summary,
+            "wrapper_summary": wrapper_summary,
+            "diagnostics": diagnostics,
+            "progress": build_progress_payload(trace_events, request_state="completed", final_status=status),
+            "artifacts": self._artifact_paths(),
+        }
+        with self._lock:
+            self._final_snapshot = final_snapshot
+
+    def snapshot(self) -> dict[str, Any]:
+        with self._lock:
+            if self._final_snapshot is not None:
+                return dict(self._final_snapshot)
+
+        trace_events = load_trace_events(self._trace_path)
+        return {
+            "status": "running",
+            "request_state": "running",
+            "status_category": "running",
+            "execution_mode": "live",
+            "variant": self.variant,
+            "message": "OpenAMP 控制面已接管本次演示，界面正在同步板端阶段。",
+            "runner_summary": {},
+            "wrapper_summary": {},
+            "diagnostics": {},
+            "progress": build_progress_payload(trace_events, request_state="running"),
+            "artifacts": self._artifact_paths(),
+        }
+
+
+def launch_remote_reconstruction_job(
+    access: BoardAccessConfig,
+    *,
+    variant: str,
+    max_inputs: int = DEFAULT_MAX_INPUTS,
+    seed: int = DEFAULT_SEED,
+    timeout_sec: float = 900.0,
+) -> LiveRemoteReconstructionJob:
+    return LiveRemoteReconstructionJob(
+        access,
+        variant=variant,
+        max_inputs=max_inputs,
+        seed=seed,
+        timeout_sec=timeout_sec,
+    )
 
 
 def run_remote_reconstruction(

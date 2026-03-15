@@ -51,6 +51,44 @@ def failed_probe_payload(requested_at: str, summary: str, error: str) -> dict[st
     }
 
 
+def live_progress_payload(label: str, state: str, percent: int, current_stage: str) -> dict[str, object]:
+    return {
+        "state": state,
+        "label": label,
+        "tone": "online" if label == "真实在线推进" else "degraded",
+        "percent": percent,
+        "current_stage": current_stage,
+        "stages": [
+            {"key": "connected", "label": "已连接", "status": "done", "detail": "STATUS_RESP: READY / fault=NONE"},
+            {"key": "dispatched", "label": "已下发", "status": "done", "detail": "已向 OpenAMP 控制面提交 JOB_REQ。"},
+            {"key": "running", "label": "板端执行中", "status": "current" if state == "running" else "done", "detail": "JOB_ACK(ALLOW) / guard=JOB_ACTIVE"},
+            {
+                "key": "returned",
+                "label": "已返回结果",
+                "status": "pending" if state == "running" else ("done" if label == "真实在线推进" else "error"),
+                "detail": "等待 JOB_DONE。" if state == "running" else "JOB_DONE 已回收，runner_exit=0 / result=0",
+            },
+        ],
+        "event_log": [
+            "[19:24:47] STATUS_REQ -> guard=READY / fault=NONE",
+            "[19:24:48] JOB_REQ -> trusted_sha=1946b08e6cf2",
+            "[19:24:48] JOB_ACK(ALLOW) -> guard=JOB_ACTIVE / fault=NONE",
+        ],
+    }
+
+
+class FakeInferenceJob:
+    def __init__(self, snapshots: list[dict[str, object]], *, job_id: str = "demo-job-001") -> None:
+        self.job_id = job_id
+        self._snapshots = [json.loads(json.dumps(item)) for item in snapshots]
+        self._calls = 0
+
+    def snapshot(self) -> dict[str, object]:
+        index = min(self._calls, len(self._snapshots) - 1)
+        self._calls += 1
+        return json.loads(json.dumps(self._snapshots[index]))
+
+
 class NonClosingBytesIO(io.BytesIO):
     def close(self) -> None:
         return
@@ -460,13 +498,15 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(headers["content-type"], "application/json; charset=utf-8")
         self.assertEqual(payload["execution_mode"], "prerecorded")
         self.assertEqual(payload["variant"], "current")
+        self.assertEqual(payload["status"], "fallback")
+        self.assertEqual(payload["request_state"], "completed")
         self.assertEqual(payload["status_category"], "config_error")
         self.assertIn("配置不完整或不可用", payload["message"])
         self.assertEqual(payload["live_attempt"]["status"], "config_error")
-        self.assertEqual(payload["live_attempt"]["missing_fields"], ["password"])
+        self.assertEqual(payload["live_attempt"]["diagnostics"]["missing_fields"], ["password"])
         self.assertIn("guided_demo", state.current_snapshot())
 
-    def test_run_inference_endpoint_uses_preloaded_env_after_password_only_save(self) -> None:
+    def test_run_inference_endpoint_starts_live_job_with_preloaded_env_after_password_only_save(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
         request_json(
             state,
@@ -475,22 +515,28 @@ class DemoHTTPServerTest(unittest.TestCase):
             body=json.dumps({"password": "demo-pass"}).encode("utf-8"),
         )
         saved_access = state._board_access
+        live_job = FakeInferenceJob(
+            [
+                {
+                    "status": "running",
+                    "request_state": "running",
+                    "status_category": "running",
+                    "execution_mode": "live",
+                    "variant": "current",
+                    "message": "OpenAMP 控制面已接管本次演示，界面正在同步板端阶段。",
+                    "runner_summary": {},
+                    "wrapper_summary": {},
+                    "diagnostics": {},
+                    "progress": live_progress_payload("真实在线推进", "running", 76, "板端执行中"),
+                    "artifacts": {},
+                }
+            ]
+        )
 
         with patch(
-            "server.run_remote_reconstruction",
-            return_value={
-                "status": "success",
-                "execution_mode": "live",
-                "variant": "current",
-                "message": "live ok",
-                "runner_summary": {
-                    "load_ms": 3.2,
-                    "vm_init_ms": 0.8,
-                    "run_median_ms": 128.4,
-                    "artifact_sha256": "abcd" * 16,
-                },
-            },
-        ) as run_reconstruction:
+            "server.launch_remote_reconstruction_job",
+            return_value=live_job,
+        ) as launch_job:
             status, _, payload = request_json(
                 state,
                 "POST",
@@ -500,14 +546,16 @@ class DemoHTTPServerTest(unittest.TestCase):
 
         self.assertEqual(status, 200)
         self.assertEqual(payload["execution_mode"], "live")
-        access = run_reconstruction.call_args.args[0]
+        self.assertEqual(payload["request_state"], "running")
+        self.assertEqual(payload["job_id"], live_job.job_id)
+        access = launch_job.call_args.args[0]
         self.assertIs(access, saved_access)
         self.assertEqual(access.host, "100.121.87.73")
         self.assertEqual(access.user, "user")
         self.assertEqual(access.password, "demo-pass")
         self.assertEqual(access.env_file, saved_access.env_file)
 
-    def test_run_inference_endpoint_uses_live_runner_when_available(self) -> None:
+    def test_inference_progress_endpoint_returns_completed_live_payload(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
         request_json(
             state,
@@ -523,42 +571,87 @@ class DemoHTTPServerTest(unittest.TestCase):
                 }
             ).encode("utf-8"),
         )
+        live_job = FakeInferenceJob(
+            [
+                {
+                    "status": "running",
+                    "request_state": "running",
+                    "status_category": "running",
+                    "execution_mode": "live",
+                    "variant": "current",
+                    "message": "OpenAMP 控制面已接管本次演示，界面正在同步板端阶段。",
+                    "runner_summary": {},
+                    "wrapper_summary": {},
+                    "diagnostics": {},
+                    "progress": live_progress_payload("真实在线推进", "running", 76, "板端执行中"),
+                    "artifacts": {},
+                },
+                {
+                    "status": "success",
+                    "request_state": "completed",
+                    "status_category": "success",
+                    "execution_mode": "live",
+                    "variant": "current",
+                    "message": "OpenAMP 控制面已完成作业下发、板端执行与结果回收。",
+                    "runner_summary": {
+                        "load_ms": 3.2,
+                        "vm_init_ms": 0.8,
+                        "run_median_ms": 128.4,
+                        "artifact_sha256": "abcd" * 16,
+                    },
+                    "wrapper_summary": {"result": "success"},
+                    "diagnostics": {},
+                    "progress": live_progress_payload("真实在线推进", "completed", 100, "已返回结果"),
+                    "artifacts": {},
+                },
+            ]
+        )
 
         with patch(
-            "server.run_remote_reconstruction",
-            return_value={
-                "status": "success",
-                "execution_mode": "live",
-                "variant": "current",
-                "message": "live ok",
-                "runner_summary": {
-                    "load_ms": 3.2,
-                    "vm_init_ms": 0.8,
-                    "run_median_ms": 128.4,
-                    "artifact_sha256": "abcd" * 16,
-                },
-            },
-        ) as run_reconstruction:
-            status, _, payload = request_json(
+            "server.launch_remote_reconstruction_job",
+            return_value=live_job,
+        ) as launch_job:
+            start_status, _, start_payload = request_json(
                 state,
                 "POST",
                 "/api/run-inference",
                 body=json.dumps({"image_index": 0, "mode": "current"}).encode("utf-8"),
             )
+            status, _, payload = request_json(
+                state,
+                "GET",
+                f"/api/inference-progress?job_id={live_job.job_id}",
+            )
 
+        self.assertEqual(start_status, 200)
+        self.assertEqual(start_payload["request_state"], "running")
         self.assertEqual(status, 200)
+        self.assertEqual(payload["request_state"], "completed")
         self.assertEqual(payload["execution_mode"], "live")
-        self.assertEqual(payload["source_label"], "在线计时 + 预录图像")
+        self.assertEqual(payload["source_label"], "真实在线推进 + 归档样例图")
         self.assertAlmostEqual(payload["timings"]["total_ms"], 132.4)
         self.assertEqual(payload["artifact_sha"], "abcd" * 16)
-        run_reconstruction.assert_called_once()
-        access = run_reconstruction.call_args.args[0]
+        launch_job.assert_called_once()
+        access = launch_job.call_args.args[0]
         self.assertEqual(
             access.build_env()["INFERENCE_CURRENT_EXPECTED_SHA256"],
             "1946b08e6cf20a1259fa43f9e849a06f50ae1230c08d4df7081fba1edae4c644",
         )
 
-    def test_run_inference_endpoint_hides_raw_auth_stderr_in_primary_message(self) -> None:
+    def test_inference_progress_endpoint_returns_not_found_for_unknown_job(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+
+        status, _, payload = request_json(
+            state,
+            "GET",
+            "/api/inference-progress?job_id=missing-job",
+        )
+
+        self.assertEqual(status, 404)
+        self.assertEqual(payload["status"], "error")
+        self.assertEqual(payload["message"], "job not found")
+
+    def test_inference_progress_endpoint_preserves_live_failure_diagnostics_on_fallback(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
         request_json(
             state,
@@ -574,18 +667,27 @@ class DemoHTTPServerTest(unittest.TestCase):
                 }
             ).encode("utf-8"),
         )
+        live_job = FakeInferenceJob(
+            [
+                {
+                    "status": "error",
+                    "request_state": "completed",
+                    "status_category": "auth_error",
+                    "execution_mode": "fallback",
+                    "variant": "current",
+                    "message": "远端推理认证失败，请检查板卡用户名、密码或 SSH 端口设置。 当前已回退到预录结果。",
+                    "runner_summary": {},
+                    "wrapper_summary": {"result": "runner_failed"},
+                    "diagnostics": {"stderr": "Permission denied (publickey,password).", "returncode": 255},
+                    "progress": live_progress_payload("在线失败已回退", "completed", 100, "已返回结果"),
+                    "artifacts": {},
+                }
+            ]
+        )
 
         with patch(
-            "server.run_remote_reconstruction",
-            return_value={
-                "status": "error",
-                "status_category": "auth_error",
-                "execution_mode": "fallback",
-                "variant": "current",
-                "message": "远端推理认证失败，请检查板卡用户名、密码或 SSH 端口设置。 当前已回退到预录结果。",
-                "missing_fields": [],
-                "diagnostics": {"stderr": "Permission denied (publickey,password).", "returncode": 255},
-            },
+            "server.launch_remote_reconstruction_job",
+            return_value=live_job,
         ):
             status, _, payload = request_json(
                 state,
@@ -596,10 +698,12 @@ class DemoHTTPServerTest(unittest.TestCase):
 
         self.assertEqual(status, 200)
         self.assertEqual(payload["execution_mode"], "prerecorded")
+        self.assertEqual(payload["status"], "fallback")
         self.assertEqual(payload["status_category"], "auth_error")
         self.assertIn("认证失败", payload["message"])
         self.assertNotIn("Permission denied", payload["message"])
         self.assertEqual(payload["live_attempt"]["diagnostics"]["stderr"], "Permission denied (publickey,password).")
+        self.assertEqual(payload["live_progress"]["label"], "在线失败已回退")
 
     def test_inject_fault_endpoint_keeps_live_attempt_diagnostics_on_replay_fallback(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
