@@ -53,6 +53,9 @@ class OpenampRemoteHookProxyTest(unittest.TestCase):
         self.assertIn('STAGE_ROOT="$(mktemp -d /tmp/openamp_demo_bridge.XXXXXX)"', command)
         self.assertIn('STAGE_ROOT="$STAGE_ROOT" python3 - <<\'PY\'', command)
         self.assertIn('bundle = base64.b64decode(', command)
+        self.assertIn("run_bridge()", command)
+        self.assertIn("sudo -n true >/dev/null 2>&1", command)
+        self.assertIn('sudo -n env OPENAMP_PHASE="$PHASE" python3', command)
         self.assertIn(
             'python3 "$STAGE_ROOT/session_bootstrap/scripts/openamp_rpmsg_bridge.py"',
             command,

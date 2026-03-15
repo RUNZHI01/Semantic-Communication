@@ -122,7 +122,18 @@ with gzip.GzipFile(fileobj=io.BytesIO(bundle), mode="rb") as gzip_file:
         archive.extractall(stage_root)
 PY
 mkdir -p "$OUTPUT_DIR"
-OPENAMP_PHASE="$PHASE" python3 "$STAGE_ROOT/session_bootstrap/scripts/openamp_rpmsg_bridge.py" --hook-stdin --rpmsg-ctrl {shlex.quote(args.rpmsg_ctrl)} --rpmsg-dev {shlex.quote(args.rpmsg_dev)} --output-dir "$OUTPUT_DIR"
+run_bridge() {{
+  OPENAMP_PHASE="$PHASE" python3 "$STAGE_ROOT/session_bootstrap/scripts/openamp_rpmsg_bridge.py" --hook-stdin --rpmsg-ctrl {shlex.quote(args.rpmsg_ctrl)} --rpmsg-dev {shlex.quote(args.rpmsg_dev)} --output-dir "$OUTPUT_DIR"
+}}
+
+# Prefer direct device access; otherwise use passwordless sudo only when the board already allows it.
+if [[ "$(id -u)" -eq 0 ]] || {{ [[ -r {shlex.quote(args.rpmsg_dev)} ]] && [[ -w {shlex.quote(args.rpmsg_dev)} ]]; }}; then
+  run_bridge
+elif command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
+  sudo -n env OPENAMP_PHASE="$PHASE" python3 "$STAGE_ROOT/session_bootstrap/scripts/openamp_rpmsg_bridge.py" --hook-stdin --rpmsg-ctrl {shlex.quote(args.rpmsg_ctrl)} --rpmsg-dev {shlex.quote(args.rpmsg_dev)} --output-dir "$OUTPUT_DIR"
+else
+  run_bridge
+fi
 """.strip()
 
 

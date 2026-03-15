@@ -102,6 +102,7 @@ Slave/OpenAMP side assumptions:
 - the board remains on the already prepared OpenAMP path
 - RPMsg transport and remoteproc state are the ones validated in the existing evidence package
 - the final post-fix firmware SHA in the dashboard comes from the board-backed `FIT-03` PASS bundle
+- live control actions first try the SSH user's direct `/dev/rpmsg*` access, then `sudo -n` if the board already grants passwordless sudo; otherwise the demo reports an explicit board-side permission gate instead of pretending the control path ran
 
 ## Local verification
 

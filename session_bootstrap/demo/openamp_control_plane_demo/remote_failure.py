@@ -4,11 +4,21 @@ from typing import Any
 
 
 _AUTH_PATTERNS = (
-    "permission denied",
+    "permission denied (publickey",
     "publickey,password",
     "please try again",
     "authentication failed",
     "access denied",
+)
+
+_PERMISSION_PATTERNS = (
+    "linux_bridge_permission_guard",
+    "permission_gate",
+    "passwordless sudo",
+    "sudo: a password is required",
+    "sudo: no tty present",
+    "/dev/rpmsg",
+    "operation not permitted",
 )
 
 _CONFIG_PATTERNS = (
@@ -36,6 +46,7 @@ _MESSAGE_TEMPLATES = {
     "probe": {
         "auth_error": "板卡 SSH 认证失败，请检查用户名、密码或 SSH 端口设置。",
         "config_error": "板卡探测配置不可用，请检查环境文件、主机和端口设置。",
+        "permission_error": "板端命令权限不足，请检查当前用户权限或非交互 sudo 配置。",
         "timeout": "板卡探测超时，请确认板卡在线后重试。",
         "error": "板卡探测失败，请查看诊断信息。",
     },
@@ -43,24 +54,28 @@ _MESSAGE_TEMPLATES = {
         "auth_error": "远端推理认证失败，请检查板卡用户名、密码或 SSH 端口设置。",
         "config_error": "远端推理配置不完整或不可用，请检查连接信息和推理环境参数。",
         "artifact_mismatch": "远端 current 工件与界面展示的 trusted current SHA 不一致，请同步板端 optimized_model.so 后重试。",
+        "permission_error": "板端 RPMsg 设备当前只允许 root 或 passwordless sudo 访问，请为演示 SSH 用户开放权限后重试。",
         "timeout": "远端推理超时，请确认板卡在线后重试。",
         "error": "远端推理执行失败，请查看诊断信息。",
     },
     "status": {
         "auth_error": "远端状态查询认证失败，请检查板卡用户名、密码或 SSH 端口设置。",
         "config_error": "远端状态查询配置不可用，请检查板卡连接信息和本机脚本环境。",
+        "permission_error": "远端状态查询缺少 RPMsg 设备访问权限，请检查当前用户权限或非交互 sudo 配置。",
         "timeout": "远端状态查询超时，请确认板卡在线后重试。",
         "error": "远端状态查询失败，请查看诊断信息。",
     },
     "fault": {
         "auth_error": "远端故障注入认证失败，请检查板卡用户名、密码或 SSH 端口设置。",
         "config_error": "远端故障注入配置不可用，请检查板卡连接信息和本机脚本环境。",
+        "permission_error": "远端故障注入缺少 RPMsg 设备访问权限，请检查当前用户权限或非交互 sudo 配置。",
         "timeout": "远端故障注入超时，请确认板卡在线后重试。",
         "error": "远端故障注入失败，请查看诊断信息。",
     },
     "recover": {
         "auth_error": "远端恢复认证失败，请检查板卡用户名、密码或 SSH 端口设置。",
         "config_error": "远端恢复配置不可用，请检查板卡连接信息和本机脚本环境。",
+        "permission_error": "远端恢复缺少 RPMsg 设备访问权限，请检查当前用户权限或非交互 sudo 配置。",
         "timeout": "远端恢复超时，请确认板卡在线后重试。",
         "error": "远端恢复失败，请查看诊断信息。",
     },
@@ -109,6 +124,10 @@ def classify_status_category(
         return "timeout"
     if any(pattern in text for pattern in _ARTIFACT_MISMATCH_PATTERNS):
         return "artifact_mismatch"
+    if any(pattern in text for pattern in _PERMISSION_PATTERNS):
+        return "permission_error"
+    if "permission denied" in text:
+        return "auth_error"
     if status == "launch_error":
         return "config_error"
     if any(pattern in text for pattern in _CONFIG_PATTERNS):

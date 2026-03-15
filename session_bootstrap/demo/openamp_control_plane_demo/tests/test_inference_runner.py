@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import shlex
 import subprocess
 import sys
+import tempfile
+from threading import Lock
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 DEMO_ROOT = Path(__file__).resolve().parents[1]
@@ -187,6 +190,122 @@ class RunRemoteReconstructionTest(unittest.TestCase):
         hook_command = command[command.index("--control-hook-cmd") + 1]
         self.assertIn("--remote-output-root", hook_command)
         self.assertIn("/tmp/openamp_demo_hook/4242", hook_command)
+
+    def test_permission_gate_failure_surfaces_explicit_live_contract(self) -> None:
+        with tempfile.TemporaryDirectory(dir=PROJECT_ROOT) as temp_dir:
+            output_dir = Path(temp_dir)
+            trace_path = output_dir / "control_trace.jsonl"
+            summary_path = output_dir / "wrapper_summary.json"
+
+            summary_path.write_text(
+                json.dumps({"result": "denied_by_control_hook"}, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+            trace_events = [
+                {
+                    "at": "2026-03-15T20:00:00+0800",
+                    "phase": "STATUS_REQ",
+                    "payload": {"job_id": 4242},
+                    "hook_result": {
+                        "returncode": 0,
+                        "response": {
+                            "phase": "STATUS_REQ",
+                            "source": "replayed_live_status_resp",
+                            "transport_status": "status_resp_received",
+                            "protocol_semantics": "implemented",
+                            "rx_frame": {
+                                "status_resp": {
+                                    "guard_state_name": "READY",
+                                    "last_fault_name": "NONE",
+                                }
+                            },
+                        },
+                    },
+                },
+                {
+                    "at": "2026-03-15T20:00:01+0800",
+                    "phase": "JOB_REQ",
+                    "payload": {"job_id": 4242, "expected_sha256": "abcd" * 16},
+                    "hook_result": {
+                        "returncode": 2,
+                        "response": {
+                            "phase": "JOB_REQ",
+                            "decision": "DENY",
+                            "fault_code": 0,
+                            "fault_name": "NONE",
+                            "guard_state": 0,
+                            "guard_state_name": "BOOT",
+                            "source": "linux_bridge_permission_guard",
+                            "transport_status": "permission_gate",
+                            "protocol_semantics": "not_attempted",
+                            "note": (
+                                "JOB_REQ could not access /dev/rpmsg0: [Errno 13] Permission denied: "
+                                "'/dev/rpmsg0'. The board-side bridge needs root or passwordless sudo "
+                                "for RPMsg device access."
+                            ),
+                            "rpmsg_ctrl": "/dev/rpmsg_ctrl0",
+                            "rpmsg_dev": "/dev/rpmsg0",
+                            "device_status": {
+                                "rpmsg_ctrl": {"path": "/dev/rpmsg_ctrl0", "exists": True},
+                                "rpmsg_dev": {"path": "/dev/rpmsg0", "exists": True},
+                            },
+                        },
+                    },
+                },
+                {
+                    "at": "2026-03-15T20:00:01+0800",
+                    "phase": "JOB_ACK",
+                    "payload": {
+                        "job_id": 4242,
+                        "decision": "DENY",
+                        "fault_code": 0,
+                        "fault_name": "NONE",
+                        "guard_state": 0,
+                        "guard_state_name": "BOOT",
+                        "source": "linux_bridge_permission_guard",
+                        "transport_status": "permission_gate",
+                        "protocol_semantics": "not_attempted",
+                        "note": (
+                            "JOB_REQ could not access /dev/rpmsg0: [Errno 13] Permission denied: "
+                            "'/dev/rpmsg0'. The board-side bridge needs root or passwordless sudo "
+                            "for RPMsg device access."
+                        ),
+                    },
+                },
+            ]
+            trace_path.write_text(
+                "\n".join(json.dumps(event, ensure_ascii=False) for event in trace_events) + "\n",
+                encoding="utf-8",
+            )
+
+            job = LiveRemoteReconstructionJob.__new__(LiveRemoteReconstructionJob)
+            job.job_id = "4242"
+            job.variant = "current"
+            job._timeout_sec = 10.0
+            job._output_dir = output_dir
+            job._trace_path = trace_path
+            job._summary_path = summary_path
+            job._runner_log_path = output_dir / "runner.log"
+            job._lock = Lock()
+            job._final_snapshot = None
+
+            fake_process = Mock()
+            fake_process.communicate.return_value = ("", "")
+            fake_process.returncode = 2
+            job._process = fake_process
+
+            job._wait_for_completion()
+
+            snapshot = job._final_snapshot
+            assert snapshot is not None
+            self.assertEqual(snapshot["status"], "error")
+            self.assertEqual(snapshot["status_category"], "permission_error")
+            self.assertIn("root 或 passwordless sudo", snapshot["message"])
+            self.assertEqual(snapshot["diagnostics"]["control_hook"]["transport_status"], "permission_gate")
+            self.assertEqual(snapshot["diagnostics"]["control_hook"]["rpmsg_dev"], "/dev/rpmsg0")
+            self.assertIn("板端权限门禁", snapshot["progress"]["stages"][2]["detail"])
+            self.assertIn("/dev/rpmsg0", snapshot["progress"]["stages"][2]["detail"])
+            self.assertIn("transport=permission_gate", snapshot["progress"]["event_log"][2])
 
 
 if __name__ == "__main__":
