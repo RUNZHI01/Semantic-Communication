@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
 import os
 from pathlib import Path
 from typing import Any
@@ -33,6 +34,11 @@ DEFAULT_INFERENCE_ENV_CANDIDATES = (
 )
 VALIDATED_INFERENCE_REPORT_CANDIDATES = (
     "session_bootstrap/reports/inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md",
+)
+VALIDATED_OPENAMP_RUN_MANIFEST_CANDIDATES = (
+    "session_bootstrap/reports/openamp_input_contract_fit_20260315_014542/run_manifest.json",
+    "session_bootstrap/reports/openamp_wrong_sha_fit_20260315_012403/run_manifest.json",
+    "session_bootstrap/reports/openamp_wrong_sha_fit_20260315_010828/run_manifest.json",
 )
 
 
@@ -142,6 +148,28 @@ def discover_validated_inference_env(
         if env_path is not None:
             return env_path
     return None
+
+
+def discover_validated_openamp_remote_project_root(
+    run_manifest_candidates: tuple[str, ...] = VALIDATED_OPENAMP_RUN_MANIFEST_CANDIDATES,
+) -> str:
+    for raw_manifest_path in run_manifest_candidates:
+        manifest_path = resolve_existing_env(raw_manifest_path)
+        if manifest_path is None:
+            continue
+        try:
+            payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        board_access = payload.get("board_access")
+        if not isinstance(board_access, dict):
+            continue
+        remote_project_root = str(board_access.get("remote_project_root") or "").strip()
+        if remote_project_root:
+            return remote_project_root
+    return ""
 
 
 def merge_env_values(
@@ -410,6 +438,14 @@ def build_demo_default_board_access(probe_env: str | None) -> BoardAccessConfig:
 
     ssh_env_values = sanitize_env_values(load_env_path(ssh_env_path)) if ssh_env_path else {}
     inference_env_values = sanitize_env_values(load_env_path(inference_env_path)) if inference_env_path else {}
+    startup_env_values = dict(ssh_env_values)
+    remote_project_root = discover_validated_openamp_remote_project_root()
+    if (
+        remote_project_root
+        and not str(inference_env_values.get("REMOTE_PROJECT_ROOT") or "").strip()
+        and not str(inference_env_values.get("OPENAMP_REMOTE_PROJECT_ROOT") or "").strip()
+    ):
+        startup_env_values["REMOTE_PROJECT_ROOT"] = remote_project_root
 
     host = first_non_empty(ssh_env_values, HOST_KEYS) or first_non_empty(inference_env_values, HOST_KEYS)
     user = first_non_empty(ssh_env_values, USER_KEYS) or first_non_empty(inference_env_values, USER_KEYS)
@@ -420,7 +456,7 @@ def build_demo_default_board_access(probe_env: str | None) -> BoardAccessConfig:
     )
 
     merged_env = merge_env_values(
-        startup_env_values=ssh_env_values,
+        startup_env_values=startup_env_values,
         env_file_values=inference_env_values,
         host=host,
         user=user,
@@ -455,7 +491,7 @@ def build_demo_default_board_access(probe_env: str | None) -> BoardAccessConfig:
             preloaded_inference_env_file=inference_env_path,
         ),
         field_sources=field_sources,
-        startup_env_values=ssh_env_values,
+        startup_env_values=startup_env_values,
         env_file_values=inference_env_values,
         preloaded_values=preloaded_values,
         preloaded_ssh_env_file=ssh_env_path,
