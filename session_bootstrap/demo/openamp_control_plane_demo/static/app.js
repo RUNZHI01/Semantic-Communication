@@ -67,6 +67,32 @@ function formatMaybeMs(value) {
   return `${numeric.toFixed(numeric >= 100 ? 1 : 3).replace(/\.000$/, "").replace(/(\.\d)00$/, "$1")} ms`;
 }
 
+function fieldLabel(field) {
+  const labels = {
+    host: "主机",
+    user: "用户名",
+    password: "密码",
+    port: "SSH 端口",
+    env_file: "推理 env",
+  };
+  return labels[field] || field;
+}
+
+function summarizeMissing(fields) {
+  if (!fields || !fields.length) return "无";
+  return fields.map((field) => fieldLabel(field)).join("、");
+}
+
+function renderFieldChip(label, value, state) {
+  const tone = state === "preloaded" ? "tone-online" : state === "missing" ? "tone-degraded" : "tone-neutral";
+  return `
+    <div class="field-chip ${tone}" data-state="${escapeHtml(state)}">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+    </div>
+  `;
+}
+
 function renderLinks(links) {
   if (!links || !links.length) return "";
   return `
@@ -134,13 +160,52 @@ function renderTop(snapshot, systemStatus) {
 
 function renderBoardAccess(systemStatus) {
   const access = systemStatus.board_access;
-  document.getElementById("boardAccessSummary").textContent = access.configured
-    ? `已录入会话：${access.user || "未填用户"}@${access.host || "未填主机"}:${access.port}，来源 ${access.source_summary}`
-    : "尚未录入板卡会话。";
+  const defaults = access.preloaded_defaults || {};
+  const currentMissing = access.missing_inference_fields_by_variant?.current || access.missing_inference_fields || [];
+  const baselineMissing = access.missing_inference_fields_by_variant?.baseline || [];
+  const onlyPasswordMissing =
+    access.missing_connection_fields.length === 1 && access.missing_connection_fields[0] === "password";
+
+  if (access.connection_ready) {
+    document.getElementById("boardAccessSummary").textContent =
+      `当前会话已可复用：${access.user || "未填用户"}@${access.host || "未填主机"}:${access.port}。`;
+  } else if (defaults.active && onlyPasswordMissing) {
+    document.getElementById("boardAccessSummary").textContent =
+      `已预载 ${access.user || "未填用户"}@${access.host || "未填主机"}:${access.port} 与推理 env；当前只差密码。`;
+  } else if (access.configured) {
+    document.getElementById("boardAccessSummary").textContent =
+      `已记录部分会话信息：${access.user || "未填用户"}@${access.host || "未填主机"}:${access.port}。`;
+  } else {
+    document.getElementById("boardAccessSummary").textContent = "尚未录入板卡会话。";
+  }
   if (access.host) document.getElementById("hostInput").value = access.host;
   if (access.user) document.getElementById("userInput").value = access.user;
   if (access.port) document.getElementById("portInput").value = access.port;
   if (access.env_file) document.getElementById("envFileInput").value = access.env_file;
+  document.getElementById("passwordInput").placeholder = access.has_password
+    ? "已保存在当前 demo 进程内；留空则继续复用"
+    : defaults.active
+      ? "当前唯一必填项；输入一次后复用"
+      : "仅保存在当前 demo 进程内";
+
+  const sourceNotes = [];
+  if (defaults.ssh_env_file) sourceNotes.push(`SSH 默认：${defaults.ssh_env_file}`);
+  if (defaults.inference_env_file) sourceNotes.push(`推理默认：${defaults.inference_env_file}`);
+  document.getElementById("boardAccessHints").innerHTML = `
+    <div class="credential-chip-row">
+      ${renderFieldChip(fieldLabel("host"), access.host || "未预载", access.field_sources?.host || "missing")}
+      ${renderFieldChip(fieldLabel("user"), access.user || "未预载", access.field_sources?.user || "missing")}
+      ${renderFieldChip(fieldLabel("port"), String(access.port || "未预载"), access.field_sources?.port || "missing")}
+      ${renderFieldChip(fieldLabel("env_file"), access.env_file || "未预载", access.field_sources?.env_file || "missing")}
+      ${renderFieldChip(fieldLabel("password"), access.has_password ? "已录入" : "待填写", access.field_sources?.password || "missing")}
+    </div>
+    <div class="credential-note">
+      SSH 会话：${escapeHtml(access.connection_ready ? "已就绪" : `仍缺 ${summarizeMissing(access.missing_connection_fields)}`)}。
+      Current：${escapeHtml(access.inference_ready_variants?.current ? "已就绪" : `仍缺 ${summarizeMissing(currentMissing)}`)}。
+      Baseline：${escapeHtml(access.inference_ready_variants?.baseline ? "已就绪" : `仍缺 ${summarizeMissing(baselineMissing)}`)}。
+    </div>
+    ${sourceNotes.length ? `<div class="credential-note">${escapeHtml(sourceNotes.join(" ｜ "))}</div>` : ""}
+  `;
 }
 
 function renderAct1(snapshot, systemStatus) {
@@ -424,11 +489,20 @@ async function saveBoardAccess() {
       method: "POST",
       body: JSON.stringify(payload),
     });
-    setFeedback("板卡会话已保存到当前 demo 进程内，后续探板/推理/故障动作会直接复用。", "success");
+    const boardAccess = result.board_access || {};
+    const onlyPasswordMissing =
+      (boardAccess.missing_connection_fields || []).length === 1 &&
+      boardAccess.missing_connection_fields[0] === "password";
+    setFeedback(
+      onlyPasswordMissing
+        ? "预载的主机、端口与推理 env 已保留；补上密码后即可复用真机动作。"
+        : "板卡会话已保存到当前 demo 进程内，后续探板/推理/故障动作会直接复用。",
+      onlyPasswordMissing ? "warning" : "success"
+    );
     document.getElementById("passwordInput").value = "";
     state.systemStatus = {
       ...state.systemStatus,
-      board_access: result.board_access,
+      board_access: boardAccess,
     };
     await refreshAll();
   } catch (error) {

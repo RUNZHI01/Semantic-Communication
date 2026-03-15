@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import os
 from pathlib import Path
 from typing import Any
@@ -22,6 +22,15 @@ INFERENCE_VARIANT_REQUIRED_KEYS = {
     "baseline": ("REMOTE_SNR_BASELINE", "REMOTE_BATCH_BASELINE"),
     "current": ("REMOTE_SNR_CURRENT", "REMOTE_BATCH_CURRENT"),
 }
+
+DEFAULT_SSH_ENV_CANDIDATES = (
+    "session_bootstrap/config/phytium_pi_login.env",
+    "session_bootstrap/config/phytium_pi_login.example.env",
+)
+DEFAULT_INFERENCE_ENV_CANDIDATES = (
+    "session_bootstrap/config/inference_real_reconstruction_compare.2026-03-11.phytium_pi.env",
+    "session_bootstrap/config/inference_tvm310_safe.2026-03-10.phytium_pi.env",
+)
 
 
 def repo_relative(path: Path) -> str:
@@ -60,6 +69,10 @@ def load_env_file(raw_path: str | None) -> tuple[Path | None, dict[str, str]]:
     return path, parse_env_text(path.read_text(encoding="utf-8"))
 
 
+def load_env_path(path: Path) -> dict[str, str]:
+    return parse_env_text(path.read_text(encoding="utf-8"))
+
+
 def first_non_empty(mapping: dict[str, str], keys: tuple[str, ...]) -> str:
     for key in keys:
         value = str(mapping.get(key, "")).strip()
@@ -79,6 +92,103 @@ def normalize_port(raw: str) -> str:
     return str(port)
 
 
+def sanitize_env_values(values: dict[str, str]) -> dict[str, str]:
+    sanitized = dict(values)
+    for key in PASSWORD_KEYS:
+        sanitized.pop(key, None)
+    return sanitized
+
+
+def resolve_existing_env(raw_path: str | None) -> Path | None:
+    if not raw_path:
+        return None
+    path = resolve_local_path(raw_path.strip())
+    if path.exists() and path.is_file():
+        return path
+    return None
+
+
+def first_existing_env(candidates: tuple[str, ...]) -> Path | None:
+    for raw_path in candidates:
+        path = resolve_existing_env(raw_path)
+        if path is not None:
+            return path
+    return None
+
+
+def merge_env_values(
+    *,
+    startup_env_values: dict[str, str],
+    env_file_values: dict[str, str],
+    host: str,
+    user: str,
+    password: str,
+    port: str,
+) -> dict[str, str]:
+    values = sanitize_env_values(startup_env_values)
+    values.update(sanitize_env_values(env_file_values))
+    if host:
+        values["REMOTE_HOST"] = host
+        values["PHYTIUM_PI_HOST"] = host
+    if user:
+        values["REMOTE_USER"] = user
+        values["PHYTIUM_PI_USER"] = user
+    values["REMOTE_SSH_PORT"] = port
+    values["PHYTIUM_PI_PORT"] = port
+    if password:
+        values["REMOTE_PASS"] = password
+        values["PHYTIUM_PI_PASSWORD"] = password
+    else:
+        for key in PASSWORD_KEYS:
+            values.pop(key, None)
+    return values
+
+
+def build_field_sources(
+    *,
+    host: str,
+    user: str,
+    password: str,
+    port: str,
+    env_file: Path | None,
+    preloaded_values: dict[str, str],
+) -> dict[str, str]:
+    field_sources = {
+        "host": "missing",
+        "user": "missing",
+        "password": "session" if password else "missing",
+        "port": "missing",
+        "env_file": "missing",
+    }
+    if host:
+        field_sources["host"] = "preloaded" if host == preloaded_values.get("host", "") else "session"
+    if user:
+        field_sources["user"] = "preloaded" if user == preloaded_values.get("user", "") else "session"
+    current_env_file = repo_relative(env_file) if env_file else ""
+    if current_env_file:
+        field_sources["env_file"] = "preloaded" if current_env_file == preloaded_values.get("env_file", "") else "session"
+    effective_port = port if (host or user or current_env_file or preloaded_values.get("port")) else ""
+    if effective_port:
+        field_sources["port"] = "preloaded" if effective_port == preloaded_values.get("port", "") else "session"
+    return field_sources
+
+
+def build_source_summary(
+    *,
+    field_sources: dict[str, str],
+    preloaded_ssh_env_file: Path | None,
+    preloaded_inference_env_file: Path | None,
+) -> str:
+    parts: list[str] = []
+    if preloaded_ssh_env_file or preloaded_inference_env_file:
+        parts.append("启动预载")
+    if any(source == "session" for source in field_sources.values()):
+        parts.append("网页表单")
+    if not parts:
+        parts.append("未配置")
+    return " + ".join(parts)
+
+
 @dataclass(frozen=True)
 class BoardAccessConfig:
     host: str
@@ -88,6 +198,12 @@ class BoardAccessConfig:
     env_file: Path | None
     env_values: dict[str, str]
     source_summary: str
+    field_sources: dict[str, str] = field(default_factory=dict)
+    startup_env_values: dict[str, str] = field(default_factory=dict)
+    env_file_values: dict[str, str] = field(default_factory=dict)
+    preloaded_values: dict[str, str] = field(default_factory=dict)
+    preloaded_ssh_env_file: Path | None = None
+    preloaded_inference_env_file: Path | None = None
 
     @property
     def configured(self) -> bool:
@@ -100,6 +216,14 @@ class BoardAccessConfig:
     @property
     def probe_ready(self) -> bool:
         return self.connection_ready
+
+    @property
+    def has_preloaded_defaults(self) -> bool:
+        return bool(
+            self.preloaded_ssh_env_file
+            or self.preloaded_inference_env_file
+            or any(str(value).strip() for value in self.preloaded_values.values())
+        )
 
     def missing_connection_fields(self) -> list[str]:
         missing: list[str] = []
@@ -119,20 +243,18 @@ class BoardAccessConfig:
         return missing
 
     def build_env(self) -> dict[str, str]:
-        values = dict(self.env_values)
-        if self.host:
-            values["REMOTE_HOST"] = self.host
-            values["PHYTIUM_PI_HOST"] = self.host
-        if self.user:
-            values["REMOTE_USER"] = self.user
-            values["PHYTIUM_PI_USER"] = self.user
-        if self.password:
-            values["REMOTE_PASS"] = self.password
-            values["PHYTIUM_PI_PASSWORD"] = self.password
-        if self.port:
-            values["REMOTE_SSH_PORT"] = self.port
-            values["PHYTIUM_PI_PORT"] = self.port
-        return values
+        startup_env_values = self.startup_env_values
+        env_file_values = self.env_file_values
+        if not startup_env_values and not env_file_values:
+            startup_env_values = sanitize_env_values(self.env_values)
+        return merge_env_values(
+            startup_env_values=startup_env_values,
+            env_file_values=env_file_values,
+            host=self.host,
+            user=self.user,
+            password=self.password,
+            port=self.port,
+        )
 
     def build_subprocess_env(self) -> dict[str, str]:
         env = os.environ.copy()
@@ -140,51 +262,98 @@ class BoardAccessConfig:
         return env
 
     def to_public_dict(self) -> dict[str, Any]:
+        missing_current = self.missing_inference_fields("current")
+        missing_baseline = self.missing_inference_fields("baseline")
         return {
             "configured": self.configured,
             "connection_ready": self.connection_ready,
             "probe_ready": self.probe_ready,
-            "inference_ready": not self.missing_inference_fields("current"),
+            "inference_ready": not missing_current,
+            "inference_ready_variants": {
+                "current": not missing_current,
+                "baseline": not missing_baseline,
+            },
             "host": self.host,
             "user": self.user,
             "port": int(self.port),
             "env_file": repo_relative(self.env_file) if self.env_file else "",
             "has_password": bool(self.password),
             "missing_connection_fields": self.missing_connection_fields(),
-            "missing_inference_fields": self.missing_inference_fields("current"),
+            "missing_inference_fields": missing_current,
+            "missing_inference_fields_by_variant": {
+                "current": missing_current,
+                "baseline": missing_baseline,
+            },
             "source_summary": self.source_summary,
+            "field_sources": self.field_sources,
+            "preloaded_defaults": {
+                "active": self.has_preloaded_defaults,
+                "host": self.preloaded_values.get("host", ""),
+                "user": self.preloaded_values.get("user", ""),
+                "port": self.preloaded_values.get("port", ""),
+                "env_file": self.preloaded_values.get("env_file", ""),
+                "ssh_env_file": repo_relative(self.preloaded_ssh_env_file) if self.preloaded_ssh_env_file else "",
+                "inference_env_file": (
+                    repo_relative(self.preloaded_inference_env_file) if self.preloaded_inference_env_file else ""
+                ),
+            },
         }
 
 
-def build_board_access_config(payload: dict[str, Any]) -> BoardAccessConfig:
+def build_board_access_config(
+    payload: dict[str, Any],
+    *,
+    fallback: BoardAccessConfig | None = None,
+) -> BoardAccessConfig:
     raw_payload = {str(key): str(value or "").strip() for key, value in payload.items()}
-    env_file, env_values = load_env_file(raw_payload.get("env_file"))
+    fallback_startup_env = sanitize_env_values(fallback.startup_env_values) if fallback else {}
+    fallback_env_file_values = sanitize_env_values(fallback.env_file_values) if fallback else {}
+    raw_env_file = raw_payload.get("env_file")
+    if raw_env_file:
+        env_file, env_file_values = load_env_file(raw_env_file)
+        env_file_values = sanitize_env_values(env_file_values)
+    else:
+        env_file = fallback.env_file if fallback else None
+        env_file_values = fallback_env_file_values
 
-    host = raw_payload.get("host") or first_non_empty(env_values, HOST_KEYS)
-    user = raw_payload.get("user") or first_non_empty(env_values, USER_KEYS)
-    password = raw_payload.get("password") or first_non_empty(env_values, PASSWORD_KEYS)
-    port = normalize_port(raw_payload.get("port") or first_non_empty(env_values, PORT_KEYS) or "22")
+    host = (
+        raw_payload.get("host")
+        or first_non_empty(env_file_values, HOST_KEYS)
+        or (fallback.host if fallback else "")
+        or first_non_empty(fallback_startup_env, HOST_KEYS)
+    )
+    user = (
+        raw_payload.get("user")
+        or first_non_empty(env_file_values, USER_KEYS)
+        or (fallback.user if fallback else "")
+        or first_non_empty(fallback_startup_env, USER_KEYS)
+    )
+    password = raw_payload.get("password") or (fallback.password if fallback else "")
+    port = normalize_port(
+        raw_payload.get("port")
+        or first_non_empty(env_file_values, PORT_KEYS)
+        or (fallback.port if fallback else "")
+        or first_non_empty(fallback_startup_env, PORT_KEYS)
+        or "22"
+    )
 
-    merged_env = dict(env_values)
-    if host:
-        merged_env["REMOTE_HOST"] = host
-        merged_env["PHYTIUM_PI_HOST"] = host
-    if user:
-        merged_env["REMOTE_USER"] = user
-        merged_env["PHYTIUM_PI_USER"] = user
-    if password:
-        merged_env["REMOTE_PASS"] = password
-        merged_env["PHYTIUM_PI_PASSWORD"] = password
-    merged_env["REMOTE_SSH_PORT"] = port
-    merged_env["PHYTIUM_PI_PORT"] = port
-
-    source_parts: list[str] = []
-    if env_file:
-        source_parts.append(f"env 文件 {repo_relative(env_file)}")
-    if any(raw_payload.get(field) for field in ("host", "user", "password", "port")):
-        source_parts.append("网页表单")
-    if not source_parts:
-        source_parts.append("未配置")
+    preloaded_values = dict(fallback.preloaded_values) if fallback else {}
+    field_sources = build_field_sources(
+        host=host,
+        user=user,
+        password=password,
+        port=port,
+        env_file=env_file,
+        preloaded_values=preloaded_values,
+    )
+    merged_env = merge_env_values(
+        startup_env_values=fallback_startup_env,
+        env_file_values=env_file_values,
+        host=host,
+        user=user,
+        password=password,
+        port=port,
+    )
 
     return BoardAccessConfig(
         host=host,
@@ -193,5 +362,74 @@ def build_board_access_config(payload: dict[str, Any]) -> BoardAccessConfig:
         port=port,
         env_file=env_file,
         env_values=merged_env,
-        source_summary=" + ".join(source_parts),
+        source_summary=build_source_summary(
+            field_sources=field_sources,
+            preloaded_ssh_env_file=fallback.preloaded_ssh_env_file if fallback else None,
+            preloaded_inference_env_file=fallback.preloaded_inference_env_file if fallback else None,
+        ),
+        field_sources=field_sources,
+        startup_env_values=fallback_startup_env,
+        env_file_values=env_file_values,
+        preloaded_values=preloaded_values,
+        preloaded_ssh_env_file=fallback.preloaded_ssh_env_file if fallback else None,
+        preloaded_inference_env_file=fallback.preloaded_inference_env_file if fallback else None,
+    )
+
+
+def build_demo_default_board_access(probe_env: str | None) -> BoardAccessConfig:
+    ssh_env_path = resolve_existing_env(probe_env) or first_existing_env(DEFAULT_SSH_ENV_CANDIDATES)
+    inference_env_path = first_existing_env(DEFAULT_INFERENCE_ENV_CANDIDATES)
+
+    ssh_env_values = sanitize_env_values(load_env_path(ssh_env_path)) if ssh_env_path else {}
+    inference_env_values = sanitize_env_values(load_env_path(inference_env_path)) if inference_env_path else {}
+
+    host = first_non_empty(ssh_env_values, HOST_KEYS) or first_non_empty(inference_env_values, HOST_KEYS)
+    user = first_non_empty(ssh_env_values, USER_KEYS) or first_non_empty(inference_env_values, USER_KEYS)
+    port = normalize_port(
+        first_non_empty(ssh_env_values, PORT_KEYS)
+        or first_non_empty(inference_env_values, PORT_KEYS)
+        or "22"
+    )
+
+    merged_env = merge_env_values(
+        startup_env_values=ssh_env_values,
+        env_file_values=inference_env_values,
+        host=host,
+        user=user,
+        password="",
+        port=port,
+    )
+    preloaded_values = {
+        "host": host,
+        "user": user,
+        "port": port if (host or user or inference_env_path) else "",
+        "env_file": repo_relative(inference_env_path) if inference_env_path else "",
+    }
+    field_sources = build_field_sources(
+        host=host,
+        user=user,
+        password="",
+        port=port,
+        env_file=inference_env_path,
+        preloaded_values=preloaded_values,
+    )
+
+    return BoardAccessConfig(
+        host=host,
+        user=user,
+        password="",
+        port=port,
+        env_file=inference_env_path,
+        env_values=merged_env,
+        source_summary=build_source_summary(
+            field_sources=field_sources,
+            preloaded_ssh_env_file=ssh_env_path,
+            preloaded_inference_env_file=inference_env_path,
+        ),
+        field_sources=field_sources,
+        startup_env_values=ssh_env_values,
+        env_file_values=inference_env_values,
+        preloaded_values=preloaded_values,
+        preloaded_ssh_env_file=ssh_env_path,
+        preloaded_inference_env_file=inference_env_path,
     )

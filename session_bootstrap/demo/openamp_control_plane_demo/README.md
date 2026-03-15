@@ -34,6 +34,13 @@ bash ./session_bootstrap/scripts/run_openamp_demo.sh \
 The dashboard stays evidence-led either way. The "探测板卡 / OpenAMP" action only runs a read-only SSH probe plus an optional cached RPMsg status query.
 If `session_bootstrap/reports/openamp_demo_live_probe_latest.json` already exists, the dashboard loads that saved successful probe on startup and keeps showing it if a later in-dashboard refresh fails.
 
+On startup, the demo now also preloads practical repo-backed defaults when they exist:
+
+- SSH defaults: `session_bootstrap/config/phytium_pi_login.env`, else `session_bootstrap/config/phytium_pi_login.example.env`
+- inference defaults for the demo line: `session_bootstrap/config/inference_real_reconstruction_compare.2026-03-11.phytium_pi.env`
+
+Repo-side password fields are ignored intentionally. The operator still enters the password once in the web UI, and the current demo-server process reuses it for later probe / inference / fault actions.
+
 ## Web-side credential flow
 
 Open the dashboard and fill the "会话接入" card:
@@ -45,6 +52,7 @@ Open the dashboard and fill the "会话接入" card:
 - optional `env 文件`
 
 The password is kept only in memory inside the current demo server process. It is not written back to the repo.
+If the startup defaults above were found, the UI prelabels which fields were preloaded and which one is still missing. In the normal repo state, `host / user / port / env_file` are already filled, so only the password must be entered before Current / Baseline attempt live execution.
 Later board-facing actions reuse the same in-process session automatically:
 
 - Act 1 board probe

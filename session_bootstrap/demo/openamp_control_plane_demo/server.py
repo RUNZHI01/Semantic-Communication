@@ -12,7 +12,7 @@ from threading import Lock
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from board_access import BoardAccessConfig, build_board_access_config
+from board_access import BoardAccessConfig, build_board_access_config, build_demo_default_board_access
 from board_probe import DEFAULT_LIVE_PROBE_OUTPUT, is_successful_probe, load_probe_output, run_live_probe, write_probe_output
 from demo_data import (
     PROJECT_ROOT,
@@ -69,7 +69,7 @@ class DashboardState:
         self._probe_timeout_sec = probe_timeout_sec
         self._probe_cache_path = probe_cache_path
         self._lock = Lock()
-        self._board_access = build_board_access_config({})
+        self._board_access = build_demo_default_board_access(self._probe_env)
         self._last_control_status: dict[str, Any] | None = None
         self._last_inference_result: dict[str, Any] | None = None
         self._last_fault_result: dict[str, Any] | None = None
@@ -86,7 +86,9 @@ class DashboardState:
         self._runtime_label = "tvm"
 
     def set_board_access(self, payload: dict[str, Any]) -> dict[str, Any]:
-        config = build_board_access_config(payload)
+        with self._lock:
+            fallback = self._board_access
+        config = build_board_access_config(payload, fallback=fallback)
         with self._lock:
             self._board_access = config
         return config.to_public_dict()
@@ -137,10 +139,18 @@ class DashboardState:
             mode_label = "在线模式"
             mode_tone = "online"
             mode_summary = "板卡 SSH 与最新读数可用，演示动作优先尝试真机。"
-        elif board_access.configured:
+        elif board_access.connection_ready:
             mode_label = "降级模式"
             mode_tone = "degraded"
             mode_summary = "已记录本场凭据，但当前没有新的板卡在线读数，动作会自动回退到预录证据。"
+        elif board_access.has_preloaded_defaults and board_access.missing_connection_fields() == ["password"]:
+            mode_label = "待补全密码"
+            mode_tone = "degraded"
+            mode_summary = "已预载仓库内的 SSH / 推理默认值；只需在网页补一次密码即可尝试真机探板、Current 与 Baseline。"
+        elif board_access.configured:
+            mode_label = "待补全会话"
+            mode_tone = "degraded"
+            mode_summary = "已记录部分连接或推理信息；补齐缺失字段后才能尝试真机动作。"
         else:
             mode_label = "离线模式"
             mode_tone = "offline"
