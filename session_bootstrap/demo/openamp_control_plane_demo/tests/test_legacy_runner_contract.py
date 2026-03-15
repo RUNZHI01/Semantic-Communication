@@ -335,6 +335,140 @@ class LegacyCompatRunnerContractTest(unittest.TestCase):
             self.assertEqual(summary["save_format"], "png")
             self.assertTrue(summary["output_dir"].endswith("/reconstructions"))
 
+    def test_legacy_runner_defaults_to_demo_100_image_cap_without_explicit_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir_name:
+            temp_dir = Path(temp_dir_name)
+            fake_python_root = temp_dir / "fake_pythonpath"
+            fake_tvm_dir = fake_python_root / "tvm"
+            fake_tvm_dir.mkdir(parents=True)
+
+            write_file(
+                fake_tvm_dir / "__init__.py",
+                textwrap.dedent(
+                    """\
+                    from . import relax, runtime
+
+
+                    def cpu(index=0):
+                        return ("cpu", index)
+                    """
+                ),
+            )
+            write_file(
+                fake_tvm_dir / "runtime.py",
+                textwrap.dedent(
+                    """\
+                    class _Module:
+                        type_key = "library"
+
+
+                    def load_module(path):
+                        return _Module()
+                    """
+                ),
+            )
+            write_file(
+                fake_tvm_dir / "relax.py",
+                textwrap.dedent(
+                    """\
+                    class VirtualMachine:
+                        def __init__(self, lib, dev):
+                            self.lib = lib
+                            self.dev = dev
+                    """
+                ),
+            )
+
+            fake_python = temp_dir / "fake_python.sh"
+            write_executable(
+                fake_python,
+                textwrap.dedent(
+                    f"""\
+                    #!/usr/bin/env bash
+                    set -euo pipefail
+                    export PYTHONPATH="{fake_python_root}${{PYTHONPATH:+:${{PYTHONPATH}}}}"
+                    exec python3 "$@"
+                    """
+                ),
+            )
+
+            jscc_dir = temp_dir / "jscc"
+            jscc_dir.mkdir()
+            artifact_dir = jscc_dir / "tvm_tune_logs"
+            artifact_dir.mkdir()
+            artifact_path = artifact_dir / "optimized_model.so"
+            artifact_bytes = b"legacy-openamp-artifact"
+            artifact_path.write_bytes(artifact_bytes)
+            expected_sha = hashlib.sha256(artifact_bytes).hexdigest()
+
+            write_file(
+                jscc_dir / "tvm_002.py",
+                textwrap.dedent(
+                    """\
+                    import argparse
+                    from pathlib import Path
+
+
+                    parser = argparse.ArgumentParser()
+                    parser.add_argument("--input_dir", required=True)
+                    parser.add_argument("--output_dir", required=True)
+                    parser.add_argument("--snr", required=True)
+                    parser.add_argument("--batch_size", required=True)
+                    args = parser.parse_args()
+
+                    input_files = sorted(path for path in Path(args.input_dir).iterdir() if path.is_file())
+                    recon_dir = Path(args.output_dir) / "reconstructions"
+                    recon_dir.mkdir(parents=True, exist_ok=True)
+                    for input_path in input_files:
+                        (recon_dir / f"{input_path.stem}_recon.png").write_bytes(b"fake-png")
+                        print("批量推理时间（1 个样本）: 0.010 秒")
+                    """
+                ),
+            )
+
+            input_dir = temp_dir / "inputs"
+            input_dir.mkdir()
+            for index in range(105):
+                suffix = ".pt" if index % 2 == 0 else ".npy"
+                (input_dir / f"sample_{index:03d}{suffix}").write_bytes(f"latent-{index:03d}".encode("utf-8"))
+            output_base = temp_dir / "outputs"
+            output_base.mkdir()
+
+            env = os.environ.copy()
+            env.update(
+                {
+                    "REMOTE_MODE": "local",
+                    "REMOTE_TVM_PYTHON": str(fake_python),
+                    "REMOTE_JSCC_DIR": str(jscc_dir),
+                    "REMOTE_INPUT_DIR": str(input_dir),
+                    "REMOTE_OUTPUT_BASE": str(output_base),
+                    "REMOTE_SNR_BASELINE": "10",
+                    "REMOTE_BATCH_BASELINE": "1",
+                    "REMOTE_BASELINE_ARTIFACT": str(artifact_path),
+                    "INFERENCE_BASELINE_EXPECTED_SHA256": expected_sha,
+                    "OPENAMP_DEMO_MODE": "1",
+                    "OPENAMP_DEMO_MAX_INPUTS": "100",
+                }
+            )
+
+            result = subprocess.run(
+                ["bash", str(LEGACY_RUNNER), "--variant", "baseline"],
+                cwd=REPO_ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            summary = json.loads([line.strip() for line in result.stdout.splitlines() if line.strip()][-1])
+            self.assertEqual(summary["max_inputs"], 100)
+            self.assertEqual(summary["input_count"], 100)
+            self.assertEqual(summary["processed_count"], 100)
+            self.assertEqual(summary["output_count"], 100)
+            self.assertEqual(summary["available_input_count"], 105)
+
 
 class LegacyBaselineLiveConsumptionTest(unittest.TestCase):
     def test_live_job_accepts_legacy_summary_json_as_success(self) -> None:
@@ -476,6 +610,9 @@ class LegacyBaselineLiveConsumptionTest(unittest.TestCase):
             self.assertEqual(snapshot["runner_summary"]["parser"], "legacy_latency_lines")
             self.assertEqual(snapshot["runner_summary"]["run_median_ms"], 12.0)
             self.assertEqual(snapshot["runner_summary"]["artifact_sha256"], "b" * 64)
+            self.assertEqual(snapshot["progress"]["completed_count"], 1)
+            self.assertEqual(snapshot["progress"]["expected_count"], 1)
+            self.assertEqual(snapshot["progress"]["count_source"], "runner_summary.processed_count")
             self.assertEqual(snapshot["progress"]["stages"][3]["status"], "done")
 
 

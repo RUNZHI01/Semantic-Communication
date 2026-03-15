@@ -127,17 +127,24 @@
           <span>测试图</span>
           <select id="imageSelect"></select>
         </label>
-        <button id="runCurrentButton" class="button button-primary" type="button">启动 Current 在线推进</button>
+        <button id="runCurrentButton" class="button button-primary" type="button">启动 Current 100 张图在线推进</button>
       </div>
       <div class="panel-lite live-progress-shell">
         <div class="live-progress-top">
           <div>
-            <div class="label">在线推进</div>
+            <div class="label">Current 在线推进</div>
             <div class="status-pill tone-neutral" id="liveProgressBadge">等待触发</div>
           </div>
-          <div class="live-progress-percent" id="liveProgressPercent">0%</div>
+          <div class="live-progress-countbox">
+            <strong id="liveProgressCount">0 / 100</strong>
+            <span>已完成图像</span>
+          </div>
         </div>
-        <div class="progress-track"><span id="liveProgressBar"></span></div>
+        <div class="progress-axis-shell">
+          <div class="progress-track"><span class="progress-fill" id="liveProgressBar"></span><span class="progress-marker" id="liveProgressMarker"></span></div>
+          <div class="progress-axis-labels" id="liveProgressAxis"></div>
+        </div>
+        <div class="compact-copy" id="liveProgressMeta">等待本场 100 张图 live run。</div>
         <div class="stage-chip-row" id="liveStageChips"></div>
         <div class="log-panel live-trace-panel" id="liveTracePanel">等待板端推进。</div>
       </div>
@@ -164,11 +171,45 @@
         </div>
         <span class="muted">保持两条正式口径，不混入临时数字</span>
       </div>
+      <div class="dual-progress-grid">
+        <article class="panel-lite progress-summary-card">
+          <div class="progress-summary-head">
+            <div>
+              <div class="label">Baseline Live</div>
+              <h3>Baseline 100 张图</h3>
+            </div>
+            <div class="status-pill tone-neutral" id="baselineProgressBadge">等待触发</div>
+          </div>
+          <div class="progress-summary-count" id="baselineProgressCount">0 / 100</div>
+          <div class="compact-copy progress-summary-stage" id="baselineProgressStage">等待触发。</div>
+          <div class="progress-axis-shell progress-axis-shell-compact">
+            <div class="progress-track"><span class="progress-fill" id="baselineProgressBar"></span><span class="progress-marker" id="baselineProgressMarker"></span></div>
+            <div class="progress-axis-labels" id="baselineProgressAxis"></div>
+          </div>
+          <div class="compact-copy progress-summary-meta" id="baselineProgressMeta">尚未开始 live run。</div>
+        </article>
+        <article class="panel-lite progress-summary-card">
+          <div class="progress-summary-head">
+            <div>
+              <div class="label">Current Live</div>
+              <h3>Current 100 张图</h3>
+            </div>
+            <div class="status-pill tone-neutral" id="comparisonCurrentProgressBadge">等待触发</div>
+          </div>
+          <div class="progress-summary-count" id="comparisonCurrentProgressCount">0 / 100</div>
+          <div class="compact-copy progress-summary-stage" id="comparisonCurrentProgressStage">等待触发。</div>
+          <div class="progress-axis-shell progress-axis-shell-compact">
+            <div class="progress-track"><span class="progress-fill" id="comparisonCurrentProgressBar"></span><span class="progress-marker" id="comparisonCurrentProgressMarker"></span></div>
+            <div class="progress-axis-labels" id="comparisonCurrentProgressAxis"></div>
+          </div>
+          <div class="compact-copy progress-summary-meta" id="comparisonCurrentProgressMeta">尚未开始 live run。</div>
+        </article>
+      </div>
       <div id="comparisonBoard" class="comparison-board"></div>
       <div class="inline-actions">
-        <button id="runBaselineButton" class="button button-secondary" type="button">运行 Baseline</button>
-        <button id="runCurrentAgainButton" class="button button-primary" type="button">运行 Current</button>
-        <button id="runAllButton" class="button button-secondary" type="button">全部运行</button>
+        <button id="runBaselineButton" class="button button-secondary" type="button">运行 Baseline 100 张图</button>
+        <button id="runCurrentAgainButton" class="button button-primary" type="button">运行 Current 100 张图</button>
+        <button id="runAllButton" class="button button-secondary" type="button">一键顺序运行双版本 100 张图</button>
       </div>
       <div class="panel-lite" id="comparisonRunNote">等待执行基线对比动作。</div>
     </section>

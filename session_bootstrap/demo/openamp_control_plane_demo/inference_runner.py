@@ -24,6 +24,10 @@ REMOTE_HOOK_PROXY_SCRIPT = Path(__file__).resolve().parent / "openamp_remote_hoo
 ARTIFACT_SHA_MISMATCH_RE = re.compile(
     r"artifact sha256 mismatch path=(?P<path>\S+) expected=(?P<expected>[0-9A-Fa-f]{64}) actual=(?P<actual>[0-9A-Fa-f]{64})"
 )
+RUNNER_SAMPLE_LATENCY_PATTERNS = (
+    re.compile(r"批量推理时间.*?:\s*([0-9]+(?:\.[0-9]+)?)\s*秒"),
+    re.compile(r"batch\s+infer(?:ence)?\s+time.*?:\s*([0-9]+(?:\.[0-9]+)?)\s*s(?:ec(?:onds?)?)?", re.I),
+)
 DEFAULT_HEARTBEAT_INTERVAL_SEC = 0.5
 DEFAULT_LIVE_CONTROL_HOOK_TIMEOUT_SEC = 30.0
 MIN_LIVE_CONTROL_HOOK_TIMEOUT_SEC = 5.0
@@ -32,6 +36,8 @@ MIN_LIVE_CONTROL_HOOK_TIMEOUT_SEC = 5.0
 DEFAULT_MAX_INPUTS = 100
 DEFAULT_SEED = 0
 UINT32_MAX = (1 << 32) - 1
+DEMO_MODE_ENV = "OPENAMP_DEMO_MODE"
+DEMO_MAX_INPUTS_ENV = "OPENAMP_DEMO_MAX_INPUTS"
 
 _LIVE_JOB_ID_LOCK = Lock()
 _LAST_LIVE_JOB_ID = 0
@@ -46,6 +52,33 @@ def parse_json_stdout(raw: str) -> dict[str, Any]:
         if isinstance(payload, dict):
             return payload
     raise ValueError("runner produced no JSON payload")
+
+
+def count_completed_images_from_runner_log(path: Path) -> int:
+    if not path.exists():
+        return 0
+    completed = 0
+    for raw_line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if any(pattern.search(line) for pattern in RUNNER_SAMPLE_LATENCY_PATTERNS):
+            completed += 1
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        progress_payload = payload.get("openamp_demo_progress")
+        if not isinstance(progress_payload, dict):
+            continue
+        try:
+            completed = max(completed, int(progress_payload.get("completed_count") or 0))
+        except (TypeError, ValueError):
+            continue
+    return completed
 
 
 def generate_live_job_id() -> str:
@@ -247,11 +280,69 @@ def format_trace_event(event: dict[str, Any]) -> str:
     return f"[{at}] {phase}"
 
 
+def normalize_positive_int(value: Any) -> int | None:
+    try:
+        normalized = int(value)
+    except (TypeError, ValueError):
+        return None
+    if normalized < 0:
+        return None
+    return normalized
+
+
+def build_completion_counts(
+    *,
+    runner_log_path: Path,
+    runner_summary: dict[str, Any] | None = None,
+    expected_outputs: int | None = None,
+) -> dict[str, Any]:
+    summary = runner_summary or {}
+
+    summary_processed = normalize_positive_int(summary.get("processed_count"))
+    if summary_processed is not None:
+        completed_count = summary_processed
+        count_source = "runner_summary.processed_count"
+    else:
+        completed_count = count_completed_images_from_runner_log(runner_log_path)
+        count_source = "runner_log.sample_latency_lines"
+
+    expected_count = (
+        normalize_positive_int(summary.get("input_count"))
+        or normalize_positive_int(summary.get("max_inputs"))
+        or normalize_positive_int(expected_outputs)
+        or 0
+    )
+    if expected_count > 0:
+        completed_count = min(completed_count, expected_count)
+    remaining_count = max(expected_count - completed_count, 0) if expected_count > 0 else 0
+    completion_ratio = (completed_count / expected_count) if expected_count > 0 else 0.0
+    percent = int(round(completion_ratio * 100.0))
+    if expected_count > 0:
+        percent = max(0, min(100, percent))
+    count_label = f"{completed_count} / {expected_count}" if expected_count > 0 else str(completed_count)
+    return {
+        "completed_count": completed_count,
+        "expected_count": expected_count,
+        "remaining_count": remaining_count,
+        "completion_ratio": round(completion_ratio, 4),
+        "count_source": count_source,
+        "count_label": count_label,
+        "percent": percent,
+    }
+
+
 def build_progress_payload(
     events: list[dict[str, Any]],
     *,
     request_state: str,
     final_status: str | None = None,
+    completed_count: int = 0,
+    expected_count: int = 0,
+    remaining_count: int = 0,
+    completion_ratio: float = 0.0,
+    count_source: str = "",
+    count_label: str = "0",
+    percent: int = 0,
 ) -> dict[str, Any]:
     status_event = last_event_by_phase(events, "STATUS_REQ")
     job_req_event = last_event_by_phase(events, "JOB_REQ")
@@ -371,15 +462,15 @@ def build_progress_payload(
     ]
 
     if request_state == "completed":
-        percent = 100
+        phase_percent = 100
     elif running_status == "current":
-        percent = 76
+        phase_percent = 76
     elif dispatched_status == "done":
-        percent = 52
+        phase_percent = 52
     elif connected_status == "done":
-        percent = 28
+        phase_percent = 28
     else:
-        percent = 8
+        phase_percent = 8
 
     current_stage = "准备中"
     for stage in stages:
@@ -407,6 +498,13 @@ def build_progress_payload(
         "label": label,
         "tone": tone,
         "percent": percent,
+        "phase_percent": phase_percent,
+        "completed_count": completed_count,
+        "expected_count": expected_count,
+        "remaining_count": remaining_count,
+        "completion_ratio": completion_ratio,
+        "count_source": count_source,
+        "count_label": count_label,
         "current_stage": current_stage,
         "stages": stages,
         "event_log": [format_trace_event(event) for event in events],
@@ -513,6 +611,7 @@ class LiveRemoteReconstructionJob:
     ) -> None:
         self.job_id = generate_live_job_id()
         self.variant = variant
+        self._expected_outputs = max_inputs
         self._timeout_sec = timeout_sec
         self._output_dir = Path(tempfile.mkdtemp(prefix="openamp_demo_live_", dir="/tmp"))
         self._trace_path = self._output_dir / "control_trace.jsonl"
@@ -535,7 +634,15 @@ class LiveRemoteReconstructionJob:
                 "runner_summary": {},
                 "wrapper_summary": {},
                 "diagnostics": build_diagnostics(missing_fields=missing),
-                "progress": build_progress_payload([], request_state="completed", final_status="config_error"),
+                "progress": build_progress_payload(
+                    [],
+                    request_state="completed",
+                    final_status="config_error",
+                    expected_count=max_inputs,
+                    remaining_count=max_inputs,
+                    count_source="demo_default",
+                    count_label=f"0 / {max_inputs}",
+                ),
                 "artifacts": self._artifact_paths(),
             }
             return
@@ -560,13 +667,23 @@ class LiveRemoteReconstructionJob:
                 "runner_summary": {},
                 "wrapper_summary": {},
                 "diagnostics": build_diagnostics(missing_fields=control_plane_missing),
-                "progress": build_progress_payload([], request_state="completed", final_status="config_error"),
+                "progress": build_progress_payload(
+                    [],
+                    request_state="completed",
+                    final_status="config_error",
+                    expected_count=max_inputs,
+                    remaining_count=max_inputs,
+                    count_source="demo_default",
+                    count_label=f"0 / {max_inputs}",
+                ),
                 "artifacts": self._artifact_paths(),
             }
             return
 
         env = access.build_subprocess_env()
         env["REMOTE_MODE"] = "ssh"
+        env[DEMO_MODE_ENV] = "1"
+        env[DEMO_MAX_INPUTS_ENV] = str(max_inputs)
 
         runner_cmd = build_runner_command(access, variant=variant, max_inputs=max_inputs, seed=seed)
         hook_cmd = self._build_hook_command(access)
@@ -619,7 +736,15 @@ class LiveRemoteReconstructionJob:
                 "runner_summary": {},
                 "wrapper_summary": {},
                 "diagnostics": build_diagnostics(error=str(exc)),
-                "progress": build_progress_payload([], request_state="completed", final_status="launch_error"),
+                "progress": build_progress_payload(
+                    [],
+                    request_state="completed",
+                    final_status="launch_error",
+                    expected_count=max_inputs,
+                    remaining_count=max_inputs,
+                    count_source="demo_default",
+                    count_label=f"0 / {max_inputs}",
+                ),
                 "artifacts": self._artifact_paths(),
             }
             return
@@ -730,6 +855,11 @@ class LiveRemoteReconstructionJob:
         hook_diagnostics = control_hook_diagnostics(last_hook_response)
         if hook_diagnostics:
             diagnostics["control_hook"] = hook_diagnostics
+        count_payload = build_completion_counts(
+            runner_log_path=self._runner_log_path,
+            runner_summary=runner_summary,
+            expected_outputs=getattr(self, "_expected_outputs", DEFAULT_MAX_INPUTS),
+        )
 
         final_snapshot = {
             "status": status,
@@ -741,7 +871,12 @@ class LiveRemoteReconstructionJob:
             "runner_summary": runner_summary,
             "wrapper_summary": wrapper_summary,
             "diagnostics": diagnostics,
-            "progress": build_progress_payload(trace_events, request_state="completed", final_status=status),
+            "progress": build_progress_payload(
+                trace_events,
+                request_state="completed",
+                final_status=status,
+                **count_payload,
+            ),
             "artifacts": self._artifact_paths(),
         }
         with self._lock:
@@ -753,6 +888,10 @@ class LiveRemoteReconstructionJob:
                 return dict(self._final_snapshot)
 
         trace_events = load_trace_events(self._trace_path)
+        count_payload = build_completion_counts(
+            runner_log_path=self._runner_log_path,
+            expected_outputs=getattr(self, "_expected_outputs", DEFAULT_MAX_INPUTS),
+        )
         return {
             "status": "running",
             "request_state": "running",
@@ -763,7 +902,7 @@ class LiveRemoteReconstructionJob:
             "runner_summary": {},
             "wrapper_summary": {},
             "diagnostics": {},
-            "progress": build_progress_payload(trace_events, request_state="running"),
+            "progress": build_progress_payload(trace_events, request_state="running", **count_payload),
             "artifacts": self._artifact_paths(),
         }
 
@@ -810,6 +949,8 @@ def run_remote_reconstruction(
     command = ["bash", "-lc", runner_cmd]
     env = access.build_subprocess_env()
     env["REMOTE_MODE"] = "ssh"
+    env[DEMO_MODE_ENV] = "1"
+    env[DEMO_MAX_INPUTS_ENV] = str(max_inputs)
 
     try:
         result = subprocess.run(

@@ -87,6 +87,11 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+demo_mode_flag="$(printf '%s' "${OPENAMP_DEMO_MODE:-}" | tr '[:upper:]' '[:lower:]')"
+if [[ -z "$MAX_INPUTS" && ( "$demo_mode_flag" == "1" || "$demo_mode_flag" == "true" || "$demo_mode_flag" == "yes" || "$demo_mode_flag" == "on" ) ]]; then
+  MAX_INPUTS="${OPENAMP_DEMO_MAX_INPUTS:-100}"
+fi
+
 if [[ "$VARIANT" != "baseline" && "$VARIANT" != "current" ]]; then
   echo "ERROR: --variant must be baseline or current." >&2
   exit 1
@@ -160,6 +165,10 @@ fi
 
 if ! [[ "$REAL_BATCH" =~ ^[0-9]+$ ]]; then
   echo "ERROR: batch_size must be a non-negative integer (got: $REAL_BATCH)." >&2
+  exit 1
+fi
+if [[ -n "$MAX_INPUTS" ]] && ! [[ "$MAX_INPUTS" =~ ^[0-9]+$ ]]; then
+  echo "ERROR: --max-inputs must be a non-negative integer (got: $MAX_INPUTS)." >&2
   exit 1
 fi
 

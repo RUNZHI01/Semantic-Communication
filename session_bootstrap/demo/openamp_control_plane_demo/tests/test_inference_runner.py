@@ -62,6 +62,79 @@ class RunRemoteReconstructionTest(unittest.TestCase):
         self.assertEqual(second, "2")
         self.assertLessEqual(int(second), inference_runner.UINT32_MAX)
 
+    def test_count_completed_images_from_runner_log_uses_real_latency_lines(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runner_log = Path(temp_dir) / "runner.log"
+            runner_log.write_text(
+                "\n".join(
+                    [
+                        "[current-real] variant=current",
+                        "2026-03-16 10:00:01 - INFO - 批量推理时间（1 个样本）: 0.011000 秒",
+                        "重构图像保存至: /tmp/run/sample_001.png",
+                        "2026-03-16 10:00:02 - INFO - 批量推理时间（1 个样本）: 0.012000 秒",
+                        "batch inference time: 0.013 sec",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            completed = inference_runner.count_completed_images_from_runner_log(runner_log)
+
+        self.assertEqual(completed, 3)
+
+    def test_running_snapshot_reports_real_completed_count_from_runner_log(self) -> None:
+        with tempfile.TemporaryDirectory(dir=PROJECT_ROOT) as temp_dir:
+            output_dir = Path(temp_dir)
+            runner_log_path = output_dir / "runner.log"
+            runner_log_path.write_text(
+                "\n".join(
+                    [
+                        "[2026-03-16T11:00:00+0800] openamp wrapper start",
+                        "批量推理时间（1 个样本）: 0.012 秒",
+                        "批量推理时间（1 个样本）: 0.014 秒",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            trace_path = output_dir / "control_trace.jsonl"
+            trace_path.write_text(
+                json.dumps(
+                    {
+                        "at": "2026-03-16T11:00:01+0800",
+                        "phase": "JOB_ACK",
+                        "payload": {"job_id": 4242, "decision": "ALLOW", "guard_state_name": "JOB_ACTIVE"},
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            job = LiveRemoteReconstructionJob.__new__(LiveRemoteReconstructionJob)
+            job.job_id = "4242"
+            job.variant = "current"
+            job._timeout_sec = 10.0
+            job._expected_outputs = 100
+            job._output_dir = output_dir
+            job._trace_path = trace_path
+            job._summary_path = output_dir / "wrapper_summary.json"
+            job._runner_log_path = runner_log_path
+            job._lock = Lock()
+            job._final_snapshot = None
+            job._process = None
+
+            snapshot = job.snapshot()
+
+        self.assertEqual(snapshot["request_state"], "running")
+        self.assertEqual(snapshot["progress"]["completed_count"], 2)
+        self.assertEqual(snapshot["progress"]["expected_count"], 100)
+        self.assertEqual(snapshot["progress"]["remaining_count"], 98)
+        self.assertEqual(snapshot["progress"]["count_label"], "2 / 100")
+        self.assertEqual(snapshot["progress"]["count_source"], "runner_log.sample_latency_lines")
+        self.assertEqual(snapshot["progress"]["percent"], 2)
+
     def test_missing_required_config_returns_operator_friendly_config_error(self) -> None:
         access = make_access(
             {
@@ -108,6 +181,8 @@ class RunRemoteReconstructionTest(unittest.TestCase):
             env={
                 **access.build_subprocess_env(),
                 "REMOTE_MODE": "ssh",
+                "OPENAMP_DEMO_MODE": "1",
+                "OPENAMP_DEMO_MAX_INPUTS": str(inference_runner.DEFAULT_MAX_INPUTS),
             },
         )
         self.assertEqual(payload["status"], "error")
@@ -252,6 +327,9 @@ class RunRemoteReconstructionTest(unittest.TestCase):
         hook_command = command[command.index("--control-hook-cmd") + 1]
         self.assertIn("--remote-output-root", hook_command)
         self.assertIn("/tmp/openamp_demo_hook/4242", hook_command)
+        env = popen_mock.call_args.kwargs["env"]
+        self.assertEqual(env["OPENAMP_DEMO_MODE"], "1")
+        self.assertEqual(env["OPENAMP_DEMO_MAX_INPUTS"], str(inference_runner.DEFAULT_MAX_INPUTS))
 
     def test_live_job_control_hook_timeout_is_capped_at_runner_timeout_when_shorter(self) -> None:
         access = make_access()

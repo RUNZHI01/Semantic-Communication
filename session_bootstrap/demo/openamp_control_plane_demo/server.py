@@ -25,7 +25,7 @@ from demo_data import (
     resolve_repo_path,
 )
 from fault_injector import query_live_status, run_fault_action, run_recover_action
-from inference_runner import launch_remote_reconstruction_job
+from inference_runner import DEFAULT_MAX_INPUTS, launch_remote_reconstruction_job
 
 
 STATIC_ROOT = Path(__file__).resolve().parent / "static"
@@ -353,7 +353,14 @@ class DashboardState:
                         "state": "completed",
                         "label": "回退展示",
                         "tone": "degraded",
-                        "percent": 100,
+                        "percent": 0,
+                        "phase_percent": 100,
+                        "completed_count": 0,
+                        "expected_count": DEFAULT_MAX_INPUTS,
+                        "remaining_count": DEFAULT_MAX_INPUTS,
+                        "completion_ratio": 0.0,
+                        "count_source": "demo_default",
+                        "count_label": f"0 / {DEFAULT_MAX_INPUTS}",
                         "current_stage": "回退展示",
                         "stages": [],
                         "event_log": [],
