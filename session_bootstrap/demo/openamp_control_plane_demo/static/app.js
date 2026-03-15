@@ -6,6 +6,8 @@ const state = {
   currentResult: null,
   baselineResult: null,
   faultResult: null,
+  activeInferenceJobId: null,
+  activeInferenceVariant: "",
 };
 
 function docHref(path) {
@@ -143,7 +145,7 @@ function setFeedback(message, tone) {
 function renderTop(snapshot, systemStatus) {
   document.getElementById("heroSummary").textContent =
     `trusted current SHA ${snapshot.project.trusted_current_sha.slice(0, 12)} 已与当前演示材料对齐。` +
-    ` 第一幕优先展示板卡状态，第二幕和第三幕分别对应重建与正式口径对比，第四幕保留 FIT-01 / FIT-02 / FIT-03 证据。`;
+    ` 第一幕展示板卡状态，第二幕会拉起 STATUS_REQ / JOB_REQ / JOB_ACK / JOB_DONE 的真实在线推进，第三幕保留正式口径对比，第四幕保留 FIT-01 / FIT-02 / FIT-03 证据。`;
 
   const modePill = document.getElementById("modePill");
   modePill.className = `mode-pill ${toneClass(systemStatus.execution_mode.tone)}`;
@@ -277,18 +279,73 @@ function barWidth(value, max) {
   return Math.max(6, Math.round((value / max) * 100));
 }
 
+function renderLiveProgress(progress) {
+  const badge = document.getElementById("liveProgressBadge");
+  const percent = document.getElementById("liveProgressPercent");
+  const bar = document.getElementById("liveProgressBar");
+  const chips = document.getElementById("liveStageChips");
+  const trace = document.getElementById("liveTracePanel");
+
+  if (!progress) {
+    badge.className = "status-pill tone-neutral";
+    badge.textContent = "等待触发";
+    percent.textContent = "0%";
+    bar.style.width = "0%";
+    chips.innerHTML = "";
+    trace.textContent = "等待板端推进。";
+    return;
+  }
+
+  badge.className = `status-pill ${toneClass(progress.tone || progress.label)}`;
+  badge.textContent = progress.label || "等待推进";
+  percent.textContent = `${Number(progress.percent || 0)}%`;
+  bar.style.width = `${Math.max(0, Math.min(100, Number(progress.percent || 0)))}%`;
+  chips.innerHTML = (progress.stages || [])
+    .map(
+      (stage) => `
+        <article class="stage-chip" data-status="${escapeHtml(stage.status)}">
+          <span class="label">${escapeHtml(stage.label)}</span>
+          <strong>${escapeHtml(stage.status === "done" ? "已完成" : stage.status === "current" ? "推进中" : stage.status === "error" ? "停在此处" : "待推进")}</strong>
+          <small>${escapeHtml(stage.detail || "")}</small>
+        </article>
+      `
+    )
+    .join("");
+  trace.textContent = (progress.event_log || []).join("\n") || "等待板端推进。";
+}
+
 function renderInference(result) {
   if (!result) {
     document.getElementById("act2SourceLabel").textContent = "等待执行。";
     document.getElementById("timingBoard").innerHTML = "";
     document.getElementById("qualityMetrics").innerHTML = "";
     document.getElementById("inferenceMessage").textContent = "等待触发重建。";
+    renderLiveProgress(null);
     return;
   }
+  renderLiveProgress(result.live_progress || null);
   document.getElementById("act2SourceLabel").textContent = `${result.source_label} | ${result.sample.label}`;
   document.getElementById("originalImage").src = result.original_image_b64;
   document.getElementById("reconstructedImage").src = result.reconstructed_image_b64;
   document.getElementById("inferenceMessage").textContent = result.message;
+
+  if (result.request_state === "running") {
+    document.getElementById("timingBoard").innerHTML = `
+      <div class="timing-row">
+        <div class="timing-label">
+          <span>当前阶段</span>
+          <span>${escapeHtml(result.live_progress?.current_stage || "等待板端响应")}</span>
+        </div>
+        <div class="timing-bar"><span class="bar-board" style="width:${Math.max(6, Number(result.live_progress?.percent || 0))}%"></span></div>
+      </div>
+    `;
+    document.getElementById("qualityMetrics").innerHTML = [
+      `<div class="metric-chip">状态: ${escapeHtml(result.live_progress?.label || "真实在线推进")}</div>`,
+      `<div class="metric-chip">阶段: ${escapeHtml(result.live_progress?.current_stage || "等待板端响应")}</div>`,
+      `<div class="metric-chip">画面: 归档样例稳定展示</div>`,
+    ].join("");
+    return;
+  }
 
   const stageValues = result.timings.stages || [];
   const maxValue = Math.max(...stageValues.map((item) => Number(item.value_ms || 0)), 1);
@@ -361,7 +418,7 @@ function renderComparison(snapshot) {
     notes.push(`Current：${state.currentResult.source_label}，${state.currentResult.message}`);
   }
   document.getElementById("comparisonRunNote").textContent =
-    notes.join(" ") || "按钮用于触发本场会话的 baseline / current 动作；条形图仍固定展示正式收口口径。";
+    notes.join(" ") || "按钮用于触发本场会话的 baseline / current 动作；第二幕会显示本次真实在线推进。";
 }
 
 function renderFault(snapshot) {
@@ -525,39 +582,72 @@ async function probeBoard() {
   }
 }
 
-async function runCurrentInference() {
-  try {
-    setFeedback("正在执行 Current 重建动作...", "warning");
-    state.selectedImageIndex = Number(document.getElementById("imageSelect").value || 0);
-    state.currentResult = await fetchJSON("/api/run-inference", {
-      method: "POST",
-      body: JSON.stringify({ image_index: state.selectedImageIndex, mode: "current" }),
-    });
-    await refreshAll();
+async function pollInferenceJob(jobId, variant) {
+  state.activeInferenceJobId = jobId;
+  state.activeInferenceVariant = variant;
+  while (true) {
+    const result = await fetchJSON(`/api/inference-progress?job_id=${encodeURIComponent(jobId)}`);
+    if (variant === "baseline") {
+      state.baselineResult = result;
+    } else {
+      state.currentResult = result;
+    }
     renderInference(state.currentResult);
     renderComparison(state.snapshot);
-    setFeedback(state.currentResult.message, state.currentResult.execution_mode === "live" ? "success" : "warning");
-    switchAct("act2");
-  } catch (error) {
-    setFeedback(error.message, "error");
+    if (result.request_state !== "running") {
+      await refreshAll();
+      state.activeInferenceJobId = null;
+      state.activeInferenceVariant = "";
+      return result;
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 350));
   }
 }
 
-async function runBaseline() {
+async function runInferenceAction(endpoint, variant, resultKey, actId, feedbackText) {
   try {
-    setFeedback("正在执行 Baseline 动作...", "warning");
+    setFeedback(feedbackText, "warning");
     state.selectedImageIndex = Number(document.getElementById("imageSelect").value || 0);
-    state.baselineResult = await fetchJSON("/api/run-baseline", {
+    const initial = await fetchJSON(endpoint, {
       method: "POST",
-      body: JSON.stringify({ image_index: state.selectedImageIndex }),
+      body: JSON.stringify({ image_index: state.selectedImageIndex, mode: variant }),
     });
-    await refreshAll();
+    state[resultKey] = initial;
+    renderInference(state.currentResult);
     renderComparison(state.snapshot);
-    setFeedback(state.baselineResult.message, state.baselineResult.execution_mode === "live" ? "success" : "warning");
-    switchAct("act3");
+    switchAct(actId);
+    if (initial.request_state === "running" && initial.job_id) {
+      const finalResult = await pollInferenceJob(initial.job_id, variant);
+      setFeedback(finalResult.message, finalResult.execution_mode === "live" ? "success" : "warning");
+      return finalResult;
+    }
+    await refreshAll();
+    setFeedback(initial.message, initial.execution_mode === "live" ? "success" : "warning");
+    return initial;
   } catch (error) {
     setFeedback(error.message, "error");
+    throw error;
   }
+}
+
+async function runCurrentInference() {
+  state.currentResult = await runInferenceAction(
+    "/api/run-inference",
+    "current",
+    "currentResult",
+    "act2",
+    "正在执行 Current 在线推进..."
+  );
+}
+
+async function runBaseline() {
+  state.baselineResult = await runInferenceAction(
+    "/api/run-baseline",
+    "baseline",
+    "baselineResult",
+    "act3",
+    "正在执行 Baseline 在线推进..."
+  );
 }
 
 async function runAllComparisons() {
