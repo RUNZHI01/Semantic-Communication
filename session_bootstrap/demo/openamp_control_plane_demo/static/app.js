@@ -145,7 +145,7 @@ function setFeedback(message, tone) {
 function renderTop(snapshot, systemStatus) {
   document.getElementById("heroSummary").textContent =
     `trusted current SHA ${snapshot.project.trusted_current_sha.slice(0, 12)} 已与当前演示材料对齐。` +
-    ` 第一幕展示板卡状态，第二幕与第三幕会展示 current / baseline 100 张图 live run 的真实在线推进与实时完成计数，第四幕保留 FIT-01 / FIT-02 / FIT-03 证据。`;
+    ` 第一幕展示板卡状态，第二幕与第三幕会展示 current / baseline 300 张图 live run 的真实在线推进与实时完成计数，第四幕保留 FIT-01 / FIT-02 / FIT-03 证据。`;
 
   const modePill = document.getElementById("modePill");
   modePill.className = `mode-pill ${toneClass(systemStatus.execution_mode.tone)}`;
@@ -462,7 +462,7 @@ function renderInference(result) {
     document.getElementById("qualityMetrics").innerHTML = [
       `<div class="metric-chip">状态: ${escapeHtml(result.live_progress?.label || "真实在线推进")}</div>`,
       `<div class="metric-chip">阶段: ${escapeHtml(result.live_progress?.current_stage || "等待板端响应")}</div>`,
-      `<div class="metric-chip">进度: ${escapeHtml(result.live_progress?.count_label || "0 / 100")}</div>`,
+      `<div class="metric-chip">进度: ${escapeHtml(result.live_progress?.count_label || "0 / 300")}</div>`,
       `<div class="metric-chip">画面: 归档样例稳定展示</div>`,
     ].join("");
     return;
@@ -540,7 +540,7 @@ function renderComparison(snapshot) {
     notes.push(`Current：${state.currentResult.source_label}，${state.currentResult.message}`);
   }
   document.getElementById("comparisonRunNote").textContent =
-    notes.join(" ") || "一键顺序运行会先拉起 Baseline，再拉起 Current；两条 live run 默认各执行 100 张图，并在此处同步展示实时计数轴。";
+    notes.join(" ") || "一键顺序运行会先拉起 Baseline，再拉起 Current；两条 live run 默认各执行 300 张图，并在此处同步展示实时计数轴。";
 }
 
 function renderFault(snapshot) {

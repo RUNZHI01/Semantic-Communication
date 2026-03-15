@@ -33,7 +33,7 @@ DEFAULT_LIVE_CONTROL_HOOK_TIMEOUT_SEC = 30.0
 MIN_LIVE_CONTROL_HOOK_TIMEOUT_SEC = 5.0
 # Demo live runs stay on a fixed 100-image budget so baseline/current remain aligned
 # without drifting into a full dataset benchmark.
-DEFAULT_MAX_INPUTS = 100
+DEFAULT_MAX_INPUTS = 300
 DEFAULT_SEED = 0
 UINT32_MAX = (1 << 32) - 1
 DEMO_MODE_ENV = "OPENAMP_DEMO_MODE"

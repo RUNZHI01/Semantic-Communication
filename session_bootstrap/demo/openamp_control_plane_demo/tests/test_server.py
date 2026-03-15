@@ -52,8 +52,8 @@ def failed_probe_payload(requested_at: str, summary: str, error: str) -> dict[st
 
 
 def live_progress_payload(label: str, state: str, percent: int, current_stage: str) -> dict[str, object]:
-    completed_count = percent
-    expected_count = 100
+    expected_count = server.DEFAULT_MAX_INPUTS
+    completed_count = max(0, round((percent / 100.0) * expected_count)) if state != "running" else percent
     return {
         "state": state,
         "label": label,
@@ -514,8 +514,8 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(payload["live_attempt"]["status"], "config_error")
         self.assertEqual(payload["live_attempt"]["diagnostics"]["missing_fields"], ["password"])
         self.assertEqual(payload["live_progress"]["completed_count"], 0)
-        self.assertEqual(payload["live_progress"]["expected_count"], 100)
-        self.assertEqual(payload["live_progress"]["count_label"], "0 / 100")
+        self.assertEqual(payload["live_progress"]["expected_count"], server.DEFAULT_MAX_INPUTS)
+        self.assertEqual(payload["live_progress"]["count_label"], f"0 / {server.DEFAULT_MAX_INPUTS}")
         self.assertIn("guided_demo", state.current_snapshot())
 
     def test_run_inference_endpoint_starts_live_job_with_preloaded_env_after_password_only_save(self) -> None:
@@ -643,8 +643,8 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(payload["source_label"], "真实在线推进 + 归档样例图")
         self.assertAlmostEqual(payload["timings"]["total_ms"], 132.4)
         self.assertEqual(payload["artifact_sha"], "abcd" * 16)
-        self.assertEqual(payload["live_progress"]["completed_count"], 100)
-        self.assertEqual(payload["live_progress"]["expected_count"], 100)
+        self.assertEqual(payload["live_progress"]["completed_count"], server.DEFAULT_MAX_INPUTS)
+        self.assertEqual(payload["live_progress"]["expected_count"], server.DEFAULT_MAX_INPUTS)
         self.assertEqual(payload["live_progress"]["count_source"], "runner_summary.processed_count")
         launch_job.assert_called_once()
         access = launch_job.call_args.args[0]
