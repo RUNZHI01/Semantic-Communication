@@ -20,7 +20,9 @@ from board_probe import (  # noqa: E402
     REMOTE_PROBE_CODE,
     SSH_WITH_PASSWORD_SCRIPT,
     build_probe_command,
+    load_probe_output,
     run_live_probe,
+    write_probe_output,
 )
 
 
@@ -125,6 +127,55 @@ class BuildProbeCommandTest(unittest.TestCase):
                 EXPECTED_REMOTE_COMMAND,
             ],
         )
+
+
+class LoadWriteProbeOutputTest(unittest.TestCase):
+    def make_probe_path(self, *, relative: bool = False) -> str:
+        temp_dir = tempfile.TemporaryDirectory(dir=PROJECT_ROOT)
+        self.addCleanup(temp_dir.cleanup)
+        probe_path = Path(temp_dir.name) / "cache" / "probe.json"
+        if relative:
+            return str(probe_path.relative_to(PROJECT_ROOT))
+        return str(probe_path)
+
+    def test_write_probe_output_writes_json_to_target_path(self) -> None:
+        payload = {
+            "requested_at": "2026-03-15T13:00:00+0800",
+            "reachable": True,
+            "status": "success",
+            "details": {"hostname": "demo-board"},
+        }
+        output_path = Path(self.make_probe_path())
+
+        write_probe_output(payload, output_path)
+
+        self.assertTrue(output_path.exists())
+        self.assertEqual(json.loads(output_path.read_text(encoding="utf-8")), payload)
+        self.assertTrue(output_path.read_text(encoding="utf-8").endswith("\n"))
+
+    def test_load_probe_output_reads_valid_json_from_relative_path(self) -> None:
+        payload = {
+            "requested_at": "2026-03-15T13:05:00+0800",
+            "reachable": True,
+            "status": "success",
+        }
+        output_path = self.make_probe_path(relative=True)
+
+        write_probe_output(payload, output_path)
+
+        self.assertEqual(load_probe_output(output_path), payload)
+
+    def test_load_probe_output_returns_none_for_missing_file(self) -> None:
+        output_path = self.make_probe_path(relative=True)
+
+        self.assertIsNone(load_probe_output(output_path))
+
+    def test_load_probe_output_returns_none_for_malformed_json(self) -> None:
+        output_path = Path(self.make_probe_path())
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text("{not-json\n", encoding="utf-8")
+
+        self.assertIsNone(load_probe_output(output_path))
 
 
 class RunLiveProbeTest(unittest.TestCase):
