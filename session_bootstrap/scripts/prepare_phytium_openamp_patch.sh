@@ -5,7 +5,7 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(cd -- "${SCRIPT_DIR}/../.." && pwd)
 
 SDK_ROOT_DEFAULT=/tmp/phytium-standalone-sdk
-PATCH_FILE_DEFAULT="${REPO_ROOT}/session_bootstrap/patches/phytium_openamp_for_linux_status_req_resp_2026-03-14.patch"
+PATCH_FILE_DEFAULT="${REPO_ROOT}/session_bootstrap/patches/phytium_openamp_for_linux_status_req_resp_release_v1.4.0_2026-03-14.patch"
 OPENAMP_DIR_REL=example/system/amp/openamp_for_linux
 CONFIG_NAME=pe2204_aarch64_phytiumpi_openamp_core0
 EXPECTED_ELF=pe2204_aarch64_phytiumpi_openamp_core0.elf
@@ -21,7 +21,7 @@ Usage:
 
 Defaults:
   --sdk-root   /tmp/phytium-standalone-sdk
-  --patch-file /home/tianxing/tvm_metaschedule_execution_project/session_bootstrap/patches/phytium_openamp_for_linux_status_req_resp_2026-03-14.patch
+  --patch-file /home/tianxing/tvm_metaschedule_execution_project/session_bootstrap/patches/phytium_openamp_for_linux_status_req_resp_release_v1.4.0_2026-03-14.patch
 
 Behavior:
   Default mode is plan-only:

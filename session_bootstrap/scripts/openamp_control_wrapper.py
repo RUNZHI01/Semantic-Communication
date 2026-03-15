@@ -7,18 +7,29 @@ import os
 import shlex
 import signal
 import subprocess
+import sys
 import time
 from pathlib import Path
 from typing import Any
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from openamp_trusted_artifacts import (  # noqa: E402
+    DEFAULT_TRUSTED_ARTIFACTS_PATH,
+    find_trusted_artifact,
+    normalize_sha256,
+    resolve_trusted_artifacts_path,
+)
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Wrap an existing trusted-current runner with control-plane events. "
+            "Wrap an existing trusted-artifact runner with control-plane events. "
             "This wrapper never rewrites the inference data path."
         )
     )
@@ -26,7 +37,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", required=True, help="Where manifest/log/control traces should be written.")
     parser.add_argument("--job-id", type=int, default=int(time.time()), help="Control-plane job identifier.")
     parser.add_argument("--variant", default="current", help="Human-readable variant tag.")
-    parser.add_argument("--expected-sha256", default="", help="Trusted current SHA, defaults to env if unset.")
+    parser.add_argument(
+        "--expected-sha256",
+        default="",
+        help="Trusted artifact SHA. Direct SHA input stays supported for compatibility.",
+    )
+    parser.add_argument(
+        "--trusted-artifact-label",
+        default="",
+        help="Select a trusted artifact allowlist entry such as baseline or current.",
+    )
+    parser.add_argument(
+        "--trusted-artifacts-file",
+        default=str(DEFAULT_TRUSTED_ARTIFACTS_PATH),
+        help="JSON allowlist used by --trusted-artifact-label and variant-based resolution.",
+    )
     parser.add_argument("--deadline-ms", type=int, default=300000, help="Control-plane deadline metadata.")
     parser.add_argument("--expected-outputs", type=int, default=300, help="Expected output count metadata.")
     parser.add_argument("--job-flags", default="reconstruction", help="Payload or reconstruction marker.")
@@ -227,6 +252,50 @@ def build_manifest(args: argparse.Namespace, output_dir: Path, expected_sha256: 
     }
 
 
+def resolve_expected_sha256(args: argparse.Namespace) -> tuple[str, dict[str, Any] | None, str]:
+    raw_expected_sha256 = ""
+    if args.expected_sha256:
+        raw_expected_sha256 = normalize_sha256(args.expected_sha256, field_name="--expected-sha256")
+
+    artifacts_file = resolve_trusted_artifacts_path(args.trusted_artifacts_file)
+    explicit_label = str(args.trusted_artifact_label or "").strip().lower()
+    env_label = str(os.environ.get("OPENAMP_TRUSTED_ARTIFACT_LABEL") or "").strip().lower()
+    variant_label = str(args.variant or "").strip().lower()
+
+    label_candidates: list[tuple[str, str]] = []
+    if explicit_label:
+        label_candidates.append(("--trusted-artifact-label", explicit_label))
+    elif not raw_expected_sha256 and env_label:
+        label_candidates.append(("OPENAMP_TRUSTED_ARTIFACT_LABEL", env_label))
+    elif not raw_expected_sha256 and variant_label:
+        label_candidates.append(("--variant", variant_label))
+
+    for source_name, label in label_candidates:
+        try:
+            trusted_artifact = find_trusted_artifact(label, raw=artifacts_file)
+        except LookupError:
+            if source_name == "--variant":
+                continue
+            raise SystemExit(f"ERROR: trusted artifact label {label!r} was not found or is disabled.")
+        if raw_expected_sha256 and raw_expected_sha256 != trusted_artifact.sha256:
+            raise SystemExit(
+                "ERROR: --expected-sha256 does not match the selected trusted artifact "
+                f"{trusted_artifact.label!r}."
+            )
+        return trusted_artifact.sha256, trusted_artifact.to_json(), source_name
+
+    if raw_expected_sha256:
+        return raw_expected_sha256, None, "--expected-sha256"
+
+    env_expected_sha256 = str(os.environ.get("INFERENCE_CURRENT_EXPECTED_SHA256") or "").strip()
+    if env_expected_sha256:
+        return normalize_sha256(env_expected_sha256, field_name="INFERENCE_CURRENT_EXPECTED_SHA256"), None, (
+            "INFERENCE_CURRENT_EXPECTED_SHA256"
+        )
+
+    return "", None, "unset"
+
+
 def main() -> int:
     args = parse_args()
     if args.transport == "hook" and not args.control_hook_cmd:
@@ -244,8 +313,12 @@ def main() -> int:
     manifest_path = output_dir / "job_manifest.json"
     runner_log_path = output_dir / "runner.log"
 
-    expected_sha256 = args.expected_sha256 or os.environ.get("INFERENCE_CURRENT_EXPECTED_SHA256", "")
+    expected_sha256, trusted_artifact, expected_sha256_source = resolve_expected_sha256(args)
     manifest = build_manifest(args, output_dir, expected_sha256)
+    manifest["expected_sha256_source"] = expected_sha256_source
+    manifest["trusted_artifacts_file"] = str(resolve_trusted_artifacts_path(args.trusted_artifacts_file))
+    if trusted_artifact is not None:
+        manifest["trusted_artifact"] = trusted_artifact
     json_dump(manifest_path, manifest)
 
     status_req_payload = {
@@ -254,6 +327,8 @@ def main() -> int:
         "expected_sha256": expected_sha256,
         "job_flags": args.job_flags,
     }
+    if trusted_artifact is not None:
+        status_req_payload["trusted_artifact_label"] = trusted_artifact["label"]
     status_response = emit_event(
         trace_path=trace_path,
         phase="STATUS_REQ",
@@ -271,6 +346,8 @@ def main() -> int:
         "job_flags": args.job_flags,
         "runner_cmd": args.runner_cmd,
     }
+    if trusted_artifact is not None:
+        job_req_payload["trusted_artifact_label"] = trusted_artifact["label"]
     job_req_response = emit_event(
         trace_path=trace_path,
         phase="JOB_REQ",
