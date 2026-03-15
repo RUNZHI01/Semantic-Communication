@@ -352,6 +352,34 @@ class RunLiveProbeTest(unittest.TestCase):
             },
         )
 
+    def test_socket_block_returns_host_env_error_payload(self) -> None:
+        command = ["bash", "fake-connect"]
+        completed = subprocess.CompletedProcess(
+            command,
+            255,
+            stdout="",
+            stderr="socket: Operation not permitted\nssh: connect to host demo-board port 22: failure\n",
+        )
+
+        with (
+            patch("board_probe.now_iso", return_value="2026-03-15T12:11:00+0800"),
+            patch("board_probe.build_probe_command", return_value=command),
+            patch("board_probe.subprocess.run", return_value=completed),
+        ):
+            payload = run_live_probe(timeout_sec=9.0)
+
+        self.assertEqual(payload["status"], "error")
+        self.assertEqual(payload["status_category"], "host_env_error")
+        self.assertIn("当前主机环境禁止建立 SSH socket", payload["summary"])
+        self.assertNotIn("权限不足", payload["summary"])
+        self.assertEqual(
+            payload["diagnostics"],
+            {
+                "stderr": "socket: Operation not permitted\nssh: connect to host demo-board port 22: failure",
+                "returncode": 255,
+            },
+        )
+
     def test_invalid_json_stdout_returns_parse_error_payload(self) -> None:
         command = ["bash", "fake-connect"]
         completed = subprocess.CompletedProcess(

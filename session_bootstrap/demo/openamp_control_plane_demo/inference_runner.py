@@ -129,6 +129,13 @@ def latest_hook_response(events: list[dict[str, Any]]) -> dict[str, Any]:
     return {}
 
 
+def hook_transport_failed(response: dict[str, Any]) -> bool:
+    transport_status = str(response.get("transport_status") or "").strip().lower()
+    if not transport_status:
+        return False
+    return transport_status.endswith("_failed")
+
+
 def control_hook_error_text(response: dict[str, Any]) -> str:
     parts: list[str] = []
     for key in ("phase", "source", "transport_status", "protocol_semantics", "note", "rpmsg_ctrl", "rpmsg_dev"):
@@ -206,14 +213,24 @@ def build_progress_payload(
     job_done_event = last_event_by_phase(events, "JOB_DONE")
     status_response = hook_response_for_phase(events, "STATUS_REQ")
     job_req_response = hook_response_for_phase(events, "JOB_REQ")
+    status_transport_failed = hook_transport_failed(status_response)
+    job_req_transport_failed = hook_transport_failed(job_req_response)
 
     job_ack_payload = job_ack_event.get("payload") if isinstance(job_ack_event, dict) else {}
     if not isinstance(job_ack_payload, dict):
         job_ack_payload = {}
     decision = str(job_ack_payload.get("decision") or "").upper()
 
-    connected_status = "done" if status_event else ("error" if final_status and final_status != "success" else "pending")
-    dispatched_status = "done" if job_req_event else ("error" if final_status and status_event else "pending")
+    connected_status = (
+        "done"
+        if status_event and not status_transport_failed
+        else ("error" if status_transport_failed or (final_status and final_status != "success") else "pending")
+    )
+    dispatched_status = (
+        "done"
+        if job_req_event and not job_req_transport_failed
+        else ("error" if job_req_transport_failed or (final_status and status_event) else "pending")
+    )
     if decision == "DENY":
         running_status = "error"
     elif job_done_event:
@@ -247,7 +264,7 @@ def build_progress_payload(
 
     dispatched_detail = "已向 OpenAMP 控制面提交 JOB_REQ。"
     if dispatched_status == "error":
-        dispatched_detail = "作业未能送达控制面。"
+        dispatched_detail = str(job_req_response.get("note") or "").strip() or "作业未能送达控制面。"
 
     running_detail = "等待板端接收并进入执行。"
     if decision == "ALLOW":
@@ -595,7 +612,7 @@ class LiveRemoteReconstructionJob:
             )
             runner_summary = {}
             if wrapper_summary.get("result") == "denied_by_control_hook":
-                if status_category == "permission_error":
+                if status_category != "error":
                     message = build_operator_message("inference", status_category, include_fallback=True)
                 else:
                     message = "OpenAMP 控制面未放行本次作业，界面已回退到归档样例。"

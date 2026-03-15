@@ -203,6 +203,11 @@ def last_returncode(phase_results: list[dict[str, Any]]) -> int | None:
     return None
 
 
+def phase_failure_status(phase_result: dict[str, Any]) -> str:
+    status = str(phase_result.get("status") or "error")
+    return status if status != "success" else "error"
+
+
 def build_action_failure(
     action: str,
     phase_results: list[dict[str, Any]],
@@ -400,7 +405,7 @@ def query_live_status(access: BoardAccessConfig, *, trusted_sha: str, timeout_se
         status_phase = {"status": "timeout", "phase": "STATUS_REQ", "response": {}, "stdout": "", "stderr": "", "returncode": None}
 
     if not status_phase_is_live(status_phase):
-        payload = build_action_failure("status", [status_phase], status=str(status_phase.get("status") or "error"), logs=logs)
+        payload = build_action_failure("status", [status_phase], status=phase_failure_status(status_phase), logs=logs)
         payload["execution_mode"] = "error"
         return payload
 
@@ -449,7 +454,7 @@ def run_fault_action(
     try:
         pre_status = run_phase("STATUS_REQ", make_status_payload(config["job_id"], trusted_sha, config["job_flags"]))
         if not status_phase_is_live(pre_status):
-            payload = build_action_failure(action, phase_results, status=str(pre_status.get("status") or "error"), logs=logs)
+            payload = build_action_failure(action, phase_results, status=phase_failure_status(pre_status), logs=logs)
             payload["execution_mode"] = "error"
             return payload
 
@@ -493,7 +498,7 @@ def run_fault_action(
 
             post_status = run_phase("STATUS_REQ", make_status_payload(config["job_id"], trusted_sha, config["job_flags"]))
             if not status_phase_is_live(post_status):
-                payload = build_action_failure(action, phase_results, status=str(post_status.get("status") or "error"), logs=logs)
+                payload = build_action_failure(action, phase_results, status=phase_failure_status(post_status), logs=logs)
                 payload["execution_mode"] = "error"
                 return payload
 
@@ -585,7 +590,7 @@ def run_fault_action(
             payload = build_action_failure(
                 action,
                 phase_results,
-                status=str(timeout_status.get("status") or "error"),
+                status=phase_failure_status(timeout_status),
                 logs=logs,
             )
             payload["execution_mode"] = "error"
@@ -611,7 +616,7 @@ def run_fault_action(
             payload = build_action_failure(
                 action,
                 phase_results,
-                status=str(cleanup_phase.get("status") or "error"),
+                status=phase_failure_status(cleanup_phase),
                 logs=logs,
                 note="heartbeat_timeout cleanup did not return an implemented READY safe-stop state.",
             )
@@ -623,7 +628,7 @@ def run_fault_action(
             payload = build_action_failure(
                 action,
                 phase_results,
-                status=str(final_status.get("status") or "error"),
+                status=phase_failure_status(final_status),
                 logs=logs,
             )
             payload["execution_mode"] = "error"
@@ -690,7 +695,7 @@ def run_recover_action(access: BoardAccessConfig, *, trusted_sha: str, timeout_s
             payload = build_action_failure(
                 "recover",
                 phase_results,
-                status=str(cleanup_phase.get("status") or "error"),
+                status=phase_failure_status(cleanup_phase),
                 logs=logs,
                 note="recover live path did not receive an implemented SAFE_STOP status response.",
             )
@@ -702,7 +707,7 @@ def run_recover_action(access: BoardAccessConfig, *, trusted_sha: str, timeout_s
             payload = build_action_failure(
                 "recover",
                 phase_results,
-                status=str(final_status.get("status") or "error"),
+                status=phase_failure_status(final_status),
                 logs=logs,
             )
             payload["execution_mode"] = "error"
