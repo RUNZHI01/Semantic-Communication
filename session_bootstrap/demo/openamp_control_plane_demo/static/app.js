@@ -145,7 +145,7 @@ function setFeedback(message, tone) {
 function renderTop(snapshot, systemStatus) {
   document.getElementById("heroSummary").textContent =
     `trusted current SHA ${snapshot.project.trusted_current_sha.slice(0, 12)} 已与当前演示材料对齐。` +
-    ` 第一幕展示板卡状态，第二幕会拉起 STATUS_REQ / JOB_REQ / JOB_ACK / JOB_DONE 的真实在线推进，第三幕保留正式口径对比，第四幕保留 FIT-01 / FIT-02 / FIT-03 证据。`;
+    ` 第一幕展示板卡状态，第二幕与第三幕会展示 current / baseline 100 张图 live run 的真实在线推进与实时完成计数，第四幕保留 FIT-01 / FIT-02 / FIT-03 证据。`;
 
   const modePill = document.getElementById("modePill");
   modePill.className = `mode-pill ${toneClass(systemStatus.execution_mode.tone)}`;
@@ -279,28 +279,118 @@ function barWidth(value, max) {
   return Math.max(6, Math.round((value / max) * 100));
 }
 
+function clampPercent(value) {
+  const percent = Number(value || 0);
+  if (Number.isNaN(percent)) return 0;
+  return Math.max(0, Math.min(100, percent));
+}
+
+function progressSourceLabel(source) {
+  const labels = {
+    "runner_log.sample_latency_lines": "实时 runner 日志",
+    "runner_summary.processed_count": "最终 runner 汇总",
+    demo_default: "演示默认值",
+  };
+  return labels[source] || "实时状态";
+}
+
+function progressAxisLabels(expectedCount) {
+  const total = Math.max(Number(expectedCount || 0), 0);
+  const ticks = total > 0 ? [0, 0.25, 0.5, 0.75, 1].map((ratio) => Math.round(total * ratio)) : [0, 25, 50, 75, 100];
+  if (ticks.length === 5) ticks[4] = total > 0 ? total : 100;
+  return ticks
+    .map((tick) => `<span>${escapeHtml(String(tick))}</span>`)
+    .join("");
+}
+
+function normalizeProgress(progress) {
+  const expectedCount = Math.max(Number(progress?.expected_count || 100), 0) || 100;
+  const completedCount = Math.max(Number(progress?.completed_count || 0), 0);
+  const remainingCount = progress?.remaining_count !== undefined
+    ? Math.max(Number(progress.remaining_count || 0), 0)
+    : Math.max(expectedCount - completedCount, 0);
+  const percent = progress?.percent !== undefined
+    ? clampPercent(progress.percent)
+    : clampPercent(expectedCount > 0 ? (completedCount / expectedCount) * 100 : 0);
+  return {
+    state: progress?.state || "idle",
+    label: progress?.label || "等待触发",
+    tone: progress?.tone || "neutral",
+    percent,
+    phase_percent: clampPercent(progress?.phase_percent || 0),
+    completed_count: completedCount,
+    expected_count: expectedCount,
+    remaining_count: remainingCount,
+    completion_ratio: Number(progress?.completion_ratio || 0),
+    count_source: progress?.count_source || "",
+    count_label: progress?.count_label || `${completedCount} / ${expectedCount}`,
+    current_stage: progress?.current_stage || "等待触发",
+    stages: progress?.stages || [],
+    event_log: progress?.event_log || [],
+  };
+}
+
+function renderProgressFrame(progress, ids, metaText) {
+  const normalized = normalizeProgress(progress);
+  const badge = document.getElementById(ids.badgeId);
+  const count = document.getElementById(ids.countId);
+  const bar = document.getElementById(ids.barId);
+  const marker = document.getElementById(ids.markerId);
+  const axis = document.getElementById(ids.axisId);
+  const stage = ids.stageId ? document.getElementById(ids.stageId) : null;
+  const meta = ids.metaId ? document.getElementById(ids.metaId) : null;
+
+  badge.className = `status-pill ${toneClass(normalized.tone || normalized.label)}`;
+  badge.textContent = normalized.label;
+  count.textContent = normalized.count_label;
+  bar.style.width = `${normalized.percent}%`;
+  marker.style.left = `${normalized.percent}%`;
+  marker.style.opacity = normalized.percent > 0 || normalized.completed_count > 0 ? "1" : "0";
+  axis.innerHTML = progressAxisLabels(normalized.expected_count);
+  if (stage) stage.textContent = `当前阶段：${normalized.current_stage}`;
+  if (meta) meta.textContent = metaText;
+  return normalized;
+}
+
+function buildProgressMeta(progress) {
+  if (progress.state === "idle") {
+    return `等待本场 ${progress.expected_count} 张图 live run。`;
+  }
+  return `计数来源：${progressSourceLabel(progress.count_source)} ｜ 当前阶段：${progress.current_stage} ｜ 剩余 ${progress.remaining_count} 张`;
+}
+
+function buildCompactProgressMeta(progress, result) {
+  if (!result) {
+    return "尚未开始 live run。";
+  }
+  const modeLabel = result.execution_mode === "live" ? "真实在线" : "已回退归档样例";
+  return `${modeLabel} ｜ 计数来源：${progressSourceLabel(progress.count_source)} ｜ 剩余 ${progress.remaining_count} 张`;
+}
+
 function renderLiveProgress(progress) {
+  const normalized = renderProgressFrame(
+    progress,
+    {
+      badgeId: "liveProgressBadge",
+      countId: "liveProgressCount",
+      barId: "liveProgressBar",
+      markerId: "liveProgressMarker",
+      axisId: "liveProgressAxis",
+      metaId: "liveProgressMeta",
+    },
+    buildProgressMeta(normalizeProgress(progress))
+  );
   const badge = document.getElementById("liveProgressBadge");
-  const percent = document.getElementById("liveProgressPercent");
-  const bar = document.getElementById("liveProgressBar");
   const chips = document.getElementById("liveStageChips");
   const trace = document.getElementById("liveTracePanel");
 
   if (!progress) {
     badge.className = "status-pill tone-neutral";
-    badge.textContent = "等待触发";
-    percent.textContent = "0%";
-    bar.style.width = "0%";
     chips.innerHTML = "";
     trace.textContent = "等待板端推进。";
     return;
   }
-
-  badge.className = `status-pill ${toneClass(progress.tone || progress.label)}`;
-  badge.textContent = progress.label || "等待推进";
-  percent.textContent = `${Number(progress.percent || 0)}%`;
-  bar.style.width = `${Math.max(0, Math.min(100, Number(progress.percent || 0)))}%`;
-  chips.innerHTML = (progress.stages || [])
+  chips.innerHTML = normalized.stages
     .map(
       (stage) => `
         <article class="stage-chip" data-status="${escapeHtml(stage.status)}">
@@ -311,7 +401,37 @@ function renderLiveProgress(progress) {
       `
     )
     .join("");
-  trace.textContent = (progress.event_log || []).join("\n") || "等待板端推进。";
+  trace.textContent = normalized.event_log.join("\n") || "等待板端推进。";
+}
+
+function renderComparisonProgressCards() {
+  const baselineProgress = renderProgressFrame(
+    state.baselineResult?.live_progress || null,
+    {
+      badgeId: "baselineProgressBadge",
+      countId: "baselineProgressCount",
+      barId: "baselineProgressBar",
+      markerId: "baselineProgressMarker",
+      axisId: "baselineProgressAxis",
+      stageId: "baselineProgressStage",
+      metaId: "baselineProgressMeta",
+    },
+    buildCompactProgressMeta(normalizeProgress(state.baselineResult?.live_progress || null), state.baselineResult)
+  );
+  const currentProgress = renderProgressFrame(
+    state.currentResult?.live_progress || null,
+    {
+      badgeId: "comparisonCurrentProgressBadge",
+      countId: "comparisonCurrentProgressCount",
+      barId: "comparisonCurrentProgressBar",
+      markerId: "comparisonCurrentProgressMarker",
+      axisId: "comparisonCurrentProgressAxis",
+      stageId: "comparisonCurrentProgressStage",
+      metaId: "comparisonCurrentProgressMeta",
+    },
+    buildCompactProgressMeta(normalizeProgress(state.currentResult?.live_progress || null), state.currentResult)
+  );
+  return { baselineProgress, currentProgress };
 }
 
 function renderInference(result) {
@@ -342,6 +462,7 @@ function renderInference(result) {
     document.getElementById("qualityMetrics").innerHTML = [
       `<div class="metric-chip">状态: ${escapeHtml(result.live_progress?.label || "真实在线推进")}</div>`,
       `<div class="metric-chip">阶段: ${escapeHtml(result.live_progress?.current_stage || "等待板端响应")}</div>`,
+      `<div class="metric-chip">进度: ${escapeHtml(result.live_progress?.count_label || "0 / 100")}</div>`,
       `<div class="metric-chip">画面: 归档样例稳定展示</div>`,
     ].join("");
     return;
@@ -391,6 +512,7 @@ function comparisonCard(label, baselineMs, currentMs, improvementPct, speedupX, 
 
 function renderComparison(snapshot) {
   const comparison = snapshot.guided_demo.comparison;
+  renderComparisonProgressCards();
   document.getElementById("comparisonBoard").innerHTML = [
     comparisonCard(
       comparison.payload.label,
@@ -418,7 +540,7 @@ function renderComparison(snapshot) {
     notes.push(`Current：${state.currentResult.source_label}，${state.currentResult.message}`);
   }
   document.getElementById("comparisonRunNote").textContent =
-    notes.join(" ") || "按钮用于触发本场会话的 baseline / current 动作；第二幕会显示本次真实在线推进。";
+    notes.join(" ") || "一键顺序运行会先拉起 Baseline，再拉起 Current；两条 live run 默认各执行 100 张图，并在此处同步展示实时计数轴。";
 }
 
 function renderFault(snapshot) {
@@ -651,6 +773,7 @@ async function runBaseline() {
 }
 
 async function runAllComparisons() {
+  switchAct("act3");
   await runBaseline();
   await runCurrentInference();
   switchAct("act3");

@@ -574,10 +574,33 @@ select:focus {
   align-items: end;
 }
 
-.live-progress-percent {
+.live-progress-countbox,
+.progress-summary-count {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.live-progress-countbox strong,
+.progress-summary-count {
   font-size: 1.7rem;
   font-weight: 900;
   color: var(--ink);
+}
+
+.live-progress-countbox span {
+  color: var(--muted);
+  font-size: 0.84rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.progress-axis-shell {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.progress-axis-shell-compact {
+  gap: 0.35rem;
 }
 
 .progress-track {
@@ -588,13 +611,81 @@ select:focus {
   overflow: hidden;
 }
 
-.progress-track span {
+.progress-fill {
   position: absolute;
   inset: 0 auto 0 0;
   width: 0%;
   border-radius: inherit;
   background: linear-gradient(90deg, rgba(13, 122, 105, 0.9), rgba(201, 93, 18, 0.65));
   transition: width 180ms ease;
+}
+
+.progress-marker {
+  position: absolute;
+  top: 50%;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid rgba(13, 122, 105, 0.88);
+  box-shadow: 0 0 0 4px rgba(13, 122, 105, 0.15);
+  transform: translate(-50%, -50%);
+  transition: left 180ms ease, opacity 180ms ease;
+}
+
+.progress-axis-labels {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.4rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.progress-axis-labels span:nth-child(n + 2) {
+  text-align: center;
+}
+
+.progress-axis-labels span:last-child {
+  text-align: right;
+}
+
+.dual-progress-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+  margin-top: 0.95rem;
+}
+
+.progress-summary-card {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.progress-summary-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.progress-summary-head h3 {
+  margin: 0;
+  font-size: 1.15rem;
+  font-family: "Noto Serif SC", "Source Han Serif SC", "STSong", "SimSun", serif;
+}
+
+.progress-summary-stage,
+.progress-summary-meta {
+  margin: 0;
+}
+
+.progress-summary-count {
+  line-height: 1.05;
+}
+
+.progress-summary-meta {
+  color: var(--muted);
 }
 
 .stage-chip-row {
@@ -750,6 +841,7 @@ select:focus {
   .credential-grid,
   .status-grid,
   .dual-grid,
+  .dual-progress-grid,
   .image-compare,
   .comparison-board,
   .stage-chip-row,
@@ -783,6 +875,7 @@ select:focus {
   .credential-grid,
   .status-grid,
   .dual-grid,
+  .dual-progress-grid,
   .image-compare,
   .stage-chip-row,
   .timeline-grid,

@@ -52,11 +52,20 @@ def failed_probe_payload(requested_at: str, summary: str, error: str) -> dict[st
 
 
 def live_progress_payload(label: str, state: str, percent: int, current_stage: str) -> dict[str, object]:
+    completed_count = percent
+    expected_count = 100
     return {
         "state": state,
         "label": label,
         "tone": "online" if label == "真实在线推进" else "degraded",
         "percent": percent,
+        "phase_percent": 76 if state == "running" else 100,
+        "completed_count": completed_count,
+        "expected_count": expected_count,
+        "remaining_count": expected_count - completed_count,
+        "completion_ratio": completed_count / expected_count,
+        "count_source": "runner_log.sample_latency_lines" if state == "running" else "runner_summary.processed_count",
+        "count_label": f"{completed_count} / {expected_count}",
         "current_stage": current_stage,
         "stages": [
             {"key": "connected", "label": "已连接", "status": "done", "detail": "STATUS_RESP: READY / fault=NONE"},
@@ -504,6 +513,9 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertIn("配置不完整或不可用", payload["message"])
         self.assertEqual(payload["live_attempt"]["status"], "config_error")
         self.assertEqual(payload["live_attempt"]["diagnostics"]["missing_fields"], ["password"])
+        self.assertEqual(payload["live_progress"]["completed_count"], 0)
+        self.assertEqual(payload["live_progress"]["expected_count"], 100)
+        self.assertEqual(payload["live_progress"]["count_label"], "0 / 100")
         self.assertIn("guided_demo", state.current_snapshot())
 
     def test_run_inference_endpoint_starts_live_job_with_preloaded_env_after_password_only_save(self) -> None:
@@ -631,6 +643,9 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(payload["source_label"], "真实在线推进 + 归档样例图")
         self.assertAlmostEqual(payload["timings"]["total_ms"], 132.4)
         self.assertEqual(payload["artifact_sha"], "abcd" * 16)
+        self.assertEqual(payload["live_progress"]["completed_count"], 100)
+        self.assertEqual(payload["live_progress"]["expected_count"], 100)
+        self.assertEqual(payload["live_progress"]["count_source"], "runner_summary.processed_count")
         launch_job.assert_called_once()
         access = launch_job.call_args.args[0]
         self.assertEqual(
