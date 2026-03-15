@@ -18,6 +18,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 REMOTE_RECONSTRUCTION_SCRIPT = (
     PROJECT_ROOT / "session_bootstrap" / "scripts" / "run_remote_current_real_reconstruction.sh"
 )
+REMOTE_LEGACY_COMPAT_SCRIPT = PROJECT_ROOT / "session_bootstrap" / "scripts" / "run_remote_legacy_tvm_compat.sh"
 OPENAMP_CONTROL_WRAPPER_SCRIPT = PROJECT_ROOT / "session_bootstrap" / "scripts" / "openamp_control_wrapper.py"
 REMOTE_HOOK_PROXY_SCRIPT = Path(__file__).resolve().parent / "openamp_remote_hook_proxy.py"
 ARTIFACT_SHA_MISMATCH_RE = re.compile(
@@ -415,6 +416,44 @@ def expected_sha_for_variant(access: BoardAccessConfig, variant: str) -> str:
     return str(values.get("INFERENCE_CURRENT_EXPECTED_SHA256") or values.get("INFERENCE_EXPECTED_SHA256") or "")
 
 
+def configured_runner_command(access: BoardAccessConfig, variant: str) -> str:
+    values = access.build_env()
+    key = "INFERENCE_BASELINE_CMD" if variant == "baseline" else "INFERENCE_CURRENT_CMD"
+    return str(values.get(key) or "").strip()
+
+
+def default_runner_command(variant: str) -> str:
+    script = REMOTE_LEGACY_COMPAT_SCRIPT if variant == "baseline" else REMOTE_RECONSTRUCTION_SCRIPT
+    return shlex.join(["bash", str(script), "--variant", variant])
+
+
+def supports_sampling_args(command: str) -> bool:
+    command_text = str(command or "")
+    return REMOTE_RECONSTRUCTION_SCRIPT.name in command_text
+
+
+def append_runner_options(command: str, *, max_inputs: int, seed: int) -> str:
+    if not supports_sampling_args(command):
+        return command
+    parts = shlex.split(command)
+    if "--max-inputs" not in parts:
+        parts.extend(["--max-inputs", str(max_inputs)])
+    if "--seed" not in parts:
+        parts.extend(["--seed", str(seed)])
+    return shlex.join(parts)
+
+
+def build_runner_command(
+    access: BoardAccessConfig,
+    *,
+    variant: str,
+    max_inputs: int,
+    seed: int,
+) -> str:
+    command = configured_runner_command(access, variant) or default_runner_command(variant)
+    return append_runner_options(command, max_inputs=max_inputs, seed=seed)
+
+
 def build_inference_message(status_category: str, *, variant: str, include_fallback: bool = False) -> str:
     if status_category == "artifact_mismatch" and variant == "baseline":
         message = (
@@ -509,18 +548,7 @@ class LiveRemoteReconstructionJob:
         env = access.build_subprocess_env()
         env["REMOTE_MODE"] = "ssh"
 
-        runner_cmd = shlex.join(
-            [
-                "bash",
-                str(REMOTE_RECONSTRUCTION_SCRIPT),
-                "--variant",
-                variant,
-                "--max-inputs",
-                str(max_inputs),
-                "--seed",
-                str(seed),
-            ]
-        )
+        runner_cmd = build_runner_command(access, variant=variant, max_inputs=max_inputs, seed=seed)
         hook_cmd = self._build_hook_command(access)
         command = [
             "python3",
@@ -755,16 +783,8 @@ def run_remote_reconstruction(
             "diagnostics": build_diagnostics(missing_fields=missing),
         }
 
-    command = [
-        "bash",
-        str(REMOTE_RECONSTRUCTION_SCRIPT),
-        "--variant",
-        variant,
-        "--max-inputs",
-        str(max_inputs),
-        "--seed",
-        str(seed),
-    ]
+    runner_cmd = build_runner_command(access, variant=variant, max_inputs=max_inputs, seed=seed)
+    command = ["bash", "-lc", runner_cmd]
     env = access.build_subprocess_env()
     env["REMOTE_MODE"] = "ssh"
 
