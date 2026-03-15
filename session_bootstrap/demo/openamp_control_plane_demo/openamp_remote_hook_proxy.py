@@ -69,6 +69,49 @@ def detect_job_id(event: dict[str, Any]) -> int:
         return 0
 
 
+def parse_json_dict_lines(raw: str) -> list[tuple[int, dict[str, Any]]]:
+    parsed: list[tuple[int, dict[str, Any]]] = []
+    for line_index, raw_line in enumerate(raw.splitlines()):
+        line = raw_line.strip()
+        if not line:
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            parsed.append((line_index, payload))
+    return parsed
+
+
+def is_synthetic_sudo_failure(payload: dict[str, Any]) -> bool:
+    note = str(payload.get("note") or "")
+    return (
+        payload.get("source") == "openamp_demo_remote_hook_proxy"
+        and payload.get("transport_status") == "permission_gate"
+        and "could not launch the board-side bridge under sudo" in note
+    )
+
+
+def suppress_synthetic_sudo_failure_tail(raw: str) -> tuple[str, bool]:
+    parsed = parse_json_dict_lines(raw)
+    if len(parsed) < 2:
+        return raw, False
+
+    tail_line_index, tail_payload = parsed[-1]
+    if not is_synthetic_sudo_failure(tail_payload):
+        return raw, False
+    if not any(not is_synthetic_sudo_failure(payload) for _, payload in parsed[:-1]):
+        return raw, False
+
+    lines = raw.splitlines()
+    filtered_lines = [line for index, line in enumerate(lines) if index != tail_line_index]
+    filtered = "\n".join(filtered_lines)
+    if raw.endswith("\n") and filtered:
+        filtered += "\n"
+    return filtered, True
+
+
 @lru_cache(maxsize=1)
 def build_bridge_bundle_base64() -> str:
     buffer = io.BytesIO()
@@ -228,11 +271,14 @@ def main() -> int:
         capture_output=True,
         check=False,
     )
-    if result.stdout:
-        sys.stdout.write(result.stdout)
+    stdout, suppressed_tail = suppress_synthetic_sudo_failure_tail(result.stdout)
+    if stdout:
+        sys.stdout.write(stdout)
     if result.stderr:
         sys.stderr.write(result.stderr)
-    if result.returncode == 0 or result.stdout.strip():
+    if result.returncode == 0 or suppressed_tail:
+        return 0
+    if stdout.strip():
         return result.returncode
     sys.stdout.write(
         json.dumps(

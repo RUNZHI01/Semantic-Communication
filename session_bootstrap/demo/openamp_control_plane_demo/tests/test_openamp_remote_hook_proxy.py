@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import gzip
 import io
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -109,6 +110,111 @@ class OpenampRemoteHookProxyTest(unittest.TestCase):
         self.assertEqual(run.call_args.kwargs["text"], True)
         self.assertEqual(stdout.getvalue(), '{"decision":"ALLOW"}\n')
         self.assertEqual(stderr.getvalue(), "")
+
+    def test_main_suppresses_synthetic_permission_gate_tail_when_bridge_summary_exists(self) -> None:
+        args = SimpleNamespace(
+            host="demo-board",
+            user="demo-user",
+            password="demo-pass",
+            port="2202",
+            remote_project_root="",
+            remote_jscc_dir="",
+            remote_output_root="/tmp/openamp_demo_hook",
+            rpmsg_ctrl="/dev/rpmsg_ctrl0",
+            rpmsg_dev="/dev/rpmsg0",
+        )
+        raw_event = '{"phase":"JOB_DONE","payload":{"job_id":7,"result_code":0}}'
+        bridge_summary = json.dumps(
+            {
+                "phase": "JOB_DONE",
+                "source": "firmware_job_done_status",
+                "transport_status": "job_done_status_received",
+                "protocol_semantics": "implemented",
+                "note": "Received STATUS_RESP after JOB_DONE.",
+            },
+            ensure_ascii=False,
+        )
+        proxy_tail = json.dumps(
+            {
+                "phase": "JOB_DONE",
+                "source": "openamp_demo_remote_hook_proxy",
+                "transport_status": "permission_gate",
+                "protocol_semantics": "not_attempted",
+                "note": "JOB_DONE could not launch the board-side bridge under sudo: sudo returned a non-zero exit status.",
+                "rpmsg_ctrl": "/dev/rpmsg_ctrl0",
+                "rpmsg_dev": "/dev/rpmsg0",
+            },
+            ensure_ascii=False,
+        )
+
+        with (
+            patch("openamp_remote_hook_proxy.parse_args", return_value=args),
+            patch(
+                "openamp_remote_hook_proxy.subprocess.run",
+                return_value=subprocess.CompletedProcess(
+                    args=["bash"],
+                    returncode=1,
+                    stdout=f"BASH=/usr/bin/bash\n{bridge_summary}\n{proxy_tail}\n",
+                    stderr="cleanup warning\n",
+                ),
+            ),
+            patch("sys.stdin", io.StringIO(raw_event)),
+            patch("sys.stdout", new_callable=io.StringIO) as stdout,
+            patch("sys.stderr", new_callable=io.StringIO) as stderr,
+        ):
+            rc = main()
+
+        self.assertEqual(rc, 0)
+        self.assertIn(bridge_summary, stdout.getvalue())
+        self.assertNotIn(proxy_tail, stdout.getvalue())
+        self.assertEqual(stderr.getvalue(), "cleanup warning\n")
+
+    def test_main_keeps_permission_gate_when_no_bridge_summary_precedes_it(self) -> None:
+        args = SimpleNamespace(
+            host="demo-board",
+            user="demo-user",
+            password="demo-pass",
+            port="2202",
+            remote_project_root="",
+            remote_jscc_dir="",
+            remote_output_root="/tmp/openamp_demo_hook",
+            rpmsg_ctrl="/dev/rpmsg_ctrl0",
+            rpmsg_dev="/dev/rpmsg0",
+        )
+        raw_event = '{"phase":"JOB_DONE","payload":{"job_id":7,"result_code":0}}'
+        proxy_tail = json.dumps(
+            {
+                "phase": "JOB_DONE",
+                "source": "openamp_demo_remote_hook_proxy",
+                "transport_status": "permission_gate",
+                "protocol_semantics": "not_attempted",
+                "note": "JOB_DONE could not launch the board-side bridge under sudo: sudo returned a non-zero exit status.",
+                "rpmsg_ctrl": "/dev/rpmsg_ctrl0",
+                "rpmsg_dev": "/dev/rpmsg0",
+            },
+            ensure_ascii=False,
+        )
+
+        with (
+            patch("openamp_remote_hook_proxy.parse_args", return_value=args),
+            patch(
+                "openamp_remote_hook_proxy.subprocess.run",
+                return_value=subprocess.CompletedProcess(
+                    args=["bash"],
+                    returncode=1,
+                    stdout=proxy_tail + "\n",
+                    stderr="sudo: a password is required\n",
+                ),
+            ),
+            patch("sys.stdin", io.StringIO(raw_event)),
+            patch("sys.stdout", new_callable=io.StringIO) as stdout,
+            patch("sys.stderr", new_callable=io.StringIO) as stderr,
+        ):
+            rc = main()
+
+        self.assertEqual(rc, 1)
+        self.assertEqual(stdout.getvalue(), proxy_tail + "\n")
+        self.assertEqual(stderr.getvalue(), "sudo: a password is required\n")
 
 
 if __name__ == "__main__":
