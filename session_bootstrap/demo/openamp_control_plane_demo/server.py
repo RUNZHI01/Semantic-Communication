@@ -197,6 +197,7 @@ class DashboardState:
 
     def run_demo_inference(self, *, variant: str, image_index: int) -> dict[str, Any]:
         payload = build_prerecorded_inference_result(image_index, variant)
+        payload["status_category"] = "fallback"
         with self._lock:
             board_access = self._board_access
 
@@ -226,6 +227,7 @@ class DashboardState:
                 payload.update(
                     {
                         "execution_mode": "live",
+                        "status_category": "success",
                         "source_label": "在线计时 + 预录图像",
                         "message": (
                             "已使用网页录入的会话凭据触发远端推理。为避免现场传图链路抖动，图像对比仍沿用已归档样例。"
@@ -241,7 +243,8 @@ class DashboardState:
                     }
                 )
             else:
-                payload["message"] = f"{live_result.get('message', '远端推理未成功')} 当前改用预录图像与正式速度报告。"
+                payload["status_category"] = live_result.get("status_category", "fallback")
+                payload["message"] = f"{live_result.get('message', '远端推理未成功')} 界面继续展示预录图像与正式速度报告。"
         else:
             payload["message"] = "尚未录入本场板卡会话，当前展示预录图像与正式速度报告。"
 
@@ -249,6 +252,7 @@ class DashboardState:
             self._last_inference_result = {
                 "status": payload["status"],
                 "execution_mode": payload["execution_mode"],
+                "status_category": payload.get("status_category", "fallback"),
                 "variant": variant,
                 "total_ms": payload["timings"]["total_ms"],
                 "artifact_sha": payload["artifact_sha"],
@@ -271,6 +275,7 @@ class DashboardState:
             if live_result.get("status") == "success":
                 response = {
                     "status": "injected",
+                    "status_category": "success",
                     "execution_mode": "live",
                     "fault_type": fault_type,
                     "source_label": "真机注入",
@@ -287,6 +292,7 @@ class DashboardState:
                     self._last_fault_result = {
                         "fault_type": fault_type,
                         "status": response["status"],
+                        "status_category": response["status_category"],
                         "execution_mode": response["execution_mode"],
                         "message": response["message"],
                         "guard_state": response["guard_state"],
@@ -294,13 +300,17 @@ class DashboardState:
                     }
                 return response
             replay = build_fault_replay(fault_type)
+            replay["status_category"] = live_result.get("status_category", "fallback")
+            replay["live_attempt"] = live_result
             replay["message"] = f"{live_result.get('message', '真机注入失败')} 已切换到 {replay['source_label']}。"
         else:
             replay = build_fault_replay(fault_type)
+            replay["status_category"] = "fallback"
         with self._lock:
             self._last_fault_result = {
                 "fault_type": fault_type,
                 "status": replay["status"],
+                "status_category": replay.get("status_category", "fallback"),
                 "execution_mode": replay["execution_mode"],
                 "message": replay["message"],
                 "guard_state": replay["guard_state"],
@@ -317,6 +327,7 @@ class DashboardState:
             if live_result.get("status") == "success":
                 response = {
                     "status": "recovered",
+                    "status_category": "success",
                     "execution_mode": "live",
                     "source_label": "真机恢复",
                     "message": "已使用当前会话凭据执行 SAFE_STOP 恢复。",
@@ -332,6 +343,7 @@ class DashboardState:
                     self._last_fault_result = {
                         "fault_type": "recover",
                         "status": response["status"],
+                        "status_category": response["status_category"],
                         "execution_mode": response["execution_mode"],
                         "message": response["message"],
                         "guard_state": response["guard_state"],
@@ -339,13 +351,17 @@ class DashboardState:
                     }
                 return response
             replay = build_recover_replay()
+            replay["status_category"] = live_result.get("status_category", "fallback")
+            replay["live_attempt"] = live_result
             replay["message"] = f"{live_result.get('message', '真机恢复失败')} 已切换到安全恢复回放。"
         else:
             replay = build_recover_replay()
+            replay["status_category"] = "fallback"
         with self._lock:
             self._last_fault_result = {
                 "fault_type": "recover",
                 "status": replay["status"],
+                "status_category": replay.get("status_category", "fallback"),
                 "execution_mode": replay["execution_mode"],
                 "message": replay["message"],
                 "guard_state": replay["guard_state"],

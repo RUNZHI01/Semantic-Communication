@@ -249,9 +249,11 @@ class RunLiveProbeTest(unittest.TestCase):
                 "requested_at": "2026-03-15T12:00:00+0800",
                 "reachable": True,
                 "status": "success",
+                "status_category": "success",
                 "summary": "phytium-demo reachable; remoteproc0=running, remoteproc1=offline; 2 rpmsg device(s); firmware abcdef123456.",
                 "error": "",
                 "details": details,
+                "diagnostics": {},
             },
         )
 
@@ -283,9 +285,11 @@ class RunLiveProbeTest(unittest.TestCase):
                 "requested_at": "2026-03-15T12:05:00+0800",
                 "reachable": False,
                 "status": "timeout",
-                "summary": "The read-only SSH probe timed out before a response arrived.",
-                "error": "probe timeout",
+                "status_category": "timeout",
+                "summary": "板卡探测超时，请确认板卡在线后重试。",
+                "error": "板卡探测超时，请确认板卡在线后重试。",
                 "details": {},
+                "diagnostics": {},
             },
         )
 
@@ -300,10 +304,12 @@ class RunLiveProbeTest(unittest.TestCase):
             {
                 "requested_at": "2026-03-15T12:07:00+0800",
                 "reachable": False,
-                "status": "error",
-                "summary": "The read-only SSH probe could not be launched from this environment.",
-                "error": f"[Errno 2] No such file or directory: '{PROJECT_ROOT / env_file}'",
+                "status": "launch_error",
+                "status_category": "config_error",
+                "summary": "板卡探测配置不可用，请检查环境文件、主机和端口设置。",
+                "error": "板卡探测配置不可用，请检查环境文件、主机和端口设置。",
                 "details": {},
+                "diagnostics": {"error": f"[Errno 2] No such file or directory: '{PROJECT_ROOT / env_file}'"},
             },
         )
 
@@ -338,9 +344,11 @@ class RunLiveProbeTest(unittest.TestCase):
                 "requested_at": "2026-03-15T12:10:00+0800",
                 "reachable": False,
                 "status": "error",
-                "summary": "The read-only SSH probe could not reach the board from this environment.",
-                "error": "permission denied",
+                "status_category": "auth_error",
+                "summary": "板卡 SSH 认证失败，请检查用户名、密码或 SSH 端口设置。",
+                "error": "板卡 SSH 认证失败，请检查用户名、密码或 SSH 端口设置。",
                 "details": {},
+                "diagnostics": {"stdout": "transient stdout", "stderr": "permission denied", "returncode": 7},
             },
         )
 
@@ -372,14 +380,23 @@ class RunLiveProbeTest(unittest.TestCase):
         self.assertEqual(payload["requested_at"], "2026-03-15T12:15:00+0800")
         self.assertFalse(payload["reachable"])
         self.assertEqual(payload["status"], "parse_error")
+        self.assertEqual(payload["status_category"], "error")
         self.assertEqual(
             payload["summary"],
-            "The read-only SSH probe returned output that could not be parsed as JSON.",
+            "板卡探测失败，请查看诊断信息。",
         )
-        self.assertIn("Expecting value", payload["error"])
+        self.assertEqual(payload["error"], "板卡探测失败，请查看诊断信息。")
         self.assertEqual(
             payload["details"],
             {"stdout": "ssh banner\nnot-json", "stderr": "stderr line"},
+        )
+        self.assertEqual(
+            payload["diagnostics"],
+            {
+                "stdout": "ssh banner\nnot-json",
+                "stderr": "stderr line",
+                "error": "Expecting value: line 1 column 1 (char 0)",
+            },
         )
 
 

@@ -6,6 +6,7 @@ import subprocess
 from typing import Any
 
 from board_access import BoardAccessConfig
+from remote_failure import build_diagnostics, build_operator_message, classify_status_category
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -35,12 +36,15 @@ def run_remote_reconstruction(
 ) -> dict[str, Any]:
     missing = access.missing_inference_fields(variant)
     if missing:
+        status_category = classify_status_category(status="config_error", missing_fields=missing)
         return {
             "status": "config_error",
+            "status_category": status_category,
             "execution_mode": "fallback",
             "variant": variant,
-            "message": "缺少远端推理所需配置。",
+            "message": build_operator_message("inference", status_category, include_fallback=True),
             "missing_fields": missing,
+            "diagnostics": build_diagnostics(missing_fields=missing),
         }
 
     command = [
@@ -69,49 +73,67 @@ def run_remote_reconstruction(
     except subprocess.TimeoutExpired:
         return {
             "status": "timeout",
+            "status_category": "timeout",
             "execution_mode": "fallback",
             "variant": variant,
-            "message": "远端推理超时，已保留预录结果作为回退。",
+            "message": build_operator_message("inference", "timeout", include_fallback=True),
             "missing_fields": [],
+            "diagnostics": {},
         }
     except OSError as exc:
+        status_category = classify_status_category(status="launch_error", error=str(exc))
         return {
             "status": "launch_error",
+            "status_category": status_category,
             "execution_mode": "fallback",
             "variant": variant,
-            "message": "远端推理命令无法启动。",
-            "error": str(exc),
+            "message": build_operator_message("inference", status_category, include_fallback=True),
             "missing_fields": [],
+            "diagnostics": build_diagnostics(error=str(exc)),
         }
 
     if result.returncode != 0:
+        stderr = (result.stderr or "").strip()
+        stdout = (result.stdout or "").strip()
+        status_category = classify_status_category(status="error", stderr=stderr, stdout=stdout)
         return {
             "status": "error",
+            "status_category": status_category,
             "execution_mode": "fallback",
             "variant": variant,
-            "message": "远端推理执行失败，已回退到预录结果。",
-            "stderr": (result.stderr or result.stdout).strip(),
+            "message": build_operator_message("inference", status_category, include_fallback=True),
             "missing_fields": [],
+            "diagnostics": build_diagnostics(stdout=stdout, stderr=stderr, returncode=result.returncode),
         }
 
     try:
         summary = parse_json_stdout(result.stdout)
     except (json.JSONDecodeError, ValueError) as exc:
+        stderr = result.stderr.strip()
+        stdout = result.stdout.strip()
+        status_category = classify_status_category(
+            status="parse_error",
+            stderr=stderr,
+            stdout=stdout,
+            error=str(exc),
+        )
         return {
             "status": "parse_error",
+            "status_category": status_category,
             "execution_mode": "fallback",
             "variant": variant,
-            "message": "远端推理返回内容无法解析，已回退到预录结果。",
-            "error": str(exc),
-            "stdout": result.stdout.strip(),
+            "message": build_operator_message("inference", status_category, include_fallback=True),
             "missing_fields": [],
+            "diagnostics": build_diagnostics(stdout=stdout, stderr=stderr, error=str(exc)),
         }
 
     return {
         "status": "success",
+        "status_category": "success",
         "execution_mode": "live",
         "variant": variant,
         "message": "已使用当前会话凭据触发远端推理。",
         "runner_summary": summary,
         "missing_fields": [],
+        "diagnostics": {},
     }
