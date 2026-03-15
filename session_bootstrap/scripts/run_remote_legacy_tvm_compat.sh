@@ -237,7 +237,9 @@ except Exception:
     raise
 PY
 
-run_remote_python - "$legacy_script" --input_dir "$input_dir" --output_dir "$output_dir" --snr "$snr" --batch_size "$batch_size" <<'PY'
+legacy_log="$(mktemp)"
+set +e
+run_remote_python - "$legacy_script" --input_dir "$input_dir" --output_dir "$output_dir" --snr "$snr" --batch_size "$batch_size" <<'PY' 2>&1 | tee "$legacy_log"
 import runpy
 import sys
 
@@ -258,6 +260,99 @@ except Exception as exc:
 sys.argv = [script_name] + script_args
 runpy.run_path(script_name, run_name="__main__")
 PY
+legacy_rc=${PIPESTATUS[0]}
+set -e
+if [[ "$legacy_rc" -ne 0 ]]; then
+  rm -f "$legacy_log"
+  exit "$legacy_rc"
+fi
+
+summary_expected_sha=""
+if [[ "$variant" == "baseline" ]]; then
+  summary_expected_sha="${INFERENCE_BASELINE_EXPECTED_SHA256:-${INFERENCE_EXPECTED_SHA256:-}}"
+else
+  summary_expected_sha="${INFERENCE_CURRENT_EXPECTED_SHA256:-${INFERENCE_EXPECTED_SHA256:-}}"
+fi
+
+summary_artifact_path="${legacy_artifact:-$artifact_target}"
+run_remote_python - "$legacy_log" "$summary_artifact_path" "$input_dir" "$output_dir" "$variant" "$snr" "$batch_size" "$summary_expected_sha" <<'PY'
+import hashlib
+import json
+import re
+import statistics
+import sys
+from pathlib import Path
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as infile:
+        for chunk in iter(lambda: infile.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+log_path = Path(sys.argv[1])
+artifact_path = Path(sys.argv[2])
+input_dir = sys.argv[3]
+output_dir = Path(sys.argv[4])
+variant = sys.argv[5]
+snr = float(sys.argv[6])
+batch_size = int(sys.argv[7])
+expected_sha256 = sys.argv[8].strip().lower()
+
+patterns = (
+    re.compile(r"批量推理时间.*?:\s*([0-9]+(?:\.[0-9]+)?)\s*秒"),
+    re.compile(r"batch\s+infer(?:ence)?\s+time.*?:\s*([0-9]+(?:\.[0-9]+)?)\s*s(?:ec(?:onds?)?)?", re.I),
+)
+
+run_samples_ms = []
+for raw_line in log_path.read_text(encoding="utf-8", errors="replace").splitlines():
+    line = raw_line.strip()
+    for pattern in patterns:
+        match = pattern.search(line)
+        if match:
+            run_samples_ms.append(float(match.group(1)) * 1000.0)
+            break
+
+artifact_sha256 = file_sha256(artifact_path) if artifact_path.is_file() else ""
+output_files = [path for path in sorted(output_dir.iterdir()) if path.is_file()] if output_dir.exists() else []
+
+summary = {
+    "variant": variant,
+    "artifact_path": str(artifact_path),
+    "artifact_sha256": artifact_sha256,
+    "artifact_sha256_expected": expected_sha256 or None,
+    "artifact_sha256_match": None
+    if not expected_sha256 or not artifact_sha256
+    else artifact_sha256 == expected_sha256,
+    "input_dir": input_dir,
+    "output_dir": str(output_dir),
+    "output_count": len(output_files),
+    "processed_count": len(run_samples_ms),
+    "input_count": len(run_samples_ms),
+    "available_input_count": len(run_samples_ms),
+    "load_ms": 0.0,
+    "vm_init_ms": 0.0,
+    "run_count": len(run_samples_ms),
+    "run_samples_ms": [round(value, 3) for value in run_samples_ms],
+    "run_median_ms": round(statistics.median(run_samples_ms), 3) if run_samples_ms else None,
+    "run_mean_ms": round(sum(run_samples_ms) / len(run_samples_ms), 3) if run_samples_ms else None,
+    "run_min_ms": round(min(run_samples_ms), 3) if run_samples_ms else None,
+    "run_max_ms": round(max(run_samples_ms), 3) if run_samples_ms else None,
+    "run_variance_ms2": round(statistics.pvariance(run_samples_ms), 6) if len(run_samples_ms) > 1 else 0.0,
+    "output_shape": None,
+    "output_dtype": None,
+    "snr": snr,
+    "batch_size": batch_size,
+    "save_format": output_files[0].suffix.lstrip(".") if output_files else "unknown",
+    "seed": None,
+    "max_inputs": 0,
+    "parser": "legacy_latency_lines",
+}
+print(json.dumps(summary, ensure_ascii=False))
+PY
+rm -f "$legacy_log"
 SH
   } >"$runner_script"
   chmod 700 "$runner_script"
