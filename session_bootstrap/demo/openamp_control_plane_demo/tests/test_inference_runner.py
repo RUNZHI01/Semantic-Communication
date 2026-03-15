@@ -99,6 +99,42 @@ class RunRemoteReconstructionTest(unittest.TestCase):
             },
         )
 
+    def test_artifact_sha_mismatch_surfaces_actionable_category_and_structured_diagnostics(self) -> None:
+        access = make_access()
+        expected_sha = "1946b08e6cf20a1259fa43f9e849a06f50ae1230c08d4df7081fba1edae4c644"
+        actual_sha = "6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1"
+        artifact_path = "/home/user/Downloads/jscc-test/jscc/tvm_tune_logs/optimized_model.so"
+        completed = subprocess.CompletedProcess(
+            ["bash", str(REMOTE_RECONSTRUCTION_SCRIPT)],
+            1,
+            stdout="",
+            stderr=(
+                "ERROR: artifact sha256 mismatch "
+                f"path={artifact_path} expected={expected_sha} actual={actual_sha}\n"
+            ),
+        )
+
+        with patch("inference_runner.subprocess.run", return_value=completed):
+            payload = run_remote_reconstruction(access, variant="current")
+
+        self.assertEqual(payload["status"], "error")
+        self.assertEqual(payload["status_category"], "artifact_mismatch")
+        self.assertIn("trusted current SHA 不一致", payload["message"])
+        self.assertNotIn(expected_sha, payload["message"])
+        self.assertEqual(
+            payload["diagnostics"],
+            {
+                "stderr": (
+                    "ERROR: artifact sha256 mismatch "
+                    f"path={artifact_path} expected={expected_sha} actual={actual_sha}"
+                ),
+                "returncode": 1,
+                "artifact_path": artifact_path,
+                "expected_sha256": expected_sha,
+                "actual_sha256": actual_sha,
+            },
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

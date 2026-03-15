@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import re
 import subprocess
 from typing import Any
 
@@ -12,6 +13,9 @@ from remote_failure import build_diagnostics, build_operator_message, classify_s
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 REMOTE_RECONSTRUCTION_SCRIPT = (
     PROJECT_ROOT / "session_bootstrap" / "scripts" / "run_remote_current_real_reconstruction.sh"
+)
+ARTIFACT_SHA_MISMATCH_RE = re.compile(
+    r"artifact sha256 mismatch path=(?P<path>\S+) expected=(?P<expected>[0-9A-Fa-f]{64}) actual=(?P<actual>[0-9A-Fa-f]{64})"
 )
 
 
@@ -24,6 +28,18 @@ def parse_json_stdout(raw: str) -> dict[str, Any]:
         if isinstance(payload, dict):
             return payload
     raise ValueError("runner produced no JSON payload")
+
+
+def extract_artifact_sha_mismatch(*values: str) -> dict[str, str]:
+    for raw in values:
+        match = ARTIFACT_SHA_MISMATCH_RE.search(raw or "")
+        if match:
+            return {
+                "artifact_path": match.group("path"),
+                "expected_sha256": match.group("expected").lower(),
+                "actual_sha256": match.group("actual").lower(),
+            }
+    return {}
 
 
 def run_remote_reconstruction(
@@ -96,6 +112,9 @@ def run_remote_reconstruction(
         stderr = (result.stderr or "").strip()
         stdout = (result.stdout or "").strip()
         status_category = classify_status_category(status="error", stderr=stderr, stdout=stdout)
+        diagnostics = build_diagnostics(stdout=stdout, stderr=stderr, returncode=result.returncode)
+        if status_category == "artifact_mismatch":
+            diagnostics.update(extract_artifact_sha_mismatch(stderr, stdout))
         return {
             "status": "error",
             "status_category": status_category,
@@ -103,7 +122,7 @@ def run_remote_reconstruction(
             "variant": variant,
             "message": build_operator_message("inference", status_category, include_fallback=True),
             "missing_fields": [],
-            "diagnostics": build_diagnostics(stdout=stdout, stderr=stderr, returncode=result.returncode),
+            "diagnostics": diagnostics,
         }
 
     try:

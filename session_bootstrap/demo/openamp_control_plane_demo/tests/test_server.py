@@ -504,6 +504,7 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(payload["execution_mode"], "live")
         access = run_reconstruction.call_args.args[0]
+        trusted_current_sha = state.current_snapshot()["project"]["trusted_current_sha"]
         self.assertEqual(access.host, "100.121.87.73")
         self.assertEqual(access.user, "user")
         self.assertEqual(access.password, "demo-pass")
@@ -511,6 +512,7 @@ class DemoHTTPServerTest(unittest.TestCase):
             access.env_file,
             REPO_ROOT / "session_bootstrap/config/inference_real_reconstruction_compare.2026-03-11.phytium_pi.env",
         )
+        self.assertEqual(access.build_env()["INFERENCE_CURRENT_EXPECTED_SHA256"], trusted_current_sha)
 
     def test_run_inference_endpoint_uses_live_runner_when_available(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
