@@ -852,23 +852,24 @@ def build_fault_replay(fault_type: str) -> dict[str, Any]:
     }
 
 
-def build_recover_replay() -> dict[str, Any]:
+def build_recover_replay(last_fault_code: str | None = None) -> dict[str, Any]:
+    retained_fault_code = format_fault_code(last_fault_code or "MANUAL_SAFE_STOP")
     return {
         "status": "recovered",
         "execution_mode": "replay",
-        "source_label": "安全恢复回放",
-        "message": "未进入真机恢复链路，当前展示 SAFE_STOP → READY 的预录恢复结果。",
+        "source_label": "SAFE_STOP 收口回放",
+        "message": "未进入真机 SAFE_STOP 收口链路，当前展示 READY 保留最近 fault code 的正式证据。",
         "board_response": {
             "decision": "ACK",
-            "fault_code": "NONE",
+            "fault_code": retained_fault_code,
             "guard_state": "READY",
         },
         "guard_state": "READY",
-        "last_fault_code": "NONE",
-        "status_lamp": "green",
+        "last_fault_code": retained_fault_code,
+        "status_lamp": "green" if retained_fault_code == "NONE" else "yellow",
         "log_entries": [
-            "[02:36:22] ▶ 发送 SAFE_STOP",
-            "[02:36:22] ◀ STATUS_RESP: READY，last_fault=NONE",
+            "[02:36:22] ▶ SAFE_STOP 收口，guard 保持 READY",
+            f"[02:36:22] ◀ STATUS_RESP: READY，last_fault={retained_fault_code}",
         ],
     }
 

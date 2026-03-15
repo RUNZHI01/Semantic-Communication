@@ -356,6 +356,14 @@ def expected_sha_for_variant(access: BoardAccessConfig, variant: str) -> str:
     return str(values.get("INFERENCE_CURRENT_EXPECTED_SHA256") or values.get("INFERENCE_EXPECTED_SHA256") or "")
 
 
+def missing_control_plane_fields(access: BoardAccessConfig, variant: str) -> list[str]:
+    if expected_sha_for_variant(access, variant):
+        return []
+    if variant == "baseline":
+        return ["INFERENCE_BASELINE_EXPECTED_SHA256"]
+    return ["INFERENCE_CURRENT_EXPECTED_SHA256"]
+
+
 def parse_runner_summary_from_log(path: Path) -> dict[str, Any]:
     if not path.exists():
         raise ValueError("runner log not found")
@@ -397,6 +405,31 @@ class LiveRemoteReconstructionJob:
                 "runner_summary": {},
                 "wrapper_summary": {},
                 "diagnostics": build_diagnostics(missing_fields=missing),
+                "progress": build_progress_payload([], request_state="completed", final_status="config_error"),
+                "artifacts": self._artifact_paths(),
+            }
+            return
+
+        control_plane_missing = missing_control_plane_fields(access, variant)
+        if control_plane_missing:
+            status_category = classify_status_category(status="config_error", missing_fields=control_plane_missing)
+            if variant == "baseline":
+                message = (
+                    "当前演示缺少 formal baseline expected SHA，Baseline 无法诚实进入 OpenAMP live 准入；"
+                    "界面将保留正式 baseline 对比结果。"
+                )
+            else:
+                message = build_operator_message("inference", status_category, include_fallback=True)
+            self._final_snapshot = {
+                "status": "config_error",
+                "request_state": "completed",
+                "status_category": status_category,
+                "execution_mode": "fallback",
+                "variant": variant,
+                "message": message,
+                "runner_summary": {},
+                "wrapper_summary": {},
+                "diagnostics": build_diagnostics(missing_fields=control_plane_missing),
                 "progress": build_progress_payload([], request_state="completed", final_status="config_error"),
                 "artifacts": self._artifact_paths(),
             }

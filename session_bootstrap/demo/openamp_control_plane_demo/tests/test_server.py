@@ -760,6 +760,78 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(payload["fit_id"], "FIT-01")
         self.assertIn("回放", payload["source_label"])
 
+    def test_recover_endpoint_keeps_retained_fault_visible_on_live_safe_stop(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        request_json(
+            state,
+            "POST",
+            "/api/session/board-access",
+            body=json.dumps(
+                {
+                    "host": "demo-board",
+                    "user": "demo-user",
+                    "password": "placeholder-pass",
+                    "port": "22",
+                }
+            ).encode("utf-8"),
+        )
+
+        with patch(
+            "server.run_recover_action",
+            return_value={
+                "status": "success",
+                "guard_state": "READY",
+                "last_fault_code": "HEARTBEAT_TIMEOUT",
+                "board_response": {
+                    "decision": "ACK",
+                    "fault_code": "HEARTBEAT_TIMEOUT",
+                    "guard_state": "READY",
+                },
+                "logs": ["[02:36:22] ◀ STATUS_RESP: READY，last_fault=HEARTBEAT_TIMEOUT"],
+            },
+        ):
+            status, _, payload = request_json(
+                state,
+                "POST",
+                "/api/recover",
+                body=json.dumps({}).encode("utf-8"),
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["execution_mode"], "live")
+        self.assertEqual(payload["source_label"], "真机 SAFE_STOP 收口")
+        self.assertEqual(payload["guard_state"], "READY")
+        self.assertEqual(payload["last_fault_code"], "HEARTBEAT_TIMEOUT")
+        self.assertEqual(payload["status_lamp"], "yellow")
+        self.assertIn("不宣称已清零", payload["message"])
+
+    def test_recover_endpoint_replay_preserves_latest_fault_code(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        state._last_fault_result = {
+            "fault_type": "wrong_sha",
+            "status": "injected",
+            "status_category": "success",
+            "execution_mode": "replay",
+            "message": "cached replay",
+            "guard_state": "READY",
+            "last_fault_code": "ARTIFACT_SHA_MISMATCH",
+        }
+
+        status, _, payload = request_json(
+            state,
+            "POST",
+            "/api/recover",
+            body=json.dumps({}).encode("utf-8"),
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["execution_mode"], "replay")
+        self.assertEqual(payload["source_label"], "SAFE_STOP 收口回放")
+        self.assertEqual(payload["guard_state"], "READY")
+        self.assertEqual(payload["last_fault_code"], "ARTIFACT_SHA_MISMATCH")
+        self.assertEqual(payload["status_lamp"], "yellow")
+        self.assertIn("保留最近 fault code", payload["message"])
+
     def test_root_serves_dashboard_entry_page(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
 
