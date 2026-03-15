@@ -102,6 +102,7 @@ set -euo pipefail
 PHASE={shlex.quote(phase)}
 OUTPUT_DIR={shlex.quote(remote_output_dir)}
 STAGE_ROOT="$(mktemp -d /tmp/openamp_demo_bridge.XXXXXX)"
+HOOK_INPUT_FILE="$STAGE_ROOT/hook_event.json"
 cleanup() {{
   rm -rf "$STAGE_ROOT"
 }}
@@ -121,16 +122,74 @@ with gzip.GzipFile(fileobj=io.BytesIO(bundle), mode="rb") as gzip_file:
     with tarfile.open(fileobj=gzip_file, mode="r:") as archive:
         archive.extractall(stage_root)
 PY
+IFS= read -r SUDO_PASSWORD || SUDO_PASSWORD=""
+cat >"$HOOK_INPUT_FILE"
 mkdir -p "$OUTPUT_DIR"
+emit_sudo_failure() {{
+  local detail="${{1:-sudo returned a non-zero exit status.}}"
+  PHASE="$PHASE" NOTE="$detail" RPMSG_CTRL={shlex.quote(args.rpmsg_ctrl)} RPMSG_DEV={shlex.quote(args.rpmsg_dev)} python3 - <<'PY'
+import json
+import os
+
+phase = os.environ.get("PHASE", "").strip() or "STATUS_REQ"
+detail = os.environ.get("NOTE", "").strip() or "sudo returned a non-zero exit status."
+print(
+    json.dumps(
+        {{
+            "phase": phase,
+            "source": "openamp_demo_remote_hook_proxy",
+            "transport_status": "permission_gate",
+            "protocol_semantics": "not_attempted",
+            "note": f"{{phase}} could not launch the board-side bridge under sudo: {{detail}}",
+            "rpmsg_ctrl": os.environ.get("RPMSG_CTRL", ""),
+            "rpmsg_dev": os.environ.get("RPMSG_DEV", ""),
+        }},
+        ensure_ascii=False,
+    )
+)
+PY
+}}
 run_bridge() {{
-  OPENAMP_PHASE="$PHASE" python3 "$STAGE_ROOT/session_bootstrap/scripts/openamp_rpmsg_bridge.py" --hook-stdin --rpmsg-ctrl {shlex.quote(args.rpmsg_ctrl)} --rpmsg-dev {shlex.quote(args.rpmsg_dev)} --output-dir "$OUTPUT_DIR"
+  OPENAMP_PHASE="$PHASE" python3 "$STAGE_ROOT/session_bootstrap/scripts/openamp_rpmsg_bridge.py" --hook-stdin --rpmsg-ctrl {shlex.quote(args.rpmsg_ctrl)} --rpmsg-dev {shlex.quote(args.rpmsg_dev)} --output-dir "$OUTPUT_DIR" <"$HOOK_INPUT_FILE"
+}}
+run_bridge_with_sudo() {{
+  local bridge_stdout="$STAGE_ROOT/bridge.stdout"
+  local bridge_stderr="$STAGE_ROOT/bridge.stderr"
+  if printf '%s\\n' "$SUDO_PASSWORD" | sudo -S -p '' env OPENAMP_PHASE="$PHASE" bash -lc 'python3 "$1" --hook-stdin --rpmsg-ctrl "$2" --rpmsg-dev "$3" --output-dir "$4" < "$5"' bash "$STAGE_ROOT/session_bootstrap/scripts/openamp_rpmsg_bridge.py" {shlex.quote(args.rpmsg_ctrl)} {shlex.quote(args.rpmsg_dev)} "$OUTPUT_DIR" "$HOOK_INPUT_FILE" >"$bridge_stdout" 2>"$bridge_stderr"; then
+    if [[ -s "$bridge_stdout" ]]; then
+      cat "$bridge_stdout"
+    fi
+    if [[ -s "$bridge_stderr" ]]; then
+      cat "$bridge_stderr" >&2
+    fi
+    return 0
+  fi
+  if [[ -s "$bridge_stdout" ]]; then
+    cat "$bridge_stdout"
+  fi
+  if [[ -s "$bridge_stderr" ]]; then
+    cat "$bridge_stderr" >&2
+  fi
+  local sudo_detail=""
+  if [[ -s "$bridge_stderr" ]]; then
+    sudo_detail="$(python3 - "$bridge_stderr" <<'PY'
+from pathlib import Path
+import sys
+
+text = Path(sys.argv[1]).read_text(encoding="utf-8", errors="replace").strip()
+print(" ".join(text.split()))
+PY
+)"
+  fi
+  emit_sudo_failure "$sudo_detail"
+  return 1
 }}
 
-# Prefer direct device access; otherwise use passwordless sudo only when the board already allows it.
+# Prefer direct device access; otherwise use the operator-supplied board password for this bridge step only.
 if [[ "$(id -u)" -eq 0 ]] || {{ [[ -r {shlex.quote(args.rpmsg_dev)} ]] && [[ -w {shlex.quote(args.rpmsg_dev)} ]]; }}; then
   run_bridge
-elif command -v sudo >/dev/null 2>&1 && sudo -n true >/dev/null 2>&1; then
-  sudo -n env OPENAMP_PHASE="$PHASE" python3 "$STAGE_ROOT/session_bootstrap/scripts/openamp_rpmsg_bridge.py" --hook-stdin --rpmsg-ctrl {shlex.quote(args.rpmsg_ctrl)} --rpmsg-dev {shlex.quote(args.rpmsg_dev)} --output-dir "$OUTPUT_DIR"
+elif command -v sudo >/dev/null 2>&1; then
+  run_bridge_with_sudo
 else
   run_bridge
 fi
@@ -144,6 +203,7 @@ def main() -> int:
     phase = detect_phase(event)
     job_id = detect_job_id(event)
     remote_command = build_remote_command(args, phase=phase, job_id=job_id)
+    remote_input = f"{args.password}\n{raw_event}"
     command = [
         "bash",
         str(SSH_HELPER),
@@ -163,7 +223,7 @@ def main() -> int:
     result = subprocess.run(
         command,
         cwd=PROJECT_ROOT,
-        input=raw_event,
+        input=remote_input,
         text=True,
         capture_output=True,
         check=False,
