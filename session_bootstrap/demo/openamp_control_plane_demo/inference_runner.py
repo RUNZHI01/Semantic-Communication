@@ -112,11 +112,49 @@ def last_event_by_phase(events: list[dict[str, Any]], phase: str) -> dict[str, A
     return None
 
 
+def hook_response_for_event(event: dict[str, Any] | None) -> dict[str, Any]:
+    response = safe_nested(event, "hook_result", "response")
+    return response if isinstance(response, dict) else {}
+
+
+def hook_response_for_phase(events: list[dict[str, Any]], phase: str) -> dict[str, Any]:
+    return hook_response_for_event(last_event_by_phase(events, phase))
+
+
+def latest_hook_response(events: list[dict[str, Any]]) -> dict[str, Any]:
+    for event in reversed(events):
+        response = hook_response_for_event(event)
+        if response:
+            return response
+    return {}
+
+
+def control_hook_error_text(response: dict[str, Any]) -> str:
+    parts: list[str] = []
+    for key in ("phase", "source", "transport_status", "protocol_semantics", "note", "rpmsg_ctrl", "rpmsg_dev"):
+        value = response.get(key)
+        if value:
+            parts.append(str(value))
+    return "\n".join(parts)
+
+
+def control_hook_diagnostics(response: dict[str, Any]) -> dict[str, Any]:
+    details: dict[str, Any] = {}
+    for key in ("phase", "source", "transport_status", "protocol_semantics", "note", "rpmsg_ctrl", "rpmsg_dev"):
+        value = response.get(key)
+        if value not in (None, ""):
+            details[key] = value
+    device_status = response.get("device_status")
+    if isinstance(device_status, dict) and device_status:
+        details["device_status"] = device_status
+    return details
+
+
 def format_trace_event(event: dict[str, Any]) -> str:
     phase = str(event.get("phase") or "UNKNOWN").upper()
     at = short_time_label(str(event.get("at") or ""))
     payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
-    response = safe_nested(event, "hook_result", "response") or {}
+    response = hook_response_for_event(event)
 
     if phase == "STATUS_REQ":
         guard = (
@@ -138,6 +176,9 @@ def format_trace_event(event: dict[str, Any]) -> str:
         decision = payload.get("decision") or "UNKNOWN"
         guard = payload.get("guard_state_name") or payload.get("guard_state") or "UNKNOWN"
         fault = payload.get("fault_name") or payload.get("fault_code") or "NONE"
+        transport = payload.get("transport_status")
+        if transport:
+            return f"[{at}] JOB_ACK({decision}) -> guard={guard} / fault={fault} / transport={transport}"
         return f"[{at}] JOB_ACK({decision}) -> guard={guard} / fault={fault}"
     if phase == "HEARTBEAT":
         runtime_state = payload.get("runtime_state") or "RUNNING"
@@ -163,6 +204,8 @@ def build_progress_payload(
     job_ack_event = last_event_by_phase(events, "JOB_ACK")
     heartbeat_event = last_event_by_phase(events, "HEARTBEAT")
     job_done_event = last_event_by_phase(events, "JOB_DONE")
+    status_response = hook_response_for_phase(events, "STATUS_REQ")
+    job_req_response = hook_response_for_phase(events, "JOB_REQ")
 
     job_ack_payload = job_ack_event.get("payload") if isinstance(job_ack_event, dict) else {}
     if not isinstance(job_ack_payload, dict):
@@ -191,11 +234,14 @@ def build_progress_payload(
 
     connected_detail = "控制面已建立 STATUS_REQ/RESP 读数。"
     if status_event:
-        status_response = safe_nested(status_event, "hook_result", "response", "rx_frame", "status_resp") or {}
-        guard = status_response.get("guard_state_name") or safe_nested(status_event, "hook_result", "response", "transport_status")
-        fault = status_response.get("last_fault_name") or "UNKNOWN"
+        status_resp = safe_nested(status_response, "rx_frame", "status_resp") or {}
+        guard = status_resp.get("guard_state_name") or status_response.get("transport_status")
+        fault = status_resp.get("last_fault_name") or "UNKNOWN"
         if guard:
             connected_detail = f"STATUS_RESP: {guard} / fault={fault}"
+        status_note = str(status_response.get("note") or "").strip()
+        if status_note and guard != "status_resp_received":
+            connected_detail = status_note
     elif connected_status == "error":
         connected_detail = "本次在线链路未能完成初始状态确认。"
 
@@ -214,7 +260,14 @@ def build_progress_payload(
                 running_detail = f"板端执行中，最近 HEARTBEAT elapsed={elapsed_ms} ms"
     elif decision == "DENY":
         fault = job_ack_payload.get("fault_name") or job_ack_payload.get("fault_code") or "UNKNOWN"
-        running_detail = f"JOB_ACK(DENY) / fault={fault}"
+        deny_note = str(job_req_response.get("note") or job_ack_payload.get("note") or "").strip()
+        transport_status = str(job_req_response.get("transport_status") or job_ack_payload.get("transport_status") or "").strip()
+        if transport_status == "permission_gate" and deny_note:
+            running_detail = f"板端权限门禁：{deny_note}"
+        elif deny_note:
+            running_detail = f"JOB_ACK(DENY) / fault={fault} / {deny_note}"
+        else:
+            running_detail = f"JOB_ACK(DENY) / fault={fault}"
 
     returned_detail = "等待 JOB_DONE。"
     if job_done_event:
@@ -474,6 +527,8 @@ class LiveRemoteReconstructionJob:
                 wrapper_summary = {}
 
         trace_events = load_trace_events(self._trace_path)
+        last_hook_response = latest_hook_response(trace_events)
+        hook_error_text = control_hook_error_text(last_hook_response)
 
         if timed_out:
             status = "timeout"
@@ -489,7 +544,7 @@ class LiveRemoteReconstructionJob:
                     status="parse_error",
                     stdout=stdout,
                     stderr=stderr,
-                    error=str(exc),
+                    error="\n".join(part for part in (str(exc), hook_error_text) if part),
                 )
                 runner_summary = {}
                 message = build_operator_message("inference", status_category, include_fallback=True)
@@ -499,16 +554,27 @@ class LiveRemoteReconstructionJob:
                 message = "OpenAMP 控制面已完成作业下发、板端执行与结果回收。"
         else:
             status = "error"
-            status_category = classify_status_category(status="error", stdout=stdout, stderr=stderr)
+            status_category = classify_status_category(
+                status="error",
+                stdout=stdout,
+                stderr=stderr,
+                error=hook_error_text,
+            )
             runner_summary = {}
             if wrapper_summary.get("result") == "denied_by_control_hook":
-                message = "OpenAMP 控制面未放行本次作业，界面已回退到归档样例。"
+                if status_category == "permission_error":
+                    message = build_operator_message("inference", status_category, include_fallback=True)
+                else:
+                    message = "OpenAMP 控制面未放行本次作业，界面已回退到归档样例。"
             else:
                 message = build_operator_message("inference", status_category, include_fallback=True)
 
         diagnostics = build_diagnostics(stdout=stdout, stderr=stderr, returncode=self._process.returncode)
         if status_category == "artifact_mismatch":
             diagnostics.update(extract_artifact_sha_mismatch(stderr, stdout))
+        hook_diagnostics = control_hook_diagnostics(last_hook_response)
+        if hook_diagnostics:
+            diagnostics["control_hook"] = hook_diagnostics
 
         final_snapshot = {
             "status": status,

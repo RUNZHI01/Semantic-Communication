@@ -237,6 +237,27 @@ def safe_runtime_state_name(value: int) -> str:
     return RUNTIME_STATE_WIRE_TO_NAME.get(value, f"UNKNOWN_{value:#x}")
 
 
+def describe_transport_failure(*, phase: str, rpmsg_dev: Path, err: BaseException) -> tuple[str, str, str, str]:
+    if isinstance(err, PermissionError) or (
+        isinstance(err, OSError) and err.errno in {errno.EACCES, errno.EPERM}
+    ):
+        return (
+            "linux_bridge_permission_guard",
+            "permission_gate",
+            "not_attempted",
+            (
+                f"{phase} could not access {rpmsg_dev}: {err}. "
+                "The board-side bridge needs root or passwordless sudo for RPMsg device access."
+            ),
+        )
+    return (
+        "linux_bridge_transport_guard",
+        "transport_error",
+        "not_verified",
+        f"{phase} transport failed before a valid response was received: {err}",
+    )
+
+
 def parse_frame(payload: bytes) -> dict[str, Any]:
     result: dict[str, Any] = {
         "raw_len": len(payload),
@@ -1509,14 +1530,32 @@ def run_status_probe(
         job_id=job_id,
         payload=b"",
     )
-    txn = transact(
-        rpmsg_dev=rpmsg_dev,
-        tx_bytes=tx_bytes,
-        response_timeout_sec=args.response_timeout_sec,
-        settle_timeout_sec=args.settle_timeout_sec,
-        max_rx_bytes=args.max_rx_bytes,
-        drain_before_send=args.drain_before_send,
-    )
+    try:
+        txn = transact(
+            rpmsg_dev=rpmsg_dev,
+            tx_bytes=tx_bytes,
+            response_timeout_sec=args.response_timeout_sec,
+            settle_timeout_sec=args.settle_timeout_sec,
+            max_rx_bytes=args.max_rx_bytes,
+            drain_before_send=args.drain_before_send,
+        )
+    except (OSError, TimeoutError, SystemExit) as err:
+        source, transport_status, protocol_semantics, note = describe_transport_failure(
+            phase=phase,
+            rpmsg_dev=rpmsg_dev,
+            err=err,
+        )
+        return build_status_local_summary(
+            args=args,
+            output_dir=output_dir,
+            phase=phase,
+            hook_event=hook_event,
+            note=note,
+            source=source,
+            transport_status=transport_status,
+            protocol_semantics=protocol_semantics,
+            device_status=device_status,
+        )
     summary = classify_status_probe(
         phase=phase,
         tx_bytes=tx_bytes,
@@ -1665,6 +1704,7 @@ def build_local_deny_summary(
     source: str = "linux_bridge_local_guard",
     transport_status: str = "not_attempted",
     protocol_semantics: str = "not_available",
+    device_status: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     summary = {
         "generated_at": now_iso(),
@@ -1685,6 +1725,42 @@ def build_local_deny_summary(
         "output_dir": str(output_dir),
         "hook_event": hook_event or {},
     }
+    if device_status is not None:
+        summary["device_status"] = device_status
+    write_json(output_dir / "bridge_summary.json", summary)
+    if hook_event:
+        write_json(output_dir / "stdin_event.json", hook_event)
+    return summary
+
+
+def build_status_local_summary(
+    *,
+    args: argparse.Namespace,
+    output_dir: Path,
+    phase: str,
+    hook_event: dict[str, Any],
+    note: str,
+    source: str = "linux_bridge_local_guard",
+    transport_status: str = "not_attempted",
+    protocol_semantics: str = "not_available",
+    device_status: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    summary = {
+        "generated_at": now_iso(),
+        "bridge_mode": "hook" if args.hook_stdin else "direct",
+        "phase": phase,
+        "source": source,
+        "transport_status": transport_status,
+        "protocol_semantics": protocol_semantics,
+        "note": note,
+        "job_id": derive_job_id(args, hook_event),
+        "rpmsg_ctrl": args.rpmsg_ctrl,
+        "rpmsg_dev": args.rpmsg_dev,
+        "output_dir": str(output_dir),
+        "hook_event": hook_event or {},
+    }
+    if device_status is not None:
+        summary["device_status"] = device_status
     write_json(output_dir / "bridge_summary.json", summary)
     if hook_event:
         write_json(output_dir / "stdin_event.json", hook_event)
@@ -1701,6 +1777,7 @@ def build_job_done_local_summary(
     source: str = "linux_bridge_local_guard",
     transport_status: str = "not_attempted",
     protocol_semantics: str = "not_available",
+    device_status: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     summary = {
         "generated_at": now_iso(),
@@ -1728,6 +1805,8 @@ def build_job_done_local_summary(
         "output_dir": str(output_dir),
         "hook_event": hook_event or {},
     }
+    if device_status is not None:
+        summary["device_status"] = device_status
     write_json(output_dir / "bridge_summary.json", summary)
     if hook_event:
         write_json(output_dir / "stdin_event.json", hook_event)
@@ -1744,6 +1823,7 @@ def build_safe_stop_local_summary(
     source: str = "linux_bridge_local_guard",
     transport_status: str = "not_attempted",
     protocol_semantics: str = "not_available",
+    device_status: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     summary = {
         "generated_at": now_iso(),
@@ -1768,6 +1848,8 @@ def build_safe_stop_local_summary(
         "output_dir": str(output_dir),
         "hook_event": hook_event or {},
     }
+    if device_status is not None:
+        summary["device_status"] = device_status
     write_json(output_dir / "bridge_summary.json", summary)
     if hook_event:
         write_json(output_dir / "stdin_event.json", hook_event)
@@ -1818,16 +1900,22 @@ def run_job_probe(
             drain_before_send=args.drain_before_send,
         )
     except (OSError, TimeoutError, SystemExit) as err:
+        source, transport_status, protocol_semantics, note = describe_transport_failure(
+            phase=phase,
+            rpmsg_dev=rpmsg_dev,
+            err=err,
+        )
         return build_local_deny_summary(
             args=args,
             output_dir=output_dir,
             phase=phase,
             hook_event=hook_event,
-            note=f"JOB_REQ transport failed before a valid JOB_ACK was received: {err}",
+            note=note,
             fault_code=CONTROL_PATH_FAULT_CODE,
-            source="linux_bridge_transport_guard",
-            transport_status="transport_error",
-            protocol_semantics="not_verified",
+            source=source,
+            transport_status=transport_status,
+            protocol_semantics=protocol_semantics,
+            device_status=device_status,
         )
     summary = classify_job_probe(
         phase=phase,
@@ -1908,16 +1996,22 @@ def run_heartbeat_probe(
             drain_before_send=args.drain_before_send,
         )
     except (OSError, TimeoutError, SystemExit) as err:
+        source, transport_status, protocol_semantics, note = describe_transport_failure(
+            phase=phase,
+            rpmsg_dev=rpmsg_dev,
+            err=err,
+        )
         return build_local_deny_summary(
             args=args,
             output_dir=output_dir,
             phase=phase,
             hook_event=hook_event,
-            note=f"HEARTBEAT transport failed before a valid HEARTBEAT_ACK was received: {err}",
+            note=note,
             fault_code=CONTROL_PATH_FAULT_CODE,
-            source="linux_bridge_transport_guard",
-            transport_status="transport_error",
-            protocol_semantics="not_verified",
+            source=source,
+            transport_status=transport_status,
+            protocol_semantics=protocol_semantics,
+            device_status=device_status,
         )
     summary = classify_heartbeat_probe(
         phase=phase,
@@ -1998,15 +2092,21 @@ def run_job_done_probe(
             drain_before_send=args.drain_before_send,
         )
     except (OSError, TimeoutError, SystemExit) as err:
+        source, transport_status, protocol_semantics, note = describe_transport_failure(
+            phase=phase,
+            rpmsg_dev=rpmsg_dev,
+            err=err,
+        )
         return build_job_done_local_summary(
             args=args,
             output_dir=output_dir,
             phase=phase,
             hook_event=hook_event,
-            note=f"JOB_DONE transport failed before a valid STATUS_RESP was received: {err}",
-            source="linux_bridge_transport_guard",
-            transport_status="transport_error",
-            protocol_semantics="not_verified",
+            note=note,
+            source=source,
+            transport_status=transport_status,
+            protocol_semantics=protocol_semantics,
+            device_status=device_status,
         )
     summary = classify_job_done_probe(
         phase=phase,
@@ -2087,15 +2187,21 @@ def run_safe_stop_probe(
             drain_before_send=args.drain_before_send,
         )
     except (OSError, TimeoutError, SystemExit) as err:
+        source, transport_status, protocol_semantics, note = describe_transport_failure(
+            phase=phase,
+            rpmsg_dev=rpmsg_dev,
+            err=err,
+        )
         return build_safe_stop_local_summary(
             args=args,
             output_dir=output_dir,
             phase=phase,
             hook_event=hook_event,
-            note=f"SAFE_STOP transport failed before a valid STATUS_RESP was received: {err}",
-            source="linux_bridge_transport_guard",
-            transport_status="transport_error",
-            protocol_semantics="not_verified",
+            note=note,
+            source=source,
+            transport_status=transport_status,
+            protocol_semantics=protocol_semantics,
+            device_status=device_status,
         )
     summary = classify_safe_stop_probe(
         phase=phase,
