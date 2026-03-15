@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import sys
+import tempfile
 import unittest
 
 
@@ -9,12 +10,31 @@ DEMO_ROOT = Path(__file__).resolve().parents[1]
 if str(DEMO_ROOT) not in sys.path:
     sys.path.insert(0, str(DEMO_ROOT))
 
-from board_access import build_board_access_config, build_demo_default_board_access  # noqa: E402
+from board_access import (  # noqa: E402
+    DEFAULT_INFERENCE_ENV_CANDIDATES,
+    build_board_access_config,
+    build_demo_default_board_access,
+    discover_validated_inference_env,
+    first_existing_env,
+)
 
 
 class DemoBoardAccessDefaultsTest(unittest.TestCase):
+    def test_discover_validated_inference_env_uses_report_linked_env_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            env_path = temp_root / "trusted.env"
+            report_path = temp_root / "trusted.md"
+            env_path.write_text("REMOTE_HOST=demo-board\n", encoding="utf-8")
+            report_path.write_text(f"- env_file: {env_path}\n", encoding="utf-8")
+
+            discovered = discover_validated_inference_env((str(report_path),))
+
+        self.assertEqual(discovered, env_path.resolve())
+
     def test_demo_defaults_prefill_real_repo_files_without_password(self) -> None:
         access = build_demo_default_board_access(None)
+        expected_inference_env = discover_validated_inference_env() or first_existing_env(DEFAULT_INFERENCE_ENV_CANDIDATES)
 
         self.assertEqual(access.host, "100.121.87.73")
         self.assertEqual(access.user, "user")
@@ -25,7 +45,7 @@ class DemoBoardAccessDefaultsTest(unittest.TestCase):
         )
         self.assertEqual(
             access.preloaded_inference_env_file,
-            DEMO_ROOT.parents[2] / "session_bootstrap/config/inference_real_reconstruction_compare.2026-03-11.phytium_pi.env",
+            expected_inference_env,
         )
         self.assertFalse(access.password)
         self.assertEqual(access.missing_connection_fields(), ["password"])

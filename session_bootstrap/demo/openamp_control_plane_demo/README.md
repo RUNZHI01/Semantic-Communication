@@ -37,8 +37,8 @@ If `session_bootstrap/reports/openamp_demo_live_probe_latest.json` already exist
 On startup, the demo now also preloads practical repo-backed defaults when they exist:
 
 - SSH defaults: `session_bootstrap/config/phytium_pi_login.env`, else `session_bootstrap/config/phytium_pi_login.example.env`
-- inference defaults for the demo line: `session_bootstrap/config/inference_real_reconstruction_compare.2026-03-11.phytium_pi.env`
-- current live inference still aligns its SHA guard to the dashboard snapshot's trusted-current artifact before launching the remote runner, so older env files do not keep the demo pinned to a retired current SHA
+- inference defaults for the demo line: prefer the env snapshot referenced by `session_bootstrap/reports/inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md`, else fall back to `session_bootstrap/config/inference_real_reconstruction_compare.2026-03-11.phytium_pi.env`
+- live inference now reuses that validated env contract directly instead of rewriting `INFERENCE_CURRENT_EXPECTED_SHA256` inside the demo server
 
 Repo-side password fields are ignored intentionally. The operator still enters the password once in the web UI, and the current demo-server process reuses it for later probe / inference / fault actions.
 

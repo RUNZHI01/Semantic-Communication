@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import replace
 import html
 import json
 import mimetypes
@@ -13,7 +12,7 @@ from threading import Lock
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from board_access import BoardAccessConfig, build_board_access_config, build_demo_default_board_access
+from board_access import build_board_access_config, build_demo_default_board_access
 from board_probe import DEFAULT_LIVE_PROBE_OUTPUT, is_successful_probe, load_probe_output, run_live_probe, write_probe_output
 from demo_data import (
     PROJECT_ROOT,
@@ -206,23 +205,6 @@ class DashboardState:
                 result["control_status"] = status_payload
         return result
 
-    def _build_inference_access(self, board_access: BoardAccessConfig, variant: str) -> BoardAccessConfig:
-        if variant != "current" or not self._trusted_current_sha:
-            return board_access
-
-        effective_env = board_access.build_env()
-        if effective_env.get("INFERENCE_CURRENT_EXPECTED_SHA256") == self._trusted_current_sha:
-            return board_access
-
-        # Keep current live inference pinned to the trusted-current line shown in the demo.
-        effective_env["INFERENCE_CURRENT_EXPECTED_SHA256"] = self._trusted_current_sha
-        return replace(
-            board_access,
-            env_values=effective_env,
-            startup_env_values={},
-            env_file_values={},
-        )
-
     def run_demo_inference(self, *, variant: str, image_index: int) -> dict[str, Any]:
         payload = build_prerecorded_inference_result(image_index, variant)
         payload["status_category"] = "fallback"
@@ -230,8 +212,7 @@ class DashboardState:
             board_access = self._board_access
 
         if board_access.configured:
-            inference_access = self._build_inference_access(board_access, variant)
-            live_result = run_remote_reconstruction(inference_access, variant=variant)
+            live_result = run_remote_reconstruction(board_access, variant=variant)
             payload["live_attempt"] = live_result
             if live_result.get("status") == "success":
                 summary = live_result["runner_summary"]
