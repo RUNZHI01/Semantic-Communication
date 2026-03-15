@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from argparse import Namespace
 import html
 import io
 import json
@@ -7,7 +8,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from urllib.parse import quote
 
 
@@ -15,6 +16,7 @@ DEMO_ROOT = Path(__file__).resolve().parents[1]
 if str(DEMO_ROOT) not in sys.path:
     sys.path.insert(0, str(DEMO_ROOT))
 
+import server  # noqa: E402
 from server import DashboardState, DemoRequestHandler  # noqa: E402
 
 
@@ -173,6 +175,100 @@ class DashboardStateTest(unittest.TestCase):
         self.assertEqual(snapshot["board"]["current_status"]["requested_at"], success["requested_at"])
         self.assertTrue(snapshot["board"]["current_status"]["reachable"])
         self.assertEqual(cached_after_failure["requested_at"], success["requested_at"])
+
+
+class ServerMainTest(unittest.TestCase):
+    def test_main_builds_server_and_serves_without_startup_probe(self) -> None:
+        args = Namespace(
+            host="0.0.0.0",
+            port=8090,
+            probe_env="config/openamp.env",
+            probe_timeout_sec=12.5,
+            probe_startup=False,
+        )
+        events: list[str] = []
+        fake_app_state = Mock()
+        fake_server = Mock()
+
+        def build_state(probe_env: str, probe_timeout_sec: float) -> Mock:
+            events.append("state_init")
+            self.assertEqual(probe_env, args.probe_env)
+            self.assertEqual(probe_timeout_sec, args.probe_timeout_sec)
+            return fake_app_state
+
+        def build_server(server_address: tuple[str, int], handler: type[DemoRequestHandler], app_state: Mock) -> Mock:
+            events.append("server_init")
+            self.assertEqual(server_address, (args.host, args.port))
+            self.assertIs(handler, DemoRequestHandler)
+            self.assertIs(app_state, fake_app_state)
+            return fake_server
+
+        fake_server.serve_forever.side_effect = lambda: events.append("serve_forever")
+
+        with (
+            patch("server.parse_args", return_value=args),
+            patch("server.DashboardState", side_effect=build_state) as state_cls,
+            patch("server.DemoHTTPServer", side_effect=build_server) as server_cls,
+            patch("sys.stdout", new_callable=io.StringIO) as stdout,
+        ):
+            exit_code = server.main()
+
+        state_cls.assert_called_once_with(args.probe_env, args.probe_timeout_sec)
+        server_cls.assert_called_once_with((args.host, args.port), DemoRequestHandler, fake_app_state)
+        fake_app_state.refresh_live_probe.assert_not_called()
+        fake_server.serve_forever.assert_called_once_with()
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(events, ["state_init", "server_init", "serve_forever"])
+        self.assertEqual(
+            stdout.getvalue().splitlines(),
+            [
+                "OpenAMP demo dashboard: http://0.0.0.0:8090",
+                f"Project root: {server.PROJECT_ROOT}",
+            ],
+        )
+
+    def test_main_runs_startup_probe_before_starting_server(self) -> None:
+        args = Namespace(
+            host="127.0.0.1",
+            port=8079,
+            probe_env="config/probe.env",
+            probe_timeout_sec=5.0,
+            probe_startup=True,
+        )
+        events: list[str] = []
+        fake_app_state = Mock()
+        fake_server = Mock()
+
+        def build_state(probe_env: str, probe_timeout_sec: float) -> Mock:
+            events.append("state_init")
+            self.assertEqual(probe_env, args.probe_env)
+            self.assertEqual(probe_timeout_sec, args.probe_timeout_sec)
+            return fake_app_state
+
+        def build_server(server_address: tuple[str, int], handler: type[DemoRequestHandler], app_state: Mock) -> Mock:
+            events.append("server_init")
+            self.assertEqual(server_address, (args.host, args.port))
+            self.assertIs(handler, DemoRequestHandler)
+            self.assertIs(app_state, fake_app_state)
+            return fake_server
+
+        fake_app_state.refresh_live_probe.side_effect = lambda: events.append("refresh_live_probe")
+        fake_server.serve_forever.side_effect = lambda: events.append("serve_forever")
+
+        with (
+            patch("server.parse_args", return_value=args),
+            patch("server.DashboardState", side_effect=build_state) as state_cls,
+            patch("server.DemoHTTPServer", side_effect=build_server) as server_cls,
+            patch("sys.stdout", new_callable=io.StringIO),
+        ):
+            exit_code = server.main()
+
+        state_cls.assert_called_once_with(args.probe_env, args.probe_timeout_sec)
+        server_cls.assert_called_once_with((args.host, args.port), DemoRequestHandler, fake_app_state)
+        fake_app_state.refresh_live_probe.assert_called_once_with()
+        fake_server.serve_forever.assert_called_once_with()
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(events, ["state_init", "refresh_live_probe", "server_init", "serve_forever"])
 
 
 class DemoHTTPServerTest(unittest.TestCase):
