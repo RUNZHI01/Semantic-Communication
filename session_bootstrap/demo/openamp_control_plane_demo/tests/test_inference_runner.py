@@ -480,7 +480,7 @@ class RunRemoteReconstructionTest(unittest.TestCase):
             job._final_snapshot = None
 
             fake_process = Mock()
-            fake_process.communicate.return_value = ("", "")
+            fake_process.communicate.return_value = (summary_path.read_text(encoding="utf-8"), "")
             fake_process.returncode = 2
             job._process = fake_process
 
