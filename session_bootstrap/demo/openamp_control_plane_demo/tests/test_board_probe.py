@@ -7,7 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 
 DEMO_ROOT = Path(__file__).resolve().parents[1]
@@ -176,6 +176,36 @@ class LoadWriteProbeOutputTest(unittest.TestCase):
         output_path.write_text("{not-json\n", encoding="utf-8")
 
         self.assertIsNone(load_probe_output(output_path))
+
+    def test_load_probe_output_returns_none_for_valid_non_dict_json(self) -> None:
+        output_path = Path(self.make_probe_path())
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(json.dumps(["reachable", True]), encoding="utf-8")
+
+        self.assertIsNone(load_probe_output(output_path))
+
+    def test_write_probe_output_propagates_write_failures(self) -> None:
+        payload = {
+            "requested_at": "2026-03-15T13:10:00+0800",
+            "reachable": True,
+            "status": "success",
+        }
+        expected_text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+        resolved_path = Mock()
+        resolved_path.parent = Mock()
+        resolved_path.write_text.side_effect = OSError("disk full")
+
+        with (
+            patch("board_probe.resolve_project_path", return_value=resolved_path) as resolve_path,
+            self.assertRaisesRegex(OSError, "disk full"),
+        ):
+            write_probe_output(payload, "session_bootstrap/reports/openamp_demo_live_probe_latest.json")
+
+        resolve_path.assert_called_once_with(
+            "session_bootstrap/reports/openamp_demo_live_probe_latest.json"
+        )
+        resolved_path.parent.mkdir.assert_called_once_with(parents=True, exist_ok=True)
+        resolved_path.write_text.assert_called_once_with(expected_text, encoding="utf-8")
 
 
 class RunLiveProbeTest(unittest.TestCase):
