@@ -603,6 +603,230 @@ class RunRemoteReconstructionTest(unittest.TestCase):
             self.assertEqual(snapshot["diagnostics"]["control_hook"]["transport_status"], "job_ack_received")
             self.assertIn("ARTIFACT_SHA_MISMATCH", snapshot["progress"]["stages"][2]["detail"])
 
+    def test_live_runner_log_artifact_mismatch_is_promoted_into_status_and_diagnostics(self) -> None:
+        with tempfile.TemporaryDirectory(dir=PROJECT_ROOT) as temp_dir:
+            output_dir = Path(temp_dir)
+            trace_path = output_dir / "control_trace.jsonl"
+            summary_path = output_dir / "wrapper_summary.json"
+            runner_log_path = output_dir / "runner.log"
+
+            summary_path.write_text(
+                json.dumps({"result": "runner_failed"}, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+            artifact_path = "/home/user/Downloads/jscc-test/jscc/tvm_tune_logs/optimized_model.so"
+            expected_sha = "6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1"
+            actual_sha = "85d701db0021c26412c3e5e08a4ca043470aaa01fb2d6792cb3b3b29e93bf849"
+            runner_log_path.write_text(
+                "\n".join(
+                    [
+                        "[2026-03-16T02:40:43+0800] openamp wrapper start",
+                        "runner_cmd=bash ./session_bootstrap/scripts/run_remote_current_real_reconstruction.sh --variant current --max-inputs 300 --seed 0",
+                        (
+                            "ERROR: artifact sha256 mismatch "
+                            f"path={artifact_path} expected={expected_sha} actual={actual_sha}"
+                        ),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            trace_events = [
+                {
+                    "at": "2026-03-16T02:40:39+0800",
+                    "phase": "STATUS_REQ",
+                    "payload": {"job_id": 1200412253},
+                    "hook_result": {
+                        "returncode": 0,
+                        "response": {
+                            "phase": "STATUS_REQ",
+                            "source": "firmware_status_resp",
+                            "transport_status": "status_resp_received",
+                            "protocol_semantics": "implemented",
+                            "note": "Received a decodable STATUS_RESP frame.",
+                        },
+                    },
+                },
+                {
+                    "at": "2026-03-16T02:40:40+0800",
+                    "phase": "JOB_REQ",
+                    "payload": {"job_id": 1200412253, "expected_sha256": expected_sha},
+                    "hook_result": {
+                        "returncode": 0,
+                        "response": {
+                            "phase": "JOB_REQ",
+                            "decision": "ALLOW",
+                            "fault_name": "NONE",
+                            "guard_state_name": "JOB_ACTIVE",
+                            "source": "firmware_job_ack",
+                            "transport_status": "job_ack_received",
+                            "protocol_semantics": "implemented",
+                            "note": "Received a decodable JOB_ACK frame from firmware.",
+                        },
+                    },
+                },
+                {
+                    "at": "2026-03-16T02:40:40+0800",
+                    "phase": "JOB_ACK",
+                    "payload": {
+                        "job_id": 1200412253,
+                        "decision": "ALLOW",
+                        "fault_name": "NONE",
+                        "guard_state_name": "JOB_ACTIVE",
+                        "source": "firmware_job_ack",
+                        "transport_status": "job_ack_received",
+                        "protocol_semantics": "implemented",
+                        "note": "Received a decodable JOB_ACK frame from firmware.",
+                    },
+                },
+                {
+                    "at": "2026-03-16T02:40:56+0800",
+                    "phase": "JOB_DONE",
+                    "payload": {
+                        "job_id": 1200412253,
+                        "elapsed_ms": 13056,
+                        "result_code": 1,
+                        "runner_exit_code": 1,
+                        "timed_out": False,
+                    },
+                    "hook_result": {
+                        "returncode": 0,
+                        "response": {
+                            "phase": "JOB_DONE",
+                            "reported_result_code": 1,
+                            "reported_output_count": 0,
+                            "reported_success": False,
+                            "guard_state_name": "READY",
+                            "last_fault_name": "OUTPUT_INCOMPLETE",
+                            "source": "firmware_job_done_status",
+                            "transport_status": "job_done_status_received",
+                            "protocol_semantics": "implemented",
+                            "note": "Received STATUS_RESP after failed JOB_DONE.",
+                        },
+                    },
+                },
+            ]
+            trace_path.write_text(
+                "\n".join(json.dumps(event, ensure_ascii=False) for event in trace_events) + "\n",
+                encoding="utf-8",
+            )
+
+            job = LiveRemoteReconstructionJob.__new__(LiveRemoteReconstructionJob)
+            job.job_id = "1200412253"
+            job.variant = "current"
+            job._timeout_sec = 10.0
+            job._expected_outputs = inference_runner.DEFAULT_MAX_INPUTS
+            job._output_dir = output_dir
+            job._trace_path = trace_path
+            job._summary_path = summary_path
+            job._runner_log_path = runner_log_path
+            job._lock = Lock()
+            job._final_snapshot = None
+
+            fake_process = Mock()
+            fake_process.communicate.return_value = ("", "")
+            fake_process.returncode = 1
+            job._process = fake_process
+
+            job._wait_for_completion()
+
+            snapshot = job._final_snapshot
+            assert snapshot is not None
+            self.assertEqual(snapshot["status"], "error")
+            self.assertEqual(snapshot["status_category"], "artifact_mismatch")
+            self.assertIn("trusted current SHA 不一致", snapshot["message"])
+            self.assertEqual(snapshot["diagnostics"]["artifact_path"], artifact_path)
+            self.assertEqual(snapshot["diagnostics"]["expected_sha256"], expected_sha)
+            self.assertEqual(snapshot["diagnostics"]["actual_sha256"], actual_sha)
+            self.assertIn("artifact sha256 mismatch", snapshot["diagnostics"]["runner_log_tail"])
+            self.assertEqual(snapshot["progress"]["count_label"], f"0 / {inference_runner.DEFAULT_MAX_INPUTS}")
+
+    def test_live_runner_log_tail_is_attached_for_generic_runner_failure(self) -> None:
+        with tempfile.TemporaryDirectory(dir=PROJECT_ROOT) as temp_dir:
+            output_dir = Path(temp_dir)
+            trace_path = output_dir / "control_trace.jsonl"
+            summary_path = output_dir / "wrapper_summary.json"
+            runner_log_path = output_dir / "runner.log"
+
+            summary_path.write_text(
+                json.dumps({"result": "runner_failed"}, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+            runner_log_path.write_text(
+                "\n".join(
+                    [
+                        "[2026-03-16T03:55:46+0800] openamp wrapper start",
+                        "runner_cmd=bash ./session_bootstrap/scripts/run_remote_current_real_reconstruction.sh --variant current --max-inputs 300 --seed 0",
+                        '  File "<string>", line 1',
+                        "    import",
+                        "         ^",
+                        "SyntaxError: invalid syntax",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            trace_path.write_text(
+                "\n".join(
+                    [
+                        json.dumps(
+                            {
+                                "at": "2026-03-16T03:55:45+0800",
+                                "phase": "JOB_ACK",
+                                "payload": {
+                                    "job_id": 1118993338,
+                                    "decision": "ALLOW",
+                                    "fault_name": "NONE",
+                                    "guard_state_name": "JOB_ACTIVE",
+                                },
+                            },
+                            ensure_ascii=False,
+                        ),
+                        json.dumps(
+                            {
+                                "at": "2026-03-16T03:55:48+0800",
+                                "phase": "JOB_DONE",
+                                "payload": {
+                                    "job_id": 1118993338,
+                                    "elapsed_ms": 2023,
+                                    "result_code": 1,
+                                    "runner_exit_code": 1,
+                                    "timed_out": False,
+                                },
+                            },
+                            ensure_ascii=False,
+                        ),
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            job = LiveRemoteReconstructionJob.__new__(LiveRemoteReconstructionJob)
+            job.job_id = "1118993338"
+            job.variant = "current"
+            job._timeout_sec = 10.0
+            job._expected_outputs = inference_runner.DEFAULT_MAX_INPUTS
+            job._output_dir = output_dir
+            job._trace_path = trace_path
+            job._summary_path = summary_path
+            job._runner_log_path = runner_log_path
+            job._lock = Lock()
+            job._final_snapshot = None
+
+            fake_process = Mock()
+            fake_process.communicate.return_value = ("", "")
+            fake_process.returncode = 1
+            job._process = fake_process
+
+            job._wait_for_completion()
+
+            snapshot = job._final_snapshot
+            assert snapshot is not None
+            self.assertEqual(snapshot["status"], "error")
+            self.assertEqual(snapshot["status_category"], "error")
+            self.assertIn("SyntaxError: invalid syntax", snapshot["diagnostics"]["runner_log_tail"])
+
     def test_duplicate_job_ack_is_not_mislabeled_as_permission_error(self) -> None:
         with tempfile.TemporaryDirectory(dir=PROJECT_ROOT) as temp_dir:
             output_dir = Path(temp_dir)
