@@ -12,6 +12,7 @@ DEMO_ROOT = Path(__file__).resolve().parents[1]
 if str(DEMO_ROOT) not in sys.path:
     sys.path.insert(0, str(DEMO_ROOT))
 
+import inference_runner  # noqa: E402
 from board_access import BoardAccessConfig  # noqa: E402
 from inference_runner import (  # noqa: E402
     PROJECT_ROOT,
@@ -42,6 +43,20 @@ def make_access(env_values: dict[str, str] | None = None) -> BoardAccessConfig:
 
 
 class RunRemoteReconstructionTest(unittest.TestCase):
+    def test_generate_live_job_id_wraps_to_non_zero_uint32_and_stays_unique(self) -> None:
+        original_last_job_id = inference_runner._LAST_LIVE_JOB_ID
+        try:
+            inference_runner._LAST_LIVE_JOB_ID = 0
+            with patch("inference_runner.time.time", side_effect=[4294967.296, 4294967.296]):
+                first = inference_runner.generate_live_job_id()
+                second = inference_runner.generate_live_job_id()
+        finally:
+            inference_runner._LAST_LIVE_JOB_ID = original_last_job_id
+
+        self.assertEqual(first, "1")
+        self.assertEqual(second, "2")
+        self.assertLessEqual(int(second), inference_runner.UINT32_MAX)
+
     def test_missing_required_config_returns_operator_friendly_config_error(self) -> None:
         access = make_access(
             {
@@ -153,6 +168,25 @@ class RunRemoteReconstructionTest(unittest.TestCase):
             command[command.index("--remote-project-root") + 1],
             "/tmp/openamp_wrong_sha_fit/project",
         )
+
+    def test_live_job_constructor_passes_generated_uint32_job_id_to_wrapper_and_hook(self) -> None:
+        access = make_access({"REMOTE_PROJECT_ROOT": "/tmp/openamp_demo/project"})
+
+        with (
+            patch("inference_runner.generate_live_job_id", return_value="4242"),
+            patch("inference_runner.tempfile.mkdtemp", return_value="/tmp/openamp_demo_live_test"),
+            patch("inference_runner.subprocess.Popen", return_value=object()) as popen_mock,
+            patch("inference_runner.Thread") as thread_cls,
+        ):
+            thread_cls.return_value.start.return_value = None
+            live_job = LiveRemoteReconstructionJob(access, variant="current")
+
+        self.assertEqual(live_job.job_id, "4242")
+        command = popen_mock.call_args.args[0]
+        self.assertEqual(command[command.index("--job-id") + 1], "4242")
+        hook_command = command[command.index("--control-hook-cmd") + 1]
+        self.assertIn("--remote-output-root", hook_command)
+        self.assertIn("/tmp/openamp_demo_hook/4242", hook_command)
 
 
 if __name__ == "__main__":
