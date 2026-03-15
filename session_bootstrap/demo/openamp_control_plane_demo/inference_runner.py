@@ -429,19 +429,29 @@ def default_runner_command(variant: str) -> str:
     return shlex.join(["bash", str(script), "--variant", variant])
 
 
-def supports_sampling_args(command: str) -> bool:
+def supports_max_inputs_arg(command: str) -> bool:
+    command_text = str(command or "")
+    return REMOTE_RECONSTRUCTION_SCRIPT.name in command_text or REMOTE_LEGACY_COMPAT_SCRIPT.name in command_text
+
+
+def supports_seed_arg(command: str) -> bool:
     command_text = str(command or "")
     return REMOTE_RECONSTRUCTION_SCRIPT.name in command_text
 
 
 def append_runner_options(command: str, *, max_inputs: int, seed: int) -> str:
-    if not supports_sampling_args(command):
+    if not supports_max_inputs_arg(command) and not supports_seed_arg(command):
         return command
     parts = shlex.split(command)
-    if "--max-inputs" not in parts:
+    changed = False
+    if supports_max_inputs_arg(command) and "--max-inputs" not in parts:
         parts.extend(["--max-inputs", str(max_inputs)])
-    if "--seed" not in parts:
+        changed = True
+    if supports_seed_arg(command) and "--seed" not in parts:
         parts.extend(["--seed", str(seed)])
+        changed = True
+    if not changed:
+        return command
     return shlex.join(parts)
 
 

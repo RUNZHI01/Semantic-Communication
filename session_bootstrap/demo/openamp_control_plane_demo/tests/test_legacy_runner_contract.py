@@ -116,17 +116,23 @@ class LegacyCompatRunnerContractTest(unittest.TestCase):
                     parser.add_argument("--batch_size", required=True)
                     args = parser.parse_args()
 
-                    output_dir = Path(args.output_dir)
-                    output_dir.mkdir(parents=True, exist_ok=True)
-                    (output_dir / "sample_000.png").write_bytes(b"fake-png")
-                    print("批量推理时间（1 个样本）: 0.012 秒")
-                    print(f"重构图像保存至: {output_dir / 'sample_000.png'}")
+                    input_files = sorted(path for path in Path(args.input_dir).iterdir() if path.is_file())
+                    recon_dir = Path(args.output_dir) / "reconstructions"
+                    recon_dir.mkdir(parents=True, exist_ok=True)
+                    for input_path in input_files:
+                        save_path = recon_dir / f"{input_path.stem}_recon.png"
+                        save_path.write_bytes(b"fake-png")
+                        print("批量推理时间（1 个样本）: 0.012 秒")
+                        print(f"重构图像保存至: {save_path}")
+                    print("处理完成")
                     """
                 ),
             )
 
             input_dir = temp_dir / "inputs"
             input_dir.mkdir()
+            (input_dir / "sample_000.pt").write_bytes(b"latent-000")
+            (input_dir / "sample_001.npy").write_bytes(b"latent-001")
             output_base = temp_dir / "outputs"
             output_base.mkdir()
 
@@ -146,7 +152,7 @@ class LegacyCompatRunnerContractTest(unittest.TestCase):
             )
 
             result = subprocess.run(
-                ["bash", str(LEGACY_RUNNER), "--variant", "baseline"],
+                ["bash", str(LEGACY_RUNNER), "--variant", "baseline", "--max-inputs", "1"],
                 cwd=REPO_ROOT,
                 env=env,
                 capture_output=True,
@@ -168,14 +174,18 @@ class LegacyCompatRunnerContractTest(unittest.TestCase):
             self.assertTrue(summary["artifact_sha256_match"])
             self.assertEqual(summary["output_count"], 1)
             self.assertEqual(summary["processed_count"], 1)
+            self.assertEqual(summary["input_count"], 1)
+            self.assertEqual(summary["available_input_count"], 2)
             self.assertEqual(summary["run_count"], 1)
             self.assertEqual(summary["run_samples_ms"], [12.0])
             self.assertEqual(summary["run_median_ms"], 12.0)
             self.assertEqual(summary["run_mean_ms"], 12.0)
             self.assertEqual(summary["load_ms"], 0.0)
             self.assertEqual(summary["vm_init_ms"], 0.0)
+            self.assertEqual(summary["max_inputs"], 1)
             self.assertEqual(summary["parser"], "legacy_latency_lines")
             self.assertEqual(summary["save_format"], "png")
+            self.assertTrue(summary["output_dir"].endswith("/reconstructions"))
 
 
 class LegacyBaselineLiveConsumptionTest(unittest.TestCase):
@@ -259,7 +269,7 @@ class LegacyBaselineLiveConsumptionTest(unittest.TestCase):
                 "artifact_sha256": "b" * 64,
                 "artifact_sha256_expected": "b" * 64,
                 "artifact_sha256_match": True,
-                "output_dir": "/tmp/openamp_demo_hook/4242/inference_benchmark_baseline",
+                "output_dir": "/tmp/openamp_demo_hook/4242/inference_benchmark_baseline/reconstructions",
                 "output_count": 1,
                 "processed_count": 1,
                 "input_count": 1,
@@ -279,13 +289,13 @@ class LegacyBaselineLiveConsumptionTest(unittest.TestCase):
                 "batch_size": 1,
                 "save_format": "png",
                 "seed": None,
-                "max_inputs": 0,
+                "max_inputs": 1,
                 "parser": "legacy_latency_lines",
             }
             runner_log_path.write_text(
                 "[2026-03-15T21:00:00+0800] openamp wrapper start\n"
-                "runner_cmd=bash ./session_bootstrap/scripts/run_remote_legacy_tvm_compat.sh --variant baseline\n"
-                "[legacy-compat] variant=baseline script=tvm_002.py output_dir=/tmp/out snr=10 batch_size=1\n"
+                "runner_cmd=bash ./session_bootstrap/scripts/run_remote_legacy_tvm_compat.sh --variant baseline --max-inputs 1\n"
+                "[legacy-compat] variant=baseline script=tvm_002.py output_dir=/tmp/out snr=10 batch_size=1 max_inputs=1\n"
                 "批量推理时间（1 个样本）: 0.012 秒\n"
                 + json.dumps(runner_summary, ensure_ascii=False)
                 + "\n",

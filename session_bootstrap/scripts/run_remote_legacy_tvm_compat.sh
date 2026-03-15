@@ -6,7 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 usage() {
   cat <<'EOF'
 Usage:
-  run_remote_legacy_tvm_compat.sh --variant <baseline|current> [--script <path>]
+  run_remote_legacy_tvm_compat.sh --variant <baseline|current> [--script <path>] [--max-inputs <n>]
 
 Notes:
   - Runs the legacy remote JSCC realcmd entry (default: tvm_002.py)
@@ -38,6 +38,7 @@ EOF
 
 VARIANT=""
 LEGACY_SCRIPT=""
+MAX_INPUTS="0"
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --variant)
@@ -46,6 +47,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --script)
       LEGACY_SCRIPT="${2:-}"
+      shift 2
+      ;;
+    --max-inputs)
+      MAX_INPUTS="${2:-}"
       shift 2
       ;;
     -h|--help)
@@ -118,6 +123,10 @@ if ! [[ "$LEGACY_BATCH" =~ ^[0-9]+$ ]]; then
   echo "ERROR: batch_size must be a non-negative integer (got: $LEGACY_BATCH)." >&2
   exit 1
 fi
+if ! [[ "$MAX_INPUTS" =~ ^[0-9]+$ ]]; then
+  echo "ERROR: --max-inputs must be a non-negative integer (got: $MAX_INPUTS)." >&2
+  exit 1
+fi
 
 LEGACY_SCRIPT="${LEGACY_SCRIPT:-${REMOTE_LEGACY_TVM_SCRIPT:-tvm_002.py}}"
 OUTPUT_PREFIX="${INFERENCE_LEGACY_OUTPUT_PREFIX:-inference_benchmark}"
@@ -133,7 +142,7 @@ run_legacy_compat() {
 #!/usr/bin/env bash
 set -euo pipefail
 SH
-    declare -p REMOTE_JSCC_DIR LEGACY_TVM_PYTHON LEGACY_SCRIPT REMOTE_INPUT_DIR LEGACY_OUTPUT_DIR LEGACY_SNR LEGACY_BATCH LEGACY_EXTRA_PYTHONPATH VARIANT LEGACY_ARTIFACT
+    declare -p REMOTE_JSCC_DIR LEGACY_TVM_PYTHON LEGACY_SCRIPT REMOTE_INPUT_DIR LEGACY_OUTPUT_DIR LEGACY_SNR LEGACY_BATCH LEGACY_EXTRA_PYTHONPATH VARIANT LEGACY_ARTIFACT MAX_INPUTS
     cat <<'SH'
 
 remote_jscc_dir="$REMOTE_JSCC_DIR"
@@ -146,6 +155,7 @@ batch_size="$LEGACY_BATCH"
 extra_pythonpath="$LEGACY_EXTRA_PYTHONPATH"
 variant="$VARIANT"
 legacy_artifact="$LEGACY_ARTIFACT"
+max_inputs="$MAX_INPUTS"
 
 cd "$remote_jscc_dir"
 mkdir -p "$output_dir"
@@ -175,6 +185,19 @@ artifact_dir="$remote_jscc_dir/tvm_tune_logs"
 artifact_target="$artifact_dir/optimized_model.so"
 artifact_backup="$artifact_dir/optimized_model.so.__legacy_compat_backup__"
 restore_original=0
+selected_input_dir="$input_dir"
+staged_input_dir=""
+
+if [[ "$max_inputs" -gt 0 && -d "$input_dir" ]]; then
+  mapfile -t supported_inputs < <(find "$input_dir" -maxdepth 1 -type f \( -name '*.pt' -o -name '*.npz' -o -name '*.npy' \) | LC_ALL=C sort)
+  if [[ "${#supported_inputs[@]}" -gt "$max_inputs" ]]; then
+    staged_input_dir="$(mktemp -d)"
+    for source_path in "${supported_inputs[@]:0:max_inputs}"; do
+      ln -sf "$source_path" "$staged_input_dir/$(basename "$source_path")"
+    done
+    selected_input_dir="$staged_input_dir"
+  fi
+fi
 
 if [[ -n "$legacy_artifact" ]]; then
   if [[ ! -f "$legacy_artifact" ]]; then
@@ -196,10 +219,13 @@ cleanup() {
     cp -f "$artifact_backup" "$artifact_target"
     rm -f "$artifact_backup"
   fi
+  if [[ -n "$staged_input_dir" && -d "$staged_input_dir" ]]; then
+    rm -rf "$staged_input_dir"
+  fi
 }
 trap cleanup EXIT
 
-echo "[legacy-compat] variant=$variant script=$legacy_script output_dir=$output_dir snr=$snr batch_size=$batch_size python=$remote_python artifact=${legacy_artifact:-$artifact_target}"
+echo "[legacy-compat] variant=$variant script=$legacy_script output_dir=$output_dir snr=$snr batch_size=$batch_size max_inputs=$max_inputs python=$remote_python artifact=${legacy_artifact:-$artifact_target}"
 
 run_remote_python - "$legacy_artifact" <<'PY'
 import sys
@@ -239,7 +265,7 @@ PY
 
 legacy_log="$(mktemp)"
 set +e
-run_remote_python - "$legacy_script" --input_dir "$input_dir" --output_dir "$output_dir" --snr "$snr" --batch_size "$batch_size" <<'PY' 2>&1 | tee "$legacy_log"
+run_remote_python - "$legacy_script" --input_dir "$selected_input_dir" --output_dir "$output_dir" --snr "$snr" --batch_size "$batch_size" <<'PY' 2>&1 | tee "$legacy_log"
 import runpy
 import sys
 
@@ -275,7 +301,7 @@ else
 fi
 
 summary_artifact_path="${legacy_artifact:-$artifact_target}"
-run_remote_python - "$legacy_log" "$summary_artifact_path" "$input_dir" "$output_dir" "$variant" "$snr" "$batch_size" "$summary_expected_sha" <<'PY'
+run_remote_python - "$legacy_log" "$summary_artifact_path" "$input_dir" "$output_dir" "$variant" "$snr" "$batch_size" "$summary_expected_sha" "$max_inputs" <<'PY'
 import hashlib
 import json
 import re
@@ -294,12 +320,13 @@ def file_sha256(path: Path) -> str:
 
 log_path = Path(sys.argv[1])
 artifact_path = Path(sys.argv[2])
-input_dir = sys.argv[3]
+input_dir = Path(sys.argv[3])
 output_dir = Path(sys.argv[4])
 variant = sys.argv[5]
 snr = float(sys.argv[6])
 batch_size = int(sys.argv[7])
 expected_sha256 = sys.argv[8].strip().lower()
+max_inputs = int(sys.argv[9])
 
 patterns = (
     re.compile(r"批量推理时间.*?:\s*([0-9]+(?:\.[0-9]+)?)\s*秒"),
@@ -316,7 +343,22 @@ for raw_line in log_path.read_text(encoding="utf-8", errors="replace").splitline
             break
 
 artifact_sha256 = file_sha256(artifact_path) if artifact_path.is_file() else ""
-output_files = [path for path in sorted(output_dir.iterdir()) if path.is_file()] if output_dir.exists() else []
+supported_suffixes = {".pt", ".npz", ".npy"}
+available_input_count = (
+    len(
+        [
+            path
+            for path in sorted(input_dir.iterdir())
+            if path.is_file() and path.suffix.lower() in supported_suffixes
+        ]
+    )
+    if input_dir.exists()
+    else 0
+)
+selected_input_count = available_input_count if max_inputs == 0 else min(available_input_count, max_inputs)
+reconstructions_dir = output_dir / "reconstructions"
+effective_output_dir = reconstructions_dir if reconstructions_dir.is_dir() else output_dir
+output_files = [path for path in sorted(effective_output_dir.iterdir()) if path.is_file()] if effective_output_dir.exists() else []
 
 summary = {
     "variant": variant,
@@ -326,12 +368,12 @@ summary = {
     "artifact_sha256_match": None
     if not expected_sha256 or not artifact_sha256
     else artifact_sha256 == expected_sha256,
-    "input_dir": input_dir,
-    "output_dir": str(output_dir),
+    "input_dir": str(input_dir),
+    "output_dir": str(effective_output_dir),
     "output_count": len(output_files),
     "processed_count": len(run_samples_ms),
-    "input_count": len(run_samples_ms),
-    "available_input_count": len(run_samples_ms),
+    "input_count": selected_input_count,
+    "available_input_count": available_input_count,
     "load_ms": 0.0,
     "vm_init_ms": 0.0,
     "run_count": len(run_samples_ms),
@@ -347,7 +389,7 @@ summary = {
     "batch_size": batch_size,
     "save_format": output_files[0].suffix.lstrip(".") if output_files else "unknown",
     "seed": None,
-    "max_inputs": 0,
+    "max_inputs": max_inputs,
     "parser": "legacy_latency_lines",
 }
 print(json.dumps(summary, ensure_ascii=False))
