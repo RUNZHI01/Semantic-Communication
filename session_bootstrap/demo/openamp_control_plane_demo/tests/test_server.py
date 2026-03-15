@@ -298,6 +298,34 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(headers["cache-control"], "no-store")
         self.assertEqual(payload, {"status": "ok"})
 
+    def test_system_status_endpoint_exposes_redacted_board_access(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+
+        save_status, _, save_payload = request_json(
+            state,
+            "POST",
+            "/api/session/board-access",
+            body=json.dumps(
+                {
+                    "host": "demo-board",
+                    "user": "demo-user",
+                    "password": "demo-pass",
+                    "port": "2202",
+                }
+            ).encode("utf-8"),
+        )
+        status, headers, payload = request_json(state, "GET", "/api/system-status")
+
+        self.assertEqual(save_status, 200)
+        self.assertEqual(save_payload["status"], "ok")
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["content-type"], "application/json; charset=utf-8")
+        self.assertTrue(payload["board_access"]["configured"])
+        self.assertEqual(payload["board_access"]["host"], "demo-board")
+        self.assertEqual(payload["board_access"]["user"], "demo-user")
+        self.assertTrue(payload["board_access"]["has_password"])
+        self.assertNotIn("password", payload["board_access"])
+
     def test_probe_board_endpoint_updates_snapshot_after_success(self) -> None:
         success = live_probe_payload("2026-03-15T12:00:00+0800", "board reachable")
         state = DashboardState(None, 30.0, probe_cache_path=None)
@@ -313,6 +341,38 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(snapshot_payload["board"]["current_status"]["label"], "最新只读 SSH 探板")
         self.assertEqual(snapshot_payload["board"]["current_status"]["requested_at"], success["requested_at"])
         self.assertTrue(snapshot_payload["board"]["current_status"]["reachable"])
+
+    def test_probe_board_endpoint_uses_saved_session_access_when_present(self) -> None:
+        success = live_probe_payload("2026-03-15T12:00:00+0800", "board reachable")
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        request_json(
+            state,
+            "POST",
+            "/api/session/board-access",
+            body=json.dumps(
+                {
+                    "host": "demo-board",
+                    "user": "demo-user",
+                    "password": "demo-pass",
+                    "port": "2202",
+                }
+            ).encode("utf-8"),
+        )
+
+        with (
+            patch("server.run_live_probe", return_value=success) as run_probe,
+            patch("server.query_live_status", return_value={"status": "error", "message": "skip"}) as query_status,
+        ):
+            probe_status, _, probe_payload = request_json(state, "POST", "/api/probe-board", body=b"{}")
+
+        self.assertEqual(probe_status, 200)
+        self.assertEqual(probe_payload["requested_at"], success["requested_at"])
+        run_probe.assert_called_once()
+        self.assertEqual(run_probe.call_args.kwargs["env_values"]["REMOTE_HOST"], "demo-board")
+        self.assertEqual(run_probe.call_args.kwargs["env_values"]["REMOTE_USER"], "demo-user")
+        self.assertEqual(run_probe.call_args.kwargs["env_values"]["REMOTE_PASS"], "demo-pass")
+        self.assertEqual(run_probe.call_args.kwargs["env_values"]["REMOTE_SSH_PORT"], "2202")
+        query_status.assert_called_once()
 
     def test_probe_board_endpoint_returns_failure_without_mutating_snapshot(self) -> None:
         failure = failed_probe_payload(
@@ -334,6 +394,84 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertFalse(snapshot_payload["board"]["current_status"]["reachable"])
         self.assertEqual(snapshot_payload["board"]["current_status"]["requested_at"], "")
 
+    def test_run_inference_endpoint_falls_back_without_session_access(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+
+        status, headers, payload = request_json(
+            state,
+            "POST",
+            "/api/run-inference",
+            body=json.dumps({"image_index": 0, "mode": "current"}).encode("utf-8"),
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["content-type"], "application/json; charset=utf-8")
+        self.assertEqual(payload["execution_mode"], "prerecorded")
+        self.assertEqual(payload["variant"], "current")
+        self.assertIn("预录", payload["message"])
+        self.assertIn("guided_demo", state.current_snapshot())
+
+    def test_run_inference_endpoint_uses_live_runner_when_available(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        request_json(
+            state,
+            "POST",
+            "/api/session/board-access",
+            body=json.dumps(
+                {
+                    "host": "demo-board",
+                    "user": "demo-user",
+                    "password": "demo-pass",
+                    "port": "22",
+                    "env_file": "session_bootstrap/config/inference_tvm310_safe.2026-03-10.phytium_pi.env",
+                }
+            ).encode("utf-8"),
+        )
+
+        with patch(
+            "server.run_remote_reconstruction",
+            return_value={
+                "status": "success",
+                "execution_mode": "live",
+                "variant": "current",
+                "message": "live ok",
+                "runner_summary": {
+                    "load_ms": 3.2,
+                    "vm_init_ms": 0.8,
+                    "run_median_ms": 128.4,
+                    "artifact_sha256": "abcd" * 16,
+                },
+            },
+        ) as run_reconstruction:
+            status, _, payload = request_json(
+                state,
+                "POST",
+                "/api/run-inference",
+                body=json.dumps({"image_index": 0, "mode": "current"}).encode("utf-8"),
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["execution_mode"], "live")
+        self.assertEqual(payload["source_label"], "在线计时 + 预录图像")
+        self.assertAlmostEqual(payload["timings"]["total_ms"], 132.4)
+        self.assertEqual(payload["artifact_sha"], "abcd" * 16)
+        run_reconstruction.assert_called_once()
+
+    def test_inject_fault_endpoint_returns_replay_when_not_configured(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+
+        status, _, payload = request_json(
+            state,
+            "POST",
+            "/api/inject-fault",
+            body=json.dumps({"fault_type": "wrong_sha"}).encode("utf-8"),
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["execution_mode"], "replay")
+        self.assertEqual(payload["fit_id"], "FIT-01")
+        self.assertIn("回放", payload["source_label"])
+
     def test_root_serves_dashboard_entry_page(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
 
@@ -342,8 +480,8 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertTrue(headers["content-type"].startswith("text/html"))
         self.assertEqual(headers["cache-control"], "no-store")
-        self.assertIn("<title>OpenAMP 控制面演示看板</title>", body)
-        self.assertIn("一屏查看 OpenAMP 控制面状态、FIT 证据与性能结果。", body)
+        self.assertIn("<title>OpenAMP 四幕交互演示系统</title>", body)
+        self.assertIn("OpenAMP 控制面四幕交互演示", body)
         self.assertIn('<script src="/app.js"></script>', body)
 
     def test_app_js_serves_dashboard_javascript(self) -> None:
@@ -355,7 +493,8 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(headers["content-type"], "application/javascript; charset=utf-8")
         self.assertEqual(headers["cache-control"], "no-store")
         self.assertIn("const state = {", body)
-        self.assertIn('fetch("/api/snapshot"', body)
+        self.assertIn('fetchJSON("/api/snapshot")', body)
+        self.assertIn('fetchJSON("/api/system-status")', body)
 
     def test_app_css_serves_dashboard_stylesheet(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)

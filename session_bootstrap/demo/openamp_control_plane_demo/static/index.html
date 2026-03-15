@@ -3,101 +3,191 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>OpenAMP 控制面演示看板</title>
+  <title>OpenAMP 四幕交互演示系统</title>
   <link rel="stylesheet" href="/app.css">
 </head>
 <body>
-  <div class="background-glow glow-a"></div>
-  <div class="background-glow glow-b"></div>
+  <div class="page-aura aura-left"></div>
+  <div class="page-aura aura-right"></div>
   <main class="shell">
-    <section class="hero panel">
+    <header class="hero panel">
       <div class="hero-copy">
-        <p class="eyebrow">答辩演示总览</p>
-        <h1>一屏查看 OpenAMP 控制面状态、FIT 证据与性能结果。</h1>
-        <p class="lede" id="heroSummary">正在加载仓库内证据快照...</p>
-        <div class="actions">
-          <button id="reloadButton" class="button button-primary" type="button">刷新证据</button>
-          <button id="probeButton" class="button button-secondary" type="button">读取当前板卡状态</button>
+        <p class="eyebrow">答辩演示系统</p>
+        <h1>OpenAMP 控制面四幕交互演示</h1>
+        <p class="lede" id="heroSummary">正在加载演示快照与证据包...</p>
+        <div class="hero-actions">
+          <button id="reloadButton" class="button button-secondary" type="button">刷新证据快照</button>
+          <button id="probeButton" class="button button-primary" type="button">探测板卡 / OpenAMP</button>
         </div>
       </div>
       <div class="hero-side">
-        <div class="mode-card card">
-          <div class="label">展示模式</div>
+        <div class="status-card panel-lite">
+          <div class="label">当前模式</div>
           <div class="mode-pill" id="modePill">准备中</div>
-          <p id="modeSummary">正在等待快照。</p>
+          <p class="compact-copy" id="modeSummary">等待系统状态。</p>
         </div>
         <div class="metric-strip" id="topStats"></div>
       </div>
+    </header>
+
+    <section class="panel credential-panel">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">会话接入</p>
+          <h2>网页录入板卡凭据并在本次演示进程内复用</h2>
+        </div>
+        <span class="muted" id="generatedAt"></span>
+      </div>
+      <form id="boardAccessForm" class="credential-grid">
+        <label>
+          <span>主机 / IP</span>
+          <input id="hostInput" name="host" type="text" placeholder="100.121.x.x">
+        </label>
+        <label>
+          <span>用户名</span>
+          <input id="userInput" name="user" type="text" placeholder="user">
+        </label>
+        <label>
+          <span>密码</span>
+          <input id="passwordInput" name="password" type="password" placeholder="仅保存在当前 demo 进程内">
+        </label>
+        <label>
+          <span>SSH 端口</span>
+          <input id="portInput" name="port" type="number" min="1" max="65535" placeholder="22">
+        </label>
+        <label class="full-span">
+          <span>可选 env 文件</span>
+          <input id="envFileInput" name="env_file" type="text" placeholder="session_bootstrap/config/inference_real_reconstruction_compare.2026-03-11.phytium_pi.env">
+        </label>
+      </form>
+      <div class="inline-actions">
+        <button id="saveAccessButton" class="button button-primary" type="button">保存并复用本场凭据</button>
+        <span class="status-inline" id="boardAccessSummary">尚未录入板卡会话。</span>
+      </div>
+      <div class="status-banner" id="feedbackBanner" hidden></div>
     </section>
 
-    <section class="grid-two">
-      <article class="panel board-panel">
-        <div class="section-head">
-          <div>
-            <p class="eyebrow">板卡与控制面</p>
-            <h2>证据状态与当前读数</h2>
-          </div>
-          <span class="muted" id="generatedAt"></span>
-        </div>
-        <div id="boardEvidenceCard"></div>
-        <div id="boardLiveCard" class="board-live-card"></div>
-      </article>
+    <nav class="act-nav panel" aria-label="四幕导航">
+      <button class="act-tab active" data-act="act1" type="button">
+        <span class="act-number">01</span>
+        <span class="act-title">可信启动</span>
+        <span class="act-lamp" id="act1Lamp"></span>
+      </button>
+      <button class="act-tab" data-act="act2" type="button">
+        <span class="act-number">02</span>
+        <span class="act-title">一键重建</span>
+      </button>
+      <button class="act-tab" data-act="act3" type="button">
+        <span class="act-number">03</span>
+        <span class="act-title">基线对比</span>
+      </button>
+      <button class="act-tab" data-act="act4" type="button">
+        <span class="act-number">04</span>
+        <span class="act-title">故障注入与恢复</span>
+        <span class="act-lamp" id="act4Lamp"></span>
+      </button>
+    </nav>
 
-      <article class="panel panel-stack">
-        <div class="section-head">
-          <div>
-            <p class="eyebrow">操作入口</p>
-            <h2>启动命令与说明范围</h2>
-          </div>
+    <section class="act-panel active panel" id="act1Panel">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">第一幕</p>
+          <h2>可信启动与当前板卡状态</h2>
         </div>
-        <div id="launchCommands" class="launch-list"></div>
-        <div class="mini-grid">
-          <div class="card" id="hostSideCard"></div>
-          <div class="card" id="slaveSideCard"></div>
+        <span class="muted" id="act1StatusNote">等待探测。</span>
+      </div>
+      <div class="status-grid" id="act1StatusGrid"></div>
+      <div class="dual-grid">
+        <article class="panel-lite">
+          <div class="label">最近一次证据确认</div>
+          <div id="boardEvidenceCard"></div>
+        </article>
+        <article class="panel-lite">
+          <div class="label">在线读数 / 会话状态</div>
+          <div id="boardLiveCard"></div>
+        </article>
+      </div>
+      <div class="evidence-stack">
+        <div class="mini-title">P0 关键里程碑</div>
+        <div id="milestonesGrid" class="timeline-grid"></div>
+      </div>
+    </section>
+
+    <section class="act-panel panel" id="act2Panel">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">第二幕</p>
+          <h2>一键重建演示</h2>
         </div>
-      </article>
+        <span class="muted" id="act2SourceLabel">等待执行。</span>
+      </div>
+      <div class="inline-actions">
+        <label class="sample-picker">
+          <span>测试图</span>
+          <select id="imageSelect"></select>
+        </label>
+        <button id="runCurrentButton" class="button button-primary" type="button">开始 Current 推理</button>
+      </div>
+      <div class="image-compare">
+        <figure class="image-card">
+          <div class="image-label">参考图</div>
+          <img id="originalImage" alt="参考图">
+        </figure>
+        <figure class="image-card">
+          <div class="image-label">重建图</div>
+          <img id="reconstructedImage" alt="重建图">
+        </figure>
+      </div>
+      <div class="timing-board" id="timingBoard"></div>
+      <div class="metric-inline" id="qualityMetrics"></div>
+      <p class="compact-copy" id="inferenceMessage">等待触发重建。</p>
+    </section>
+
+    <section class="act-panel panel" id="act3Panel">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">第三幕</p>
+          <h2>正式基线对比</h2>
+        </div>
+        <span class="muted">保持两条正式口径，不混入临时数字</span>
+      </div>
+      <div id="comparisonBoard" class="comparison-board"></div>
+      <div class="inline-actions">
+        <button id="runBaselineButton" class="button button-secondary" type="button">运行 Baseline</button>
+        <button id="runCurrentAgainButton" class="button button-primary" type="button">运行 Current</button>
+        <button id="runAllButton" class="button button-secondary" type="button">全部运行</button>
+      </div>
+      <div class="panel-lite" id="comparisonRunNote">等待执行基线对比动作。</div>
+    </section>
+
+    <section class="act-panel panel" id="act4Panel">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">第四幕</p>
+          <h2>故障注入与安全恢复</h2>
+        </div>
+        <span class="muted" id="faultStatusHeadline">等待注入动作。</span>
+      </div>
+      <div class="fault-toolbar">
+        <button class="button button-danger" data-fault="wrong_sha" type="button">注入错误 SHA</button>
+        <button class="button button-danger" data-fault="heartbeat_timeout" type="button">注入心跳超时</button>
+        <button class="button button-danger" data-fault="illegal_param" type="button">注入非法参数</button>
+        <button id="recoverButton" class="button button-primary" type="button">恢复到安全状态</button>
+      </div>
+      <div class="fault-summary" id="faultSummary"></div>
+      <div class="log-panel" id="faultLogPanel"></div>
+      <div class="fit-grid" id="fitGrid"></div>
     </section>
 
     <section class="panel">
-        <div class="section-head">
-          <div>
-            <p class="eyebrow">关键里程碑</p>
-            <h2>OpenAMP 最小闭环证据</h2>
-          </div>
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">证据与材料</p>
+          <h2>保留原始证据入口，便于答辩追问时下钻</h2>
         </div>
-      <div id="milestonesGrid" class="timeline-grid"></div>
-    </section>
-
-    <section class="grid-two">
-      <article class="panel">
-        <div class="section-head">
-          <div>
-            <p class="eyebrow">FIT 状态</p>
-            <h2>正式收口结果</h2>
-          </div>
-        </div>
-        <div id="fitGrid" class="fit-grid"></div>
-      </article>
-
-      <article class="panel">
-        <div class="section-head">
-          <div>
-            <p class="eyebrow">性能定位</p>
-            <h2>trusted current 对齐情况</h2>
-          </div>
-        </div>
-        <p id="performanceNote" class="lede compact"></p>
-        <div id="performanceGrid" class="performance-grid"></div>
-      </article>
-    </section>
-
-    <section class="panel">
-        <div class="section-head">
-          <div>
-            <p class="eyebrow">材料索引</p>
-            <h2>主文档与脚本</h2>
-          </div>
-        </div>
+      </div>
+      <p id="performanceNote" class="lede compact"></p>
+      <div id="performanceGrid" class="performance-grid"></div>
       <div id="sourcesGrid" class="sources-grid"></div>
     </section>
   </main>

@@ -121,21 +121,32 @@ def parse_env_file(env_file: str | None) -> dict[str, str]:
     return values
 
 
-def build_probe_command(env_file: str | None = None) -> list[str]:
+def resolve_probe_login(values: dict[str, str]) -> tuple[str, str, str, str]:
+    host = values.get("REMOTE_HOST") or values.get("PHYTIUM_PI_HOST") or ""
+    user = values.get("REMOTE_USER") or values.get("PHYTIUM_PI_USER") or ""
+    password = values.get("REMOTE_PASS") or values.get("PHYTIUM_PI_PASSWORD") or ""
+    port = values.get("REMOTE_SSH_PORT") or values.get("PHYTIUM_PI_PORT") or "22"
+    return host, user, password, port
+
+
+def build_probe_command(env_file: str | None = None, env_values: dict[str, str] | None = None) -> list[str]:
     remote_cmd = f"python3 -c {shlex.quote(REMOTE_PROBE_CODE)}"
-    values = parse_env_file(env_file)
-    if values.get("REMOTE_HOST") and values.get("REMOTE_USER") and values.get("REMOTE_PASS"):
+    values = dict(env_values or {})
+    if not values:
+        values = parse_env_file(env_file)
+    host, user, password, port = resolve_probe_login(values)
+    if host and user and password:
         return [
             "bash",
             str(SSH_WITH_PASSWORD_SCRIPT),
             "--host",
-            values["REMOTE_HOST"],
+            host,
             "--user",
-            values["REMOTE_USER"],
+            user,
             "--pass",
-            values["REMOTE_PASS"],
+            password,
             "--port",
-            values.get("REMOTE_SSH_PORT", "22"),
+            port,
             "--",
             remote_cmd,
         ]
@@ -167,10 +178,17 @@ def summarize_probe(details: dict[str, Any]) -> str:
     return f"{details.get('hostname', 'board')} reachable; {states}; {rpmsg_count} rpmsg device(s); {firmware_note}."
 
 
-def run_live_probe(env_file: str | None = None, timeout_sec: float = 30.0) -> dict[str, Any]:
+def run_live_probe(
+    env_file: str | None = None,
+    timeout_sec: float = 30.0,
+    env_values: dict[str, str] | None = None,
+) -> dict[str, Any]:
     requested_at = now_iso()
     try:
-        command = build_probe_command(env_file)
+        if env_values is None:
+            command = build_probe_command(env_file)
+        else:
+            command = build_probe_command(env_file, env_values=env_values)
         result = subprocess.run(
             command,
             cwd=PROJECT_ROOT,
