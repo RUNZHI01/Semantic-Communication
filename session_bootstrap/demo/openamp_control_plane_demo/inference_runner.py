@@ -55,6 +55,23 @@ def parse_json_stdout(raw: str) -> dict[str, Any]:
     raise ValueError("runner produced no JSON payload")
 
 
+def sanitize_wrapper_stdout_for_classification(raw: str) -> str:
+    retained: list[str] = []
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            payload = json.loads(stripped)
+        except json.JSONDecodeError:
+            retained.append(stripped)
+            continue
+        if isinstance(payload, dict) and "job_req_response" in payload and "status_response" in payload:
+            continue
+        retained.append(stripped)
+    return "\n".join(retained)
+
+
 def count_completed_images_from_runner_log(path: Path) -> int:
     if not path.exists():
         return 0
@@ -849,6 +866,7 @@ class LiveRemoteReconstructionJob:
         trace_events = load_trace_events(self._trace_path)
         last_hook_response = latest_hook_response(trace_events)
         hook_error_text = control_hook_error_text(last_hook_response)
+        classify_stdout = sanitize_wrapper_stdout_for_classification(stdout)
 
         if timed_out:
             status = "timeout"
@@ -862,7 +880,7 @@ class LiveRemoteReconstructionJob:
                 status = "parse_error"
                 status_category = classify_status_category(
                     status="parse_error",
-                    stdout=stdout,
+                    stdout=classify_stdout,
                     stderr=stderr,
                     error="\n".join(part for part in (str(exc), hook_error_text) if part),
                 )
@@ -876,7 +894,7 @@ class LiveRemoteReconstructionJob:
             status = "error"
             status_category = hook_status_category(last_hook_response) or classify_status_category(
                 status="error",
-                stdout=stdout,
+                stdout=classify_stdout,
                 stderr=stderr,
                 error=hook_error_text,
             )

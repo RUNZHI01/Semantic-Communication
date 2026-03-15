@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import secrets
 import shlex
 import signal
 import subprocess
@@ -24,6 +25,9 @@ from openamp_trusted_artifacts import (  # noqa: E402
     normalize_sha256,
     resolve_trusted_artifacts_path,
 )
+
+
+UINT32_MAX = (1 << 32) - 1
 
 
 def parse_args() -> argparse.Namespace:
@@ -149,6 +153,28 @@ def normalize_decision(response: dict[str, Any] | None) -> str | None:
     return text or None
 
 
+def response_fault_name(response: dict[str, Any] | None) -> str:
+    if not isinstance(response, dict):
+        return ""
+    for raw in (
+        response.get("fault_name"),
+        response.get("last_fault_name"),
+    ):
+        value = str(raw or "").strip().upper()
+        if value:
+            return value
+    return ""
+
+
+def next_retry_job_id(previous_job_id: int) -> int:
+    candidate = previous_job_id
+    for _ in range(8):
+        candidate = secrets.randbelow(UINT32_MAX) + 1
+        if candidate != previous_job_id:
+            return candidate
+    return (previous_job_id % UINT32_MAX) + 1
+
+
 def build_job_ack_payload(
     *,
     job_id: int,
@@ -252,6 +278,48 @@ def build_manifest(args: argparse.Namespace, output_dir: Path, expected_sha256: 
     }
 
 
+def build_status_req_payload(
+    *,
+    job_id: int,
+    variant: str,
+    expected_sha256: str,
+    job_flags: str,
+    trusted_artifact: dict[str, Any] | None,
+) -> dict[str, Any]:
+    payload = {
+        "job_id": job_id,
+        "variant": variant,
+        "expected_sha256": expected_sha256,
+        "job_flags": job_flags,
+    }
+    if trusted_artifact is not None:
+        payload["trusted_artifact_label"] = trusted_artifact["label"]
+    return payload
+
+
+def build_job_req_payload(
+    *,
+    job_id: int,
+    expected_sha256: str,
+    deadline_ms: int,
+    expected_outputs: int,
+    job_flags: str,
+    runner_cmd: str,
+    trusted_artifact: dict[str, Any] | None,
+) -> dict[str, Any]:
+    payload = {
+        "job_id": job_id,
+        "expected_sha256": expected_sha256,
+        "deadline_ms": deadline_ms,
+        "expected_outputs": expected_outputs,
+        "job_flags": job_flags,
+        "runner_cmd": runner_cmd,
+    }
+    if trusted_artifact is not None:
+        payload["trusted_artifact_label"] = trusted_artifact["label"]
+    return payload
+
+
 def resolve_expected_sha256(args: argparse.Namespace) -> tuple[str, dict[str, Any] | None, str]:
     raw_expected_sha256 = ""
     if args.expected_sha256:
@@ -321,53 +389,70 @@ def main() -> int:
         manifest["trusted_artifact"] = trusted_artifact
     json_dump(manifest_path, manifest)
 
-    status_req_payload = {
-        "job_id": args.job_id,
-        "variant": args.variant,
-        "expected_sha256": expected_sha256,
-        "job_flags": args.job_flags,
-    }
-    if trusted_artifact is not None:
-        status_req_payload["trusted_artifact_label"] = trusted_artifact["label"]
-    status_response = emit_event(
-        trace_path=trace_path,
-        phase="STATUS_REQ",
-        payload=status_req_payload,
-        transport=args.transport,
-        hook_cmd=args.control_hook_cmd,
-        hook_timeout_sec=args.control_hook_timeout_sec,
-    )
+    control_job_id = args.job_id
+    retry_count = 0
+    while True:
+        status_req_payload = build_status_req_payload(
+            job_id=control_job_id,
+            variant=args.variant,
+            expected_sha256=expected_sha256,
+            job_flags=args.job_flags,
+            trusted_artifact=trusted_artifact,
+        )
+        status_response = emit_event(
+            trace_path=trace_path,
+            phase="STATUS_REQ",
+            payload=status_req_payload,
+            transport=args.transport,
+            hook_cmd=args.control_hook_cmd,
+            hook_timeout_sec=args.control_hook_timeout_sec,
+        )
 
-    job_req_payload = {
-        "job_id": args.job_id,
-        "expected_sha256": expected_sha256,
-        "deadline_ms": args.deadline_ms,
-        "expected_outputs": args.expected_outputs,
-        "job_flags": args.job_flags,
-        "runner_cmd": args.runner_cmd,
-    }
-    if trusted_artifact is not None:
-        job_req_payload["trusted_artifact_label"] = trusted_artifact["label"]
-    job_req_response = emit_event(
-        trace_path=trace_path,
-        phase="JOB_REQ",
-        payload=job_req_payload,
-        transport=args.transport,
-        hook_cmd=args.control_hook_cmd,
-        hook_timeout_sec=args.control_hook_timeout_sec,
-    )
-    hook_response = job_req_response.get("response") if job_req_response else None
-    decision = normalize_decision(hook_response)
-    job_ack_payload = build_job_ack_payload(
-        job_id=args.job_id,
-        transport=args.transport,
-        decision=decision,
-        response=hook_response,
-    )
+        job_req_payload = build_job_req_payload(
+            job_id=control_job_id,
+            expected_sha256=expected_sha256,
+            deadline_ms=args.deadline_ms,
+            expected_outputs=args.expected_outputs,
+            job_flags=args.job_flags,
+            runner_cmd=args.runner_cmd,
+            trusted_artifact=trusted_artifact,
+        )
+        job_req_response = emit_event(
+            trace_path=trace_path,
+            phase="JOB_REQ",
+            payload=job_req_payload,
+            transport=args.transport,
+            hook_cmd=args.control_hook_cmd,
+            hook_timeout_sec=args.control_hook_timeout_sec,
+        )
+        hook_response = job_req_response.get("response") if job_req_response else None
+        decision = normalize_decision(hook_response)
+        job_ack_payload = build_job_ack_payload(
+            job_id=control_job_id,
+            transport=args.transport,
+            decision=decision,
+            response=hook_response,
+        )
+        should_retry_duplicate = (
+            args.transport == "hook"
+            and decision != "ALLOW"
+            and response_fault_name(hook_response) == "DUPLICATE_JOB_ID"
+            and retry_count == 0
+        )
+        if not should_retry_duplicate:
+            break
+        retry_count += 1
+        control_job_id = next_retry_job_id(control_job_id)
+        manifest["requested_job_id"] = args.job_id
+        manifest["job_id"] = control_job_id
+        manifest["retry_count"] = retry_count
+        manifest["retry_reason"] = "DUPLICATE_JOB_ID"
+        json_dump(manifest_path, manifest)
+
     if args.transport == "hook" and decision != "ALLOW":
         summary = {
             "finished_at": now_iso(),
-            "job_id": args.job_id,
+            "job_id": control_job_id,
             "result": "denied_by_control_hook",
             "status_response": status_response,
             "job_req_response": job_req_response,
@@ -400,7 +485,7 @@ def main() -> int:
     if args.dry_run:
         summary = {
             "finished_at": now_iso(),
-            "job_id": args.job_id,
+            "job_id": control_job_id,
             "result": "dry_run_only",
             "status_response": status_response,
             "job_req_response": job_req_response,
@@ -449,7 +534,7 @@ def main() -> int:
                         trace_path=trace_path,
                         phase="HEARTBEAT",
                         payload={
-                            "job_id": args.job_id,
+                            "job_id": control_job_id,
                             "elapsed_ms": int(elapsed * 1000),
                             "runtime_state": "RUNNING",
                         },
@@ -466,7 +551,7 @@ def main() -> int:
             emit_event(
                 trace_path=trace_path,
                 phase="SAFE_STOP",
-                payload={"job_id": args.job_id, "reason": "keyboard_interrupt"},
+                payload={"job_id": control_job_id, "reason": "keyboard_interrupt"},
                 transport=args.transport,
                 hook_cmd=args.control_hook_cmd,
                 hook_timeout_sec=args.control_hook_timeout_sec,
@@ -480,7 +565,7 @@ def main() -> int:
         emit_event(
             trace_path=trace_path,
             phase="SAFE_STOP",
-            payload={"job_id": args.job_id, "reason": "runner_timeout", "elapsed_ms": elapsed_ms},
+            payload={"job_id": control_job_id, "reason": "runner_timeout", "elapsed_ms": elapsed_ms},
             transport=args.transport,
             hook_cmd=args.control_hook_cmd,
             hook_timeout_sec=args.control_hook_timeout_sec,
@@ -490,7 +575,7 @@ def main() -> int:
         trace_path=trace_path,
         phase="JOB_DONE",
         payload={
-            "job_id": args.job_id,
+            "job_id": control_job_id,
             "elapsed_ms": elapsed_ms,
             "result_code": 0 if (return_code or 0) == 0 and not timed_out else 1,
             "runner_exit_code": return_code,
@@ -503,7 +588,7 @@ def main() -> int:
 
     summary = {
         "finished_at": finished_at,
-        "job_id": args.job_id,
+        "job_id": control_job_id,
         "result": "timeout" if timed_out else ("success" if (return_code or 0) == 0 else "runner_failed"),
         "status_response": status_response,
         "job_req_response": job_req_response,
