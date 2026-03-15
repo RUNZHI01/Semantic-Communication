@@ -36,6 +36,8 @@ Optional env:
   REMOTE_REAL_EXTRA_PYTHONPATH
   INFERENCE_OUTPUT_PREFIX
   INFERENCE_REAL_OUTPUT_PREFIX
+  LOCAL_CURRENT_ARTIFACT_SOURCE
+  REMOTE_CURRENT_ARTIFACT_STAGE_DIR
   INFERENCE_BASELINE_EXPECTED_SHA256
   INFERENCE_CURRENT_EXPECTED_SHA256
   INFERENCE_EXPECTED_SHA256
@@ -141,6 +143,89 @@ resolve_artifact_path() {
   return 1
 }
 
+sha256_file() {
+  local file_path="$1"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$file_path" | awk '{print $1}'
+    return 0
+  fi
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$file_path" | awk '{print $1}'
+    return 0
+  fi
+  python3 -c 'import hashlib, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+digest = hashlib.sha256()
+with path.open("rb") as infile:
+    for chunk in iter(lambda: infile.read(1024 * 1024), b""):
+        digest.update(chunk)
+print(digest.hexdigest())' "$file_path"
+}
+
+remote_sha256_file() {
+  local remote_path="$1"
+  bash "$SCRIPT_DIR/ssh_with_password.sh" \
+    --host "$REMOTE_HOST" \
+    --user "$REMOTE_USER" \
+    --pass "$REMOTE_PASS" \
+    --port "${REMOTE_SSH_PORT:-22}" \
+    -- \
+    python3 -c 'import hashlib, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+digest = hashlib.sha256()
+with path.open("rb") as infile:
+    for chunk in iter(lambda: infile.read(1024 * 1024), b""):
+        digest.update(chunk)
+print(digest.hexdigest())' \
+    "$remote_path"
+}
+
+stage_current_artifact_from_local_source() {
+  local local_source="$1"
+  local expected_sha256_lower local_sha256 remote_stage_root remote_stage_dir remote_stage_path remote_sha256
+
+  if [[ "$VARIANT" != "current" || "$REMOTE_MODE" != "ssh" || -z "$local_source" ]]; then
+    return 0
+  fi
+  if [[ ! -f "$local_source" ]]; then
+    echo "ERROR: trusted local current artifact source not found: $local_source" >&2
+    exit 1
+  fi
+
+  local_sha256="$(sha256_file "$local_source")"
+  expected_sha256_lower="$(printf '%s' "$REAL_EXPECTED_SHA256" | tr '[:upper:]' '[:lower:]')"
+  if [[ -n "$expected_sha256_lower" && "$local_sha256" != "$expected_sha256_lower" ]]; then
+    echo "ERROR: trusted local current artifact source sha256 mismatch path=$local_source expected=$expected_sha256_lower actual=$local_sha256" >&2
+    exit 1
+  fi
+
+  remote_stage_root="${REMOTE_CURRENT_ARTIFACT_STAGE_DIR:-${REMOTE_TVM_JSCC_BASE_DIR:-${REMOTE_OUTPUT_BASE:-/tmp/openamp_demo_current_artifacts}}}"
+  remote_stage_dir="${remote_stage_root%/}/.openamp_demo_current/${local_sha256}"
+  remote_stage_path="${remote_stage_dir}/optimized_model.so"
+
+  base64 "$local_source" | bash "$SCRIPT_DIR/ssh_with_password.sh" \
+    --host "$REMOTE_HOST" \
+    --user "$REMOTE_USER" \
+    --pass "$REMOTE_PASS" \
+    --port "${REMOTE_SSH_PORT:-22}" \
+    -- \
+    python3 -c 'import base64, pathlib, sys
+payload = base64.b64decode(sys.stdin.buffer.read())
+path = pathlib.Path(sys.argv[1])
+path.parent.mkdir(parents=True, exist_ok=True)
+path.write_bytes(payload)' \
+    "$remote_stage_path"
+
+  remote_sha256="$(remote_sha256_file "$remote_stage_path" | tr -d '\r\n')"
+  if [[ "$remote_sha256" != "$local_sha256" ]]; then
+    echo "ERROR: remote staged current artifact sha256 mismatch path=$remote_stage_path expected=$local_sha256 actual=$remote_sha256" >&2
+    exit 1
+  fi
+
+  REAL_ARTIFACT_PATH="$remote_stage_path"
+  echo "[current-real] staged trusted current artifact source=$local_source remote_artifact=$REAL_ARTIFACT_PATH sha256=$local_sha256"
+}
+
 if [[ "$VARIANT" == "baseline" ]]; then
   require_var REMOTE_SNR_BASELINE
   require_var REMOTE_BATCH_BASELINE
@@ -176,6 +261,8 @@ if [[ -n "$REAL_EXPECTED_SHA256" ]] && ! [[ "$REAL_EXPECTED_SHA256" =~ ^[0-9A-Fa
   echo "ERROR: expected artifact sha256 must be 64 hex characters (got: $REAL_EXPECTED_SHA256)." >&2
   exit 1
 fi
+
+stage_current_artifact_from_local_source "${LOCAL_CURRENT_ARTIFACT_SOURCE:-}"
 
 OUTPUT_PREFIX="${INFERENCE_REAL_OUTPUT_PREFIX:-${INFERENCE_OUTPUT_PREFIX:-inference_real_reconstruction}}"
 REAL_OUTPUT_DIR="$REMOTE_OUTPUT_BASE/${OUTPUT_PREFIX}_${VARIANT}"

@@ -652,6 +652,229 @@ PY
             self.assertEqual(summary["output_count"], 300)
             self.assertFalse(stale_output.exists())
 
+    def test_ssh_runner_stages_trusted_local_current_artifact_and_uses_it_instead_of_mutable_remote_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir_name:
+            temp_dir = Path(temp_dir_name)
+            runner_dir = temp_dir / "runner"
+            runner_dir.mkdir()
+            staged_runner = runner_dir / "run_remote_current_real_reconstruction.sh"
+            staged_runner.write_text(CURRENT_RUNNER.read_text(encoding="utf-8"), encoding="utf-8")
+            staged_runner.chmod(
+                stat.S_IRUSR
+                | stat.S_IWUSR
+                | stat.S_IXUSR
+                | stat.S_IRGRP
+                | stat.S_IXGRP
+                | stat.S_IROTH
+                | stat.S_IXOTH
+            )
+            write_file(
+                runner_dir / "current_real_reconstruction.py",
+                "print('placeholder runner source')\n",
+            )
+            write_executable(
+                runner_dir / "ssh_with_password.sh",
+                textwrap.dedent(
+                    """\
+                    #!/usr/bin/env bash
+                    set -euo pipefail
+                    while [[ $# -gt 0 ]]; do
+                      case "$1" in
+                        --host|--user|--pass|--port)
+                          shift 2
+                          ;;
+                        --)
+                          shift
+                          break
+                          ;;
+                        *)
+                          echo "unexpected ssh helper arg: $1" >&2
+                          exit 1
+                          ;;
+                      esac
+                    done
+                    exec "$@"
+                    """
+                ),
+            )
+
+            fake_python = temp_dir / "fake_python.sh"
+            write_executable(
+                fake_python,
+                textwrap.dedent(
+                    """\
+                    #!/usr/bin/env bash
+                    set -euo pipefail
+                    cat >/dev/null
+
+                    artifact_path=""
+                    input_dir=""
+                    output_dir=""
+                    variant=""
+                    expected_sha256=""
+                    max_inputs="0"
+
+                    while [[ $# -gt 0 ]]; do
+                      case "$1" in
+                        --artifact-path)
+                          artifact_path="$2"
+                          shift 2
+                          ;;
+                        --input-dir)
+                          input_dir="$2"
+                          shift 2
+                          ;;
+                        --output-dir)
+                          output_dir="$2"
+                          shift 2
+                          ;;
+                        --variant)
+                          variant="$2"
+                          shift 2
+                          ;;
+                        --expected-sha256)
+                          expected_sha256="$2"
+                          shift 2
+                          ;;
+                        --max-inputs)
+                          max_inputs="$2"
+                          shift 2
+                          ;;
+                        *)
+                          shift
+                          ;;
+                      esac
+                    done
+
+                    mapfile -t input_files < <(find "$input_dir" -maxdepth 1 -type f -name '*.npy' | LC_ALL=C sort)
+                    available_input_count="${#input_files[@]}"
+                    selected_input_count="$available_input_count"
+                    if [[ "$max_inputs" != "0" && "$available_input_count" -gt "$max_inputs" ]]; then
+                      selected_input_count="$max_inputs"
+                    fi
+
+                    recon_dir="$output_dir/reconstructions"
+                    mkdir -p "$recon_dir"
+                    for ((index = 0; index < selected_input_count; index++)); do
+                      input_path="${input_files[$index]}"
+                      stem="$(basename "${input_path%.*}")"
+                      printf 'fake-recon' > "$recon_dir/${stem}_recon.npy"
+                    done
+
+                    python3 - "$artifact_path" "$expected_sha256" "$input_dir" "$recon_dir" "$variant" "$available_input_count" "$selected_input_count" "$max_inputs" <<'PY'
+import json
+import sys
+
+(
+    artifact_path,
+    expected_sha256,
+    input_dir,
+    recon_dir,
+    variant,
+    available_input_count,
+    selected_input_count,
+    max_inputs,
+) = sys.argv[1:]
+
+selected_input_count = int(selected_input_count)
+available_input_count = int(available_input_count)
+max_inputs = int(max_inputs)
+
+summary = {
+    "variant": variant,
+    "artifact_path": artifact_path,
+    "artifact_sha256": expected_sha256,
+    "artifact_sha256_expected": expected_sha256,
+    "artifact_sha256_match": True,
+    "input_dir": input_dir,
+    "output_dir": recon_dir,
+    "output_count": selected_input_count,
+    "processed_count": selected_input_count,
+    "input_count": selected_input_count,
+    "available_input_count": available_input_count,
+    "load_ms": 0.0,
+    "vm_init_ms": 0.0,
+    "run_count": selected_input_count,
+    "run_samples_ms": [12.0] * selected_input_count,
+    "run_median_ms": 12.0,
+    "run_mean_ms": 12.0,
+    "run_min_ms": 12.0,
+    "run_max_ms": 12.0,
+    "run_variance_ms2": 0.0,
+    "output_shape": [1, 1, 2, 2],
+    "output_dtype": "float32",
+    "snr": 12.0,
+    "batch_size": 1,
+    "save_format": "npy",
+    "seed": None,
+    "max_inputs": max_inputs,
+}
+print(json.dumps(summary, ensure_ascii=False))
+PY
+                    """
+                ),
+            )
+
+            trusted_source = temp_dir / "trusted_current.so"
+            trusted_bytes = b"trusted-current-artifact"
+            trusted_source.write_bytes(trusted_bytes)
+            expected_sha = hashlib.sha256(trusted_bytes).hexdigest()
+
+            mutable_remote_dir = temp_dir / "mutable_remote" / "tvm_tune_logs"
+            mutable_remote_dir.mkdir(parents=True)
+            mutable_remote_artifact = mutable_remote_dir / "optimized_model.so"
+            mutable_remote_artifact.write_bytes(b"baseline-artifact")
+
+            input_dir = temp_dir / "inputs"
+            input_dir.mkdir()
+            (input_dir / "sample_000.npy").write_bytes(b"latent-000")
+            output_base = temp_dir / "outputs"
+            output_base.mkdir()
+            remote_stage_root = temp_dir / "remote_stage_root"
+
+            env = os.environ.copy()
+            env.update(
+                {
+                    "REMOTE_MODE": "ssh",
+                    "REMOTE_HOST": "demo-board",
+                    "REMOTE_USER": "demo-user",
+                    "REMOTE_PASS": "demo-pass",
+                    "REMOTE_SSH_PORT": "22",
+                    "REMOTE_TVM_PYTHON": str(fake_python),
+                    "REMOTE_INPUT_DIR": str(input_dir),
+                    "REMOTE_OUTPUT_BASE": str(output_base),
+                    "REMOTE_SNR_CURRENT": "12",
+                    "REMOTE_BATCH_CURRENT": "1",
+                    "REMOTE_CURRENT_ARTIFACT": str(mutable_remote_artifact),
+                    "REMOTE_CURRENT_ARTIFACT_STAGE_DIR": str(remote_stage_root),
+                    "LOCAL_CURRENT_ARTIFACT_SOURCE": str(trusted_source),
+                    "INFERENCE_CURRENT_EXPECTED_SHA256": expected_sha,
+                }
+            )
+
+            result = subprocess.run(
+                ["bash", str(staged_runner), "--variant", "current", "--max-inputs", "1"],
+                cwd=REPO_ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            summary = json.loads([line.strip() for line in result.stdout.splitlines() if line.strip()][-1])
+            staged_remote_artifact = remote_stage_root / ".openamp_demo_current" / expected_sha / "optimized_model.so"
+            self.assertIn("staged trusted current artifact source", result.stdout)
+            self.assertEqual(summary["variant"], "current")
+            self.assertEqual(summary["artifact_path"], str(staged_remote_artifact))
+            self.assertEqual(summary["artifact_sha256"], expected_sha)
+            self.assertEqual(summary["artifact_sha256_expected"], expected_sha)
+            self.assertTrue(summary["artifact_sha256_match"])
+            self.assertNotEqual(summary["artifact_path"], str(mutable_remote_artifact))
+            self.assertEqual(staged_remote_artifact.read_bytes(), trusted_bytes)
+            self.assertEqual(mutable_remote_artifact.read_bytes(), b"baseline-artifact")
+
 
 class LegacyBaselineLiveConsumptionTest(unittest.TestCase):
     def test_live_job_accepts_legacy_summary_json_as_success(self) -> None:
