@@ -89,11 +89,11 @@ The current demo regression suite covers these public/operator-facing surfaces:
 - localhost socket smoke coverage for `GET /api/health` that boots `DemoHTTPServer` on an ephemeral port, hits the real bound endpoint once, and shuts down cleanly when the runtime permits local socket creation
 - live-probe cache behavior: startup reuse of the last successful probe artifact and preservation of that saved probe when a later refresh fails
 - docs endpoint guardrails for missing path, invalid repo-external path, missing file, and JSON pretty-print rendering
-- direct `board_probe` unit coverage for command construction, cache helpers, and execution outcomes: password-auth SSH selection, `REMOTE_SSH_PORT` override handling, `connect_phytium_pi.sh --env ...` fallback, dedicated `load_probe_output()` checks for missing, malformed, and valid-non-dict JSON, `write_probe_output()` success-and-write-failure paths, and `run_live_probe()` success, timeout, non-zero exit, and JSON parse-error payload shaping
+- direct `board_probe` unit coverage for command construction, cache helpers, and execution outcomes: password-auth SSH selection, `REMOTE_SSH_PORT` override handling, `connect_phytium_pi.sh --env ...` fallback, dedicated `load_probe_output()` checks for missing, malformed, and valid-non-dict JSON, `write_probe_output()` success-and-write-failure paths, and `run_live_probe()` success, timeout, launch/configuration failure, non-zero exit, and JSON parse-error payload shaping
 - `server.main()` bootstrap coverage for both normal startup and `--probe-startup`, including `DashboardState` construction, startup probe ordering, `DemoHTTPServer` wiring, and the printed launch banner without binding a real socket
 
 Intentional gaps and next-optional coverage:
 
-- optional extra `board_probe` unit coverage would now be limited to rarer environment/OS failure modes beyond the current command-construction, cache-helper, and result-shaping paths
+- optional extra `board_probe` unit coverage would now be limited to rarer platform-specific shell/permission anomalies beyond the current command-construction, cache-helper, launch-failure, and result-shaping paths
 - the frontend is covered as served assets only; there is no browser-level regression for DOM rendering or the in-page refresh flow
 - the localhost socket smoke skips explicitly when the runtime forbids socket creation, so heavily sandboxed environments still will not exercise bind/listen despite the test existing

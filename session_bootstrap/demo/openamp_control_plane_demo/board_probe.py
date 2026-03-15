@@ -169,8 +169,8 @@ def summarize_probe(details: dict[str, Any]) -> str:
 
 def run_live_probe(env_file: str | None = None, timeout_sec: float = 30.0) -> dict[str, Any]:
     requested_at = now_iso()
-    command = build_probe_command(env_file)
     try:
+        command = build_probe_command(env_file)
         result = subprocess.run(
             command,
             cwd=PROJECT_ROOT,
@@ -186,6 +186,15 @@ def run_live_probe(env_file: str | None = None, timeout_sec: float = 30.0) -> di
             "status": "timeout",
             "summary": "The read-only SSH probe timed out before a response arrived.",
             "error": "probe timeout",
+            "details": {},
+        }
+    except OSError as exc:
+        return {
+            "requested_at": requested_at,
+            "reachable": False,
+            "status": "error",
+            "summary": "The read-only SSH probe could not be launched from this environment.",
+            "error": str(exc),
             "details": {},
         }
 

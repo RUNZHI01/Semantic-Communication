@@ -289,6 +289,24 @@ class RunLiveProbeTest(unittest.TestCase):
             },
         )
 
+    def test_command_launch_failure_returns_error_payload(self) -> None:
+        env_file = "session_bootstrap/demo/openamp_control_plane_demo/tests/missing-probe.env"
+
+        with patch("board_probe.now_iso", return_value="2026-03-15T12:07:00+0800"):
+            payload = run_live_probe(env_file=env_file, timeout_sec=4.0)
+
+        self.assertEqual(
+            payload,
+            {
+                "requested_at": "2026-03-15T12:07:00+0800",
+                "reachable": False,
+                "status": "error",
+                "summary": "The read-only SSH probe could not be launched from this environment.",
+                "error": f"[Errno 2] No such file or directory: '{PROJECT_ROOT / env_file}'",
+                "details": {},
+            },
+        )
+
     def test_non_zero_exit_returns_error_payload(self) -> None:
         command = ["bash", "fake-connect"]
         completed = subprocess.CompletedProcess(
