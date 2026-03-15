@@ -58,6 +58,16 @@ class DemoDataTest(unittest.TestCase):
         self.assertEqual(snapshot["board"]["current_status"]["label"], "保存的只读 SSH 探板")
         self.assertIn("上一次成功探板的保存记录", snapshot["board"]["current_status"]["summary"])
 
+    def test_guided_demo_snapshot_contains_comparison_and_sample_catalog(self) -> None:
+        snapshot = build_snapshot()
+        guided_demo = snapshot["guided_demo"]
+
+        self.assertIn("comparison", guided_demo)
+        self.assertIn("sample_catalog", guided_demo)
+        self.assertGreaterEqual(len(guided_demo["sample_catalog"]), 1)
+        self.assertAlmostEqual(guided_demo["comparison"]["payload"]["baseline_ms"], 1846.9)
+        self.assertAlmostEqual(guided_demo["comparison"]["end_to_end"]["current_ms"], 230.339)
+
 
 if __name__ == "__main__":
     unittest.main()

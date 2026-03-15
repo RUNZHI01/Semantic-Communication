@@ -4,6 +4,8 @@ This package ships a real local dashboard for the current repo state. It is not 
 
 ## What it shows
 
+- four-act Chinese-first demo flow: trusted boot -> one-click reconstruction -> formal baseline comparison -> fault injection / recovery
+- web-side board credential entry for `host / user / password / port / env_file`, stored only in the current demo-server process and reused for later actions
 - board/control-plane status with explicit evidence-backed vs live-probe mode
 - key OpenAMP milestones across cold boot, `STATUS_REQ/RESP`, `JOB_REQ/JOB_ACK`, heartbeat, wrapper-backed board smoke, `SAFE_STOP`, and `JOB_DONE`
 - final `FIT-01`, `FIT-02`, `FIT-03` state, including `FIT-03` pre-fix FAIL -> post-fix PASS history
@@ -29,8 +31,28 @@ bash ./session_bootstrap/scripts/run_openamp_demo.sh \
   --probe-env ./session_bootstrap/config/phytium_pi_login.env
 ```
 
-The dashboard stays evidence-led either way. The "Refresh live board status" action only runs a read-only SSH probe.
+The dashboard stays evidence-led either way. The "探测板卡 / OpenAMP" action only runs a read-only SSH probe plus an optional cached RPMsg status query.
 If `session_bootstrap/reports/openamp_demo_live_probe_latest.json` already exists, the dashboard loads that saved successful probe on startup and keeps showing it if a later in-dashboard refresh fails.
+
+## Web-side credential flow
+
+Open the dashboard and fill the "会话接入" card:
+
+- `主机 / IP`
+- `用户名`
+- `密码`
+- `SSH 端口`
+- optional `env 文件`
+
+The password is kept only in memory inside the current demo server process. It is not written back to the repo.
+Later board-facing actions reuse the same in-process session automatically:
+
+- Act 1 board probe
+- Act 2 remote reconstruction timing attempt
+- Act 3 baseline/current run attempt
+- Act 4 RPMsg fault injection / SAFE_STOP recovery
+
+If the board is unreachable or the env file is incomplete for inference, the UI falls back to prerecorded evidence and labels that downgrade explicitly.
 
 ## Read-only board probe
 
@@ -86,9 +108,10 @@ bash ./session_bootstrap/scripts/run_openamp_demo.sh --port 8079
 The current demo regression suite covers these public/operator-facing surfaces:
 
 - snapshot construction in `demo_data.build_snapshot()`, including final FIT verdicts, trusted-current performance alignment, live-probe mode switching, and saved-probe labeling
-- HTTP smoke coverage for `GET /api/snapshot`, `POST /api/probe-board`, `GET /docs?path=...`, `GET /api/health`, `GET /`, `GET /app.js`, and `GET /app.css`
+- HTTP smoke coverage for `GET /api/snapshot`, `GET /api/system-status`, `POST /api/session/board-access`, `POST /api/probe-board`, `POST /api/run-inference`, `POST /api/inject-fault`, `GET /docs?path=...`, `GET /api/health`, `GET /`, `GET /app.js`, and `GET /app.css`
 - localhost socket smoke coverage for `GET /api/health` that boots `DemoHTTPServer` on an ephemeral port, hits the real bound endpoint once, and shuts down cleanly when the runtime permits local socket creation
 - live-probe cache behavior: startup reuse of the last successful probe artifact and preservation of that saved probe when a later refresh fails
+- session credential behavior: redacted public payloads, probe reuse of saved credentials, and fallback/live inference API payload shaping
 - docs endpoint guardrails for missing path, invalid repo-external path, missing file, and JSON pretty-print rendering
 - direct `board_probe` unit coverage for command construction, cache helpers, and execution outcomes: password-auth SSH selection, `REMOTE_SSH_PORT` override handling, `connect_phytium_pi.sh --env ...` fallback, dedicated `load_probe_output()` checks for missing, malformed, and valid-non-dict JSON, `write_probe_output()` success-and-write-failure paths, and `run_live_probe()` success, timeout, launch/configuration failure, non-zero exit, and JSON parse-error payload shaping
 - `server.main()` bootstrap coverage for both normal startup and `--probe-startup`, including `DashboardState` construction, startup probe ordering, `DemoHTTPServer` wiring, and the printed launch banner without binding a real socket

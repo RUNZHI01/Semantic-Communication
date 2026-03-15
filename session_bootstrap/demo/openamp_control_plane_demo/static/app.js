@@ -1,51 +1,70 @@
 const state = {
   snapshot: null,
+  systemStatus: null,
+  activeAct: "act1",
+  selectedImageIndex: 0,
+  currentResult: null,
+  baselineResult: null,
+  faultResult: null,
 };
 
 function docHref(path) {
   return `/docs?path=${encodeURIComponent(path)}`;
 }
 
+function fetchJSON(url, options = {}) {
+  return fetch(url, {
+    headers: { "Content-Type": "application/json" },
+    ...options,
+  }).then(async (response) => {
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.message || `Request failed: ${response.status}`);
+    }
+    return payload;
+  });
+}
+
+function escapeHtml(text) {
+  return String(text || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
 function toneClass(value) {
-  if (!value) return "tone-neutral";
-  const normalized = value.toLowerCase();
-  if (normalized === "live") return "tone-live";
-  if (normalized === "fallback") return "tone-fallback";
-  if (
-    normalized.includes("pass") ||
-    normalized.includes("live") ||
-    normalized.includes("通过") ||
-    normalized.includes("在线") ||
-    normalized.includes("已确认")
-  ) {
-    return "tone-pass";
+  const normalized = String(value || "").toLowerCase();
+  if (normalized.includes("online") || normalized.includes("live") || normalized.includes("pass") || normalized.includes("ready")) {
+    return "tone-online";
   }
-  if (normalized.includes("fail") || normalized.includes("失败")) return "tone-fail";
-  if (
-    normalized.includes("fallback") ||
-    normalized.includes("warning") ||
-    normalized.includes("仅展示证据") ||
-    normalized.includes("回退")
-  ) {
-    return "tone-warning";
+  if (normalized.includes("degraded") || normalized.includes("warning") || normalized.includes("fallback") || normalized.includes("replay")) {
+    return "tone-degraded";
+  }
+  if (normalized.includes("offline") || normalized.includes("fail") || normalized.includes("deny") || normalized.includes("timeout")) {
+    return "tone-offline";
   }
   return "tone-neutral";
 }
 
-function displayStatus(value) {
-  const normalized = String(value || "").trim().toUpperCase();
-  if (normalized === "PASS") return "通过 PASS";
-  if (normalized === "FAIL") return "失败 FAIL";
-  if (normalized === "PASS (FINAL)") return "最终通过 PASS";
-  if (normalized === "FAIL (HISTORICAL)") return "历史失败 FAIL";
-  return String(value || "");
+function lampClass(value) {
+  const normalized = String(value || "").toLowerCase();
+  if (normalized.includes("online") || normalized.includes("ready") || normalized.includes("green")) {
+    return "lamp-online";
+  }
+  if (normalized.includes("warning") || normalized.includes("degraded") || normalized.includes("yellow")) {
+    return "lamp-warning";
+  }
+  if (normalized.includes("danger") || normalized.includes("red") || normalized.includes("fault") || normalized.includes("deny")) {
+    return "lamp-danger";
+  }
+  return "";
 }
 
-function escapeHtml(text) {
-  return String(text)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;");
+function formatMaybeMs(value) {
+  if (value === null || value === undefined || value === "") return "NA";
+  const numeric = Number(value);
+  if (Number.isNaN(numeric)) return String(value);
+  return `${numeric.toFixed(numeric >= 100 ? 1 : 3).replace(/\.000$/, "").replace(/(\.\d)00$/, "$1")} ms`;
 }
 
 function renderLinks(links) {
@@ -53,12 +72,7 @@ function renderLinks(links) {
   return `
     <div class="inline-links">
       ${links
-        .map((link) => {
-          const href = link.path ? docHref(link.path) : "#";
-          const label = escapeHtml(link.label);
-          const title = link.note ? ` title="${escapeHtml(link.note)}"` : "";
-          return `<a class="doc-link" href="${href}"${title}>${label}</a>`;
-        })
+        .map((link) => `<a class="doc-link" href="${docHref(link.path)}">${escapeHtml(link.label)}</a>`)
         .join("")}
     </div>
   `;
@@ -67,83 +81,102 @@ function renderLinks(links) {
 function statCard(label, value, caption) {
   return `
     <div class="mini-metric">
-      <div class="caption">${escapeHtml(label)}</div>
+      <div class="label">${escapeHtml(label)}</div>
       <div class="value">${escapeHtml(value)}</div>
-      <div class="caption">${escapeHtml(caption)}</div>
+      <div class="compact-copy">${escapeHtml(caption)}</div>
     </div>
   `;
 }
 
-function boardStatusCard(title, pillText, summary, metaItems, links) {
+function kpiCard(label, value, note, lamp = "") {
   return `
-    <div class="status-card">
-      <div class="label">${escapeHtml(title)}</div>
-      <div class="status-pill ${toneClass(pillText)}">${escapeHtml(pillText)}</div>
-      <div class="readout">${escapeHtml(summary)}</div>
-      <div class="status-meta">
-        ${metaItems.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}
+    <article class="status-kpi">
+      <div class="label">${escapeHtml(label)}</div>
+      <div class="inline-actions">
+        <div class="status-dot ${lampClass(lamp)}"></div>
+        <div class="value">${escapeHtml(value)}</div>
       </div>
-      ${renderLinks(links)}
-    </div>
+      <div class="compact-copy">${escapeHtml(note)}</div>
+    </article>
   `;
 }
 
-function renderBoard(snapshot) {
+function setFeedback(message, tone) {
+  const banner = document.getElementById("feedbackBanner");
+  if (!message) {
+    banner.hidden = true;
+    banner.textContent = "";
+    banner.removeAttribute("data-tone");
+    return;
+  }
+  banner.hidden = false;
+  banner.setAttribute("data-tone", tone);
+  banner.textContent = message;
+}
+
+function renderTop(snapshot, systemStatus) {
+  document.getElementById("heroSummary").textContent =
+    `trusted current SHA ${snapshot.project.trusted_current_sha.slice(0, 12)} 已与当前演示材料对齐。` +
+    ` 第一幕优先展示板卡状态，第二幕和第三幕分别对应重建与正式口径对比，第四幕保留 FIT-01 / FIT-02 / FIT-03 证据。`;
+
+  const modePill = document.getElementById("modePill");
+  modePill.className = `mode-pill ${toneClass(systemStatus.execution_mode.tone)}`;
+  modePill.textContent = systemStatus.execution_mode.label;
+  document.getElementById("modeSummary").textContent = systemStatus.execution_mode.summary;
+  document.getElementById("generatedAt").textContent = `快照时间 ${snapshot.generated_at}`;
+  document.getElementById("topStats").innerHTML = [
+    statCard("P0 里程碑", String(snapshot.stats.p0_milestones_verified), "演示系统保留的板级证据项"),
+    statCard("FIT 最终通过", String(snapshot.stats.fit_final_pass_count), "正式收口后的通过项"),
+    statCard("Payload", `${snapshot.stats.payload_current_ms} ms`, "正式 current 口径"),
+    statCard("端到端", `${snapshot.stats.end_to_end_current_ms} ms/image`, "正式 current 口径"),
+  ].join("");
+}
+
+function renderBoardAccess(systemStatus) {
+  const access = systemStatus.board_access;
+  document.getElementById("boardAccessSummary").textContent = access.configured
+    ? `已录入会话：${access.user || "未填用户"}@${access.host || "未填主机"}:${access.port}，来源 ${access.source_summary}`
+    : "尚未录入板卡会话。";
+  if (access.host) document.getElementById("hostInput").value = access.host;
+  if (access.user) document.getElementById("userInput").value = access.user;
+  if (access.port) document.getElementById("portInput").value = access.port;
+  if (access.env_file) document.getElementById("envFileInput").value = access.env_file;
+}
+
+function renderAct1(snapshot, systemStatus) {
+  const live = systemStatus.live;
+  document.getElementById("act1StatusNote").textContent = live.status_note;
+  document.getElementById("act1StatusGrid").innerHTML = [
+    kpiCard("飞腾派 / SSH", live.board_online ? "在线" : "未在线", live.board_online ? "当前演示进程已拿到最新只读读数。" : "尚无新的在线读数，回退到证据。", live.board_online ? "online" : "offline"),
+    kpiCard("OpenAMP / remoteproc", live.remoteproc_state, `RPMsg 设备：${live.rpmsg_device}`, live.remoteproc_state),
+    kpiCard("guard_state", live.guard_state, `last_fault_code：${live.last_fault_code}`, live.guard_state),
+    kpiCard("运行目标", live.target, `runtime：${live.runtime}`, "online"),
+  ].join("");
+
   const evidence = snapshot.board.evidence_status;
-  const transport = evidence.transport || {};
-  document.getElementById("boardEvidenceCard").innerHTML = boardStatusCard(
-    "最近一次已确认状态",
-    evidence.label,
-    evidence.summary,
-    [
-      `remoteproc=${transport.remoteproc_state || "未知"}`,
-      `RPMsg=${transport.rpmsg_dev || "未知"}`,
-      `wrapper=${evidence.wrapper_board_smoke.result}`,
-      `固件 SHA=${evidence.final_live_firmware_sha256.slice(0, 12)}`,
-      `确认时间=${evidence.confirmed_at}`,
-    ],
-    evidence.evidence
-  );
+  document.getElementById("boardEvidenceCard").innerHTML = `
+    <div class="status-pill tone-online">${escapeHtml(evidence.label)}</div>
+    <div class="compact-copy">${escapeHtml(evidence.summary)}</div>
+    <div class="status-meta">
+      <span>remoteproc=${escapeHtml(evidence.transport.remoteproc_state)}</span>
+      <span>RPMsg=${escapeHtml(evidence.transport.rpmsg_dev)}</span>
+      <span>trusted SHA=${escapeHtml(evidence.trusted_current_sha.slice(0, 12))}</span>
+    </div>
+    ${renderLinks(evidence.evidence)}
+  `;
 
   const current = snapshot.board.current_status;
-  const details = current.details || {};
-  const remoteproc = (details.remoteproc || [])
-    .map((item) => `${item.name}=${item.state}`)
-    .join(", ");
-  document.getElementById("boardLiveCard").innerHTML = boardStatusCard(
-    "当前板卡读数",
-    current.reachable ? "在线读取正常" : "仅展示证据",
-    current.summary,
-    [
-      current.requested_at ? `读取时间=${current.requested_at}` : "读取时间=尚未执行",
-      remoteproc ? remoteproc : "remoteproc=暂不可得",
-      details.firmware && details.firmware.sha256 ? `固件 SHA=${details.firmware.sha256.slice(0, 12)}` : "固件 SHA=暂不可得",
-    ],
-    current.evidence
-  );
-}
-
-function renderLaunch(snapshot) {
-  document.getElementById("launchCommands").innerHTML = snapshot.operator.launch_commands
-    .map((command) => `<div class="command-row"><code>${escapeHtml(command)}</code></div>`)
-    .join("");
-
-  const host = snapshot.operator.host_side;
-  document.getElementById("hostSideCard").innerHTML = `
-    <div class="label">主机侧</div>
-    <div class="readout">${escapeHtml(host.summary)}</div>
-    ${renderLinks(host.items)}
+  document.getElementById("boardLiveCard").innerHTML = `
+    <div class="status-pill ${current.reachable ? "tone-online" : "tone-degraded"}">${escapeHtml(current.label)}</div>
+    <div class="compact-copy">${escapeHtml(current.summary)}</div>
+    <div class="status-meta">
+      <span>读取时间=${escapeHtml(current.requested_at || "尚未执行")}</span>
+      <span>guard=${escapeHtml(live.guard_state)}</span>
+      <span>fault=${escapeHtml(live.last_fault_code)}</span>
+    </div>
+    ${renderLinks(current.evidence)}
   `;
 
-  const slave = snapshot.operator.slave_side;
-  document.getElementById("slaveSideCard").innerHTML = `
-    <div class="label">板端 / OpenAMP 侧</div>
-    <div class="readout">${escapeHtml(slave.summary)}</div>
-    ${renderLinks(slave.items)}
-  `;
-}
-
-function renderMilestones(snapshot) {
   document.getElementById("milestonesGrid").innerHTML = snapshot.milestones
     .map(
       (item) => `
@@ -153,8 +186,8 @@ function renderMilestones(snapshot) {
             <span>${escapeHtml(item.mapped_id)}</span>
           </div>
           <h3>${escapeHtml(item.coverage_item)}</h3>
-          <div class="status-pill ${toneClass(item.status)}">${escapeHtml(displayStatus(item.status))}</div>
-          <div class="readout">${escapeHtml(item.key_proof_point)}</div>
+          <div class="status-pill ${toneClass(item.status)}">${escapeHtml(item.status)}</div>
+          <div class="compact-copy">${escapeHtml(item.key_proof_point)}</div>
           ${renderLinks(item.evidence)}
         </article>
       `
@@ -162,45 +195,148 @@ function renderMilestones(snapshot) {
     .join("");
 }
 
-function renderFits(snapshot) {
-  document.getElementById("fitGrid").innerHTML = snapshot.fits
-    .map((fit) => {
-      const history = fit.history
-        ? `
-          <div class="card">
-            <div class="label">修复前历史</div>
-            <div class="status-pill ${toneClass(fit.history.status)}">${escapeHtml(displayStatus(fit.history.status))}</div>
-            <div class="readout">${escapeHtml(fit.history.summary)}</div>
-            ${renderLinks(fit.history.evidence)}
-          </div>
-        `
-        : "";
+function renderSampleOptions(snapshot) {
+  const select = document.getElementById("imageSelect");
+  if (select.options.length) return;
+  select.innerHTML = snapshot.guided_demo.sample_catalog
+    .map(
+      (item) =>
+        `<option value="${item.index}">${escapeHtml(item.label)} | current PSNR ${Number(item.quality_preview.current_psnr_db || 0).toFixed(2)} dB</option>`
+    )
+    .join("");
+  select.value = String(state.selectedImageIndex);
+}
+
+function barWidth(value, max) {
+  if (!max || max <= 0) return 0;
+  return Math.max(6, Math.round((value / max) * 100));
+}
+
+function renderInference(result) {
+  if (!result) {
+    document.getElementById("act2SourceLabel").textContent = "等待执行。";
+    document.getElementById("timingBoard").innerHTML = "";
+    document.getElementById("qualityMetrics").innerHTML = "";
+    document.getElementById("inferenceMessage").textContent = "等待触发重建。";
+    return;
+  }
+  document.getElementById("act2SourceLabel").textContent = `${result.source_label} | ${result.sample.label}`;
+  document.getElementById("originalImage").src = result.original_image_b64;
+  document.getElementById("reconstructedImage").src = result.reconstructed_image_b64;
+  document.getElementById("inferenceMessage").textContent = result.message;
+
+  const stageValues = result.timings.stages || [];
+  const maxValue = Math.max(...stageValues.map((item) => Number(item.value_ms || 0)), 1);
+  document.getElementById("timingBoard").innerHTML = stageValues
+    .map((item) => {
+      const emphasisClass = item.emphasis === "board" ? "bar-board" : item.emphasis === "total" ? "bar-total" : "bar-host";
       return `
+        <div class="timing-row">
+          <div class="timing-label">
+            <span>${escapeHtml(item.label)}</span>
+            <span>${formatMaybeMs(item.value_ms)}</span>
+          </div>
+          <div class="timing-bar"><span class="${emphasisClass}" style="width:${barWidth(Number(item.value_ms || 0), maxValue)}%"></span></div>
+        </div>
+      `;
+    })
+    .join("");
+
+  document.getElementById("qualityMetrics").innerHTML = [
+    `<div class="metric-chip">PSNR: ${Number(result.quality.psnr_db || 0).toFixed(2)} dB</div>`,
+    `<div class="metric-chip">SSIM: ${Number(result.quality.ssim || 0).toFixed(4)}</div>`,
+    `<div class="metric-chip">artifact: ${escapeHtml(String(result.artifact_sha).slice(0, 12))}</div>`,
+  ].join("");
+}
+
+function comparisonCard(label, baselineMs, currentMs, improvementPct, speedupX, callout) {
+  const maxValue = Math.max(baselineMs, currentMs, 1);
+  return `
+    <article class="comparison-card">
+      <div class="comparison-title">${escapeHtml(label)}<span class="comparison-speedup">${speedupX.toFixed(1)}x / ${improvementPct.toFixed(2)}%</span></div>
+      <div class="comparison-row">
+        <div class="timing-label"><span>baseline</span><span>${formatMaybeMs(baselineMs)}</span></div>
+        <div class="comparison-bar"><span class="bar-host" style="width:${barWidth(baselineMs, maxValue)}%"></span></div>
+      </div>
+      <div class="comparison-row">
+        <div class="timing-label"><span>current</span><span>${formatMaybeMs(currentMs)}</span></div>
+        <div class="comparison-bar"><span class="bar-board" style="width:${barWidth(currentMs, maxValue)}%"></span></div>
+      </div>
+      <div class="comparison-callout">${escapeHtml(callout)}</div>
+    </article>
+  `;
+}
+
+function renderComparison(snapshot) {
+  const comparison = snapshot.guided_demo.comparison;
+  document.getElementById("comparisonBoard").innerHTML = [
+    comparisonCard(
+      comparison.payload.label,
+      comparison.payload.baseline_ms,
+      comparison.payload.current_ms,
+      comparison.payload.improvement_pct,
+      comparison.payload.speedup_x,
+      comparison.payload.callout
+    ),
+    comparisonCard(
+      comparison.end_to_end.label,
+      comparison.end_to_end.baseline_ms,
+      comparison.end_to_end.current_ms,
+      comparison.end_to_end.improvement_pct,
+      comparison.end_to_end.speedup_x,
+      comparison.end_to_end.callout
+    ),
+  ].join("");
+
+  const notes = [];
+  if (state.baselineResult) {
+    notes.push(`Baseline：${state.baselineResult.source_label}，${state.baselineResult.message}`);
+  }
+  if (state.currentResult) {
+    notes.push(`Current：${state.currentResult.source_label}，${state.currentResult.message}`);
+  }
+  document.getElementById("comparisonRunNote").textContent =
+    notes.join(" ") || "按钮用于触发本场会话的 baseline / current 动作；条形图仍固定展示正式收口口径。";
+}
+
+function renderFault(snapshot) {
+  const result = state.faultResult;
+  const system = state.systemStatus;
+  document.getElementById("act4Lamp").className = `act-lamp ${lampClass(result ? result.status_lamp : system.live.guard_state)}`;
+  if (!result) {
+    document.getElementById("faultStatusHeadline").textContent = "等待注入动作。";
+    document.getElementById("faultSummary").innerHTML = [
+      kpiCard("当前 guard_state", system.live.guard_state, "来自当前缓存状态或正式证据。", system.live.guard_state),
+      kpiCard("last_fault_code", system.live.last_fault_code, "注入后会在此处高亮变化。", system.live.last_fault_code),
+      kpiCard("FIT 汇总", "FIT-01 / FIT-02 / FIT-03", "保留原始标识，方便评委追问时核对。", "online"),
+    ].join("");
+    document.getElementById("faultLogPanel").textContent = "等待故障注入动作。";
+  } else {
+    document.getElementById("faultStatusHeadline").textContent = `${result.source_label} | ${result.message}`;
+    document.getElementById("faultSummary").innerHTML = [
+      kpiCard("当前动作", result.fault_type || "recover", result.source_label, result.status_lamp),
+      kpiCard("guard_state", result.guard_state, "注入或恢复后的最终状态。", result.guard_state),
+      kpiCard("last_fault_code", result.last_fault_code, "保留 fault code 原样便于答辩讲解。", result.last_fault_code),
+    ].join("");
+    document.getElementById("faultLogPanel").textContent = (result.log_entries || []).join("\n");
+  }
+
+  document.getElementById("fitGrid").innerHTML = snapshot.fits
+    .map(
+      (fit) => `
         <article class="fit-card">
           <div class="fit-meta">
             <span>${escapeHtml(fit.fit_id)}</span>
             <span>${escapeHtml(fit.generated_at)}</span>
           </div>
           <h3>${escapeHtml(fit.scenario)}</h3>
-          <div class="status-pill ${toneClass(fit.status)}">${escapeHtml(displayStatus(fit.status))}</div>
-          <div class="readout">${escapeHtml(fit.readout)}</div>
-          <ul class="list-plain">
-            <li><strong>风险点:</strong> ${escapeHtml(fit.risk_item)}</li>
-            <li><strong>trusted current SHA:</strong> ${escapeHtml(fit.trusted_current_sha.slice(0, 12))}</li>
-            ${fit.live_firmware_sha256 ? `<li><strong>固件 SHA:</strong> ${escapeHtml(fit.live_firmware_sha256.slice(0, 12))}</li>` : ""}
-          </ul>
+          <div class="status-pill ${toneClass(fit.status)}">${escapeHtml(fit.status)}</div>
+          <div class="compact-copy">${escapeHtml(fit.readout)}</div>
           ${renderLinks(fit.evidence)}
-          ${history}
         </article>
-      `;
-    })
+      `
+    )
     .join("");
-}
-
-function improvementWidth(metric) {
-  const numeric = parseFloat(String(metric.improvement).replace("%", "").replace("x", ""));
-  if (Number.isNaN(numeric)) return 40;
-  return Math.max(10, Math.min(100, numeric));
 }
 
 function renderPerformance(snapshot) {
@@ -211,8 +347,7 @@ function renderPerformance(snapshot) {
         <article class="performance-card">
           <div class="label">${escapeHtml(metric.label)}</div>
           <h3>${escapeHtml(metric.current)}</h3>
-          <div class="readout">基线 ${escapeHtml(metric.baseline)} | 提升 ${escapeHtml(metric.improvement)}</div>
-          <div class="metric-bar"><span style="width:${improvementWidth(metric)}%"></span></div>
+          <div class="compact-copy">baseline ${escapeHtml(metric.baseline)} | 提升 ${escapeHtml(metric.improvement)}</div>
           ${renderLinks([metric.report])}
         </article>
       `
@@ -225,82 +360,213 @@ function renderSources(snapshot) {
     .map(
       (item) => `
         <article class="doc-card">
-          <div class="label">资料</div>
+          <div class="label">材料</div>
           <h3>${escapeHtml(item.label)}</h3>
-          <div class="readout">${escapeHtml(item.path)}</div>
-          <div class="link-list">
-            <a class="doc-link" href="${docHref(item.path)}">打开</a>
-          </div>
+          <div class="compact-copy">${escapeHtml(item.path)}</div>
+          <div class="link-list"><a class="doc-link" href="${docHref(item.path)}">打开</a></div>
         </article>
       `
     )
     .join("");
 }
 
-function renderTop(snapshot) {
-  document.getElementById("heroSummary").textContent =
-    `${snapshot.project.final_verdict}。当前界面将 OpenAMP 控制面证据、FIT 收口与性能结果集中展示；trusted current SHA ${snapshot.project.trusted_current_sha.slice(0, 12)} 已与本次演示材料对齐。`;
-  document.getElementById("modePill").className = `mode-pill ${toneClass(snapshot.mode.effective_tone)}`;
-  document.getElementById("modePill").textContent = snapshot.mode.effective_label;
-  document.getElementById("modeSummary").textContent = `${snapshot.mode.summary} 现场策略：${snapshot.mode.live_policy}`;
-  document.getElementById("generatedAt").textContent = `快照时间 ${snapshot.generated_at}`;
-  document.getElementById("topStats").innerHTML = [
-    statCard("P0 里程碑", String(snapshot.stats.p0_milestones_verified), "看板内已展示的板级证据项"),
-    statCard("FIT 最终通过", String(snapshot.stats.fit_final_pass_count), "本轮正式收口的 FIT 项"),
-    statCard("Payload 中位延迟", `${snapshot.stats.payload_current_ms} ms`, "对应 trusted current SHA"),
-    statCard("端到端中位延迟", `${snapshot.stats.end_to_end_current_ms} ms/image`, "对应 trusted current SHA"),
-  ].join("");
-}
-
-function renderSnapshot(snapshot) {
-  state.snapshot = snapshot;
-  renderTop(snapshot);
-  renderBoard(snapshot);
-  renderLaunch(snapshot);
-  renderMilestones(snapshot);
-  renderFits(snapshot);
-  renderPerformance(snapshot);
-  renderSources(snapshot);
-}
-
-async function loadSnapshot() {
-  const response = await fetch("/api/snapshot", { cache: "no-store" });
-  if (!response.ok) throw new Error(`snapshot request failed: ${response.status}`);
-  renderSnapshot(await response.json());
-}
-
-async function refreshProbe() {
-  const button = document.getElementById("probeButton");
-  button.disabled = true;
-  button.textContent = "正在读取...";
-  try {
-    const response = await fetch("/api/probe-board", { method: "POST" });
-    if (!response.ok) throw new Error(`probe request failed: ${response.status}`);
-    const probe = await response.json();
-    await loadSnapshot();
-    if (probe.status !== "success") {
-      const message = probe.summary || probe.error || "在线探板失败。";
-      document.getElementById("heroSummary").textContent =
-        `${message} 当前继续展示最近一次成功读数或既有证据。`;
-    }
-  } finally {
-    button.disabled = false;
-    button.textContent = "读取当前板卡状态";
+function renderActLamps(systemStatus) {
+  document.getElementById("act1Lamp").className = `act-lamp ${lampClass(systemStatus.live.board_online ? "online" : systemStatus.execution_mode.tone)}`;
+  if (!state.faultResult) {
+    document.getElementById("act4Lamp").className = `act-lamp ${lampClass(systemStatus.live.last_fault_code)}`;
   }
 }
 
-document.getElementById("reloadButton").addEventListener("click", () => {
-  loadSnapshot().catch((error) => {
-    document.getElementById("heroSummary").textContent = error.message;
-  });
-});
+function renderAll() {
+  if (!state.snapshot || !state.systemStatus) return;
+  renderTop(state.snapshot, state.systemStatus);
+  renderBoardAccess(state.systemStatus);
+  renderAct1(state.snapshot, state.systemStatus);
+  renderSampleOptions(state.snapshot);
+  renderInference(state.currentResult);
+  renderComparison(state.snapshot);
+  renderFault(state.snapshot);
+  renderPerformance(state.snapshot);
+  renderSources(state.snapshot);
+  renderActLamps(state.systemStatus);
+}
 
-document.getElementById("probeButton").addEventListener("click", () => {
-  refreshProbe().catch((error) => {
-    document.getElementById("heroSummary").textContent = error.message;
+function switchAct(actId) {
+  state.activeAct = actId;
+  document.querySelectorAll(".act-tab").forEach((tab) => {
+    tab.classList.toggle("active", tab.dataset.act === actId);
   });
-});
+  document.querySelectorAll(".act-panel").forEach((panel) => {
+    panel.classList.toggle("active", panel.id === `${actId}Panel`);
+  });
+}
 
-loadSnapshot().catch((error) => {
-  document.getElementById("heroSummary").textContent = error.message;
+async function refreshAll() {
+  const [snapshot, systemStatus] = await Promise.all([
+    fetchJSON("/api/snapshot"),
+    fetchJSON("/api/system-status"),
+  ]);
+  state.snapshot = snapshot;
+  state.systemStatus = systemStatus;
+  renderAll();
+}
+
+async function saveBoardAccess() {
+  const payload = {
+    host: document.getElementById("hostInput").value.trim(),
+    user: document.getElementById("userInput").value.trim(),
+    password: document.getElementById("passwordInput").value,
+    port: document.getElementById("portInput").value.trim(),
+    env_file: document.getElementById("envFileInput").value.trim(),
+  };
+  try {
+    const result = await fetchJSON("/api/session/board-access", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    setFeedback("板卡会话已保存到当前 demo 进程内，后续探板/推理/故障动作会直接复用。", "success");
+    document.getElementById("passwordInput").value = "";
+    state.systemStatus = {
+      ...state.systemStatus,
+      board_access: result.board_access,
+    };
+    await refreshAll();
+  } catch (error) {
+    setFeedback(error.message, "error");
+  }
+}
+
+async function probeBoard() {
+  try {
+    setFeedback("正在探测板卡与 OpenAMP 状态...", "warning");
+    await fetchJSON("/api/probe-board", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    await refreshAll();
+    setFeedback("板卡探测已完成。", "success");
+    switchAct("act1");
+  } catch (error) {
+    setFeedback(error.message, "error");
+  }
+}
+
+async function runCurrentInference() {
+  try {
+    setFeedback("正在执行 Current 重建动作...", "warning");
+    state.selectedImageIndex = Number(document.getElementById("imageSelect").value || 0);
+    state.currentResult = await fetchJSON("/api/run-inference", {
+      method: "POST",
+      body: JSON.stringify({ image_index: state.selectedImageIndex, mode: "current" }),
+    });
+    await refreshAll();
+    renderInference(state.currentResult);
+    renderComparison(state.snapshot);
+    setFeedback(state.currentResult.message, state.currentResult.execution_mode === "live" ? "success" : "warning");
+    switchAct("act2");
+  } catch (error) {
+    setFeedback(error.message, "error");
+  }
+}
+
+async function runBaseline() {
+  try {
+    setFeedback("正在执行 Baseline 动作...", "warning");
+    state.selectedImageIndex = Number(document.getElementById("imageSelect").value || 0);
+    state.baselineResult = await fetchJSON("/api/run-baseline", {
+      method: "POST",
+      body: JSON.stringify({ image_index: state.selectedImageIndex }),
+    });
+    await refreshAll();
+    renderComparison(state.snapshot);
+    setFeedback(state.baselineResult.message, state.baselineResult.execution_mode === "live" ? "success" : "warning");
+    switchAct("act3");
+  } catch (error) {
+    setFeedback(error.message, "error");
+  }
+}
+
+async function runAllComparisons() {
+  await runBaseline();
+  await runCurrentInference();
+  switchAct("act3");
+}
+
+async function injectFault(faultType) {
+  try {
+    setFeedback("正在执行故障注入动作...", "warning");
+    state.faultResult = await fetchJSON("/api/inject-fault", {
+      method: "POST",
+      body: JSON.stringify({ fault_type: faultType }),
+    });
+    await refreshAll();
+    renderFault(state.snapshot);
+    setFeedback(state.faultResult.message, state.faultResult.execution_mode === "live" ? "success" : "warning");
+    switchAct("act4");
+  } catch (error) {
+    setFeedback(error.message, "error");
+  }
+}
+
+async function recoverFault() {
+  try {
+    setFeedback("正在执行 SAFE_STOP 恢复...", "warning");
+    state.faultResult = await fetchJSON("/api/recover", {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    await refreshAll();
+    renderFault(state.snapshot);
+    setFeedback(state.faultResult.message, state.faultResult.execution_mode === "live" ? "success" : "warning");
+    switchAct("act4");
+  } catch (error) {
+    setFeedback(error.message, "error");
+  }
+}
+
+function bindEvents() {
+  document.getElementById("reloadButton").addEventListener("click", () => {
+    refreshAll().catch((error) => setFeedback(error.message, "error"));
+  });
+  document.getElementById("probeButton").addEventListener("click", () => {
+    probeBoard();
+  });
+  document.getElementById("saveAccessButton").addEventListener("click", () => {
+    saveBoardAccess();
+  });
+  document.getElementById("runCurrentButton").addEventListener("click", () => {
+    runCurrentInference();
+  });
+  document.getElementById("runBaselineButton").addEventListener("click", () => {
+    runBaseline();
+  });
+  document.getElementById("runCurrentAgainButton").addEventListener("click", () => {
+    runCurrentInference();
+  });
+  document.getElementById("runAllButton").addEventListener("click", () => {
+    runAllComparisons();
+  });
+  document.getElementById("recoverButton").addEventListener("click", () => {
+    recoverFault();
+  });
+
+  document.querySelectorAll(".act-tab").forEach((tab) => {
+    tab.addEventListener("click", () => switchAct(tab.dataset.act));
+  });
+  document.querySelectorAll("[data-fault]").forEach((button) => {
+    button.addEventListener("click", () => injectFault(button.dataset.fault));
+  });
+  document.getElementById("imageSelect").addEventListener("change", (event) => {
+    state.selectedImageIndex = Number(event.target.value || 0);
+  });
+}
+
+async function bootstrap() {
+  bindEvents();
+  await refreshAll();
+  switchAct(state.activeAct);
+}
+
+bootstrap().catch((error) => {
+  setFeedback(error.message, "error");
 });

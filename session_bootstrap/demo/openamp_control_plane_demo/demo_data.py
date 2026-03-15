@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+from functools import lru_cache
 import json
 import re
 import time
@@ -90,6 +92,31 @@ INLINE_LINK_LABELS = {
     "fit": "FIT 报告",
 }
 
+PRERECORDED_SAMPLE_FIXTURES = (
+    {
+        "sample_id": "places365-208",
+        "label": "样例 208",
+        "title": "Places365 预置样例 208",
+        "note": "使用仓库内已归档的参考图与 current/baseline 重建图，适合现场稳定演示。",
+        "relative_path": "Places365_val_00000208_recon.png",
+        "original_path": PROJECT_ROOT / "session_bootstrap" / "tmp" / "quality_samples_20260311" / "current" / "test_208.png",
+        "current_path": PROJECT_ROOT
+        / "session_bootstrap"
+        / "tmp"
+        / "quality_samples_20260311"
+        / "current"
+        / "Places365_val_00000208_recon.png",
+        "baseline_path": PROJECT_ROOT
+        / "session_bootstrap"
+        / "tmp"
+        / "quality_samples_20260311"
+        / "baseline"
+        / "Places365_val_00000208_recon.png",
+    },
+)
+QUALITY_CURRENT_REPORT = REPORTS_ROOT / "quality_metrics_20260312_pytorch_vs_tvm_current.json"
+QUALITY_BASELINE_REPORT = REPORTS_ROOT / "quality_metrics_20260312_pytorch_vs_tvm_baseline.json"
+
 
 def now_iso() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%S%z")
@@ -115,6 +142,30 @@ def read_text(path: Path) -> str:
 
 def read_json(path: Path) -> dict[str, Any]:
     return json.loads(read_text(path))
+
+
+@lru_cache(maxsize=None)
+def image_data_uri(path_value: str) -> str:
+    path = Path(path_value)
+    suffix = path.suffix.lower()
+    mime_type = {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".webp": "image/webp",
+    }.get(suffix, "application/octet-stream")
+    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    return f"data:{mime_type};base64,{encoded}"
+
+
+@lru_cache(maxsize=2)
+def quality_metrics_by_relative_path(report_path_value: str) -> dict[str, dict[str, Any]]:
+    payload = read_json(Path(report_path_value))
+    return {
+        item["relative_path"]: item
+        for item in payload.get("per_image", [])
+        if isinstance(item, dict) and item.get("relative_path")
+    }
 
 
 def clean_markdown_value(raw: str) -> str:
@@ -556,6 +607,280 @@ def build_performance_snapshot() -> dict[str, Any]:
     }
 
 
+def speedup_x(baseline_ms: float, current_ms: float) -> float:
+    if current_ms <= 0:
+        return 0.0
+    return round(baseline_ms / current_ms, 1)
+
+
+def build_comparison_snapshot() -> dict[str, Any]:
+    performance = build_performance_snapshot()
+    micro = performance["micro_summary"]
+    return {
+        "payload": {
+            "label": "Payload 推理延迟",
+            "baseline_ms": micro["payload_baseline_ms"],
+            "current_ms": micro["payload_current_ms"],
+            "improvement_pct": micro["payload_improvement_pct"],
+            "speedup_x": speedup_x(micro["payload_baseline_ms"], micro["payload_current_ms"]),
+            "callout": (
+                f"正式 payload 口径：{micro['payload_baseline_ms']:.1f} → "
+                f"{micro['payload_current_ms']:.3f} ms"
+            ),
+        },
+        "end_to_end": {
+            "label": "端到端重建延迟",
+            "baseline_ms": micro["end_to_end_baseline_ms"],
+            "current_ms": micro["end_to_end_current_ms"],
+            "improvement_pct": micro["end_to_end_improvement_pct"],
+            "speedup_x": speedup_x(micro["end_to_end_baseline_ms"], micro["end_to_end_current_ms"]),
+            "callout": (
+                f"正式真实端到端口径：{micro['end_to_end_baseline_ms']:.1f} → "
+                f"{micro['end_to_end_current_ms']:.3f} ms/image"
+            ),
+        },
+        "trusted_current_sha": performance["artifact_sha"],
+    }
+
+
+def build_inference_sample_catalog() -> list[dict[str, Any]]:
+    current_quality = quality_metrics_by_relative_path(str(QUALITY_CURRENT_REPORT))
+    baseline_quality = quality_metrics_by_relative_path(str(QUALITY_BASELINE_REPORT))
+    catalog: list[dict[str, Any]] = []
+    for index, fixture in enumerate(PRERECORDED_SAMPLE_FIXTURES):
+        current_entry = current_quality.get(fixture["relative_path"], {})
+        baseline_entry = baseline_quality.get(fixture["relative_path"], {})
+        catalog.append(
+            {
+                "index": index,
+                "sample_id": fixture["sample_id"],
+                "label": fixture["label"],
+                "title": fixture["title"],
+                "note": fixture["note"],
+                "quality_preview": {
+                    "current_psnr_db": current_entry.get("psnr_db"),
+                    "current_ssim": current_entry.get("ssim"),
+                    "baseline_psnr_db": baseline_entry.get("psnr_db"),
+                    "baseline_ssim": baseline_entry.get("ssim"),
+                },
+            }
+        )
+    return catalog
+
+
+def build_prerecorded_inference_result(image_index: int, variant: str) -> dict[str, Any]:
+    variant_key = variant.lower()
+    if image_index < 0 or image_index >= len(PRERECORDED_SAMPLE_FIXTURES):
+        raise IndexError("invalid image_index")
+    fixture = PRERECORDED_SAMPLE_FIXTURES[image_index]
+    comparison = build_comparison_snapshot()
+    current_quality = quality_metrics_by_relative_path(str(QUALITY_CURRENT_REPORT))
+    baseline_quality = quality_metrics_by_relative_path(str(QUALITY_BASELINE_REPORT))
+    quality_entry = (
+        current_quality.get(fixture["relative_path"], {})
+        if variant_key == "current"
+        else baseline_quality.get(fixture["relative_path"], {})
+    )
+    original_path = fixture["original_path"]
+    reconstructed_path = fixture["current_path"] if variant_key == "current" else fixture["baseline_path"]
+
+    total_ms = (
+        comparison["end_to_end"]["current_ms"]
+        if variant_key == "current"
+        else comparison["end_to_end"]["baseline_ms"]
+    )
+    payload_ms = (
+        comparison["payload"]["current_ms"]
+        if variant_key == "current"
+        else comparison["payload"]["baseline_ms"]
+    )
+    prep_ms = round(max(total_ms - payload_ms, 0.0), 3)
+
+    stage_timings = [
+        {
+            "label": "前段准备 / 链路",
+            "value_ms": prep_ms,
+            "emphasis": "host",
+        },
+        {
+            "label": "板端 payload / 解码",
+            "value_ms": payload_ms,
+            "emphasis": "board",
+        },
+        {
+            "label": "总计",
+            "value_ms": total_ms,
+            "emphasis": "total",
+        },
+    ]
+
+    return {
+        "status": "success",
+        "execution_mode": "prerecorded",
+        "source_label": "预录结果",
+        "message": "当前展示使用已校验的预录图像与正式速度报告，可稳定支撑答辩演示。",
+        "variant": variant_key,
+        "image_index": image_index,
+        "sample": {
+            "sample_id": fixture["sample_id"],
+            "label": fixture["label"],
+            "title": fixture["title"],
+            "note": fixture["note"],
+        },
+        "original_image_b64": image_data_uri(str(original_path)),
+        "reconstructed_image_b64": image_data_uri(str(reconstructed_path)),
+        "timings": {
+            "payload_ms": round(payload_ms, 3),
+            "prepare_ms": prep_ms,
+            "total_ms": round(total_ms, 3),
+            "stages": stage_timings,
+        },
+        "quality": {
+            "psnr_db": quality_entry.get("psnr_db"),
+            "ssim": quality_entry.get("ssim"),
+        },
+        "artifact_sha": comparison["trusted_current_sha"] if variant_key == "current" else "formal-baseline",
+        "evidence": [
+            link_entry(QUALITY_CURRENT_REPORT if variant_key == "current" else QUALITY_BASELINE_REPORT, "质量报告"),
+            link_entry(
+                fixture["current_path"] if variant_key == "current" else fixture["baseline_path"],
+                "重建图像",
+            ),
+        ],
+    }
+
+
+def build_fault_catalog() -> list[dict[str, Any]]:
+    fit_map = {fit["fit_id"]: fit for fit in build_fit_snapshot()}
+    return [
+        {
+            "fault_type": "wrong_sha",
+            "title": "错误 SHA 注入",
+            "fit_id": "FIT-01",
+            "summary": fit_map["FIT-01"]["scenario"],
+        },
+        {
+            "fault_type": "illegal_param",
+            "title": "非法参数注入",
+            "fit_id": "FIT-02",
+            "summary": fit_map["FIT-02"]["scenario"],
+        },
+        {
+            "fault_type": "heartbeat_timeout",
+            "title": "心跳超时注入",
+            "fit_id": "FIT-03",
+            "summary": fit_map["FIT-03"]["scenario"],
+        },
+    ]
+
+
+def build_fault_replay(fault_type: str) -> dict[str, Any]:
+    if fault_type == "wrong_sha":
+        fit_summary = load_fit_summary(REPORTS_ROOT / "openamp_wrong_sha_fit_20260315_012403" / "fit_summary.json")
+        return {
+            "status": "injected",
+            "execution_mode": "replay",
+            "fault_type": fault_type,
+            "fit_id": "FIT-01",
+            "source_label": "FIT-01 回放模式",
+            "message": "未进入真机注入链路，当前播放已校验的 FIT-01 日志序列。",
+            "board_response": {
+                "decision": "DENY",
+                "fault_code": "ARTIFACT_SHA_MISMATCH",
+                "guard_state": "READY",
+            },
+            "guard_state": "READY",
+            "last_fault_code": "ARTIFACT_SHA_MISMATCH",
+            "status_lamp": "red",
+            "log_entries": [
+                "[01:24:34] ▶ RPMsg STATUS_REQ，guard=READY",
+                "[01:24:34] ▶ 发送 JOB_REQ，expected_sha=...dc0",
+                "[01:24:34] ◀ JOB_ACK: DENY，fault=ARTIFACT_SHA_MISMATCH",
+                "[01:24:35] ◀ STATUS_RESP: READY，last_fault=ARTIFACT_SHA_MISMATCH",
+            ],
+            "fit_summary": fit_summary,
+        }
+    if fault_type == "illegal_param":
+        fit_summary = load_fit_summary(REPORTS_ROOT / "openamp_input_contract_fit_20260315_014542" / "fit_summary.json")
+        return {
+            "status": "injected",
+            "execution_mode": "replay",
+            "fault_type": fault_type,
+            "fit_id": "FIT-02",
+            "source_label": "FIT-02 回放模式",
+            "message": "未进入真机注入链路，当前播放已校验的 FIT-02 日志序列。",
+            "board_response": {
+                "decision": "DENY",
+                "fault_code": "ILLEGAL_PARAM_RANGE",
+                "guard_state": "READY",
+            },
+            "guard_state": "READY",
+            "last_fault_code": "ILLEGAL_PARAM_RANGE",
+            "status_lamp": "red",
+            "log_entries": [
+                "[01:47:41] ▶ RPMsg STATUS_REQ，guard=READY",
+                "[01:47:41] ▶ 发送 JOB_REQ，expected_outputs=2",
+                "[01:47:41] ◀ JOB_ACK: DENY，fault=ILLEGAL_PARAM_RANGE",
+                "[01:47:42] ◀ STATUS_RESP: READY，last_fault=ILLEGAL_PARAM_RANGE",
+            ],
+            "fit_summary": fit_summary,
+        }
+    fit_summary = load_fit_summary(REPORTS_ROOT / "openamp_heartbeat_timeout_fit_watchdogfix_20260315_023410" / "fit_summary.json")
+    return {
+        "status": "injected",
+        "execution_mode": "replay",
+        "fault_type": fault_type,
+        "fit_id": "FIT-03",
+        "source_label": "FIT-03 回放模式",
+        "message": "未进入真机注入链路，当前播放已校验的 FIT-03 watchdog 修复后日志。",
+        "board_response": {
+            "decision": "ALLOW",
+            "fault_code": "HEARTBEAT_TIMEOUT",
+            "guard_state": "READY",
+        },
+        "guard_state": "READY",
+        "last_fault_code": "HEARTBEAT_TIMEOUT",
+        "status_lamp": "red",
+        "log_entries": [
+            "[02:36:17] ▶ STATUS_REQ，guard=READY",
+            "[02:36:17] ▶ JOB_REQ -> JOB_ACK(ALLOW)",
+            "[02:36:17] ▶ HEARTBEAT -> HEARTBEAT_ACK(ok=1)",
+            "[02:36:22] ◀ STATUS_RESP: READY，last_fault=HEARTBEAT_TIMEOUT",
+            "[02:36:22] ▶ SAFE_STOP 清理完成，guard 保持 READY",
+        ],
+        "fit_summary": fit_summary,
+    }
+
+
+def build_recover_replay() -> dict[str, Any]:
+    return {
+        "status": "recovered",
+        "execution_mode": "replay",
+        "source_label": "安全恢复回放",
+        "message": "未进入真机恢复链路，当前展示 SAFE_STOP → READY 的预录恢复结果。",
+        "board_response": {
+            "decision": "ACK",
+            "fault_code": "NONE",
+            "guard_state": "READY",
+        },
+        "guard_state": "READY",
+        "last_fault_code": "NONE",
+        "status_lamp": "green",
+        "log_entries": [
+            "[02:36:22] ▶ 发送 SAFE_STOP",
+            "[02:36:22] ◀ STATUS_RESP: READY，last_fault=NONE",
+        ],
+    }
+
+
+def build_guided_demo_snapshot() -> dict[str, Any]:
+    return {
+        "sample_catalog": build_inference_sample_catalog(),
+        "comparison": build_comparison_snapshot(),
+        "fault_catalog": build_fault_catalog(),
+    }
+
+
 def build_operator_snapshot() -> dict[str, Any]:
     return {
         "launch_commands": [
@@ -646,6 +971,7 @@ def build_snapshot(live_probe: dict[str, Any] | None = None) -> dict[str, Any]:
         "milestones": build_milestones_snapshot(),
         "fits": fits,
         "performance": performance,
+        "guided_demo": build_guided_demo_snapshot(),
         "operator": build_operator_snapshot(),
         "docs": build_docs_snapshot(),
     }
