@@ -89,11 +89,11 @@ The current demo regression suite covers these public/operator-facing surfaces:
 - localhost socket smoke coverage for `GET /api/health` that boots `DemoHTTPServer` on an ephemeral port, hits the real bound endpoint once, and shuts down cleanly when the runtime permits local socket creation
 - live-probe cache behavior: startup reuse of the last successful probe artifact and preservation of that saved probe when a later refresh fails
 - docs endpoint guardrails for missing path, invalid repo-external path, missing file, and JSON pretty-print rendering
-- direct `board_probe` unit coverage for command construction and execution outcomes: password-auth SSH selection, `REMOTE_SSH_PORT` override handling, `connect_phytium_pi.sh --env ...` fallback, and `run_live_probe()` success, timeout, non-zero exit, and JSON parse-error payload shaping
+- direct `board_probe` unit coverage for command construction, cache helpers, and execution outcomes: password-auth SSH selection, `REMOTE_SSH_PORT` override handling, `connect_phytium_pi.sh --env ...` fallback, dedicated `load_probe_output()` / `write_probe_output()` success-and-error-path checks, and `run_live_probe()` success, timeout, non-zero exit, and JSON parse-error payload shaping
 - `server.main()` bootstrap coverage for both normal startup and `--probe-startup`, including `DashboardState` construction, startup probe ordering, `DemoHTTPServer` wiring, and the printed launch banner without binding a real socket
 
-Intentional gaps and higher-risk edges:
+Intentional gaps and next-optional coverage:
 
-- `board_probe` cache/persistence helpers such as `load_probe_output()` and `write_probe_output()` are covered through `DashboardState`, but do not yet have dedicated unit tests of their own
+- optional extra `board_probe` unit coverage would now be narrower edge cases such as non-dict cached JSON payloads or filesystem write failures, rather than the core cache/persistence helpers themselves
 - the frontend is covered as served assets only; there is no browser-level regression for DOM rendering or the in-page refresh flow
 - the localhost socket smoke skips explicitly when the runtime forbids socket creation, so heavily sandboxed environments still will not exercise bind/listen despite the test existing
