@@ -4,7 +4,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import secrets
 import shlex
 import signal
 import subprocess
@@ -26,13 +25,13 @@ from openamp_trusted_artifacts import (  # noqa: E402
     resolve_trusted_artifacts_path,
 )
 from openamp_signed_manifest import (  # noqa: E402
+    build_signed_admission_transport_plan,
     load_signed_manifest_bundle,
     signed_manifest_summary,
     verify_signed_manifest_bundle,
 )
 
-
-UINT32_MAX = (1 << 32) - 1
+SIGNED_ADMISSION_KEY_SLOT = 1
 
 
 def parse_args() -> argparse.Namespace:
@@ -172,28 +171,6 @@ def normalize_decision(response: dict[str, Any] | None) -> str | None:
     if text in {"0", "DENY", "DENIED", "FALSE"}:
         return "DENY"
     return text or None
-
-
-def response_fault_name(response: dict[str, Any] | None) -> str:
-    if not isinstance(response, dict):
-        return ""
-    for raw in (
-        response.get("fault_name"),
-        response.get("last_fault_name"),
-    ):
-        value = str(raw or "").strip().upper()
-        if value:
-            return value
-    return ""
-
-
-def next_retry_job_id(previous_job_id: int) -> int:
-    candidate = previous_job_id
-    for _ in range(8):
-        candidate = secrets.randbelow(UINT32_MAX) + 1
-        if candidate != previous_job_id:
-            return candidate
-    return (previous_job_id % UINT32_MAX) + 1
 
 
 def build_job_ack_payload(
@@ -404,6 +381,48 @@ def build_signed_manifest_hook_payload(signed_admission: dict[str, Any]) -> dict
     }
 
 
+def build_signed_admission_frame_payload(
+    *,
+    job_id: int,
+    signed_admission: dict[str, Any],
+    frame: dict[str, Any],
+    trusted_artifact: dict[str, Any] | None,
+) -> dict[str, Any]:
+    payload = {
+        "job_id": job_id,
+        "admission_mode": signed_admission["admission_mode"],
+        "signed_manifest": build_signed_manifest_hook_payload(signed_admission),
+        "tx_frame_hex": str(frame["frame_hex"]),
+        "signed_admission_frame": {
+            "phase": str(frame["phase"]),
+            "seq": int(frame["seq"]),
+            "msg_type": int(frame["msg_type"]),
+            "payload_len": int(frame["payload_len"]),
+            "payload": dict(frame["payload"]),
+        },
+    }
+    if trusted_artifact is not None:
+        payload["trusted_artifact_label"] = trusted_artifact["label"]
+    return payload
+
+
+def build_signed_admission_plan(
+    *,
+    job_id: int,
+    signed_admission: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if signed_admission is None:
+        return None
+    bundle_path = Path(str(signed_admission["bundle_path"]))
+    bundle = load_signed_manifest_bundle(bundle_path)
+    return build_signed_admission_transport_plan(
+        bundle,
+        job_id=job_id,
+        key_slot=SIGNED_ADMISSION_KEY_SLOT,
+        seq_start=1,
+    )
+
+
 def resolve_expected_sha256(args: argparse.Namespace) -> tuple[str, dict[str, Any] | None, str]:
     raw_expected_sha256 = ""
     if args.expected_sha256:
@@ -560,66 +579,89 @@ def main() -> int:
     json_dump(manifest_path, manifest)
 
     control_job_id = args.job_id
-    retry_count = 0
-    while True:
-        status_req_payload = build_status_req_payload(
-            job_id=control_job_id,
-            variant=variant,
-            expected_sha256=expected_sha256,
-            job_flags=job_flags,
-            trusted_artifact=trusted_artifact,
-            signed_admission=signed_admission,
-        )
-        status_response = emit_event(
-            trace_path=trace_path,
-            phase="STATUS_REQ",
-            payload=status_req_payload,
-            transport=args.transport,
-            hook_cmd=args.control_hook_cmd,
-            hook_timeout_sec=args.control_hook_timeout_sec,
-        )
+    signed_admission_plan = build_signed_admission_plan(
+        job_id=control_job_id,
+        signed_admission=signed_admission,
+    )
+    status_req_payload = build_status_req_payload(
+        job_id=control_job_id,
+        variant=variant,
+        expected_sha256=expected_sha256,
+        job_flags=job_flags,
+        trusted_artifact=trusted_artifact,
+        signed_admission=signed_admission,
+    )
+    status_response = emit_event(
+        trace_path=trace_path,
+        phase="STATUS_REQ",
+        payload=status_req_payload,
+        transport=args.transport,
+        hook_cmd=args.control_hook_cmd,
+        hook_timeout_sec=args.control_hook_timeout_sec,
+    )
 
-        job_req_payload = build_job_req_payload(
-            job_id=control_job_id,
-            expected_sha256=expected_sha256,
-            deadline_ms=deadline_ms,
-            expected_outputs=expected_outputs,
-            job_flags=job_flags,
-            runner_cmd=args.runner_cmd,
-            trusted_artifact=trusted_artifact,
-            signed_admission=signed_admission,
-        )
-        job_req_response = emit_event(
-            trace_path=trace_path,
-            phase="JOB_REQ",
-            payload=job_req_payload,
-            transport=args.transport,
-            hook_cmd=args.control_hook_cmd,
-            hook_timeout_sec=args.control_hook_timeout_sec,
-        )
-        hook_response = job_req_response.get("response") if job_req_response else None
-        decision = normalize_decision(hook_response)
-        job_ack_payload = build_job_ack_payload(
-            job_id=control_job_id,
-            transport=args.transport,
-            decision=decision,
-            response=hook_response,
-        )
-        should_retry_duplicate = (
-            args.transport == "hook"
-            and decision != "ALLOW"
-            and response_fault_name(hook_response) == "DUPLICATE_JOB_ID"
-            and retry_count == 0
-        )
-        if not should_retry_duplicate:
-            break
-        retry_count += 1
-        control_job_id = next_retry_job_id(control_job_id)
-        manifest["requested_job_id"] = args.job_id
-        manifest["job_id"] = control_job_id
-        manifest["retry_count"] = retry_count
-        manifest["retry_reason"] = "DUPLICATE_JOB_ID"
-        json_dump(manifest_path, manifest)
+    signed_admission_responses: list[dict[str, Any]] = []
+    final_job_req_transport_frame: dict[str, Any] | None = None
+    if signed_admission_plan is not None:
+        frames = list(signed_admission_plan.get("frames", []))
+        if not frames:
+            raise SystemExit("ERROR: signed admission transport plan did not emit any frames.")
+        for frame in frames:
+            phase = str(frame.get("phase") or "").strip().upper()
+            if phase == "JOB_REQ":
+                final_job_req_transport_frame = frame
+                continue
+            signed_admission_responses.append(
+                emit_event(
+                    trace_path=trace_path,
+                    phase=phase,
+                    payload=build_signed_admission_frame_payload(
+                        job_id=control_job_id,
+                        signed_admission=signed_admission,
+                        frame=frame,
+                        trusted_artifact=trusted_artifact,
+                    ),
+                    transport=args.transport,
+                    hook_cmd=args.control_hook_cmd,
+                    hook_timeout_sec=args.control_hook_timeout_sec,
+                )
+            )
+
+    job_req_payload = build_job_req_payload(
+        job_id=control_job_id,
+        expected_sha256=expected_sha256,
+        deadline_ms=deadline_ms,
+        expected_outputs=expected_outputs,
+        job_flags=job_flags,
+        runner_cmd=args.runner_cmd,
+        trusted_artifact=trusted_artifact,
+        signed_admission=signed_admission,
+    )
+    if final_job_req_transport_frame is not None:
+        job_req_payload["tx_frame_hex"] = str(final_job_req_transport_frame["frame_hex"])
+        job_req_payload["signed_admission_frame"] = {
+            "phase": str(final_job_req_transport_frame["phase"]),
+            "seq": int(final_job_req_transport_frame["seq"]),
+            "msg_type": int(final_job_req_transport_frame["msg_type"]),
+            "payload_len": int(final_job_req_transport_frame["payload_len"]),
+            "payload": dict(final_job_req_transport_frame["payload"]),
+        }
+    job_req_response = emit_event(
+        trace_path=trace_path,
+        phase="JOB_REQ",
+        payload=job_req_payload,
+        transport=args.transport,
+        hook_cmd=args.control_hook_cmd,
+        hook_timeout_sec=args.control_hook_timeout_sec,
+    )
+    hook_response = job_req_response.get("response") if job_req_response else None
+    decision = normalize_decision(hook_response)
+    job_ack_payload = build_job_ack_payload(
+        job_id=control_job_id,
+        transport=args.transport,
+        decision=decision,
+        response=hook_response,
+    )
 
     if args.transport == "hook" and decision != "ALLOW":
         summary = {
@@ -627,6 +669,7 @@ def main() -> int:
             "job_id": control_job_id,
             "result": "denied_by_control_hook",
             "status_response": status_response,
+            "signed_admission_responses": signed_admission_responses,
             "job_req_response": job_req_response,
             "runner_exit_code": None,
             "runner_log": str(runner_log_path),
@@ -660,6 +703,7 @@ def main() -> int:
             "job_id": control_job_id,
             "result": "dry_run_only",
             "status_response": status_response,
+            "signed_admission_responses": signed_admission_responses,
             "job_req_response": job_req_response,
             "runner_exit_code": None,
             "runner_log": str(runner_log_path),
@@ -763,6 +807,7 @@ def main() -> int:
         "job_id": control_job_id,
         "result": "timeout" if timed_out else ("success" if (return_code or 0) == 0 else "runner_failed"),
         "status_response": status_response,
+        "signed_admission_responses": signed_admission_responses,
         "job_req_response": job_req_response,
         "runner_exit_code": return_code,
         "runner_log": str(runner_log_path),
