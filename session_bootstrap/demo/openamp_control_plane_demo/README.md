@@ -31,19 +31,23 @@ bash ./session_bootstrap/scripts/run_openamp_demo.sh \
   --probe-env ./session_bootstrap/config/phytium_pi_login.env
 ```
 
-Optional signed-manifest demo admission for the current artifact:
+Optional signed-manifest demo admission for the current artifact, baseline artifact, or both:
 
 ```bash
 bash ./session_bootstrap/scripts/run_openamp_demo.sh \
   --signed-manifest-file /tmp/openamp_demo_signed_admission/current.bundle.json \
-  --signed-manifest-public-key /tmp/openamp_demo_signed_admission/current.public.pem
+  --signed-manifest-public-key /tmp/openamp_demo_signed_admission/current.public.pem \
+  --baseline-signed-manifest-file /tmp/openamp_demo_signed_admission/baseline.bundle.json \
+  --baseline-signed-manifest-public-key /tmp/openamp_demo_signed_admission/baseline.public.pem
 ```
 
-The current demo keeps the legacy path intact by default. When the two flags above are supplied, the demo switches only the Current live path to `signed_manifest_v1` preflight:
+The demo keeps the legacy path intact by default. Current and Baseline are configured independently:
 
+- if a variant-specific signed bundle and public key are supplied, that live path switches to `signed_manifest_v1` preflight
 - the signed bundle is verified locally with the supplied public key before the wrapper launches
 - wrapper traces and manifests carry the signed-manifest metadata for the user-facing demo
 - the final board trigger still stays on the existing 44-byte `JOB_REQ` until the board firmware signed-admission patch is actually deployed
+- if Baseline signed admission is not configured or fails local verification, the demo stays explicit: Baseline live falls back to legacy expected-SHA admission when available, otherwise the UI keeps the formal archived baseline comparison only
 
 The same override can also be carried in the active inference env file with:
 
@@ -51,6 +55,10 @@ The same override can also be carried in the active inference env file with:
 OPENAMP_DEMO_ADMISSION_MODE=signed_manifest_v1
 OPENAMP_DEMO_SIGNED_MANIFEST_FILE=/tmp/openamp_demo_signed_admission/current.bundle.json
 OPENAMP_DEMO_SIGNED_MANIFEST_PUBLIC_KEY=/tmp/openamp_demo_signed_admission/current.public.pem
+
+OPENAMP_DEMO_BASELINE_ADMISSION_MODE=signed_manifest_v1
+OPENAMP_DEMO_BASELINE_SIGNED_MANIFEST_FILE=/tmp/openamp_demo_signed_admission/baseline.bundle.json
+OPENAMP_DEMO_BASELINE_SIGNED_MANIFEST_PUBLIC_KEY=/tmp/openamp_demo_signed_admission/baseline.public.pem
 ```
 
 The dashboard stays evidence-led either way. The "探测板卡 / OpenAMP" action only runs a read-only SSH probe plus an optional cached RPMsg status query.

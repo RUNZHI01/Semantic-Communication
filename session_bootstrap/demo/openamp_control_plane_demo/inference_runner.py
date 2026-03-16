@@ -55,6 +55,9 @@ DEMO_MAX_INPUTS_ENV = "OPENAMP_DEMO_MAX_INPUTS"
 DEMO_ADMISSION_MODE_ENV = "OPENAMP_DEMO_ADMISSION_MODE"
 DEMO_SIGNED_MANIFEST_FILE_ENV = "OPENAMP_DEMO_SIGNED_MANIFEST_FILE"
 DEMO_SIGNED_MANIFEST_PUBLIC_KEY_ENV = "OPENAMP_DEMO_SIGNED_MANIFEST_PUBLIC_KEY"
+DEMO_BASELINE_ADMISSION_MODE_ENV = "OPENAMP_DEMO_BASELINE_ADMISSION_MODE"
+DEMO_BASELINE_SIGNED_MANIFEST_FILE_ENV = "OPENAMP_DEMO_BASELINE_SIGNED_MANIFEST_FILE"
+DEMO_BASELINE_SIGNED_MANIFEST_PUBLIC_KEY_ENV = "OPENAMP_DEMO_BASELINE_SIGNED_MANIFEST_PUBLIC_KEY"
 
 _LIVE_JOB_ID_LOCK = Lock()
 _LAST_LIVE_JOB_ID = 0
@@ -779,6 +782,36 @@ def resolve_demo_path(raw_path: str) -> Path:
     return path
 
 
+def demo_variant_label(variant: str) -> str:
+    return "Baseline" if variant == "baseline" else "Current"
+
+
+def demo_admission_env_names(variant: str) -> dict[str, str]:
+    if variant == "baseline":
+        return {
+            "mode": DEMO_BASELINE_ADMISSION_MODE_ENV,
+            "bundle": DEMO_BASELINE_SIGNED_MANIFEST_FILE_ENV,
+            "public_key": DEMO_BASELINE_SIGNED_MANIFEST_PUBLIC_KEY_ENV,
+        }
+    return {
+        "mode": DEMO_ADMISSION_MODE_ENV,
+        "bundle": DEMO_SIGNED_MANIFEST_FILE_ENV,
+        "public_key": DEMO_SIGNED_MANIFEST_PUBLIC_KEY_ENV,
+    }
+
+
+def demo_signed_manifest_config(values: dict[str, str], *, variant: str) -> dict[str, str]:
+    env_names = demo_admission_env_names(variant)
+    return {
+        "mode_env": env_names["mode"],
+        "bundle_env": env_names["bundle"],
+        "public_key_env": env_names["public_key"],
+        "mode_value": str(values.get(env_names["mode"]) or "").strip().lower(),
+        "bundle_value": str(values.get(env_names["bundle"]) or "").strip(),
+        "public_key_value": str(values.get(env_names["public_key"]) or "").strip(),
+    }
+
+
 def expected_sha_for_variant_from_env(access: BoardAccessConfig, variant: str) -> str:
     values = access.build_env()
     if variant == "baseline":
@@ -787,12 +820,11 @@ def expected_sha_for_variant_from_env(access: BoardAccessConfig, variant: str) -
 
 
 def configured_admission_mode(values: dict[str, str], *, variant: str) -> str:
-    if variant != "current":
-        return "legacy_sha"
-    raw_mode = str(values.get(DEMO_ADMISSION_MODE_ENV) or "").strip().lower()
+    config = demo_signed_manifest_config(values, variant=variant)
+    raw_mode = config["mode_value"]
     if raw_mode:
         return raw_mode
-    if str(values.get(DEMO_SIGNED_MANIFEST_FILE_ENV) or "").strip():
+    if config["bundle_value"]:
         return "signed_manifest_v1"
     return "legacy_sha"
 
@@ -807,12 +839,13 @@ def load_signed_manifest_summary(
     if admission_mode != "signed_manifest_v1":
         raise ValueError("signed manifest summary requested while admission mode is not signed_manifest_v1")
 
-    signed_manifest_file = str(values.get(DEMO_SIGNED_MANIFEST_FILE_ENV) or "").strip()
+    config = demo_signed_manifest_config(values, variant=variant)
+    signed_manifest_file = config["bundle_value"]
     if not signed_manifest_file:
-        raise ValueError(f"{DEMO_SIGNED_MANIFEST_FILE_ENV} is required for signed-manifest demo admission")
-    public_key_file = str(values.get(DEMO_SIGNED_MANIFEST_PUBLIC_KEY_ENV) or "").strip()
+        raise ValueError(f"{config['bundle_env']} is required for signed-manifest demo admission")
+    public_key_file = config["public_key_value"]
     if require_public_key and not public_key_file:
-        raise ValueError(f"{DEMO_SIGNED_MANIFEST_PUBLIC_KEY_ENV} is required for signed-manifest demo admission")
+        raise ValueError(f"{config['public_key_env']} is required for signed-manifest demo admission")
 
     bundle_path = resolve_demo_path(signed_manifest_file)
     if not bundle_path.exists():
@@ -855,6 +888,7 @@ def load_signed_manifest_summary(
 
 def resolve_live_admission(access: BoardAccessConfig, *, variant: str) -> dict[str, Any]:
     values = access.build_env()
+    env_names = demo_admission_env_names(variant)
     admission_mode = configured_admission_mode(values, variant=variant)
     expected_sha256 = expected_sha_for_variant_from_env(access, variant)
     if admission_mode == "legacy_sha":
@@ -866,7 +900,7 @@ def resolve_live_admission(access: BoardAccessConfig, *, variant: str) -> dict[s
         }
     if admission_mode != "signed_manifest_v1":
         raise ValueError(
-            f"unsupported {DEMO_ADMISSION_MODE_ENV} value {admission_mode!r}; use legacy_sha or signed_manifest_v1"
+            f"unsupported {env_names['mode']} value {admission_mode!r}; use legacy_sha or signed_manifest_v1"
         )
 
     summary = load_signed_manifest_summary(values, variant=variant, require_public_key=True)
@@ -877,7 +911,7 @@ def resolve_live_admission(access: BoardAccessConfig, *, variant: str) -> dict[s
     manifest_expected_sha256 = str(summary["artifact_sha256"])
     if expected_sha256 and expected_sha256 != manifest_expected_sha256:
         raise ValueError(
-            "configured current expected SHA does not match the signed manifest artifact SHA"
+            f"configured {variant} expected SHA does not match the signed manifest artifact SHA"
         )
     return {
         "mode": "signed_manifest_v1",
@@ -896,17 +930,21 @@ def resolve_live_admission(access: BoardAccessConfig, *, variant: str) -> dict[s
 
 def describe_demo_admission(access: BoardAccessConfig, *, variant: str = "current") -> dict[str, Any]:
     values = access.build_env()
+    config = demo_signed_manifest_config(values, variant=variant)
+    variant_label = demo_variant_label(variant)
     admission_mode = configured_admission_mode(values, variant=variant)
     if admission_mode == "legacy_sha":
         expected_sha256 = expected_sha_for_variant_from_env(access, variant)
-        note = "Current 44-byte JOB_REQ stays on the legacy trusted SHA allowlist path."
+        note = f"{variant_label} 44-byte JOB_REQ stays on the legacy trusted SHA allowlist path."
         if expected_sha256:
             note = f"Legacy 44-byte JOB_REQ; expected_sha={expected_sha256[:12]}."
+        elif variant == "baseline":
+            note = "Baseline legacy live needs a formal baseline expected SHA to stay honest."
         return {
-            "status": "ready" if expected_sha256 or variant != "current" else "config_error",
+            "status": "ready" if expected_sha256 else "config_error",
             "mode": "legacy_sha",
             "label": "Legacy SHA allowlist",
-            "tone": "online" if expected_sha256 or variant != "current" else "degraded",
+            "tone": "online" if expected_sha256 else "degraded",
             "bundle_path": "",
             "public_key_path": "",
             "manifest_sha256": "",
@@ -930,7 +968,7 @@ def describe_demo_admission(access: BoardAccessConfig, *, variant: str = "curren
             "key_id": "",
             "verified_locally": False,
             "artifact_match": None,
-            "note": f"Unsupported {DEMO_ADMISSION_MODE_ENV}={admission_mode!r}.",
+            "note": f"Unsupported {config['mode_env']}={admission_mode!r}.",
         }
 
     try:
@@ -941,8 +979,8 @@ def describe_demo_admission(access: BoardAccessConfig, *, variant: str = "curren
             "mode": "signed_manifest_v1",
             "label": "Signed manifest v1",
             "tone": "degraded",
-            "bundle_path": str(values.get(DEMO_SIGNED_MANIFEST_FILE_ENV) or ""),
-            "public_key_path": str(values.get(DEMO_SIGNED_MANIFEST_PUBLIC_KEY_ENV) or ""),
+            "bundle_path": config["bundle_value"],
+            "public_key_path": config["public_key_value"],
             "manifest_sha256": "",
             "artifact_sha256": "",
             "key_id": "",
@@ -975,75 +1013,54 @@ def describe_demo_admission(access: BoardAccessConfig, *, variant: str = "curren
 
 
 def describe_demo_variant_support(access: BoardAccessConfig, *, variant: str) -> dict[str, Any]:
-    values = access.build_env()
-    if variant == "current":
-        admission = describe_demo_admission(access, variant="current")
-        if admission["mode"] == "signed_manifest_v1":
-            ready = admission["status"] == "ready"
-            note = "Current signed-admission live path is supported."
-            if not ready:
-                note = "Current signed-admission live path is not ready yet."
-            if admission.get("note"):
-                note = f"{note} {admission['note']}"
-            return {
-                "variant": "current",
-                "status": admission["status"],
-                "mode": admission["mode"],
-                "label": "Current signed live 已支持" if ready else "Current signed live 未就绪",
-                "tone": "online" if ready else "degraded",
-                "note": note,
-                "supported": ready,
-                "launch_allowed": ready,
-            }
-
-        expected_sha256 = expected_sha_for_variant(access, "current")
-        note = "Current live path is still using the legacy SHA allowlist."
-        if expected_sha256:
-            note = f"{note} expected_sha={expected_sha256[:12]}."
+    admission = describe_demo_admission(access, variant=variant)
+    variant_label = demo_variant_label(variant)
+    if admission["mode"] == "signed_manifest_v1":
+        ready = admission["status"] == "ready"
+        note = f"{variant_label} signed-admission live path is supported."
+        if not ready:
+            note = f"{variant_label} signed-admission live path is not ready yet."
+        if admission.get("note"):
+            note = f"{note} {admission['note']}"
         return {
-            "variant": "current",
-            "status": "ready" if expected_sha256 else "config_error",
+            "variant": variant,
+            "status": admission["status"],
             "mode": admission["mode"],
-            "label": "Current legacy live",
-            "tone": "degraded" if expected_sha256 else "degraded",
+            "label": f"{variant_label} signed live 已支持" if ready else f"{variant_label} signed live 未就绪",
+            "tone": "online" if ready else "degraded",
             "note": note,
-            "supported": bool(expected_sha256),
-            "launch_allowed": bool(expected_sha256),
+            "supported": ready,
+            "launch_allowed": ready,
         }
 
-    current_mode = configured_admission_mode(values, variant="current")
-    baseline_expected_sha = expected_sha_for_variant(access, "baseline")
-    if current_mode == "signed_manifest_v1":
+    if admission["mode"] == "legacy_sha":
+        ready = admission["status"] == "ready"
+        note = f"{variant_label} live path is still using the legacy SHA allowlist."
+        if ready and admission.get("artifact_sha256"):
+            note = f"{note} expected_sha={str(admission['artifact_sha256'])[:12]}."
+        elif variant == "baseline":
+            note = "缺少 formal baseline expected SHA；第三幕仅保留 formal baseline 归档对比。"
+        else:
+            note = "Current live path is not ready; the legacy SHA allowlist still needs a trusted current expected SHA."
         return {
-            "variant": "baseline",
-            "status": "unsupported",
-            "mode": "legacy_sha",
-            "label": "Baseline live 未适配 signed admission",
+            "variant": variant,
+            "status": admission["status"],
+            "mode": admission["mode"],
+            "label": f"{variant_label} legacy live" if ready else f"{variant_label} legacy live 未就绪",
             "tone": "degraded",
-            "note": "第三幕保留 formal baseline 对比；Baseline live 不作为当前 signed-admission demo 路径。",
-            "supported": False,
-            "launch_allowed": False,
+            "note": note,
+            "supported": ready,
+            "launch_allowed": ready,
         }
 
-    if baseline_expected_sha:
-        return {
-            "variant": "baseline",
-            "status": "ready",
-            "mode": "legacy_sha",
-            "label": "Baseline legacy live",
-            "tone": "degraded",
-            "note": "Baseline live 仍是 legacy SHA 路径，尚未适配 signed admission。",
-            "supported": True,
-            "launch_allowed": True,
-        }
-
+    note = str(admission.get("note") or f"{variant_label} live config error.")
     return {
-        "variant": "baseline",
+        "variant": variant,
         "status": "config_error",
-        "mode": "legacy_sha",
-        "label": "Baseline legacy live 未就绪",
+        "mode": str(admission.get("mode") or ""),
+        "label": f"{variant_label} live 配置错误",
         "tone": "degraded",
-        "note": "缺少 formal baseline expected SHA；第三幕仅保留 formal baseline 归档对比。",
+        "note": note,
         "supported": False,
         "launch_allowed": False,
     }
@@ -1148,11 +1165,12 @@ def missing_control_plane_fields(access: BoardAccessConfig, variant: str) -> lis
     if admission_mode == "legacy_sha" and expected_sha_for_variant(access, variant):
         return []
     if admission_mode == "signed_manifest_v1":
+        config = demo_signed_manifest_config(values, variant=variant)
         missing: list[str] = []
-        if not str(values.get(DEMO_SIGNED_MANIFEST_FILE_ENV) or "").strip():
-            missing.append(DEMO_SIGNED_MANIFEST_FILE_ENV)
-        if not str(values.get(DEMO_SIGNED_MANIFEST_PUBLIC_KEY_ENV) or "").strip():
-            missing.append(DEMO_SIGNED_MANIFEST_PUBLIC_KEY_ENV)
+        if not config["bundle_value"]:
+            missing.append(config["bundle_env"])
+        if not config["public_key_value"]:
+            missing.append(config["public_key_env"])
         return missing
     if variant == "baseline":
         return ["INFERENCE_BASELINE_EXPECTED_SHA256"]
@@ -1220,47 +1238,18 @@ class LiveRemoteReconstructionJob:
             }
             return
 
-        variant_support = describe_demo_variant_support(access, variant=variant)
-        if variant == "baseline" and variant_support.get("status") == "unsupported":
-            message = (
-                "Baseline live 未适配当前 signed-admission demo；第三幕保留 formal baseline 对比，"
-                "不会把 Baseline live 伪装成已支持路径。"
-            )
-            self._final_snapshot = {
-                "status": "config_error",
-                "request_state": "completed",
-                "status_category": "unsupported_live_path",
-                "execution_mode": "fallback",
-                "variant": variant,
-                "message": message,
-                "runner_summary": {},
-                "wrapper_summary": {},
-                "diagnostics": {"variant_support": variant_support},
-                "progress": build_progress_payload(
-                    [],
-                    request_state="completed",
-                    final_status="config_error",
-                    expected_count=max_inputs,
-                    remaining_count=max_inputs,
-                    count_source="demo_default",
-                    count_label=f"0 / {max_inputs}",
-                ),
-                "artifacts": self._artifact_paths(),
-            }
-            return
-
         control_plane_missing = missing_control_plane_fields(access, variant)
         if control_plane_missing:
             status_category = classify_status_category(status="config_error", missing_fields=control_plane_missing)
-            if variant == "baseline":
+            if configured_admission_mode(access.build_env(), variant=variant) == "signed_manifest_v1":
+                message = (
+                    f"{demo_variant_label(variant)} live 已切到 signed-manifest admission，但本地签名包或公钥路径仍未补齐；"
+                    "界面将先回退到归档样例。"
+                )
+            elif variant == "baseline":
                 message = (
                     "当前演示缺少 formal baseline expected SHA，Baseline 无法诚实进入 OpenAMP live 准入；"
                     "界面将保留正式 baseline 对比结果。"
-                )
-            elif configured_admission_mode(access.build_env(), variant=variant) == "signed_manifest_v1":
-                message = (
-                    "当前演示已切到 signed-manifest admission，但本地签名包或公钥路径仍未补齐；"
-                    "界面将先回退到归档样例。"
                 )
             else:
                 message = build_inference_message(status_category, variant=variant, include_fallback=True)
@@ -1294,7 +1283,7 @@ class LiveRemoteReconstructionJob:
             message = build_inference_message(status_category, variant=variant, include_fallback=True)
             if configured_admission_mode(access.build_env(), variant=variant) == "signed_manifest_v1":
                 message = (
-                    "当前演示已切到 signed-manifest admission，但本地签名包校验未通过；"
+                    f"{demo_variant_label(variant)} live 已切到 signed-manifest admission，但本地签名包校验未通过；"
                     "界面将先回退到归档样例。"
                 )
             self._final_snapshot = {

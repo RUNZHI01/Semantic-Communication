@@ -28,6 +28,9 @@ from fault_injector import query_live_status, run_fault_action, run_recover_acti
 from inference_runner import (
     DEFAULT_MAX_INPUTS,
     DEMO_ADMISSION_MODE_ENV,
+    DEMO_BASELINE_ADMISSION_MODE_ENV,
+    DEMO_BASELINE_SIGNED_MANIFEST_FILE_ENV,
+    DEMO_BASELINE_SIGNED_MANIFEST_PUBLIC_KEY_ENV,
     DEMO_SIGNED_MANIFEST_FILE_ENV,
     DEMO_SIGNED_MANIFEST_PUBLIC_KEY_ENV,
     describe_demo_admission,
@@ -74,6 +77,22 @@ def parse_args() -> argparse.Namespace:
         "--signed-manifest-public-key",
         default="",
         help="Optional PEM public key used to verify --signed-manifest-file locally before launch.",
+    )
+    parser.add_argument(
+        "--baseline-admission-mode",
+        choices=("legacy_sha", "signed_manifest_v1"),
+        default="",
+        help="Optional baseline-demo admission mode override.",
+    )
+    parser.add_argument(
+        "--baseline-signed-manifest-file",
+        default="",
+        help="Optional signed bundle path for the baseline demo artifact.",
+    )
+    parser.add_argument(
+        "--baseline-signed-manifest-public-key",
+        default="",
+        help="Optional PEM public key used to verify --baseline-signed-manifest-file locally before launch.",
     )
     return parser.parse_args()
 
@@ -454,21 +473,7 @@ class DashboardState:
             board_access = self._board_access
         variant_support = describe_demo_variant_support(board_access, variant=variant)
 
-        if variant == "baseline" and variant_support.get("status") == "unsupported":
-            payload = self._build_blocked_inference_payload(
-                variant=variant,
-                image_index=image_index,
-                status_category="unsupported_live_path",
-                source_label="Baseline 保留正式归档对比",
-                message=(
-                    "Baseline live 未适配当前 signed-admission demo；第三幕继续展示 formal baseline 归档结果，"
-                    "不会把 Baseline live 说成已支持路径。"
-                ),
-                detail=str(variant_support.get("note") or "Baseline live 未适配当前 signed-admission demo。"),
-                diagnostics={"variant_support": variant_support},
-                event_log=[str(variant_support.get("note") or "Baseline live 未适配当前 signed-admission demo。")],
-            )
-        elif board_access.configured:
+        if board_access.configured:
             active_record = self._running_inference_job_record()
             if active_record is not None:
                 active_variant = str(active_record["variant"])
@@ -722,6 +727,12 @@ def demo_startup_env_overrides(args: argparse.Namespace) -> dict[str, str]:
         overrides[DEMO_SIGNED_MANIFEST_FILE_ENV] = str(args.signed_manifest_file).strip()
     if str(getattr(args, "signed_manifest_public_key", "") or "").strip():
         overrides[DEMO_SIGNED_MANIFEST_PUBLIC_KEY_ENV] = str(args.signed_manifest_public_key).strip()
+    if str(getattr(args, "baseline_admission_mode", "") or "").strip():
+        overrides[DEMO_BASELINE_ADMISSION_MODE_ENV] = str(args.baseline_admission_mode).strip()
+    if str(getattr(args, "baseline_signed_manifest_file", "") or "").strip():
+        overrides[DEMO_BASELINE_SIGNED_MANIFEST_FILE_ENV] = str(args.baseline_signed_manifest_file).strip()
+    if str(getattr(args, "baseline_signed_manifest_public_key", "") or "").strip():
+        overrides[DEMO_BASELINE_SIGNED_MANIFEST_PUBLIC_KEY_ENV] = str(args.baseline_signed_manifest_public_key).strip()
     return overrides
 
 

@@ -237,6 +237,9 @@ class ServerMainTest(unittest.TestCase):
             demo_admission_mode="",
             signed_manifest_file="",
             signed_manifest_public_key="",
+            baseline_admission_mode="",
+            baseline_signed_manifest_file="",
+            baseline_signed_manifest_public_key="",
         )
         events: list[str] = []
         fake_app_state = Mock()
@@ -298,6 +301,9 @@ class ServerMainTest(unittest.TestCase):
             demo_admission_mode="",
             signed_manifest_file="",
             signed_manifest_public_key="",
+            baseline_admission_mode="",
+            baseline_signed_manifest_file="",
+            baseline_signed_manifest_public_key="",
         )
         events: list[str] = []
         fake_app_state = Mock()
@@ -463,13 +469,13 @@ class DemoHTTPServerTest(unittest.TestCase):
                     },
                     {
                         "variant": "baseline",
-                        "status": "unsupported",
-                        "mode": "legacy_sha",
-                        "label": "Baseline live 未适配 signed admission",
-                        "tone": "degraded",
-                        "note": "第三幕保留 formal baseline 对比；Baseline live 不作为当前 signed-admission demo 路径。",
-                        "supported": False,
-                        "launch_allowed": False,
+                        "status": "ready",
+                        "mode": "signed_manifest_v1",
+                        "label": "Baseline signed live 已支持",
+                        "tone": "online",
+                        "note": "Baseline signed-admission live path is supported.",
+                        "supported": True,
+                        "launch_allowed": True,
                     },
                 ],
             ),
@@ -481,7 +487,8 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(payload["live"]["admission"]["key_id"], "demo-live-20260316")
         self.assertTrue(payload["live"]["admission"]["verified_locally"])
         self.assertEqual(payload["live"]["variant_support"]["current"]["label"], "Current signed live 已支持")
-        self.assertFalse(payload["live"]["variant_support"]["baseline"]["launch_allowed"])
+        self.assertEqual(payload["live"]["variant_support"]["baseline"]["label"], "Baseline signed live 已支持")
+        self.assertTrue(payload["live"]["variant_support"]["baseline"]["launch_allowed"])
 
     def test_board_access_endpoint_accepts_password_only_and_keeps_preloaded_defaults(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
@@ -758,24 +765,59 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(payload["live_attempt"]["diagnostics"]["board_status"]["active_job_id"], 8093)
         launch_job.assert_not_called()
 
-    def test_run_baseline_endpoint_blocks_signed_demo_path_as_unsupported(self) -> None:
+    def test_run_baseline_endpoint_launches_when_baseline_signed_path_is_ready(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
+        request_json(
+            state,
+            "POST",
+            "/api/session/board-access",
+            body=json.dumps({"password": "demo-pass"}).encode("utf-8"),
+        )
+        live_job = FakeInferenceJob(
+            [
+                {
+                    "status": "running",
+                    "request_state": "running",
+                    "status_category": "running",
+                    "execution_mode": "live",
+                    "variant": "baseline",
+                    "message": "Baseline signed live 已进入真实在线推进。",
+                    "runner_summary": {},
+                    "wrapper_summary": {},
+                    "diagnostics": {},
+                    "progress": live_progress_payload("真实在线推进", "running", 76, "板端执行中"),
+                    "artifacts": {},
+                }
+            ],
+            job_id="baseline-job-001",
+        )
 
         with (
             patch(
                 "server.describe_demo_variant_support",
                 return_value={
                     "variant": "baseline",
-                    "status": "unsupported",
-                    "mode": "legacy_sha",
-                    "label": "Baseline live 未适配 signed admission",
-                    "tone": "degraded",
-                    "note": "第三幕保留 formal baseline 对比；Baseline live 不作为当前 signed-admission demo 路径。",
-                    "supported": False,
-                    "launch_allowed": False,
+                    "status": "ready",
+                    "mode": "signed_manifest_v1",
+                    "label": "Baseline signed live 已支持",
+                    "tone": "online",
+                    "note": "Baseline signed-admission live path is supported.",
+                    "supported": True,
+                    "launch_allowed": True,
                 },
             ),
-            patch("server.launch_remote_reconstruction_job") as launch_job,
+            patch(
+                "server.query_live_status",
+                return_value={
+                    "status": "success",
+                    "guard_state": "READY",
+                    "active_job_id": 0,
+                    "last_fault_code": "NONE",
+                    "total_fault_count": 0,
+                    "logs": [],
+                },
+            ),
+            patch("server.launch_remote_reconstruction_job", return_value=live_job) as launch_job,
         ):
             status, _, payload = request_json(
                 state,
@@ -785,11 +827,10 @@ class DemoHTTPServerTest(unittest.TestCase):
             )
 
         self.assertEqual(status, 200)
-        self.assertEqual(payload["status"], "fallback")
-        self.assertEqual(payload["status_category"], "unsupported_live_path")
-        self.assertIn("Baseline live 未适配当前 signed-admission demo", payload["message"])
-        self.assertEqual(payload["live_attempt"]["status"], "blocked")
-        launch_job.assert_not_called()
+        self.assertEqual(payload["execution_mode"], "live")
+        self.assertEqual(payload["request_state"], "running")
+        self.assertEqual(payload["job_id"], live_job.job_id)
+        launch_job.assert_called_once()
 
     def test_inference_progress_endpoint_returns_completed_live_payload(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
