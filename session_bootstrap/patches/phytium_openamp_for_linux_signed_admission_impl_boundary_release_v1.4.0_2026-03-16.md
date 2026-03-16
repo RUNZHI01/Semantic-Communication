@@ -17,7 +17,10 @@ Status:
 
 What moved from placeholder to concrete boundary in this follow-on patch:
 
-- `sc_public_key_slots[0]` now carries the exact uncompressed P-256 public key bytes derived from:
+- `sc_public_key_slots[0]` now carries the exact slot binding triple from the committed fixture:
+  - `key_id = fixture-dev-20260316`
+  - `channel = openamp-fixture`
+  - exact uncompressed P-256 public key bytes derived from:
   `session_bootstrap/examples/openamp_signed_manifest.fixture.public.pem`
 - `ScManifestContract` now has explicit C fields for the committed manifest contract:
   - `schema_id`
@@ -29,7 +32,7 @@ What moved from placeholder to concrete boundary in this follow-on patch:
   - `publisher_key_id`
   - `publisher_channel`
 - `sc_ctrl_parse_manifest_contract(...)` is no longer a blank TODO surface.
-  It now specifies the narrow parser shape and helper set for:
+  It now decomposes the narrow parser path into exact helper calls for:
   - top-level `schema`
   - top-level `manifest_version`
   - `artifact.sha256`
@@ -38,10 +41,20 @@ What moved from placeholder to concrete boundary in this follow-on patch:
   - `job.job_flags`
   - `publisher.key_id`
   - `publisher.channel`
+- `sc_ctrl_verify_signed_manifest_for_job_req(...)` now uses the parsed publisher fields for slot binding:
+  - `publisher.key_id / publisher.channel` must match the selected firmware key slot before the 44-byte `JOB_REQ` mirror is accepted.
 - `sc_ctrl_verify_manifest_signature(...)` now has one exact standalone-SDK integration boundary:
   - `sc_ctrl_crypto_sha256(...)`
   - `sc_ctrl_crypto_verify_ecdsa_p256_sha256_der(...)`
   - request struct `ScEcdsaP256VerifyRequest`
+- The crypto wrappers now pin the exact mbedTLS drop-in sequence instead of a generic TODO:
+  - `mbedtls_sha256_ret(...)`
+  - `mbedtls_ecdsa_init(...)`
+  - `mbedtls_ecp_group_load(...)`
+  - `mbedtls_ecp_point_read_binary(...)`
+  - `mbedtls_ecp_check_pubkey(...)`
+  - `mbedtls_ecdsa_read_signature(...)`
+  - `mbedtls_ecdsa_free(...)`
 
 What still intentionally does not change runtime behavior:
 
@@ -61,7 +74,8 @@ Exact committed artifacts that make the next coding step mechanical:
 Exact next firmware coding step:
 
 1. Apply this follow-on patch after the scaffold patch in the firmware tree.
-2. Replace `sc_ctrl_crypto_sha256(...)` with the accepted standalone-SDK SHA-256 one-shot call.
-3. Replace `sc_ctrl_crypto_verify_ecdsa_p256_sha256_der(...)` with the accepted standalone-SDK ECDSA-P256 DER verify call sequence against `slot->public_key_uncompressed`.
-4. Build the patched firmware and replay the committed fixture transport plan, ending with the unchanged 44-byte `JOB_REQ`.
-5. Only after that passes should the signed path be flipped from deny-by-default to allow-on-success.
+2. Keep the parser helper split and publisher slot binding as-is; the remaining work is inside the two crypto wrappers.
+3. Replace `sc_ctrl_crypto_sha256(...)` with the accepted standalone-SDK SHA-256 one-shot call already named in the patch comment.
+4. Replace `sc_ctrl_crypto_verify_ecdsa_p256_sha256_der(...)` with the exact `mbedtls_ecdsa_init -> mbedtls_ecp_group_load -> mbedtls_ecp_point_read_binary -> mbedtls_ecp_check_pubkey -> mbedtls_ecdsa_read_signature -> mbedtls_ecdsa_free` sequence against `slot->public_key_uncompressed`.
+5. Build the patched firmware and replay the committed fixture transport plan, ending with the unchanged 44-byte `JOB_REQ`.
+6. Only after that passes should the signed path be flipped from deny-by-default to allow-on-success.

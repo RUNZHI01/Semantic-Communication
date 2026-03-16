@@ -76,24 +76,39 @@ class SignedAdmissionFirmwareImplBoundaryTest(unittest.TestCase):
 
         for line in firmware_contract["public_key_slot"]["c_initializer_lines"]:
             self.assertIn(line, patch_text)
+        self.assertIn(firmware_contract["public_key_slot"]["key_id"], patch_text)
+        self.assertIn(firmware_contract["public_key_slot"]["channel"], patch_text)
 
         for symbol in (
             "ScEcdsaP256VerifyRequest",
-            "sc_ctrl_parse_sha256_hex",
-            "sc_ctrl_manifest_flag_from_string",
-            "sc_ctrl_json_find_object",
-            "sc_ctrl_json_find_string_field",
-            "sc_ctrl_json_find_u32_field",
-            "sc_ctrl_crypto_sha256",
-            "sc_ctrl_crypto_verify_ecdsa_p256_sha256_der",
-            'strcmp(out_contract->schema_id, "openamp_artifact_manifest/v1")',
+            '"openamp_artifact_manifest/v1"',
             "sc_ctrl_verify_manifest_signature(slot,",
             "sc_signed_stage.manifest_sha256",
         ):
             self.assertIn(symbol, patch_text)
 
+        for helper_name in firmware_contract["parser_strategy"]["required_helpers"]:
+            self.assertIn(helper_name, patch_text)
+        for marker in firmware_contract["parser_strategy"]["parse_call_markers"]:
+            self.assertIn(marker, patch_text)
+        for marker in firmware_contract["parser_strategy"]["slot_binding_markers"]:
+            self.assertIn(marker, patch_text)
+        for marker in firmware_contract["crypto_boundary"]["sha256_wrapper"]["validation_markers"]:
+            self.assertIn(marker, patch_text)
+        for marker in firmware_contract["crypto_boundary"]["sha256_wrapper"]["call_sequence"]:
+            self.assertIn(marker, patch_text)
+        for marker in firmware_contract["crypto_boundary"]["verify_wrapper"]["validation_markers"]:
+            self.assertIn(marker, patch_text)
+        for marker in firmware_contract["crypto_boundary"]["verify_wrapper"]["context_markers"]:
+            self.assertIn(marker, patch_text)
+        for marker in firmware_contract["crypto_boundary"]["verify_wrapper"]["cleanup_sequence"]:
+            self.assertIn(marker, patch_text)
+        for marker in firmware_contract["crypto_boundary"]["mbedtls_call_sequence"]:
+            self.assertIn(marker, patch_text)
+
         self.assertNotIn("+            /* TODO(next): replace placeholder bytes", patch_text)
         self.assertNotIn("+    /* TODO(next): implement strict field extraction", patch_text)
+        self.assertNotIn("mbedtls_ecdsa_from_keypair", patch_text)
 
     def test_patch_note_keeps_non_admitting_status_explicit(self) -> None:
         note_text = PATCH_NOTE_PATH.read_text(encoding="utf-8")
@@ -103,6 +118,8 @@ class SignedAdmissionFirmwareImplBoundaryTest(unittest.TestCase):
         self.assertIn("openamp_signed_manifest.fixture.firmware_contract.json", note_text)
         self.assertIn("sc_ctrl_crypto_sha256(...)", note_text)
         self.assertIn("sc_ctrl_crypto_verify_ecdsa_p256_sha256_der(...)", note_text)
+        self.assertIn("publisher.key_id / publisher.channel", note_text)
+        self.assertIn("mbedtls_ecp_check_pubkey", note_text)
         self.assertIn("Legacy `JOB_REQ` SHA allowlist behavior remains intact", note_text)
 
 

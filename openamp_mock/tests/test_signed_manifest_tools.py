@@ -356,11 +356,24 @@ class SignedManifestToolsTest(unittest.TestCase):
         self.assertEqual(summary["schema"], signed_manifest.FIRMWARE_CONTRACT_SCHEMA)
         self.assertEqual(summary["key_slot"], 1)
         self.assertEqual(artifact["public_key_slot"]["slot_id"], 1)
+        self.assertIn('"openamp-fixture"', artifact["public_key_slot"]["c_initializer"])
         self.assertEqual(
             artifact["manifest_contract"]["artifact_sha256"],
             "09af47ee1b0e2a7d3cad3add031f36811926e1fe34cfd58fa98d70eba9526b91",
         )
         self.assertEqual(artifact["manifest_contract"]["job_flags_wire"], 2)
+        self.assertEqual(
+            artifact["parser_strategy"]["slot_binding_markers"],
+            [
+                "strcmp(contract.publisher_key_id, slot->key_id)",
+                "strcmp(contract.publisher_channel, slot->channel)",
+            ],
+        )
+        self.assertIn(
+            "mbedtls_ecp_check_pubkey(&ecdsa.grp, &ecdsa.Q)",
+            artifact["crypto_boundary"]["mbedtls_call_sequence"],
+        )
+        self.assertNotIn("mbedtls_ecdsa_from_keypair", json.dumps(artifact["crypto_boundary"]))
 
     def test_committed_fixture_bundle_and_transport_plan_match_tool_output(self) -> None:
         manifest = signed_manifest.load_json(FIXTURE_MANIFEST_PATH)
