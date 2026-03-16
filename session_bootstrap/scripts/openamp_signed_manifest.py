@@ -5,11 +5,13 @@ import argparse
 import base64
 import hashlib
 import json
+import struct
 import subprocess
 import tempfile
 import time
 from pathlib import Path
 from typing import Any, Mapping
+import zlib
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -18,6 +20,39 @@ MANIFEST_SCHEMA = "openamp_artifact_manifest/v1"
 SIGNED_BUNDLE_SCHEMA = "openamp_signed_manifest_bundle/v1"
 BUNDLE_VERSION = 1
 SIGNATURE_ALGORITHM = "ecdsa-p256-sha256"
+SIGNED_ADMISSION_TRANSPORT_SCHEMA = "openamp_signed_admission_transport_plan/v1"
+CTRL_MAGIC = 0x53434F4D
+CTRL_VERSION = 1
+CTRL_HEADER_STRUCT = struct.Struct("<IHHIIII")
+SIGNED_ADMISSION_TYPE = 1
+SIGNED_ADMISSION_SIGNATURE_ALGORITHM = 1
+SIGNED_ADMISSION_CHUNK_DATA_MAX = 160
+JOB_FLAG_NAME_TO_WIRE = {
+    "payload": 1,
+    "reconstruction": 2,
+    "smoke": 3,
+}
+SIGNED_ADMISSION_MSG_TYPES = {
+    "SIGNED_ADMISSION_BEGIN": 0x000C,
+    "SIGNED_ADMISSION_CHUNK": 0x000D,
+    "SIGNED_ADMISSION_SIGNATURE": 0x000E,
+    "SIGNED_ADMISSION_COMMIT": 0x000F,
+    "SIGNED_ADMISSION_ACK": 0x0010,
+}
+SIGNED_ADMISSION_STAGE_CODES = {
+    "BEGIN": 1,
+    "CHUNK": 2,
+    "SIGNATURE": 3,
+    "COMMIT": 4,
+}
+SIGNED_ADMISSION_ACK_STATUS = {
+    "ACCEPTED": 0,
+    "DUPLICATE": 1,
+    "OUT_OF_RANGE": 2,
+    "CRC_ERROR": 3,
+    "TOO_LARGE": 4,
+    "READY": 5,
+}
 
 
 def now_iso() -> str:
@@ -99,6 +134,31 @@ def canonicalize_manifest(manifest: Mapping[str, Any]) -> bytes:
 
 def manifest_sha256_hex(manifest: Mapping[str, Any]) -> str:
     return hashlib.sha256(canonicalize_manifest(manifest)).hexdigest()
+
+
+def compute_crc32(payload: bytes) -> int:
+    return zlib.crc32(payload) & 0xFFFFFFFF
+
+
+def compute_control_header_crc(
+    *,
+    magic: int,
+    version: int,
+    msg_type: int,
+    seq: int,
+    job_id: int,
+    payload_len: int,
+) -> int:
+    header_without_crc = struct.pack(
+        "<IHHIII",
+        magic,
+        version,
+        msg_type,
+        seq,
+        job_id,
+        payload_len,
+    )
+    return compute_crc32(header_without_crc)
 
 
 def validate_manifest(manifest: Mapping[str, Any]) -> None:
@@ -324,6 +384,53 @@ def validate_signed_manifest_bundle(bundle: Mapping[str, Any]) -> None:
     require_text(signature.get("value"), field_name="bundle.signature.value")
 
 
+def parse_job_flags_to_wire(job_flags: str) -> int:
+    key = require_text(job_flags, field_name="job_flags").strip().lower()
+    try:
+        return JOB_FLAG_NAME_TO_WIRE[key]
+    except KeyError as err:
+        allowed = ", ".join(sorted(JOB_FLAG_NAME_TO_WIRE))
+        raise ValueError(f"job_flags must map to a known wire value ({allowed}).") from err
+
+
+def decode_signature_bytes(bundle: Mapping[str, Any]) -> bytes:
+    signature = require_dict(bundle.get("signature"), field_name="bundle.signature")
+    return base64.b64decode(str(signature["value"]).encode("ascii"), validate=True)
+
+
+def build_control_frame(*, msg_type: int, seq: int, job_id: int, payload: bytes) -> bytes:
+    header_crc32 = compute_control_header_crc(
+        magic=CTRL_MAGIC,
+        version=CTRL_VERSION,
+        msg_type=msg_type,
+        seq=seq,
+        job_id=job_id,
+        payload_len=len(payload),
+    )
+    header = CTRL_HEADER_STRUCT.pack(
+        CTRL_MAGIC,
+        CTRL_VERSION,
+        msg_type,
+        seq,
+        job_id,
+        len(payload),
+        header_crc32,
+    )
+    return header + payload
+
+
+def chunk_bytes(payload: bytes, *, chunk_size: int) -> list[tuple[int, bytes]]:
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be > 0.")
+    chunks: list[tuple[int, bytes]] = []
+    offset = 0
+    while offset < len(payload):
+        chunk = payload[offset:offset + chunk_size]
+        chunks.append((offset, chunk))
+        offset += len(chunk)
+    return chunks
+
+
 def load_signed_manifest_bundle(path: str | Path) -> dict[str, Any]:
     bundle = load_json(path)
     validate_signed_manifest_bundle(bundle)
@@ -440,6 +547,235 @@ def build_signed_manifest_bundle(
     )
 
 
+def build_signed_admission_transport_plan(
+    bundle: Mapping[str, Any],
+    *,
+    job_id: int,
+    key_slot: int,
+    chunk_size: int = SIGNED_ADMISSION_CHUNK_DATA_MAX,
+    seq_start: int = 1,
+) -> dict[str, Any]:
+    validate_signed_manifest_bundle(bundle)
+    manifest = require_dict(bundle.get("manifest"), field_name="bundle.manifest")
+    artifact = require_dict(manifest.get("artifact"), field_name="manifest.artifact")
+    job = require_dict(manifest.get("job"), field_name="manifest.job")
+    if key_slot < 0 or key_slot > 0xFF:
+        raise ValueError("key_slot must fit in u8.")
+    if seq_start <= 0 or seq_start > 0xFFFFFFFF:
+        raise ValueError("seq_start must fit in u32 and be > 0.")
+    if chunk_size <= 0 or chunk_size > SIGNED_ADMISSION_CHUNK_DATA_MAX:
+        raise ValueError(
+            f"chunk_size must be > 0 and <= {SIGNED_ADMISSION_CHUNK_DATA_MAX} bytes."
+        )
+
+    canonical_manifest = canonicalize_manifest(manifest)
+    manifest_sha256 = normalize_sha256(bundle.get("manifest_sha256"), field_name="bundle.manifest_sha256")
+    signature_bytes = decode_signature_bytes(bundle)
+    signature_crc32 = compute_crc32(signature_bytes)
+    manifest_crc32 = compute_crc32(canonical_manifest)
+    expected_sha256 = normalize_sha256(artifact.get("sha256"), field_name="manifest.artifact.sha256")
+    deadline_ms = require_u32(job.get("deadline_ms"), field_name="manifest.job.deadline_ms")
+    expected_outputs = require_u32(job.get("expected_outputs"), field_name="manifest.job.expected_outputs")
+    flags_wire = parse_job_flags_to_wire(str(job.get("job_flags")))
+
+    seq = seq_start
+    frames: list[dict[str, Any]] = []
+
+    begin_payload = struct.pack(
+        "<BBH32sIII",
+        SIGNED_ADMISSION_TYPE,
+        key_slot,
+        SIGNED_ADMISSION_SIGNATURE_ALGORITHM,
+        bytes.fromhex(manifest_sha256),
+        len(canonical_manifest),
+        len(signature_bytes),
+        chunk_size,
+    )
+    begin_frame = build_control_frame(
+        msg_type=SIGNED_ADMISSION_MSG_TYPES["SIGNED_ADMISSION_BEGIN"],
+        seq=seq,
+        job_id=job_id,
+        payload=begin_payload,
+    )
+    frames.append(
+        {
+            "phase": "SIGNED_ADMISSION_BEGIN",
+            "seq": seq,
+            "job_id": job_id,
+            "msg_type": SIGNED_ADMISSION_MSG_TYPES["SIGNED_ADMISSION_BEGIN"],
+            "payload_len": len(begin_payload),
+            "payload_hex": begin_payload.hex(),
+            "frame_hex": begin_frame.hex(),
+            "payload": {
+                "admission_type": SIGNED_ADMISSION_TYPE,
+                "key_slot": key_slot,
+                "signature_algorithm": SIGNED_ADMISSION_SIGNATURE_ALGORITHM,
+                "manifest_sha256": manifest_sha256,
+                "manifest_len": len(canonical_manifest),
+                "signature_len": len(signature_bytes),
+                "chunk_size": chunk_size,
+            },
+        }
+    )
+    seq += 1
+
+    manifest_chunks: list[dict[str, Any]] = []
+    for offset, chunk in chunk_bytes(canonical_manifest, chunk_size=chunk_size):
+        chunk_crc32 = compute_crc32(chunk)
+        chunk_payload = (
+            bytes.fromhex(manifest_sha256)
+            + struct.pack("<III", offset, len(chunk), chunk_crc32)
+            + chunk
+        )
+        chunk_frame = build_control_frame(
+            msg_type=SIGNED_ADMISSION_MSG_TYPES["SIGNED_ADMISSION_CHUNK"],
+            seq=seq,
+            job_id=job_id,
+            payload=chunk_payload,
+        )
+        manifest_chunks.append(
+            {
+                "phase": "SIGNED_ADMISSION_CHUNK",
+                "seq": seq,
+                "job_id": job_id,
+                "msg_type": SIGNED_ADMISSION_MSG_TYPES["SIGNED_ADMISSION_CHUNK"],
+                "payload_len": len(chunk_payload),
+                "payload_hex": chunk_payload.hex(),
+                "frame_hex": chunk_frame.hex(),
+                "payload": {
+                    "manifest_sha256": manifest_sha256,
+                    "offset": offset,
+                    "chunk_len": len(chunk),
+                    "chunk_crc32": chunk_crc32,
+                    "chunk_data_hex": chunk.hex(),
+                },
+            }
+        )
+        seq += 1
+    frames.extend(manifest_chunks)
+
+    signature_payload = (
+        bytes.fromhex(manifest_sha256)
+        + struct.pack("<II", len(signature_bytes), signature_crc32)
+        + signature_bytes
+    )
+    signature_frame = build_control_frame(
+        msg_type=SIGNED_ADMISSION_MSG_TYPES["SIGNED_ADMISSION_SIGNATURE"],
+        seq=seq,
+        job_id=job_id,
+        payload=signature_payload,
+    )
+    frames.append(
+        {
+            "phase": "SIGNED_ADMISSION_SIGNATURE",
+            "seq": seq,
+            "job_id": job_id,
+            "msg_type": SIGNED_ADMISSION_MSG_TYPES["SIGNED_ADMISSION_SIGNATURE"],
+            "payload_len": len(signature_payload),
+            "payload_hex": signature_payload.hex(),
+            "frame_hex": signature_frame.hex(),
+            "payload": {
+                "manifest_sha256": manifest_sha256,
+                "signature_len": len(signature_bytes),
+                "signature_crc32": signature_crc32,
+                "signature_hex": signature_bytes.hex(),
+            },
+        }
+    )
+    seq += 1
+
+    commit_payload = (
+        bytes.fromhex(manifest_sha256)
+        + struct.pack(
+            "<IIII",
+            manifest_crc32,
+            signature_crc32,
+            len(canonical_manifest),
+            len(signature_bytes),
+        )
+    )
+    commit_frame = build_control_frame(
+        msg_type=SIGNED_ADMISSION_MSG_TYPES["SIGNED_ADMISSION_COMMIT"],
+        seq=seq,
+        job_id=job_id,
+        payload=commit_payload,
+    )
+    frames.append(
+        {
+            "phase": "SIGNED_ADMISSION_COMMIT",
+            "seq": seq,
+            "job_id": job_id,
+            "msg_type": SIGNED_ADMISSION_MSG_TYPES["SIGNED_ADMISSION_COMMIT"],
+            "payload_len": len(commit_payload),
+            "payload_hex": commit_payload.hex(),
+            "frame_hex": commit_frame.hex(),
+            "payload": {
+                "manifest_sha256": manifest_sha256,
+                "manifest_crc32": manifest_crc32,
+                "signature_crc32": signature_crc32,
+                "manifest_len": len(canonical_manifest),
+                "signature_len": len(signature_bytes),
+            },
+        }
+    )
+    seq += 1
+
+    job_req_payload = struct.pack(
+        "<32sIII",
+        bytes.fromhex(expected_sha256),
+        deadline_ms,
+        expected_outputs,
+        flags_wire,
+    )
+    job_req_frame = build_control_frame(
+        msg_type=0x0001,
+        seq=seq,
+        job_id=job_id,
+        payload=job_req_payload,
+    )
+    frames.append(
+        {
+            "phase": "JOB_REQ",
+            "seq": seq,
+            "job_id": job_id,
+            "msg_type": 0x0001,
+            "payload_len": len(job_req_payload),
+            "payload_hex": job_req_payload.hex(),
+            "frame_hex": job_req_frame.hex(),
+            "payload": {
+                "expected_sha256": expected_sha256,
+                "deadline_ms": deadline_ms,
+                "expected_outputs": expected_outputs,
+                "flags": flags_wire,
+                "job_flags": str(job["job_flags"]),
+            },
+        }
+    )
+
+    return {
+        "schema": SIGNED_ADMISSION_TRANSPORT_SCHEMA,
+        "transport_version": 1,
+        "job_id": job_id,
+        "key_slot": key_slot,
+        "chunk_size": chunk_size,
+        "bundle_schema": str(bundle["schema"]),
+        "manifest_sha256": manifest_sha256,
+        "artifact_sha256": expected_sha256,
+        "signature_algorithm": SIGNATURE_ALGORITHM,
+        "signature_algorithm_wire": SIGNED_ADMISSION_SIGNATURE_ALGORITHM,
+        "admission_type": "signed_manifest_v1",
+        "message_types": dict(SIGNED_ADMISSION_MSG_TYPES),
+        "stage_codes": dict(SIGNED_ADMISSION_STAGE_CODES),
+        "ack_status_codes": dict(SIGNED_ADMISSION_ACK_STATUS),
+        "manifest_len": len(canonical_manifest),
+        "signature_len": len(signature_bytes),
+        "manifest_crc32": manifest_crc32,
+        "signature_crc32": signature_crc32,
+        "expected_job_req_payload_len": len(job_req_payload),
+        "frames": frames,
+    }
+
+
 def parse_shape(raw: str) -> tuple[int, int, int, int]:
     parts = [part.strip() for part in str(raw).split(",")]
     if len(parts) != 4:
@@ -470,6 +806,28 @@ def parse_args() -> argparse.Namespace:
     build_parser.add_argument("--input-dtype", default="float32")
     build_parser.add_argument("--source-git-commit", default="")
     build_parser.add_argument("--note", default="")
+    build_parser.add_argument("--created-at", default="")
+
+    bundle_parser = subparsers.add_parser(
+        "bundle",
+        help="Build and sign a manifest bundle from an artifact path in one command.",
+    )
+    bundle_parser.add_argument("--artifact", required=True, help="Artifact path used for sha256 and size metadata.")
+    bundle_parser.add_argument("--private-key", required=True, help="PEM private key used for signing.")
+    bundle_parser.add_argument("--output", required=True, help="Signed bundle JSON output path.")
+    bundle_parser.add_argument("--variant", required=True, help="Variant label such as current or baseline.")
+    bundle_parser.add_argument("--key-id", required=True, help="Publisher key identifier stored in the manifest.")
+    bundle_parser.add_argument("--publisher-channel", required=True, help="Publishing channel or environment label.")
+    bundle_parser.add_argument("--deadline-ms", type=int, default=300000)
+    bundle_parser.add_argument("--expected-outputs", type=int, default=300)
+    bundle_parser.add_argument("--job-flags", default="reconstruction")
+    bundle_parser.add_argument("--artifact-format", default="tvm-module-shared-object")
+    bundle_parser.add_argument("--input-shape", default="1,32,32,32")
+    bundle_parser.add_argument("--input-dtype", default="float32")
+    bundle_parser.add_argument("--source-git-commit", default="")
+    bundle_parser.add_argument("--note", default="")
+    bundle_parser.add_argument("--created-at", default="")
+    bundle_parser.add_argument("--openssl-bin", default="openssl")
 
     sign_parser = subparsers.add_parser("sign", help="Sign an existing manifest JSON file and emit a bundle.")
     sign_parser.add_argument("--manifest", required=True, help="Input unsigned manifest JSON.")
@@ -483,6 +841,17 @@ def parse_args() -> argparse.Namespace:
     verify_parser.add_argument("--public-key", required=True, help="PEM public key used for verification.")
     verify_parser.add_argument("--artifact", default="", help="Optional artifact path to match against the manifest sha256.")
     verify_parser.add_argument("--openssl-bin", default="openssl")
+
+    transport_parser = subparsers.add_parser(
+        "transport-plan",
+        help="Emit the draft signed-admission sideband transport plan that precedes the existing JOB_REQ.",
+    )
+    transport_parser.add_argument("--signed-manifest", required=True, help="Signed bundle JSON path.")
+    transport_parser.add_argument("--job-id", required=True, type=int, help="Control-plane job identifier.")
+    transport_parser.add_argument("--key-slot", required=True, type=int, help="Firmware public-key slot index.")
+    transport_parser.add_argument("--output", required=True, help="JSON output path for the transport plan.")
+    transport_parser.add_argument("--chunk-size", type=int, default=SIGNED_ADMISSION_CHUNK_DATA_MAX)
+    transport_parser.add_argument("--seq-start", type=int, default=1)
 
     return parser.parse_args()
 
@@ -501,6 +870,7 @@ def command_build(args: argparse.Namespace) -> dict[str, Any]:
         input_dtype=args.input_dtype,
         source_git_commit=args.source_git_commit,
         note=args.note,
+        created_at=args.created_at or None,
     )
     output_path = resolve_path(args.output)
     write_json(output_path, manifest)
@@ -509,6 +879,36 @@ def command_build(args: argparse.Namespace) -> dict[str, Any]:
         "output": str(output_path),
         "manifest_sha256": manifest_sha256_hex(manifest),
         "artifact_sha256": manifest["artifact"]["sha256"],
+    }
+
+
+def command_bundle(args: argparse.Namespace) -> dict[str, Any]:
+    bundle = build_signed_manifest_bundle(
+        artifact_path=args.artifact,
+        variant=args.variant,
+        key_id=args.key_id,
+        publisher_channel=args.publisher_channel,
+        deadline_ms=args.deadline_ms,
+        expected_outputs=args.expected_outputs,
+        job_flags=args.job_flags,
+        private_key=args.private_key,
+        artifact_format=args.artifact_format,
+        input_shape=parse_shape(args.input_shape),
+        input_dtype=args.input_dtype,
+        source_git_commit=args.source_git_commit,
+        note=args.note,
+        created_at=args.created_at or None,
+        openssl_bin=args.openssl_bin,
+    )
+    output_path = resolve_path(args.output)
+    write_json(output_path, bundle)
+    return {
+        "command": "bundle",
+        "output": str(output_path),
+        "manifest_sha256": bundle["manifest_sha256"],
+        "artifact_sha256": bundle["manifest"]["artifact"]["sha256"],
+        "key_id": bundle["signature"]["key_id"],
+        "signature_algorithm": bundle["signature"]["algorithm"],
     }
 
 
@@ -545,14 +945,40 @@ def command_verify(args: argparse.Namespace) -> dict[str, Any]:
     return summary
 
 
+def command_transport_plan(args: argparse.Namespace) -> dict[str, Any]:
+    bundle_path = resolve_path(args.signed_manifest)
+    bundle = load_signed_manifest_bundle(bundle_path)
+    plan = build_signed_admission_transport_plan(
+        bundle,
+        job_id=require_u32(args.job_id, field_name="--job-id"),
+        key_slot=require_u32(args.key_slot, field_name="--key-slot", allow_zero=True),
+        chunk_size=require_u32(args.chunk_size, field_name="--chunk-size"),
+        seq_start=require_u32(args.seq_start, field_name="--seq-start"),
+    )
+    output_path = resolve_path(args.output)
+    write_json(output_path, plan)
+    return {
+        "command": "transport-plan",
+        "output": str(output_path),
+        "schema": plan["schema"],
+        "frame_count": len(plan["frames"]),
+        "manifest_sha256": plan["manifest_sha256"],
+        "job_id": plan["job_id"],
+    }
+
+
 def main() -> int:
     args = parse_args()
     if args.command == "build":
         result = command_build(args)
+    elif args.command == "bundle":
+        result = command_bundle(args)
     elif args.command == "sign":
         result = command_sign(args)
     elif args.command == "verify":
         result = command_verify(args)
+    elif args.command == "transport-plan":
+        result = command_transport_plan(args)
     else:
         raise SystemExit(f"unsupported command: {args.command}")
     print(json.dumps(result, ensure_ascii=False, indent=2))

@@ -7,6 +7,8 @@ Status:
 - First implementation batch in repo only.
 - Host-side scaffolding is added in this batch.
 - Board firmware does not support this yet.
+- The implementation-ready wire refinement now lives in:
+  `session_bootstrap/runbooks/openamp_signed_admission_transport_v1_2026-03-16.md`
 
 ## Current protocol baseline
 
@@ -138,16 +140,15 @@ Keep the current path unchanged:
 
 ### Phase 1: signed-manifest path
 
-The signed-manifest path should not overload the 44-byte `JOB_REQ` with the full manifest. Instead:
+The refined execution-batch choice is now:
 
 1. Host stages the canonical manifest JSON bytes to firmware.
 2. Host stages the detached signature bytes to firmware.
-3. Host sends a compact `JOB_REQ_V2` descriptor that references the staged manifest.
-4. Firmware verifies:
-   - staged manifest digest matches descriptor
-   - signature matches the configured public key slot
-   - manifest parses and produces the same execution contract the host is requesting
+3. Host sends the existing 44-byte `JOB_REQ`.
+4. Firmware verifies the staged signed data and cross-checks it against that existing `JOB_REQ`.
 5. Firmware admits or denies the job.
+
+That keeps the current `JOB_REQ` semantics intact while adding signed admission alongside them.
 
 ## Proposed protocol extension
 
@@ -289,6 +290,28 @@ python3 session_bootstrap/scripts/openamp_signed_manifest.py verify \
   --artifact build/current/optimized_model.so
 ```
 
+4. Build and sign in one command:
+
+```bash
+python3 session_bootstrap/scripts/openamp_signed_manifest.py bundle \
+  --artifact build/current/optimized_model.so \
+  --private-key /secure/openamp/dev-local-20260316.pem \
+  --output /tmp/openamp_manifest.signed.json \
+  --variant current \
+  --key-id dev-local-20260316 \
+  --publisher-channel openamp-dev
+```
+
+5. Emit the staged signed-admission transport plan that precedes the unchanged `JOB_REQ`:
+
+```bash
+python3 session_bootstrap/scripts/openamp_signed_manifest.py transport-plan \
+  --signed-manifest /tmp/openamp_manifest.signed.json \
+  --job-id 7301 \
+  --key-slot 1 \
+  --output /tmp/openamp_manifest.transport.json
+```
+
 Wrapper support added in this batch:
 
 - `session_bootstrap/scripts/openamp_control_wrapper.py`
@@ -309,7 +332,7 @@ Current behavior of the wrapper in signed mode:
 
 What it does not do yet:
 
-- It does not send `MANIFEST_CHUNK`, `MANIFEST_SIG`, or `JOB_REQ_V2`.
+- It does not send `SIGNED_ADMISSION_BEGIN/CHUNK/SIGNATURE/COMMIT` on the real bridge yet.
 - It does not change the current bridge binary wire format.
 
 ## Key handling expectations
@@ -337,3 +360,4 @@ Do not commit the private key output.
 The next real firmware step is to replace the static `sc_trusted_artifact_allowlist[]` check in `sc_ctrl_handle_job_req(...)` with a staged-manifest plus public-key verification flow. The concrete file/function patch plan is captured in:
 
 - `session_bootstrap/patches/phytium_openamp_signed_manifest_patch_plan_2026-03-16.md`
+- `session_bootstrap/patches/phytium_openamp_signed_admission_release_v1.4.0_patch_execution_plan_2026-03-16.md`
