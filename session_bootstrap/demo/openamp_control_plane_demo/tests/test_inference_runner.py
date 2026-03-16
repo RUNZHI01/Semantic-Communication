@@ -83,6 +83,20 @@ class RunRemoteReconstructionTest(unittest.TestCase):
 
         self.assertEqual(completed, 3)
 
+    def test_build_completion_counts_marks_missing_runner_log_source(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runner_log = Path(temp_dir) / "runner.log"
+
+            counts = inference_runner.build_completion_counts(
+                runner_log_path=runner_log,
+                expected_outputs=inference_runner.DEFAULT_MAX_INPUTS,
+            )
+
+        self.assertEqual(counts["completed_count"], 0)
+        self.assertEqual(counts["expected_count"], inference_runner.DEFAULT_MAX_INPUTS)
+        self.assertEqual(counts["count_label"], f"0 / {inference_runner.DEFAULT_MAX_INPUTS}")
+        self.assertEqual(counts["count_source"], "runner_log.missing")
+
     def test_running_snapshot_reports_real_completed_count_from_runner_log(self) -> None:
         with tempfile.TemporaryDirectory(dir=PROJECT_ROOT) as temp_dir:
             output_dir = Path(temp_dir)
@@ -608,7 +622,7 @@ class RunRemoteReconstructionTest(unittest.TestCase):
             assert snapshot is not None
             self.assertEqual(snapshot["status"], "error")
             self.assertEqual(snapshot["progress"]["count_label"], f"0 / {inference_runner.DEFAULT_MAX_INPUTS}")
-            self.assertEqual(snapshot["progress"]["count_source"], "runner_log.sample_latency_lines")
+            self.assertEqual(snapshot["progress"]["count_source"], "runner_log.missing")
             self.assertEqual(snapshot["progress"]["stages"][0]["status"], "error")
             self.assertEqual(snapshot["progress"]["stages"][1]["status"], "error")
             self.assertEqual(snapshot["progress"]["stages"][2]["status"], "error")
