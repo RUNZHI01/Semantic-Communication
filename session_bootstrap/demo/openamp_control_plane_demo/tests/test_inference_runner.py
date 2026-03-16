@@ -438,6 +438,28 @@ class RunRemoteReconstructionTest(unittest.TestCase):
         self.assertEqual(summary["bundle_path"], str(bundle_path))
         self.assertEqual(summary["public_key_path"], str(public_key))
 
+    def test_describe_demo_variant_support_marks_baseline_live_as_unsupported_during_signed_demo(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir_raw:
+            temp_dir = Path(temp_dir_raw)
+            _, bundle_path, public_key, _ = build_signed_bundle(temp_dir)
+            access = make_access(
+                {
+                    "REMOTE_SNR_BASELINE": "12",
+                    "REMOTE_BATCH_BASELINE": "1",
+                    "INFERENCE_BASELINE_EXPECTED_SHA256": "b" * 64,
+                    inference_runner.DEMO_ADMISSION_MODE_ENV: "signed_manifest_v1",
+                    inference_runner.DEMO_SIGNED_MANIFEST_FILE_ENV: str(bundle_path),
+                    inference_runner.DEMO_SIGNED_MANIFEST_PUBLIC_KEY_ENV: str(public_key),
+                }
+            )
+
+            support = inference_runner.describe_demo_variant_support(access, variant="baseline")
+
+        self.assertEqual(support["status"], "unsupported")
+        self.assertFalse(support["launch_allowed"])
+        self.assertIn("未适配 signed admission", support["label"])
+        self.assertIn("formal baseline", support["note"])
+
     def test_live_job_constructor_passes_generated_uint32_job_id_to_wrapper_and_hook(self) -> None:
         access = make_access(
             {
@@ -1437,12 +1459,14 @@ class RunRemoteReconstructionTest(unittest.TestCase):
             snapshot = job._final_snapshot
             assert snapshot is not None
             self.assertEqual(snapshot["status"], "error")
-            self.assertEqual(snapshot["status_category"], "error")
+            self.assertEqual(snapshot["status_category"], "board_busy")
             self.assertEqual(snapshot["diagnostics"]["control_hook"]["fault_name"], "DUPLICATE_JOB_ID")
+            self.assertEqual(snapshot["diagnostics"]["control_hook"]["guard_state_name"], "JOB_ACTIVE")
             self.assertEqual(snapshot["diagnostics"]["control_hook"]["rpmsg_dev"], "/dev/rpmsg0")
             self.assertNotIn("passwordless sudo", snapshot["message"])
-            self.assertIn("OpenAMP 控制面未放行", snapshot["message"])
-            self.assertIn("DUPLICATE_JOB_ID", snapshot["progress"]["stages"][2]["detail"])
+            self.assertIn("guard_state=JOB_ACTIVE", snapshot["message"])
+            self.assertIn("不会自动 SAFE_STOP", snapshot["message"])
+            self.assertIn("板端已有活动作业", snapshot["progress"]["stages"][2]["detail"])
 
     def test_ssh_bridge_launch_failure_surfaces_host_env_error_and_stage_gate(self) -> None:
         with tempfile.TemporaryDirectory(dir=PROJECT_ROOT) as temp_dir:

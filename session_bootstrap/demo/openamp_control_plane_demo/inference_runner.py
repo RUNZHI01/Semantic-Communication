@@ -238,7 +238,45 @@ def hook_fault_name(response: dict[str, Any]) -> str:
     return ""
 
 
+def hook_guard_state_name(response: dict[str, Any]) -> str:
+    candidates = (
+        response.get("guard_state_name"),
+        safe_nested(response, "rx_frame", "job_ack", "guard_state_name"),
+        safe_nested(response, "rx_frame", "status_resp", "guard_state_name"),
+        response.get("guard_state"),
+        safe_nested(response, "rx_frame", "job_ack", "guard_state"),
+        safe_nested(response, "rx_frame", "status_resp", "guard_state"),
+    )
+    for raw in candidates:
+        value = str(raw or "").strip().upper()
+        if value:
+            return value
+    return ""
+
+
+def hook_active_job_id(response: dict[str, Any]) -> int:
+    candidates = (
+        response.get("active_job_id"),
+        safe_nested(response, "rx_frame", "status_resp", "active_job_id"),
+        safe_nested(response, "rx_frame", "job_ack", "active_job_id"),
+    )
+    for raw in candidates:
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            return value
+    return 0
+
+
+def hook_denied_by_active_job(response: dict[str, Any]) -> bool:
+    return hook_fault_name(response) == "DUPLICATE_JOB_ID" and hook_guard_state_name(response) == "JOB_ACTIVE"
+
+
 def hook_status_category(response: dict[str, Any]) -> str | None:
+    if hook_denied_by_active_job(response):
+        return "board_busy"
     if hook_fault_name(response) == "ARTIFACT_SHA_MISMATCH":
         return "artifact_mismatch"
     return None
@@ -265,7 +303,11 @@ def control_hook_error_text(response: dict[str, Any]) -> str:
         "phase",
         "decision",
         "fault_name",
+        "fault_code",
         "last_fault_name",
+        "guard_state_name",
+        "guard_state",
+        "active_job_id",
         "source",
         "transport_status",
         "protocol_semantics",
@@ -288,7 +330,11 @@ def control_hook_diagnostics(response: dict[str, Any]) -> dict[str, Any]:
         "phase",
         "decision",
         "fault_name",
+        "fault_code",
         "last_fault_name",
+        "guard_state_name",
+        "guard_state",
+        "active_job_id",
         "source",
         "transport_status",
         "protocol_semantics",
@@ -622,7 +668,14 @@ def build_progress_payload(
         fault = job_ack_payload.get("fault_name") or job_ack_payload.get("fault_code") or "UNKNOWN"
         deny_note = str(job_req_response.get("note") or job_ack_payload.get("note") or "").strip()
         transport_status = str(job_req_response.get("transport_status") or job_ack_payload.get("transport_status") or "").strip()
-        if transport_status == "permission_gate" and deny_note:
+        if hook_denied_by_active_job(job_req_response):
+            active_job_id = hook_active_job_id(job_req_response)
+            active_suffix = f" / active_job_id={active_job_id}" if active_job_id else ""
+            running_detail = (
+                "JOB_ACK(DENY) / fault=DUPLICATE_JOB_ID / guard=JOB_ACTIVE"
+                f"{active_suffix} / 板端已有活动作业，demo 保守阻断重复 launch"
+            )
+        elif transport_status == "permission_gate" and deny_note:
             running_detail = f"板端权限门禁：{deny_note}"
         elif deny_note:
             running_detail = f"JOB_ACK(DENY) / fault={fault} / {deny_note}"
@@ -921,6 +974,81 @@ def describe_demo_admission(access: BoardAccessConfig, *, variant: str = "curren
     }
 
 
+def describe_demo_variant_support(access: BoardAccessConfig, *, variant: str) -> dict[str, Any]:
+    values = access.build_env()
+    if variant == "current":
+        admission = describe_demo_admission(access, variant="current")
+        if admission["mode"] == "signed_manifest_v1":
+            ready = admission["status"] == "ready"
+            note = "Current signed-admission live path is supported."
+            if not ready:
+                note = "Current signed-admission live path is not ready yet."
+            if admission.get("note"):
+                note = f"{note} {admission['note']}"
+            return {
+                "variant": "current",
+                "status": admission["status"],
+                "mode": admission["mode"],
+                "label": "Current signed live 已支持" if ready else "Current signed live 未就绪",
+                "tone": "online" if ready else "degraded",
+                "note": note,
+                "supported": ready,
+                "launch_allowed": ready,
+            }
+
+        expected_sha256 = expected_sha_for_variant(access, "current")
+        note = "Current live path is still using the legacy SHA allowlist."
+        if expected_sha256:
+            note = f"{note} expected_sha={expected_sha256[:12]}."
+        return {
+            "variant": "current",
+            "status": "ready" if expected_sha256 else "config_error",
+            "mode": admission["mode"],
+            "label": "Current legacy live",
+            "tone": "degraded" if expected_sha256 else "degraded",
+            "note": note,
+            "supported": bool(expected_sha256),
+            "launch_allowed": bool(expected_sha256),
+        }
+
+    current_mode = configured_admission_mode(values, variant="current")
+    baseline_expected_sha = expected_sha_for_variant(access, "baseline")
+    if current_mode == "signed_manifest_v1":
+        return {
+            "variant": "baseline",
+            "status": "unsupported",
+            "mode": "legacy_sha",
+            "label": "Baseline live 未适配 signed admission",
+            "tone": "degraded",
+            "note": "第三幕保留 formal baseline 对比；Baseline live 不作为当前 signed-admission demo 路径。",
+            "supported": False,
+            "launch_allowed": False,
+        }
+
+    if baseline_expected_sha:
+        return {
+            "variant": "baseline",
+            "status": "ready",
+            "mode": "legacy_sha",
+            "label": "Baseline legacy live",
+            "tone": "degraded",
+            "note": "Baseline live 仍是 legacy SHA 路径，尚未适配 signed admission。",
+            "supported": True,
+            "launch_allowed": True,
+        }
+
+    return {
+        "variant": "baseline",
+        "status": "config_error",
+        "mode": "legacy_sha",
+        "label": "Baseline legacy live 未就绪",
+        "tone": "degraded",
+        "note": "缺少 formal baseline expected SHA；第三幕仅保留 formal baseline 归档对比。",
+        "supported": False,
+        "launch_allowed": False,
+    }
+
+
 def expected_sha_for_variant(access: BoardAccessConfig, variant: str) -> str:
     expected_sha256 = expected_sha_for_variant_from_env(access, variant)
     if expected_sha256:
@@ -1079,6 +1207,35 @@ class LiveRemoteReconstructionJob:
                 "runner_summary": {},
                 "wrapper_summary": {},
                 "diagnostics": build_diagnostics(missing_fields=missing),
+                "progress": build_progress_payload(
+                    [],
+                    request_state="completed",
+                    final_status="config_error",
+                    expected_count=max_inputs,
+                    remaining_count=max_inputs,
+                    count_source="demo_default",
+                    count_label=f"0 / {max_inputs}",
+                ),
+                "artifacts": self._artifact_paths(),
+            }
+            return
+
+        variant_support = describe_demo_variant_support(access, variant=variant)
+        if variant == "baseline" and variant_support.get("status") == "unsupported":
+            message = (
+                "Baseline live 未适配当前 signed-admission demo；第三幕保留 formal baseline 对比，"
+                "不会把 Baseline live 伪装成已支持路径。"
+            )
+            self._final_snapshot = {
+                "status": "config_error",
+                "request_state": "completed",
+                "status_category": "unsupported_live_path",
+                "execution_mode": "fallback",
+                "variant": variant,
+                "message": message,
+                "runner_summary": {},
+                "wrapper_summary": {},
+                "diagnostics": {"variant_support": variant_support},
                 "progress": build_progress_payload(
                     [],
                     request_state="completed",
