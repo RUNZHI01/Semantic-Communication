@@ -1,0 +1,169 @@
+{
+  "schema": "openamp_signed_admission_firmware_contract/v1",
+  "contract_version": 1,
+  "bundle_schema": "openamp_signed_manifest_bundle/v1",
+  "manifest_schema": "openamp_artifact_manifest/v1",
+  "manifest_sha256": "dcde2829dcf76b7c974dc193ac93dd8641d2dfb948b15b4d46c9bbbef7f45d54",
+  "manifest_len": 808,
+  "manifest_crc32": 4253828123,
+  "signature_len": 71,
+  "signature_crc32": 3659953669,
+  "signature_algorithm": "ecdsa-p256-sha256",
+  "signature_algorithm_wire": 1,
+  "admission_type_wire": 1,
+  "message_types": {
+    "SIGNED_ADMISSION_BEGIN": 12,
+    "SIGNED_ADMISSION_CHUNK": 13,
+    "SIGNED_ADMISSION_SIGNATURE": 14,
+    "SIGNED_ADMISSION_COMMIT": 15,
+    "SIGNED_ADMISSION_ACK": 16
+  },
+  "stage_codes": {
+    "BEGIN": 1,
+    "CHUNK": 2,
+    "SIGNATURE": 3,
+    "COMMIT": 4
+  },
+  "ack_status_codes": {
+    "ACCEPTED": 0,
+    "DUPLICATE": 1,
+    "OUT_OF_RANGE": 2,
+    "CRC_ERROR": 3,
+    "TOO_LARGE": 4,
+    "READY": 5
+  },
+  "public_key_slot": {
+    "slot_id": 1,
+    "key_id": "fixture-dev-20260316",
+    "channel": "openamp-fixture",
+    "curve": "prime256v1",
+    "format": "uncompressed-sec1",
+    "byte_len": 65,
+    "bytes_hex": "04aaef2bc7f2dd9af211bd3bc4f3bad1bcaeb7e25baacc0100e13ec51c12bdae62da2b87f3a1659721602600025d08f77d3a6a23b295316b917d2ebb081d15d305",
+    "c_type": "ScPublicKeySlot",
+    "c_initializer_lines": [
+      "0x04U, 0xAAU, 0xEFU, 0x2BU, 0xC7U, 0xF2U, 0xDDU, 0x9AU,",
+      "0xF2U, 0x11U, 0xBDU, 0x3BU, 0xC4U, 0xF3U, 0xBAU, 0xD1U,",
+      "0xBCU, 0xAEU, 0xB7U, 0xE2U, 0x5BU, 0xAAU, 0xCCU, 0x01U,",
+      "0x00U, 0xE1U, 0x3EU, 0xC5U, 0x1CU, 0x12U, 0xBDU, 0xAEU,",
+      "0x62U, 0xDAU, 0x2BU, 0x87U, 0xF3U, 0xA1U, 0x65U, 0x97U,",
+      "0x21U, 0x60U, 0x26U, 0x00U, 0x02U, 0x5DU, 0x08U, 0xF7U,",
+      "0x7DU, 0x3AU, 0x6AU, 0x23U, 0xB2U, 0x95U, 0x31U, 0x6BU,",
+      "0x91U, 0x7DU, 0x2EU, 0xBBU, 0x08U, 0x1DU, 0x15U, 0xD3U,",
+      "0x05U"
+    ],
+    "c_initializer": "{\n    1U,\n    \"fixture-dev-20260316\",\n    {\n        0x04U, 0xAAU, 0xEFU, 0x2BU, 0xC7U, 0xF2U, 0xDDU, 0x9AU,\n        0xF2U, 0x11U, 0xBDU, 0x3BU, 0xC4U, 0xF3U, 0xBAU, 0xD1U,\n        0xBCU, 0xAEU, 0xB7U, 0xE2U, 0x5BU, 0xAAU, 0xCCU, 0x01U,\n        0x00U, 0xE1U, 0x3EU, 0xC5U, 0x1CU, 0x12U, 0xBDU, 0xAEU,\n        0x62U, 0xDAU, 0x2BU, 0x87U, 0xF3U, 0xA1U, 0x65U, 0x97U,\n        0x21U, 0x60U, 0x26U, 0x00U, 0x02U, 0x5DU, 0x08U, 0xF7U,\n        0x7DU, 0x3AU, 0x6AU, 0x23U, 0xB2U, 0x95U, 0x31U, 0x6BU,\n        0x91U, 0x7DU, 0x2EU, 0xBBU, 0x08U, 0x1DU, 0x15U, 0xD3U,\n        0x05U\n    },\n}"
+  },
+  "manifest_contract": {
+    "struct_name": "ScManifestContract",
+    "schema": "openamp_artifact_manifest/v1",
+    "manifest_version": 1,
+    "artifact_sha256": "09af47ee1b0e2a7d3cad3add031f36811926e1fe34cfd58fa98d70eba9526b91",
+    "deadline_ms": 60000,
+    "expected_outputs": 300,
+    "job_flags_text": "reconstruction",
+    "job_flags_wire": 2,
+    "publisher_key_id": "fixture-dev-20260316",
+    "publisher_channel": "openamp-fixture",
+    "field_plan": [
+      {
+        "json_path": "schema",
+        "c_field": "schema_id",
+        "c_type": "char[32]",
+        "parser": "json_string_exact",
+        "expected": "openamp_artifact_manifest/v1"
+      },
+      {
+        "json_path": "manifest_version",
+        "c_field": "manifest_version",
+        "c_type": "uint32_t",
+        "parser": "json_u32_exact",
+        "expected": 1
+      },
+      {
+        "json_path": "artifact.sha256",
+        "c_field": "artifact_sha256",
+        "c_type": "uint8_t[32]",
+        "parser": "json_sha256_hex"
+      },
+      {
+        "json_path": "job.deadline_ms",
+        "c_field": "deadline_ms",
+        "c_type": "uint32_t",
+        "parser": "json_u32"
+      },
+      {
+        "json_path": "job.expected_outputs",
+        "c_field": "expected_outputs",
+        "c_type": "uint32_t",
+        "parser": "json_u32"
+      },
+      {
+        "json_path": "job.job_flags",
+        "c_field": "flags",
+        "c_type": "uint32_t",
+        "parser": "json_string_enum",
+        "enum_map": {
+          "payload": 1,
+          "reconstruction": 2,
+          "smoke": 3
+        }
+      },
+      {
+        "json_path": "publisher.key_id",
+        "c_field": "publisher_key_id",
+        "c_type": "char[32]",
+        "parser": "json_string_copy"
+      },
+      {
+        "json_path": "publisher.channel",
+        "c_field": "publisher_channel",
+        "c_type": "char[32]",
+        "parser": "json_string_copy"
+      }
+    ]
+  },
+  "parser_strategy": {
+    "entrypoint": "sc_ctrl_parse_manifest_contract",
+    "required_helpers": [
+      "sc_ctrl_json_find_object",
+      "sc_ctrl_json_find_string_field",
+      "sc_ctrl_json_find_u32_field",
+      "sc_ctrl_parse_sha256_hex",
+      "sc_ctrl_manifest_flag_from_string"
+    ],
+    "assumptions": [
+      "manifest bytes are the exact canonical UTF-8 bytes staged over SIGNED_ADMISSION_CHUNK",
+      "parser is narrow and only accepts the committed openamp_artifact_manifest/v1 schema",
+      "string fields reject escape sequences to keep the firmware parser small and deterministic"
+    ]
+  },
+  "crypto_boundary": {
+    "backend": "standalone-sdk-mbedtls-boundary",
+    "hash_algorithm": "sha256",
+    "digest_len": 32,
+    "public_key_format": "uncompressed-sec1",
+    "signature_format": "asn1-der",
+    "request_struct_name": "ScEcdsaP256VerifyRequest",
+    "sha256_wrapper": {
+      "name": "sc_ctrl_crypto_sha256",
+      "prototype": "static int sc_ctrl_crypto_sha256(const uint8_t *input, uint32_t input_len, uint8_t out_digest[32])"
+    },
+    "verify_wrapper": {
+      "name": "sc_ctrl_crypto_verify_ecdsa_p256_sha256_der",
+      "prototype": "static int sc_ctrl_crypto_verify_ecdsa_p256_sha256_der(const ScEcdsaP256VerifyRequest *request)"
+    },
+    "sdk_headers": [
+      "mbedtls/ecdsa.h",
+      "mbedtls/ecp.h",
+      "mbedtls/sha256.h"
+    ],
+    "mbedtls_call_sequence": [
+      "mbedtls_sha256_ret(manifest_bytes, manifest_len, manifest_digest, 0)",
+      "mbedtls_ecp_group_load(&group, MBEDTLS_ECP_DP_SECP256R1)",
+      "mbedtls_ecp_point_read_binary(&group, &public_key, public_key_uncompressed, 65)",
+      "mbedtls_ecdsa_from_keypair(&ecdsa, &keypair)",
+      "mbedtls_ecdsa_read_signature(&ecdsa, manifest_digest, 32, signature_der, signature_len)"
+    ]
+  }
+}
