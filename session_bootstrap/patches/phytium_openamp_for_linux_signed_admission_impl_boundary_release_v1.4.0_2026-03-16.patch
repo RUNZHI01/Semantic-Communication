@@ -24,7 +24,8 @@
  {
      uint8_t slot_id;
      const char *key_id;
-     uint8_t public_key_uncompressed[65];
+     const char *channel;
+     uint8_t public_key_uncompressed[SC_PUBLIC_KEY_UNCOMPRESSED_LEN];
  } ScPublicKeySlot;
  
 +typedef struct
@@ -54,6 +55,7 @@
      {
          1U,
          "fixture-dev-20260316",
+         "openamp-fixture",
          {
 -            /* TODO(next): replace placeholder bytes with the real uncompressed P-256 public key. */
 -            0x04U,
@@ -172,6 +174,8 @@
 +    char token[48];
 +    uint32_t token_len = 0U;
 +    uint32_t index;
++    uint32_t object_depth = 0U;
++    int in_string = 0;
 +
 +    if ((json_bytes == NULL) || (field_name == NULL) || (out_value_start == NULL))
 +    {
@@ -183,10 +187,42 @@
 +    }
 +    for (index = 0U; index + token_len <= json_len; ++index)
 +    {
-+        if (memcmp(&json_bytes[index], token, token_len) == 0)
++        uint8_t ch = json_bytes[index];
++
++        if (in_string)
 +        {
-+            *out_value_start = &json_bytes[index + token_len];
-+            return 1;
++            if (ch == (uint8_t)'\\')
++            {
++                return 0;
++            }
++            if (ch == (uint8_t)'"')
++            {
++                in_string = 0;
++            }
++            continue;
++        }
++        if (ch == (uint8_t)'"')
++        {
++            if ((object_depth == 1U) &&
++                (memcmp(&json_bytes[index], token, token_len) == 0))
++            {
++                *out_value_start = &json_bytes[index + token_len];
++                return 1;
++            }
++            in_string = 1;
++            continue;
++        }
++        if (ch == (uint8_t)'{')
++        {
++            ++object_depth;
++        }
++        else if (ch == (uint8_t)'}')
++        {
++            if (object_depth == 0U)
++            {
++                return 0;
++            }
++            --object_depth;
 +        }
 +    }
 +    return 0;
@@ -315,6 +351,11 @@
 +        {
 +            break;
 +        }
++        if ((value > 429496729U) ||
++            ((value == 429496729U) && ((uint32_t)(ch - (uint8_t)'0') > 5U)))
++        {
++            return 0;
++        }
 +        value = (value * 10U) + (uint32_t)(ch - (uint8_t)'0');
 +        ++digit_count;
 +        ++cursor;
@@ -327,34 +368,106 @@
 +    return 1;
 +}
 +
++static int sc_ctrl_json_expect_string_field(const uint8_t *json_bytes,
++                                            uint32_t json_len,
++                                            const char *field_name,
++                                            const char *expected_text,
++                                            char *out_text,
++                                            uint32_t out_text_len)
++{
++    if (!sc_ctrl_json_find_string_field(json_bytes, json_len, field_name,
++                                        out_text, out_text_len))
++    {
++        return 0;
++    }
++    if ((expected_text != NULL) && (strcmp(out_text, expected_text) != 0))
++    {
++        return 0;
++    }
++    return 1;
++}
++
++static int sc_ctrl_json_expect_u32_field(const uint8_t *json_bytes,
++                                         uint32_t json_len,
++                                         const char *field_name,
++                                         uint32_t expected_value,
++                                         uint32_t *out_value)
++{
++    if (!sc_ctrl_json_find_u32_field(json_bytes, json_len, field_name, out_value) ||
++        (*out_value != expected_value))
++    {
++        return 0;
++    }
++    return 1;
++}
++
 +static int sc_ctrl_crypto_sha256(const uint8_t *input,
 +                                 uint32_t input_len,
 +                                 uint8_t out_digest[32])
 +{
-+    (void)input;
-+    (void)input_len;
-+    (void)out_digest;
++    int sdk_status = -1;
++
++    if ((input == NULL) || (input_len == 0U) || (out_digest == NULL))
++    {
++        return 0;
++    }
 +    /*
-+     * standalone SDK integration boundary:
++     * standalone SDK drop-in:
 +     *   #include <mbedtls/sha256.h>
-+     *   return (mbedtls_sha256_ret(input, input_len, out_digest, 0) == 0);
++     *   sdk_status = mbedtls_sha256_ret(input, input_len, out_digest, 0);
++     *   return (sdk_status == 0);
 +     */
++    (void)sdk_status;
 +    return 0;
++}
++
++static int sc_ctrl_crypto_verify_request_is_valid(
++    const ScEcdsaP256VerifyRequest *request)
++{
++    if ((request == NULL) || (request->manifest_bytes == NULL) ||
++        (request->manifest_len == 0U) || (request->signature_der == NULL) ||
++        (request->signature_len == 0U) ||
++        (request->signature_len > SC_SIGNED_SIGNATURE_MAX_LEN) ||
++        (request->public_key_uncompressed == NULL) ||
++        (request->public_key_len != SC_PUBLIC_KEY_UNCOMPRESSED_LEN))
++    {
++        return 0;
++    }
++    return 1;
 +}
 +
 +static int sc_ctrl_crypto_verify_ecdsa_p256_sha256_der(
 +    const ScEcdsaP256VerifyRequest *request)
 +{
-+    (void)request;
++    int sdk_status = -1;
++
++    if (!sc_ctrl_crypto_verify_request_is_valid(request))
++    {
++        return 0;
++    }
 +    /*
-+     * standalone SDK integration boundary:
++     * standalone SDK drop-in:
 +     *   #include <mbedtls/ecp.h>
 +     *   #include <mbedtls/ecdsa.h>
-+     *   1. load MBEDTLS_ECP_DP_SECP256R1
-+     *   2. point_read_binary(slot->public_key_uncompressed, 65)
-+     *   3. ecdsa_read_signature(request->manifest_sha256, 32,
-+     *                           request->signature_der, request->signature_len)
++     *   mbedtls_ecdsa_context ecdsa;
++     *   mbedtls_ecdsa_init(&ecdsa);
++     *   sdk_status = mbedtls_ecp_group_load(&ecdsa.grp, MBEDTLS_ECP_DP_SECP256R1);
++     *   if (sdk_status == 0) sdk_status = mbedtls_ecp_point_read_binary(&ecdsa.grp,
++     *                                                                    &ecdsa.Q,
++     *                                                                    request->public_key_uncompressed,
++     *                                                                    request->public_key_len);
++     *   if (sdk_status == 0) sdk_status = mbedtls_ecp_check_pubkey(&ecdsa.grp, &ecdsa.Q);
++     *   if (sdk_status == 0) sdk_status = mbedtls_ecdsa_read_signature(&ecdsa,
++     *                                                                  request->manifest_sha256,
++     *                                                                  sizeof(request->manifest_sha256),
++     *                                                                  request->signature_der,
++     *                                                                  request->signature_len);
++     *   mbedtls_ecdsa_free(&ecdsa);
++     *   return (sdk_status == 0);
 +     */
++    (void)request->manifest_bytes;
++    (void)request->manifest_len;
++    (void)sdk_status;
 +    return 0;
 +}
 +
@@ -411,50 +524,17 @@
 +    return sc_ctrl_crypto_verify_ecdsa_p256_sha256_der(&verify_request);
  }
  
- static int sc_ctrl_parse_manifest_contract(const uint8_t *manifest_bytes,
-                                            uint32_t manifest_len,
-                                            ScManifestContract *out_contract)
- {
--    (void)manifest_bytes;
--    (void)manifest_len;
--    if (out_contract != NULL)
--    {
--        memset(out_contract, 0, sizeof(*out_contract));
--    }
--    /* TODO(next): implement strict field extraction for artifact.sha256 and job.* only. */
--    return 0;
++static int sc_ctrl_parse_manifest_artifact_contract(const uint8_t *manifest_bytes,
++                                                    uint32_t manifest_len,
++                                                    ScManifestContract *out_contract)
++{
 +    ScJsonSlice artifact_object;
-+    ScJsonSlice job_object;
-+    ScJsonSlice publisher_object;
-+    char text_value[96];
++    char sha256_hex[65];
 +
 +    if ((manifest_bytes == NULL) || (manifest_len == 0U) || (out_contract == NULL))
 +    {
 +        return 0;
 +    }
-+    memset(out_contract, 0, sizeof(*out_contract));
-+
-+    if (!sc_ctrl_json_find_string_field(manifest_bytes,
-+                                        manifest_len,
-+                                        "schema",
-+                                        out_contract->schema_id,
-+                                        sizeof(out_contract->schema_id)))
-+    {
-+        return 0;
-+    }
-+    if (strcmp(out_contract->schema_id, "openamp_artifact_manifest/v1") != 0)
-+    {
-+        return 0;
-+    }
-+    if (!sc_ctrl_json_find_u32_field(manifest_bytes,
-+                                     manifest_len,
-+                                     "manifest_version",
-+                                     &out_contract->manifest_version) ||
-+        (out_contract->manifest_version != 1U))
-+    {
-+        return 0;
-+    }
-+
 +    if (!sc_ctrl_json_find_object(manifest_bytes,
 +                                  manifest_len,
 +                                  "artifact",
@@ -462,13 +542,26 @@
 +        !sc_ctrl_json_find_string_field(artifact_object.begin,
 +                                        artifact_object.len,
 +                                        "sha256",
-+                                        text_value,
-+                                        sizeof(text_value)) ||
-+        !sc_ctrl_parse_sha256_hex(text_value, out_contract->artifact_sha256))
++                                        sha256_hex,
++                                        sizeof(sha256_hex)) ||
++        !sc_ctrl_parse_sha256_hex(sha256_hex, out_contract->artifact_sha256))
 +    {
 +        return 0;
 +    }
++    return 1;
++}
 +
++static int sc_ctrl_parse_manifest_job_contract(const uint8_t *manifest_bytes,
++                                               uint32_t manifest_len,
++                                               ScManifestContract *out_contract)
++{
++    ScJsonSlice job_object;
++    char job_flags_text[32];
++
++    if ((manifest_bytes == NULL) || (manifest_len == 0U) || (out_contract == NULL))
++    {
++        return 0;
++    }
 +    if (!sc_ctrl_json_find_object(manifest_bytes,
 +                                  manifest_len,
 +                                  "job",
@@ -484,13 +577,25 @@
 +        !sc_ctrl_json_find_string_field(job_object.begin,
 +                                        job_object.len,
 +                                        "job_flags",
-+                                        text_value,
-+                                        sizeof(text_value)) ||
-+        !sc_ctrl_manifest_flag_from_string(text_value, &out_contract->flags))
++                                        job_flags_text,
++                                        sizeof(job_flags_text)) ||
++        !sc_ctrl_manifest_flag_from_string(job_flags_text, &out_contract->flags))
 +    {
 +        return 0;
 +    }
++    return 1;
++}
 +
++static int sc_ctrl_parse_manifest_publisher_contract(const uint8_t *manifest_bytes,
++                                                     uint32_t manifest_len,
++                                                     ScManifestContract *out_contract)
++{
++    ScJsonSlice publisher_object;
++
++    if ((manifest_bytes == NULL) || (manifest_len == 0U) || (out_contract == NULL))
++    {
++        return 0;
++    }
 +    if (!sc_ctrl_json_find_object(manifest_bytes,
 +                                  manifest_len,
 +                                  "publisher",
@@ -509,8 +614,76 @@
 +        return 0;
 +    }
 +    return 1;
++}
+
+ static int sc_ctrl_parse_manifest_contract(const uint8_t *manifest_bytes,
+                                            uint32_t manifest_len,
+                                            ScManifestContract *out_contract)
+ {
+-    (void)manifest_bytes;
+-    (void)manifest_len;
+-    if (out_contract != NULL)
+-    {
+-        memset(out_contract, 0, sizeof(*out_contract));
+-    }
+-    /* TODO(next): implement strict field extraction for artifact.sha256 and job.* only. */
+-    return 0;
++    if ((manifest_bytes == NULL) || (manifest_len == 0U) || (out_contract == NULL))
++    {
++        return 0;
++    }
++    memset(out_contract, 0, sizeof(*out_contract));
++
++    if (!sc_ctrl_json_expect_string_field(manifest_bytes,
++                                          manifest_len,
++                                          "schema",
++                                          "openamp_artifact_manifest/v1",
++                                          out_contract->schema_id,
++                                          sizeof(out_contract->schema_id)))
++    {
++        return 0;
++    }
++    if (!sc_ctrl_json_expect_u32_field(manifest_bytes,
++                                       manifest_len,
++                                       "manifest_version",
++                                       1U,
++                                       &out_contract->manifest_version))
++    {
++        return 0;
++    }
++    if (!sc_ctrl_parse_manifest_artifact_contract(manifest_bytes,
++                                                  manifest_len,
++                                                  out_contract) ||
++        !sc_ctrl_parse_manifest_job_contract(manifest_bytes,
++                                             manifest_len,
++                                             out_contract) ||
++        !sc_ctrl_parse_manifest_publisher_contract(manifest_bytes,
++                                                   manifest_len,
++                                                   out_contract))
++    {
++        return 0;
++    }
++    return 1;
  }
 @@
+     if (!sc_ctrl_parse_manifest_contract(sc_signed_stage.manifest_buf,
+                                          sc_signed_stage.manifest_len,
+                                          &contract))
+     {
+         return SC_FAULT_MANIFEST_PARSE_ERROR;
+     }
+-    if ((memcmp(request->expected_sha256, contract.artifact_sha256,
++    if ((strcmp(contract.publisher_key_id, slot->key_id) != 0) ||
++        (strcmp(contract.publisher_channel, slot->channel) != 0) ||
++        (memcmp(request->expected_sha256, contract.artifact_sha256,
+                 sizeof(contract.artifact_sha256)) != 0) ||
+         (request->deadline_ms != contract.deadline_ms) ||
+         (request->expected_outputs != contract.expected_outputs) ||
+         (request->flags != contract.flags))
+     {
+         return SC_FAULT_MANIFEST_CONTRACT_MISMATCH;
+     }
+ @@
 -    if (!sc_ctrl_verify_manifest_signature(slot,
 -                                           sc_signed_stage.manifest_buf,
 -                                           sc_signed_stage.manifest_len,

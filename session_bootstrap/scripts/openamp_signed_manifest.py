@@ -856,6 +856,7 @@ def build_firmware_contract_artifact(
             "{",
             f"    {key_slot}U,",
             f"    \"{require_text(publisher.get('key_id'), field_name='manifest.publisher.key_id')}\",",
+            f"    \"{require_text(publisher.get('channel'), field_name='manifest.publisher.channel')}\",",
             "    {",
             *[f"        {line}" for line in _format_c_byte_initializer(public_key_bytes)],
             "    },",
@@ -959,11 +960,27 @@ def build_firmware_contract_artifact(
         "parser_strategy": {
             "entrypoint": "sc_ctrl_parse_manifest_contract",
             "required_helpers": [
+                "sc_ctrl_json_expect_string_field",
+                "sc_ctrl_json_expect_u32_field",
                 "sc_ctrl_json_find_object",
                 "sc_ctrl_json_find_string_field",
                 "sc_ctrl_json_find_u32_field",
+                "sc_ctrl_parse_manifest_artifact_contract",
+                "sc_ctrl_parse_manifest_job_contract",
+                "sc_ctrl_parse_manifest_publisher_contract",
                 "sc_ctrl_parse_sha256_hex",
                 "sc_ctrl_manifest_flag_from_string",
+            ],
+            "parse_call_markers": [
+                "sc_ctrl_json_expect_string_field(manifest_bytes,",
+                "sc_ctrl_json_expect_u32_field(manifest_bytes,",
+                "sc_ctrl_parse_manifest_artifact_contract(manifest_bytes,",
+                "sc_ctrl_parse_manifest_job_contract(manifest_bytes,",
+                "sc_ctrl_parse_manifest_publisher_contract(manifest_bytes,",
+            ],
+            "slot_binding_markers": [
+                "strcmp(contract.publisher_key_id, slot->key_id)",
+                "strcmp(contract.publisher_channel, slot->channel)",
             ],
             "assumptions": [
                 "manifest bytes are the exact canonical UTF-8 bytes staged over SIGNED_ADMISSION_CHUNK",
@@ -984,6 +1001,14 @@ def build_firmware_contract_artifact(
                     "static int sc_ctrl_crypto_sha256(const uint8_t *input, "
                     "uint32_t input_len, uint8_t out_digest[32])"
                 ),
+                "validation_markers": [
+                    "input == NULL",
+                    "input_len == 0U",
+                    "out_digest == NULL",
+                ],
+                "call_sequence": [
+                    "mbedtls_sha256_ret(input, input_len, out_digest, 0)",
+                ],
             },
             "verify_wrapper": {
                 "name": "sc_ctrl_crypto_verify_ecdsa_p256_sha256_der",
@@ -991,6 +1016,22 @@ def build_firmware_contract_artifact(
                     "static int sc_ctrl_crypto_verify_ecdsa_p256_sha256_der("
                     "const ScEcdsaP256VerifyRequest *request)"
                 ),
+                "validation_markers": [
+                    "request->manifest_bytes == NULL",
+                    "request->manifest_len == 0U",
+                    "request->signature_der == NULL",
+                    "request->signature_len == 0U",
+                    "request->signature_len > SC_SIGNED_SIGNATURE_MAX_LEN",
+                    "request->public_key_uncompressed == NULL",
+                    "request->public_key_len != SC_PUBLIC_KEY_UNCOMPRESSED_LEN",
+                ],
+                "context_markers": [
+                    "mbedtls_ecdsa_context ecdsa",
+                    "int sdk_status = -1",
+                ],
+                "cleanup_sequence": [
+                    "mbedtls_ecdsa_free(&ecdsa)",
+                ],
             },
             "sdk_headers": [
                 "mbedtls/ecdsa.h",
@@ -998,11 +1039,11 @@ def build_firmware_contract_artifact(
                 "mbedtls/sha256.h",
             ],
             "mbedtls_call_sequence": [
-                "mbedtls_sha256_ret(manifest_bytes, manifest_len, manifest_digest, 0)",
-                "mbedtls_ecp_group_load(&group, MBEDTLS_ECP_DP_SECP256R1)",
-                "mbedtls_ecp_point_read_binary(&group, &public_key, public_key_uncompressed, 65)",
-                "mbedtls_ecdsa_from_keypair(&ecdsa, &keypair)",
-                "mbedtls_ecdsa_read_signature(&ecdsa, manifest_digest, 32, signature_der, signature_len)",
+                "mbedtls_ecdsa_init(&ecdsa)",
+                "mbedtls_ecp_group_load(&ecdsa.grp, MBEDTLS_ECP_DP_SECP256R1)",
+                "mbedtls_ecp_point_read_binary(&ecdsa.grp,",
+                "mbedtls_ecp_check_pubkey(&ecdsa.grp, &ecdsa.Q)",
+                "mbedtls_ecdsa_read_signature(&ecdsa,",
             ],
         },
     }

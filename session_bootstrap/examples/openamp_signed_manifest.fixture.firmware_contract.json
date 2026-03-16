@@ -52,7 +52,7 @@
       "0x91U, 0x7DU, 0x2EU, 0xBBU, 0x08U, 0x1DU, 0x15U, 0xD3U,",
       "0x05U"
     ],
-    "c_initializer": "{\n    1U,\n    \"fixture-dev-20260316\",\n    {\n        0x04U, 0xAAU, 0xEFU, 0x2BU, 0xC7U, 0xF2U, 0xDDU, 0x9AU,\n        0xF2U, 0x11U, 0xBDU, 0x3BU, 0xC4U, 0xF3U, 0xBAU, 0xD1U,\n        0xBCU, 0xAEU, 0xB7U, 0xE2U, 0x5BU, 0xAAU, 0xCCU, 0x01U,\n        0x00U, 0xE1U, 0x3EU, 0xC5U, 0x1CU, 0x12U, 0xBDU, 0xAEU,\n        0x62U, 0xDAU, 0x2BU, 0x87U, 0xF3U, 0xA1U, 0x65U, 0x97U,\n        0x21U, 0x60U, 0x26U, 0x00U, 0x02U, 0x5DU, 0x08U, 0xF7U,\n        0x7DU, 0x3AU, 0x6AU, 0x23U, 0xB2U, 0x95U, 0x31U, 0x6BU,\n        0x91U, 0x7DU, 0x2EU, 0xBBU, 0x08U, 0x1DU, 0x15U, 0xD3U,\n        0x05U\n    },\n}"
+    "c_initializer": "{\n    1U,\n    \"fixture-dev-20260316\",\n    \"openamp-fixture\",\n    {\n        0x04U, 0xAAU, 0xEFU, 0x2BU, 0xC7U, 0xF2U, 0xDDU, 0x9AU,\n        0xF2U, 0x11U, 0xBDU, 0x3BU, 0xC4U, 0xF3U, 0xBAU, 0xD1U,\n        0xBCU, 0xAEU, 0xB7U, 0xE2U, 0x5BU, 0xAAU, 0xCCU, 0x01U,\n        0x00U, 0xE1U, 0x3EU, 0xC5U, 0x1CU, 0x12U, 0xBDU, 0xAEU,\n        0x62U, 0xDAU, 0x2BU, 0x87U, 0xF3U, 0xA1U, 0x65U, 0x97U,\n        0x21U, 0x60U, 0x26U, 0x00U, 0x02U, 0x5DU, 0x08U, 0xF7U,\n        0x7DU, 0x3AU, 0x6AU, 0x23U, 0xB2U, 0x95U, 0x31U, 0x6BU,\n        0x91U, 0x7DU, 0x2EU, 0xBBU, 0x08U, 0x1DU, 0x15U, 0xD3U,\n        0x05U\n    },\n}"
   },
   "manifest_contract": {
     "struct_name": "ScManifestContract",
@@ -126,11 +126,27 @@
   "parser_strategy": {
     "entrypoint": "sc_ctrl_parse_manifest_contract",
     "required_helpers": [
+      "sc_ctrl_json_expect_string_field",
+      "sc_ctrl_json_expect_u32_field",
       "sc_ctrl_json_find_object",
       "sc_ctrl_json_find_string_field",
       "sc_ctrl_json_find_u32_field",
+      "sc_ctrl_parse_manifest_artifact_contract",
+      "sc_ctrl_parse_manifest_job_contract",
+      "sc_ctrl_parse_manifest_publisher_contract",
       "sc_ctrl_parse_sha256_hex",
       "sc_ctrl_manifest_flag_from_string"
+    ],
+    "parse_call_markers": [
+      "sc_ctrl_json_expect_string_field(manifest_bytes,",
+      "sc_ctrl_json_expect_u32_field(manifest_bytes,",
+      "sc_ctrl_parse_manifest_artifact_contract(manifest_bytes,",
+      "sc_ctrl_parse_manifest_job_contract(manifest_bytes,",
+      "sc_ctrl_parse_manifest_publisher_contract(manifest_bytes,"
+    ],
+    "slot_binding_markers": [
+      "strcmp(contract.publisher_key_id, slot->key_id)",
+      "strcmp(contract.publisher_channel, slot->channel)"
     ],
     "assumptions": [
       "manifest bytes are the exact canonical UTF-8 bytes staged over SIGNED_ADMISSION_CHUNK",
@@ -147,11 +163,35 @@
     "request_struct_name": "ScEcdsaP256VerifyRequest",
     "sha256_wrapper": {
       "name": "sc_ctrl_crypto_sha256",
-      "prototype": "static int sc_ctrl_crypto_sha256(const uint8_t *input, uint32_t input_len, uint8_t out_digest[32])"
+      "prototype": "static int sc_ctrl_crypto_sha256(const uint8_t *input, uint32_t input_len, uint8_t out_digest[32])",
+      "validation_markers": [
+        "input == NULL",
+        "input_len == 0U",
+        "out_digest == NULL"
+      ],
+      "call_sequence": [
+        "mbedtls_sha256_ret(input, input_len, out_digest, 0)"
+      ]
     },
     "verify_wrapper": {
       "name": "sc_ctrl_crypto_verify_ecdsa_p256_sha256_der",
-      "prototype": "static int sc_ctrl_crypto_verify_ecdsa_p256_sha256_der(const ScEcdsaP256VerifyRequest *request)"
+      "prototype": "static int sc_ctrl_crypto_verify_ecdsa_p256_sha256_der(const ScEcdsaP256VerifyRequest *request)",
+      "validation_markers": [
+        "request->manifest_bytes == NULL",
+        "request->manifest_len == 0U",
+        "request->signature_der == NULL",
+        "request->signature_len == 0U",
+        "request->signature_len > SC_SIGNED_SIGNATURE_MAX_LEN",
+        "request->public_key_uncompressed == NULL",
+        "request->public_key_len != SC_PUBLIC_KEY_UNCOMPRESSED_LEN"
+      ],
+      "context_markers": [
+        "mbedtls_ecdsa_context ecdsa",
+        "int sdk_status = -1"
+      ],
+      "cleanup_sequence": [
+        "mbedtls_ecdsa_free(&ecdsa)"
+      ]
     },
     "sdk_headers": [
       "mbedtls/ecdsa.h",
@@ -159,11 +199,11 @@
       "mbedtls/sha256.h"
     ],
     "mbedtls_call_sequence": [
-      "mbedtls_sha256_ret(manifest_bytes, manifest_len, manifest_digest, 0)",
-      "mbedtls_ecp_group_load(&group, MBEDTLS_ECP_DP_SECP256R1)",
-      "mbedtls_ecp_point_read_binary(&group, &public_key, public_key_uncompressed, 65)",
-      "mbedtls_ecdsa_from_keypair(&ecdsa, &keypair)",
-      "mbedtls_ecdsa_read_signature(&ecdsa, manifest_digest, 32, signature_der, signature_len)"
+      "mbedtls_ecdsa_init(&ecdsa)",
+      "mbedtls_ecp_group_load(&ecdsa.grp, MBEDTLS_ECP_DP_SECP256R1)",
+      "mbedtls_ecp_point_read_binary(&ecdsa.grp,",
+      "mbedtls_ecp_check_pubkey(&ecdsa.grp, &ecdsa.Q)",
+      "mbedtls_ecdsa_read_signature(&ecdsa,"
     ]
   }
 }
