@@ -6,6 +6,8 @@ Status:
 
 - Design and mapping only.
 - No firmware C patch is included in this batch.
+- The implementation-ordered execution plan now lives in:
+  `session_bootstrap/patches/phytium_openamp_signed_admission_release_v1.4.0_patch_execution_plan_2026-03-16.md`
 
 ## Target firmware baseline
 
