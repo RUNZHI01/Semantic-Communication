@@ -8,22 +8,24 @@
 
 ## 答辩最短路径
 
-只看三份文件时，按这个顺序：
+只看四份文件时，按这个顺序：
 
 1. [summary_report.md](summary_report.md)
 2. [coverage_matrix.md](coverage_matrix.md)
-3. [../openamp_phase5_fit03_watchdog_success_2026-03-15.md](../openamp_phase5_fit03_watchdog_success_2026-03-15.md)
+3. [../openamp_demo_live_dualpath_status_20260317.md](../openamp_demo_live_dualpath_status_20260317.md)
+4. [../openamp_phase5_fit03_watchdog_success_2026-03-15.md](../openamp_phase5_fit03_watchdog_success_2026-03-15.md)
 
 ## 答辩 / Demo 材料
 
 如果当前任务不是继续补板级实验，而是准备 defense / live demo，优先看下面这些：
 
 1. [demo_materials_index.md](demo_materials_index.md)
-2. [demo_four_act_runbook.md](demo_four_act_runbook.md)
-3. [defense_talk_outline.md](defense_talk_outline.md)
-4. [degraded_demo_plan.md](degraded_demo_plan.md)
-5. [../../demo/openamp_control_plane_demo/README.md](../../demo/openamp_control_plane_demo/README.md)
-6. [../../scripts/run_openamp_demo.sh](../../scripts/run_openamp_demo.sh)
+2. [../openamp_demo_live_dualpath_status_20260317.md](../openamp_demo_live_dualpath_status_20260317.md)
+3. [demo_four_act_runbook.md](demo_four_act_runbook.md)
+4. [defense_talk_outline.md](defense_talk_outline.md)
+5. [degraded_demo_plan.md](degraded_demo_plan.md)
+6. [../../demo/openamp_control_plane_demo/README.md](../../demo/openamp_control_plane_demo/README.md)
+7. [../../scripts/run_openamp_demo.sh](../../scripts/run_openamp_demo.sh)
 
 ## 阅读顺序
 
