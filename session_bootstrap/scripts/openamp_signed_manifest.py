@@ -5,6 +5,7 @@ import argparse
 import base64
 import hashlib
 import json
+import re
 import struct
 import subprocess
 import tempfile
@@ -21,12 +22,14 @@ SIGNED_BUNDLE_SCHEMA = "openamp_signed_manifest_bundle/v1"
 BUNDLE_VERSION = 1
 SIGNATURE_ALGORITHM = "ecdsa-p256-sha256"
 SIGNED_ADMISSION_TRANSPORT_SCHEMA = "openamp_signed_admission_transport_plan/v1"
+FIRMWARE_CONTRACT_SCHEMA = "openamp_signed_admission_firmware_contract/v1"
 CTRL_MAGIC = 0x53434F4D
 CTRL_VERSION = 1
 CTRL_HEADER_STRUCT = struct.Struct("<IHHIIII")
 SIGNED_ADMISSION_TYPE = 1
 SIGNED_ADMISSION_SIGNATURE_ALGORITHM = 1
 SIGNED_ADMISSION_CHUNK_DATA_MAX = 160
+P256_PUBLIC_KEY_UNCOMPRESSED_LEN = 65
 JOB_FLAG_NAME_TO_WIRE = {
     "payload": 1,
     "reconstruction": 2,
@@ -396,6 +399,56 @@ def parse_job_flags_to_wire(job_flags: str) -> int:
 def decode_signature_bytes(bundle: Mapping[str, Any]) -> bytes:
     signature = require_dict(bundle.get("signature"), field_name="bundle.signature")
     return base64.b64decode(str(signature["value"]).encode("ascii"), validate=True)
+
+
+def _format_c_byte_initializer(payload: bytes, *, values_per_line: int = 8) -> list[str]:
+    lines: list[str] = []
+    for offset in range(0, len(payload), values_per_line):
+        chunk = payload[offset:offset + values_per_line]
+        rendered = ", ".join(f"0x{value:02X}U" for value in chunk)
+        if offset + len(chunk) < len(payload):
+            rendered += ","
+        lines.append(rendered)
+    return lines
+
+
+def extract_p256_public_key_uncompressed(
+    public_key: str | Path,
+    *,
+    openssl_bin: str = "openssl",
+) -> bytes:
+    result = _run_openssl(
+        [
+            openssl_bin,
+            "ec",
+            "-pubin",
+            "-in",
+            str(resolve_path(public_key)),
+            "-text",
+            "-noout",
+        ]
+    )
+    output = result.stdout.decode("utf-8", errors="replace")
+    if "ASN1 OID: prime256v1" not in output:
+        raise ValueError("public key must be an EC P-256 public key (prime256v1).")
+
+    collecting = False
+    octets: list[int] = []
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+        if line == "pub:":
+            collecting = True
+            continue
+        if collecting and line.startswith("ASN1 OID:"):
+            break
+        if not collecting:
+            continue
+        octets.extend(int(token, 16) for token in re.findall(r"[0-9A-Fa-f]{2}", line))
+
+    key_bytes = bytes(octets)
+    if len(key_bytes) != P256_PUBLIC_KEY_UNCOMPRESSED_LEN or key_bytes[:1] != b"\x04":
+        raise ValueError("public key must decode to a 65-byte uncompressed SEC1 point.")
+    return key_bytes
 
 
 def build_control_frame(*, msg_type: int, seq: int, job_id: int, payload: bytes) -> bytes:
@@ -776,6 +829,185 @@ def build_signed_admission_transport_plan(
     }
 
 
+def build_firmware_contract_artifact(
+    bundle: Mapping[str, Any],
+    *,
+    public_key: str | Path,
+    key_slot: int,
+    openssl_bin: str = "openssl",
+) -> dict[str, Any]:
+    validate_signed_manifest_bundle(bundle)
+    manifest = require_dict(bundle.get("manifest"), field_name="bundle.manifest")
+    artifact = require_dict(manifest.get("artifact"), field_name="manifest.artifact")
+    job = require_dict(manifest.get("job"), field_name="manifest.job")
+    publisher = require_dict(manifest.get("publisher"), field_name="manifest.publisher")
+    if key_slot < 0 or key_slot > 0xFF:
+        raise ValueError("key_slot must fit in u8.")
+
+    canonical_manifest = canonicalize_manifest(manifest)
+    signature_bytes = decode_signature_bytes(bundle)
+    public_key_bytes = extract_p256_public_key_uncompressed(public_key, openssl_bin=openssl_bin)
+    job_flags_text = require_text(job.get("job_flags"), field_name="manifest.job.job_flags")
+    job_flags_wire = parse_job_flags_to_wire(job_flags_text)
+    manifest_sha256 = normalize_sha256(bundle.get("manifest_sha256"), field_name="bundle.manifest_sha256")
+
+    public_key_slot_entry = "\n".join(
+        [
+            "{",
+            f"    {key_slot}U,",
+            f"    \"{require_text(publisher.get('key_id'), field_name='manifest.publisher.key_id')}\",",
+            "    {",
+            *[f"        {line}" for line in _format_c_byte_initializer(public_key_bytes)],
+            "    },",
+            "}",
+        ]
+    )
+
+    return {
+        "schema": FIRMWARE_CONTRACT_SCHEMA,
+        "contract_version": 1,
+        "bundle_schema": str(bundle["schema"]),
+        "manifest_schema": str(manifest["schema"]),
+        "manifest_sha256": manifest_sha256,
+        "manifest_len": len(canonical_manifest),
+        "manifest_crc32": compute_crc32(canonical_manifest),
+        "signature_len": len(signature_bytes),
+        "signature_crc32": compute_crc32(signature_bytes),
+        "signature_algorithm": SIGNATURE_ALGORITHM,
+        "signature_algorithm_wire": SIGNED_ADMISSION_SIGNATURE_ALGORITHM,
+        "admission_type_wire": SIGNED_ADMISSION_TYPE,
+        "message_types": dict(SIGNED_ADMISSION_MSG_TYPES),
+        "stage_codes": dict(SIGNED_ADMISSION_STAGE_CODES),
+        "ack_status_codes": dict(SIGNED_ADMISSION_ACK_STATUS),
+        "public_key_slot": {
+            "slot_id": key_slot,
+            "key_id": str(publisher["key_id"]),
+            "channel": str(publisher["channel"]),
+            "curve": "prime256v1",
+            "format": "uncompressed-sec1",
+            "byte_len": len(public_key_bytes),
+            "bytes_hex": public_key_bytes.hex(),
+            "c_type": "ScPublicKeySlot",
+            "c_initializer_lines": _format_c_byte_initializer(public_key_bytes),
+            "c_initializer": public_key_slot_entry,
+        },
+        "manifest_contract": {
+            "struct_name": "ScManifestContract",
+            "schema": str(manifest["schema"]),
+            "manifest_version": int(manifest["manifest_version"]),
+            "artifact_sha256": str(artifact["sha256"]),
+            "deadline_ms": int(job["deadline_ms"]),
+            "expected_outputs": int(job["expected_outputs"]),
+            "job_flags_text": job_flags_text,
+            "job_flags_wire": job_flags_wire,
+            "publisher_key_id": str(publisher["key_id"]),
+            "publisher_channel": str(publisher["channel"]),
+            "field_plan": [
+                {
+                    "json_path": "schema",
+                    "c_field": "schema_id",
+                    "c_type": "char[32]",
+                    "parser": "json_string_exact",
+                    "expected": MANIFEST_SCHEMA,
+                },
+                {
+                    "json_path": "manifest_version",
+                    "c_field": "manifest_version",
+                    "c_type": "uint32_t",
+                    "parser": "json_u32_exact",
+                    "expected": 1,
+                },
+                {
+                    "json_path": "artifact.sha256",
+                    "c_field": "artifact_sha256",
+                    "c_type": "uint8_t[32]",
+                    "parser": "json_sha256_hex",
+                },
+                {
+                    "json_path": "job.deadline_ms",
+                    "c_field": "deadline_ms",
+                    "c_type": "uint32_t",
+                    "parser": "json_u32",
+                },
+                {
+                    "json_path": "job.expected_outputs",
+                    "c_field": "expected_outputs",
+                    "c_type": "uint32_t",
+                    "parser": "json_u32",
+                },
+                {
+                    "json_path": "job.job_flags",
+                    "c_field": "flags",
+                    "c_type": "uint32_t",
+                    "parser": "json_string_enum",
+                    "enum_map": dict(JOB_FLAG_NAME_TO_WIRE),
+                },
+                {
+                    "json_path": "publisher.key_id",
+                    "c_field": "publisher_key_id",
+                    "c_type": "char[32]",
+                    "parser": "json_string_copy",
+                },
+                {
+                    "json_path": "publisher.channel",
+                    "c_field": "publisher_channel",
+                    "c_type": "char[32]",
+                    "parser": "json_string_copy",
+                },
+            ],
+        },
+        "parser_strategy": {
+            "entrypoint": "sc_ctrl_parse_manifest_contract",
+            "required_helpers": [
+                "sc_ctrl_json_find_object",
+                "sc_ctrl_json_find_string_field",
+                "sc_ctrl_json_find_u32_field",
+                "sc_ctrl_parse_sha256_hex",
+                "sc_ctrl_manifest_flag_from_string",
+            ],
+            "assumptions": [
+                "manifest bytes are the exact canonical UTF-8 bytes staged over SIGNED_ADMISSION_CHUNK",
+                "parser is narrow and only accepts the committed openamp_artifact_manifest/v1 schema",
+                "string fields reject escape sequences to keep the firmware parser small and deterministic",
+            ],
+        },
+        "crypto_boundary": {
+            "backend": "standalone-sdk-mbedtls-boundary",
+            "hash_algorithm": "sha256",
+            "digest_len": 32,
+            "public_key_format": "uncompressed-sec1",
+            "signature_format": "asn1-der",
+            "request_struct_name": "ScEcdsaP256VerifyRequest",
+            "sha256_wrapper": {
+                "name": "sc_ctrl_crypto_sha256",
+                "prototype": (
+                    "static int sc_ctrl_crypto_sha256(const uint8_t *input, "
+                    "uint32_t input_len, uint8_t out_digest[32])"
+                ),
+            },
+            "verify_wrapper": {
+                "name": "sc_ctrl_crypto_verify_ecdsa_p256_sha256_der",
+                "prototype": (
+                    "static int sc_ctrl_crypto_verify_ecdsa_p256_sha256_der("
+                    "const ScEcdsaP256VerifyRequest *request)"
+                ),
+            },
+            "sdk_headers": [
+                "mbedtls/ecdsa.h",
+                "mbedtls/ecp.h",
+                "mbedtls/sha256.h",
+            ],
+            "mbedtls_call_sequence": [
+                "mbedtls_sha256_ret(manifest_bytes, manifest_len, manifest_digest, 0)",
+                "mbedtls_ecp_group_load(&group, MBEDTLS_ECP_DP_SECP256R1)",
+                "mbedtls_ecp_point_read_binary(&group, &public_key, public_key_uncompressed, 65)",
+                "mbedtls_ecdsa_from_keypair(&ecdsa, &keypair)",
+                "mbedtls_ecdsa_read_signature(&ecdsa, manifest_digest, 32, signature_der, signature_len)",
+            ],
+        },
+    }
+
+
 def parse_shape(raw: str) -> tuple[int, int, int, int]:
     parts = [part.strip() for part in str(raw).split(",")]
     if len(parts) != 4:
@@ -852,6 +1084,16 @@ def parse_args() -> argparse.Namespace:
     transport_parser.add_argument("--output", required=True, help="JSON output path for the transport plan.")
     transport_parser.add_argument("--chunk-size", type=int, default=SIGNED_ADMISSION_CHUNK_DATA_MAX)
     transport_parser.add_argument("--seq-start", type=int, default=1)
+
+    firmware_parser = subparsers.add_parser(
+        "firmware-contract",
+        help="Emit the exact firmware-facing manifest contract, public key slot, and crypto boundary fixture.",
+    )
+    firmware_parser.add_argument("--signed-manifest", required=True, help="Signed bundle JSON path.")
+    firmware_parser.add_argument("--public-key", required=True, help="PEM public key used for firmware slot generation.")
+    firmware_parser.add_argument("--key-slot", required=True, type=int, help="Firmware public-key slot index.")
+    firmware_parser.add_argument("--output", required=True, help="JSON output path for the firmware contract artifact.")
+    firmware_parser.add_argument("--openssl-bin", default="openssl")
 
     return parser.parse_args()
 
@@ -967,6 +1209,26 @@ def command_transport_plan(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+def command_firmware_contract(args: argparse.Namespace) -> dict[str, Any]:
+    bundle_path = resolve_path(args.signed_manifest)
+    bundle = load_signed_manifest_bundle(bundle_path)
+    artifact = build_firmware_contract_artifact(
+        bundle,
+        public_key=args.public_key,
+        key_slot=require_u32(args.key_slot, field_name="--key-slot", allow_zero=True),
+        openssl_bin=args.openssl_bin,
+    )
+    output_path = resolve_path(args.output)
+    write_json(output_path, artifact)
+    return {
+        "command": "firmware-contract",
+        "output": str(output_path),
+        "schema": artifact["schema"],
+        "manifest_sha256": artifact["manifest_sha256"],
+        "key_slot": artifact["public_key_slot"]["slot_id"],
+    }
+
+
 def main() -> int:
     args = parse_args()
     if args.command == "build":
@@ -979,6 +1241,8 @@ def main() -> int:
         result = command_verify(args)
     elif args.command == "transport-plan":
         result = command_transport_plan(args)
+    elif args.command == "firmware-contract":
+        result = command_firmware_contract(args)
     else:
         raise SystemExit(f"unsupported command: {args.command}")
     print(json.dumps(result, ensure_ascii=False, indent=2))

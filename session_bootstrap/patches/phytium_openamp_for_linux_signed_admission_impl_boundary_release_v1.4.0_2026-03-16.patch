@@ -1,0 +1,527 @@
+--- a/example/system/amp/openamp_for_linux/src/slaver_00_example.c
++++ b/example/system/amp/openamp_for_linux/src/slaver_00_example.c
+@@
+ #define SC_SIGNED_MANIFEST_MAX_LEN          1536U
+ #define SC_SIGNED_SIGNATURE_MAX_LEN         96U
+ #define SC_SIGNED_MANIFEST_CHUNK_MAX        160U
+ #define SC_SIGNED_MANIFEST_MAX_CHUNK_COUNT  10U
++#define SC_PUBLIC_KEY_UNCOMPRESSED_LEN      65U
++#define SC_MANIFEST_SCHEMA_ID_MAX_LEN       32U
++#define SC_MANIFEST_KEY_ID_MAX_LEN          32U
++#define SC_MANIFEST_CHANNEL_MAX_LEN         32U
+ #define SC_SIGNED_STAGE_BEGIN               1U
+ #define SC_SIGNED_STAGE_CHUNK               2U
+ #define SC_SIGNED_STAGE_SIGNATURE           3U
+ #define SC_SIGNED_STAGE_COMMIT              4U
+@@
++typedef struct
++{
++    const uint8_t *begin;
++    uint32_t len;
++} ScJsonSlice;
++
+ typedef struct
+ {
+     uint8_t slot_id;
+     const char *key_id;
+     uint8_t public_key_uncompressed[65];
+ } ScPublicKeySlot;
+ 
++typedef struct
++{
++    const uint8_t *manifest_bytes;
++    uint32_t manifest_len;
++    uint8_t manifest_sha256[32];
++    const uint8_t *signature_der;
++    uint32_t signature_len;
++    const uint8_t *public_key_uncompressed;
++    uint32_t public_key_len;
++} ScEcdsaP256VerifyRequest;
++
+ typedef struct
+ {
++    char schema_id[SC_MANIFEST_SCHEMA_ID_MAX_LEN];
++    uint32_t manifest_version;
+     uint8_t artifact_sha256[32];
+     uint32_t deadline_ms;
+     uint32_t expected_outputs;
+     uint32_t flags;
++    char publisher_key_id[SC_MANIFEST_KEY_ID_MAX_LEN];
++    char publisher_channel[SC_MANIFEST_CHANNEL_MAX_LEN];
+ } ScManifestContract;
+@@
+ static const ScPublicKeySlot sc_public_key_slots[] = {
+     {
+         1U,
+         "fixture-dev-20260316",
+         {
+-            /* TODO(next): replace placeholder bytes with the real uncompressed P-256 public key. */
+-            0x04U,
++            0x04U, 0xAAU, 0xEFU, 0x2BU, 0xC7U, 0xF2U, 0xDDU, 0x9AU,
++            0xF2U, 0x11U, 0xBDU, 0x3BU, 0xC4U, 0xF3U, 0xBAU, 0xD1U,
++            0xBCU, 0xAEU, 0xB7U, 0xE2U, 0x5BU, 0xAAU, 0xCCU, 0x01U,
++            0x00U, 0xE1U, 0x3EU, 0xC5U, 0x1CU, 0x12U, 0xBDU, 0xAEU,
++            0x62U, 0xDAU, 0x2BU, 0x87U, 0xF3U, 0xA1U, 0x65U, 0x97U,
++            0x21U, 0x60U, 0x26U, 0x00U, 0x02U, 0x5DU, 0x08U, 0xF7U,
++            0x7DU, 0x3AU, 0x6AU, 0x23U, 0xB2U, 0x95U, 0x31U, 0x6BU,
++            0x91U, 0x7DU, 0x2EU, 0xBBU, 0x08U, 0x1DU, 0x15U, 0xD3U,
++            0x05U,
+         },
+     },
+ };
+@@
++static int sc_ctrl_parse_hex_nibble(uint8_t raw, uint8_t *out_nibble)
++{
++    if ((raw >= (uint8_t)'0') && (raw <= (uint8_t)'9'))
++    {
++        *out_nibble = (uint8_t)(raw - (uint8_t)'0');
++        return 1;
++    }
++    if ((raw >= (uint8_t)'a') && (raw <= (uint8_t)'f'))
++    {
++        *out_nibble = (uint8_t)(raw - (uint8_t)'a' + 10U);
++        return 1;
++    }
++    if ((raw >= (uint8_t)'A') && (raw <= (uint8_t)'F'))
++    {
++        *out_nibble = (uint8_t)(raw - (uint8_t)'A' + 10U);
++        return 1;
++    }
++    return 0;
++}
++
++static int sc_ctrl_parse_sha256_hex(const char *text, uint8_t out_sha256[32])
++{
++    uint32_t index;
++
++    if ((text == NULL) || (out_sha256 == NULL) || (strlen(text) != 64U))
++    {
++        return 0;
++    }
++    for (index = 0U; index < 32U; ++index)
++    {
++        uint8_t high = 0U;
++        uint8_t low = 0U;
++
++        if (!sc_ctrl_parse_hex_nibble((uint8_t)text[index * 2U], &high) ||
++            !sc_ctrl_parse_hex_nibble((uint8_t)text[index * 2U + 1U], &low))
++        {
++            return 0;
++        }
++        out_sha256[index] = (uint8_t)((high << 4U) | low);
++    }
++    return 1;
++}
++
++static int sc_ctrl_manifest_flag_from_string(const char *text, uint32_t *out_flags)
++{
++    if ((text == NULL) || (out_flags == NULL))
++    {
++        return 0;
++    }
++    if (strcmp(text, "payload") == 0)
++    {
++        *out_flags = 1U;
++        return 1;
++    }
++    if (strcmp(text, "reconstruction") == 0)
++    {
++        *out_flags = 2U;
++        return 1;
++    }
++    if (strcmp(text, "smoke") == 0)
++    {
++        *out_flags = 3U;
++        return 1;
++    }
++    return 0;
++}
++
++static int sc_ctrl_json_build_key_token(const char *field_name,
++                                        char *out_token,
++                                        uint32_t out_token_len,
++                                        uint32_t *out_written_len)
++{
++    size_t field_name_len;
++
++    if ((field_name == NULL) || (out_token == NULL))
++    {
++        return 0;
++    }
++    field_name_len = strlen(field_name);
++    if ((field_name_len + 3U) > out_token_len)
++    {
++        return 0;
++    }
++    out_token[0] = '"';
++    memcpy(&out_token[1], field_name, field_name_len);
++    out_token[field_name_len + 1U] = '"';
++    out_token[field_name_len + 2U] = ':';
++    if (out_written_len != NULL)
++    {
++        *out_written_len = (uint32_t)(field_name_len + 3U);
++    }
++    return 1;
++}
++
++static int sc_ctrl_json_find_key_start(const uint8_t *json_bytes,
++                                       uint32_t json_len,
++                                       const char *field_name,
++                                       const uint8_t **out_value_start)
++{
++    char token[48];
++    uint32_t token_len = 0U;
++    uint32_t index;
++
++    if ((json_bytes == NULL) || (field_name == NULL) || (out_value_start == NULL))
++    {
++        return 0;
++    }
++    if (!sc_ctrl_json_build_key_token(field_name, token, sizeof(token), &token_len))
++    {
++        return 0;
++    }
++    for (index = 0U; index + token_len <= json_len; ++index)
++    {
++        if (memcmp(&json_bytes[index], token, token_len) == 0)
++        {
++            *out_value_start = &json_bytes[index + token_len];
++            return 1;
++        }
++    }
++    return 0;
++}
++
++static int sc_ctrl_json_find_object(const uint8_t *json_bytes,
++                                    uint32_t json_len,
++                                    const char *field_name,
++                                    ScJsonSlice *out_object)
++{
++    const uint8_t *value_start = NULL;
++    const uint8_t *cursor;
++    uint32_t depth = 0U;
++    int in_string = 0;
++
++    if ((out_object == NULL) ||
++        !sc_ctrl_json_find_key_start(json_bytes, json_len, field_name, &value_start) ||
++        (value_start[0] != (uint8_t)'{'))
++    {
++        return 0;
++    }
++    cursor = value_start;
++    while ((uint32_t)(cursor - json_bytes) < json_len)
++    {
++        uint8_t ch = *cursor;
++
++        if (in_string)
++        {
++            if (ch == (uint8_t)'\\')
++            {
++                return 0;
++            }
++            if (ch == (uint8_t)'"')
++            {
++                in_string = 0;
++            }
++        }
++        else if (ch == (uint8_t)'"')
++        {
++            in_string = 1;
++        }
++        else if (ch == (uint8_t)'{')
++        {
++            ++depth;
++        }
++        else if (ch == (uint8_t)'}')
++        {
++            if (depth == 0U)
++            {
++                return 0;
++            }
++            --depth;
++            if (depth == 0U)
++            {
++                out_object->begin = value_start;
++                out_object->len = (uint32_t)((cursor - value_start) + 1U);
++                return 1;
++            }
++        }
++        ++cursor;
++    }
++    return 0;
++}
++
++static int sc_ctrl_json_find_string_field(const uint8_t *json_bytes,
++                                          uint32_t json_len,
++                                          const char *field_name,
++                                          char *out_text,
++                                          uint32_t out_text_len)
++{
++    const uint8_t *value_start = NULL;
++    const uint8_t *cursor;
++    uint32_t text_len = 0U;
++
++    if ((out_text == NULL) ||
++        !sc_ctrl_json_find_key_start(json_bytes, json_len, field_name, &value_start) ||
++        (value_start[0] != (uint8_t)'"'))
++    {
++        return 0;
++    }
++    cursor = &value_start[1];
++    while ((uint32_t)(cursor - json_bytes) < json_len)
++    {
++        if (*cursor == (uint8_t)'\\')
++        {
++            return 0;
++        }
++        if (*cursor == (uint8_t)'"')
++        {
++            break;
++        }
++        ++cursor;
++        ++text_len;
++    }
++    if (((uint32_t)(cursor - json_bytes) >= json_len) ||
++        ((text_len + 1U) > out_text_len))
++    {
++        return 0;
++    }
++    memcpy(out_text, &value_start[1], text_len);
++    out_text[text_len] = '\0';
++    return 1;
++}
++
++static int sc_ctrl_json_find_u32_field(const uint8_t *json_bytes,
++                                       uint32_t json_len,
++                                       const char *field_name,
++                                       uint32_t *out_value)
++{
++    const uint8_t *value_start = NULL;
++    const uint8_t *cursor;
++    uint32_t value = 0U;
++    uint32_t digit_count = 0U;
++
++    if ((out_value == NULL) ||
++        !sc_ctrl_json_find_key_start(json_bytes, json_len, field_name, &value_start))
++    {
++        return 0;
++    }
++    cursor = value_start;
++    while ((uint32_t)(cursor - json_bytes) < json_len)
++    {
++        uint8_t ch = *cursor;
++
++        if ((ch < (uint8_t)'0') || (ch > (uint8_t)'9'))
++        {
++            break;
++        }
++        value = (value * 10U) + (uint32_t)(ch - (uint8_t)'0');
++        ++digit_count;
++        ++cursor;
++    }
++    if (digit_count == 0U)
++    {
++        return 0;
++    }
++    *out_value = value;
++    return 1;
++}
++
++static int sc_ctrl_crypto_sha256(const uint8_t *input,
++                                 uint32_t input_len,
++                                 uint8_t out_digest[32])
++{
++    (void)input;
++    (void)input_len;
++    (void)out_digest;
++    /*
++     * standalone SDK integration boundary:
++     *   #include <mbedtls/sha256.h>
++     *   return (mbedtls_sha256_ret(input, input_len, out_digest, 0) == 0);
++     */
++    return 0;
++}
++
++static int sc_ctrl_crypto_verify_ecdsa_p256_sha256_der(
++    const ScEcdsaP256VerifyRequest *request)
++{
++    (void)request;
++    /*
++     * standalone SDK integration boundary:
++     *   #include <mbedtls/ecp.h>
++     *   #include <mbedtls/ecdsa.h>
++     *   1. load MBEDTLS_ECP_DP_SECP256R1
++     *   2. point_read_binary(slot->public_key_uncompressed, 65)
++     *   3. ecdsa_read_signature(request->manifest_sha256, 32,
++     *                           request->signature_der, request->signature_len)
++     */
++    return 0;
++}
++
+-static int sc_ctrl_verify_manifest_signature(const ScPublicKeySlot *slot,
+-                                             const uint8_t *manifest_bytes,
+-                                             uint32_t manifest_len,
+-                                             const uint8_t *signature_bytes,
+-                                             uint32_t signature_len)
++static int sc_ctrl_verify_manifest_signature(const ScPublicKeySlot *slot,
++                                             const uint8_t expected_manifest_sha256[32],
++                                             const uint8_t *manifest_bytes,
++                                             uint32_t manifest_len,
++                                             const uint8_t *signature_bytes,
++                                             uint32_t signature_len)
+ {
+-    (void)slot;
+-    (void)manifest_bytes;
+-    (void)manifest_len;
+-    (void)signature_bytes;
+-    (void)signature_len;
+-    /*
+-     * TODO(next): replace this deny-by-default stub with the chosen SHA-256 +
+-     * ECDSA-P256 verifier from the standalone SDK build. Until that lands, the
+-     * signed path remains explicitly non-admitting.
+-     */
+-    return 0;
++    uint8_t manifest_sha256[32];
++    ScEcdsaP256VerifyRequest verify_request;
++
++    if ((slot == NULL) || (expected_manifest_sha256 == NULL) ||
++        (manifest_bytes == NULL) || (manifest_len == 0U) ||
++        (signature_bytes == NULL) || (signature_len == 0U))
++    {
++        return 0;
++    }
++    if (!sc_ctrl_crypto_sha256(manifest_bytes, manifest_len, manifest_sha256))
++    {
++        return 0;
++    }
++    if (memcmp(manifest_sha256, expected_manifest_sha256, sizeof(manifest_sha256)) != 0)
++    {
++        return 0;
++    }
++    memset(&verify_request, 0, sizeof(verify_request));
++    verify_request.manifest_bytes = manifest_bytes;
++    verify_request.manifest_len = manifest_len;
++    memcpy(verify_request.manifest_sha256,
++           manifest_sha256,
++           sizeof(verify_request.manifest_sha256));
++    verify_request.signature_der = signature_bytes;
++    verify_request.signature_len = signature_len;
++    verify_request.public_key_uncompressed = slot->public_key_uncompressed;
++    verify_request.public_key_len = SC_PUBLIC_KEY_UNCOMPRESSED_LEN;
++    return sc_ctrl_crypto_verify_ecdsa_p256_sha256_der(&verify_request);
+ }
+ 
+ static int sc_ctrl_parse_manifest_contract(const uint8_t *manifest_bytes,
+                                            uint32_t manifest_len,
+                                            ScManifestContract *out_contract)
+ {
+-    (void)manifest_bytes;
+-    (void)manifest_len;
+-    if (out_contract != NULL)
+-    {
+-        memset(out_contract, 0, sizeof(*out_contract));
+-    }
+-    /* TODO(next): implement strict field extraction for artifact.sha256 and job.* only. */
+-    return 0;
++    ScJsonSlice artifact_object;
++    ScJsonSlice job_object;
++    ScJsonSlice publisher_object;
++    char text_value[96];
++
++    if ((manifest_bytes == NULL) || (manifest_len == 0U) || (out_contract == NULL))
++    {
++        return 0;
++    }
++    memset(out_contract, 0, sizeof(*out_contract));
++
++    if (!sc_ctrl_json_find_string_field(manifest_bytes,
++                                        manifest_len,
++                                        "schema",
++                                        out_contract->schema_id,
++                                        sizeof(out_contract->schema_id)))
++    {
++        return 0;
++    }
++    if (strcmp(out_contract->schema_id, "openamp_artifact_manifest/v1") != 0)
++    {
++        return 0;
++    }
++    if (!sc_ctrl_json_find_u32_field(manifest_bytes,
++                                     manifest_len,
++                                     "manifest_version",
++                                     &out_contract->manifest_version) ||
++        (out_contract->manifest_version != 1U))
++    {
++        return 0;
++    }
++
++    if (!sc_ctrl_json_find_object(manifest_bytes,
++                                  manifest_len,
++                                  "artifact",
++                                  &artifact_object) ||
++        !sc_ctrl_json_find_string_field(artifact_object.begin,
++                                        artifact_object.len,
++                                        "sha256",
++                                        text_value,
++                                        sizeof(text_value)) ||
++        !sc_ctrl_parse_sha256_hex(text_value, out_contract->artifact_sha256))
++    {
++        return 0;
++    }
++
++    if (!sc_ctrl_json_find_object(manifest_bytes,
++                                  manifest_len,
++                                  "job",
++                                  &job_object) ||
++        !sc_ctrl_json_find_u32_field(job_object.begin,
++                                     job_object.len,
++                                     "deadline_ms",
++                                     &out_contract->deadline_ms) ||
++        !sc_ctrl_json_find_u32_field(job_object.begin,
++                                     job_object.len,
++                                     "expected_outputs",
++                                     &out_contract->expected_outputs) ||
++        !sc_ctrl_json_find_string_field(job_object.begin,
++                                        job_object.len,
++                                        "job_flags",
++                                        text_value,
++                                        sizeof(text_value)) ||
++        !sc_ctrl_manifest_flag_from_string(text_value, &out_contract->flags))
++    {
++        return 0;
++    }
++
++    if (!sc_ctrl_json_find_object(manifest_bytes,
++                                  manifest_len,
++                                  "publisher",
++                                  &publisher_object) ||
++        !sc_ctrl_json_find_string_field(publisher_object.begin,
++                                        publisher_object.len,
++                                        "key_id",
++                                        out_contract->publisher_key_id,
++                                        sizeof(out_contract->publisher_key_id)) ||
++        !sc_ctrl_json_find_string_field(publisher_object.begin,
++                                        publisher_object.len,
++                                        "channel",
++                                        out_contract->publisher_channel,
++                                        sizeof(out_contract->publisher_channel)))
++    {
++        return 0;
++    }
++    return 1;
+ }
+@@
+-    if (!sc_ctrl_verify_manifest_signature(slot,
+-                                           sc_signed_stage.manifest_buf,
+-                                           sc_signed_stage.manifest_len,
+-                                           sc_signed_stage.signature_buf,
+-                                           sc_signed_stage.signature_len))
++    if (!sc_ctrl_verify_manifest_signature(slot,
++                                           sc_signed_stage.manifest_sha256,
++                                           sc_signed_stage.manifest_buf,
++                                           sc_signed_stage.manifest_len,
++                                           sc_signed_stage.signature_buf,
++                                           sc_signed_stage.signature_len))
+     {
+         return SC_FAULT_SIGNATURE_INVALID;
+     }

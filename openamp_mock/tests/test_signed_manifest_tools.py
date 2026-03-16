@@ -30,6 +30,9 @@ FIXTURE_PUBLIC_KEY_PATH = (
 FIXTURE_TRANSPORT_PATH = (
     PROJECT_ROOT / "session_bootstrap" / "examples" / "openamp_signed_manifest.fixture.transport.json"
 )
+FIXTURE_FIRMWARE_CONTRACT_PATH = (
+    PROJECT_ROOT / "session_bootstrap" / "examples" / "openamp_signed_manifest.fixture.firmware_contract.json"
+)
 
 
 def load_module(module_name: str, module_path: Path):
@@ -309,6 +312,56 @@ class SignedManifestToolsTest(unittest.TestCase):
         self.assertGreaterEqual(len(chunk_frames), 1)
         self.assertTrue(all(frame["payload"]["chunk_len"] <= 160 for frame in chunk_frames))
 
+    def test_public_key_extraction_matches_committed_fixture_bytes(self) -> None:
+        public_key_bytes = signed_manifest.extract_p256_public_key_uncompressed(FIXTURE_PUBLIC_KEY_PATH)
+
+        self.assertEqual(len(public_key_bytes), 65)
+        self.assertEqual(public_key_bytes[:1], b"\x04")
+        self.assertEqual(
+            public_key_bytes.hex(),
+            (
+                "04aaef2bc7f2dd9af211bd3bc4f3bad1bcaeb7e25baacc0100e13ec51c12bdae"
+                "62da2b87f3a1659721602600025d08f77d3a6a23b295316b917d2ebb081d15d305"
+            ),
+        )
+
+    def test_firmware_contract_command_emits_expected_fixture_summary(self) -> None:
+        with tempfile.TemporaryDirectory(prefix="signed_manifest_fw_contract_") as temp_dir_raw:
+            temp_dir = Path(temp_dir_raw)
+            output_path = temp_dir / "firmware_contract.json"
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SIGNED_MANIFEST_PATH),
+                    "firmware-contract",
+                    "--signed-manifest",
+                    str(FIXTURE_BUNDLE_PATH),
+                    "--public-key",
+                    str(FIXTURE_PUBLIC_KEY_PATH),
+                    "--key-slot",
+                    "1",
+                    "--output",
+                    str(output_path),
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+
+            summary = json.loads(result.stdout)
+            artifact = signed_manifest.load_json(output_path)
+
+        self.assertEqual(summary["command"], "firmware-contract")
+        self.assertEqual(summary["schema"], signed_manifest.FIRMWARE_CONTRACT_SCHEMA)
+        self.assertEqual(summary["key_slot"], 1)
+        self.assertEqual(artifact["public_key_slot"]["slot_id"], 1)
+        self.assertEqual(
+            artifact["manifest_contract"]["artifact_sha256"],
+            "09af47ee1b0e2a7d3cad3add031f36811926e1fe34cfd58fa98d70eba9526b91",
+        )
+        self.assertEqual(artifact["manifest_contract"]["job_flags_wire"], 2)
+
     def test_committed_fixture_bundle_and_transport_plan_match_tool_output(self) -> None:
         manifest = signed_manifest.load_json(FIXTURE_MANIFEST_PATH)
         bundle = signed_manifest.load_signed_manifest_bundle(FIXTURE_BUNDLE_PATH)
@@ -318,6 +371,7 @@ class SignedManifestToolsTest(unittest.TestCase):
             artifact_path=FIXTURE_ARTIFACT_PATH,
         )
         fixture_transport = signed_manifest.load_json(FIXTURE_TRANSPORT_PATH)
+        fixture_firmware_contract = signed_manifest.load_json(FIXTURE_FIRMWARE_CONTRACT_PATH)
         rebuilt_transport = signed_manifest.build_signed_admission_transport_plan(
             bundle,
             job_id=7301,
@@ -325,11 +379,17 @@ class SignedManifestToolsTest(unittest.TestCase):
             chunk_size=160,
             seq_start=1,
         )
+        rebuilt_firmware_contract = signed_manifest.build_firmware_contract_artifact(
+            bundle,
+            public_key=FIXTURE_PUBLIC_KEY_PATH,
+            key_slot=1,
+        )
 
         self.assertEqual(manifest, bundle["manifest"])
         self.assertTrue(verify_summary["verified_locally"])
         self.assertTrue(verify_summary["artifact_match"])
         self.assertEqual(fixture_transport, rebuilt_transport)
+        self.assertEqual(fixture_firmware_contract, rebuilt_firmware_contract)
 
 
 if __name__ == "__main__":
