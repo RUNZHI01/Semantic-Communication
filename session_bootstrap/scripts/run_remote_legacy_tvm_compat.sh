@@ -324,17 +324,32 @@ def file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-log_path = Path(sys.argv[1])
-artifact_path = Path(sys.argv[2])
-original_input_dir = Path(sys.argv[3])
-selected_input_dir = Path(sys.argv[4])
-output_dir = Path(sys.argv[5])
-variant = sys.argv[6]
-snr = float(sys.argv[7])
-batch_size = int(sys.argv[8])
-expected_sha256 = sys.argv[9].strip().lower()
-max_inputs = int(sys.argv[10])
-run_started_at = int(sys.argv[11])
+def argv_or(index: int, default: str = "") -> str:
+    if len(sys.argv) > index:
+        return sys.argv[index]
+    return default
+
+
+if len(sys.argv) < 9:
+    raise SystemExit(f"ERROR: legacy summary expected at least 8 args, got {len(sys.argv) - 1}")
+
+summary_warnings = []
+if len(sys.argv) <= 10:
+    summary_warnings.append("max_inputs_missing")
+if len(sys.argv) <= 11:
+    summary_warnings.append("run_started_at_missing")
+
+log_path = Path(argv_or(1))
+artifact_path = Path(argv_or(2))
+original_input_dir = Path(argv_or(3))
+selected_input_dir = Path(argv_or(4))
+output_dir = Path(argv_or(5))
+variant = argv_or(6)
+snr = float(argv_or(7, "0") or 0.0)
+batch_size = int(argv_or(8, "0") or 0)
+expected_sha256 = argv_or(9).strip().lower()
+max_inputs = int(argv_or(10, "0") or 0)
+run_started_at = int(argv_or(11, "0") or 0)
 
 patterns = (
     re.compile(r"批量推理时间.*?:\s*([0-9]+(?:\.[0-9]+)?)\s*秒"),
@@ -429,6 +444,8 @@ summary = {
     "max_inputs": max_inputs,
     "parser": "legacy_latency_lines",
 }
+if summary_warnings:
+    summary["warnings"] = summary_warnings
 print(json.dumps(summary, ensure_ascii=False))
 PY
 rm -f "$legacy_log"

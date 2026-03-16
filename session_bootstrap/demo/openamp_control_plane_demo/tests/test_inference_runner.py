@@ -590,6 +590,143 @@ class RunRemoteReconstructionTest(unittest.TestCase):
             self.assertEqual(snapshot["diagnostics"]["control_hook_stats"]["heartbeat_event_count"], 1)
             self.assertAlmostEqual(snapshot["runner_summary"]["run_median_ms"], 230.339)
 
+    def test_current_live_job_surfaces_slowdown_message_when_heartbeat_hooks_are_expensive(self) -> None:
+        with tempfile.TemporaryDirectory(dir=PROJECT_ROOT) as temp_dir:
+            output_dir = Path(temp_dir)
+            trace_path = output_dir / "control_trace.jsonl"
+            summary_path = output_dir / "wrapper_summary.json"
+            runner_log_path = output_dir / "runner.log"
+
+            summary_path.write_text(
+                json.dumps({"result": "success"}, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+            trace_events = [
+                {
+                    "at": "2026-03-16T10:28:32+0800",
+                    "phase": "STATUS_REQ",
+                    "payload": {"job_id": 4242},
+                    "hook_result": {
+                        "returncode": 0,
+                        "timed_out": False,
+                        "duration_ms": 2955,
+                        "response": {
+                            "phase": "STATUS_REQ",
+                            "transport_status": "status_resp_received",
+                            "protocol_semantics": "implemented",
+                        },
+                    },
+                },
+                {
+                    "at": "2026-03-16T10:28:35+0800",
+                    "phase": "JOB_REQ",
+                    "payload": {"job_id": 4242},
+                    "hook_result": {
+                        "returncode": 0,
+                        "timed_out": False,
+                        "duration_ms": 2876,
+                        "response": {
+                            "phase": "JOB_REQ",
+                            "decision": "ALLOW",
+                            "transport_status": "job_ack_received",
+                            "protocol_semantics": "implemented",
+                        },
+                    },
+                },
+                {
+                    "at": "2026-03-16T10:28:35+0800",
+                    "phase": "JOB_ACK",
+                    "payload": {"job_id": 4242, "decision": "ALLOW", "guard_state_name": "JOB_ACTIVE"},
+                },
+            ]
+            for offset, duration_ms in enumerate((3521, 3375, 3470, 2818, 3463, 3550, 3410, 3605, 3342), start=1):
+                trace_events.append(
+                    {
+                        "at": f"2026-03-16T10:29:{offset:02d}+0800",
+                        "phase": "HEARTBEAT",
+                        "payload": {"job_id": 4242, "elapsed_ms": offset * 4000, "runtime_state": "RUNNING"},
+                        "hook_result": {
+                            "returncode": 0,
+                            "timed_out": False,
+                            "duration_ms": duration_ms,
+                            "response": {
+                                "phase": "HEARTBEAT",
+                                "acknowledged": True,
+                                "heartbeat_ok": 1,
+                                "guard_state_name": "JOB_ACTIVE",
+                                "source": "firmware_heartbeat_ack",
+                                "transport_status": "heartbeat_ack_received",
+                                "protocol_semantics": "implemented",
+                            },
+                        },
+                    }
+                )
+            trace_events.append(
+                {
+                    "at": "2026-03-16T10:30:54+0800",
+                    "phase": "JOB_DONE",
+                    "payload": {"job_id": 4242, "elapsed_ms": 134774, "result_code": 0, "runner_exit_code": 0},
+                    "hook_result": {
+                        "returncode": 0,
+                        "timed_out": False,
+                        "duration_ms": 2899,
+                        "response": {
+                            "phase": "JOB_DONE",
+                            "acknowledged": True,
+                            "transport_status": "job_done_status_received",
+                            "protocol_semantics": "implemented",
+                        },
+                    },
+                }
+            )
+            trace_path.write_text(
+                "\n".join(json.dumps(event, ensure_ascii=False) for event in trace_events) + "\n",
+                encoding="utf-8",
+            )
+            runner_log_path.write_text(
+                json.dumps(
+                    {
+                        "processed_count": 300,
+                        "input_count": 300,
+                        "load_ms": 2.718,
+                        "vm_init_ms": 0.473,
+                        "run_median_ms": 370.274,
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            job = LiveRemoteReconstructionJob.__new__(LiveRemoteReconstructionJob)
+            job.job_id = "4242"
+            job.variant = "current"
+            job._timeout_sec = 10.0
+            job._expected_outputs = inference_runner.DEFAULT_MAX_INPUTS
+            job._output_dir = output_dir
+            job._trace_path = trace_path
+            job._summary_path = summary_path
+            job._runner_log_path = runner_log_path
+            job._lock = Lock()
+            job._final_snapshot = None
+
+            fake_process = Mock()
+            fake_process.communicate.return_value = ("", "")
+            fake_process.returncode = 0
+            job._process = fake_process
+
+            job._wait_for_completion()
+
+            snapshot = job._final_snapshot
+            assert snapshot is not None
+            self.assertEqual(snapshot["status"], "success")
+            self.assertIn("370.274 ms", snapshot["message"])
+            self.assertIn("230.339 ms", snapshot["message"])
+            self.assertIn("HEARTBEAT hook", snapshot["message"])
+            self.assertTrue(snapshot["diagnostics"]["performance_regression"]["control_plane_interference_suspected"])
+            self.assertEqual(snapshot["diagnostics"]["performance_regression"]["heartbeat_event_count"], 9)
+            self.assertGreater(snapshot["diagnostics"]["control_hook_stats"]["heartbeat_duration_total_ms"], 30000)
+
     def test_baseline_live_job_ack_artifact_mismatch_is_not_mislabeled_as_permission_error(self) -> None:
         with tempfile.TemporaryDirectory(dir=PROJECT_ROOT) as temp_dir:
             output_dir = Path(temp_dir)
