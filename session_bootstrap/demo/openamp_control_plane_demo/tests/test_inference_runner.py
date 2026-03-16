@@ -107,6 +107,134 @@ def build_signed_bundle(temp_dir: Path, *, variant: str = "current") -> tuple[Pa
 
 
 class RunRemoteReconstructionTest(unittest.TestCase):
+    def assert_live_signed_demo_trace(self, *, variant: str) -> None:
+        with tempfile.TemporaryDirectory(dir=PROJECT_ROOT) as temp_dir_raw:
+            temp_dir = Path(temp_dir_raw)
+            output_dir = temp_dir / "live"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            _, bundle_path, public_key, _ = build_signed_bundle(temp_dir / "bundle", variant=variant)
+            hook_script = temp_dir / "fake_hook.py"
+            hook_script.write_text(
+                "\n".join(
+                    [
+                        "#!/usr/bin/env python3",
+                        "import json",
+                        "import sys",
+                        "",
+                        "event = json.loads(sys.stdin.read() or '{}')",
+                        "phase = str(event.get('phase') or '')",
+                        "if phase == 'STATUS_REQ':",
+                        "    response = {",
+                        "        'phase': phase,",
+                        "        'transport_status': 'status_resp_received',",
+                        "        'protocol_semantics': 'implemented',",
+                        "    }",
+                        "elif phase.startswith('SIGNED_ADMISSION_'):",
+                        "    response = {",
+                        "        'phase': phase,",
+                        "        'acknowledged': True,",
+                        "        'transport_status': 'signed_admission_ack_received',",
+                        "        'protocol_semantics': 'implemented',",
+                        "    }",
+                        "elif phase == 'JOB_REQ':",
+                        "    response = {",
+                        "        'phase': phase,",
+                        "        'decision': 'ALLOW',",
+                        "        'fault_code': 0,",
+                        "        'fault_name': 'NONE',",
+                        "        'guard_state': 2,",
+                        "        'guard_state_name': 'JOB_ACTIVE',",
+                        "        'transport_status': 'job_ack_received',",
+                        "        'protocol_semantics': 'implemented',",
+                        "    }",
+                        "else:",
+                        "    response = {",
+                        "        'phase': phase,",
+                        "        'acknowledged': True,",
+                        "        'transport_status': 'ack_received',",
+                        "        'protocol_semantics': 'implemented',",
+                        "    }",
+                        "print(json.dumps(response, ensure_ascii=False))",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            bundle = openamp_signed_manifest.load_signed_manifest_bundle(bundle_path)
+            transport_plan = openamp_signed_manifest.build_signed_admission_transport_plan(
+                bundle,
+                job_id=4242,
+                key_slot=1,
+                seq_start=1,
+            )
+
+            class ImmediateThread:
+                def __init__(self, target=None, daemon=None, **_kwargs):
+                    self._target = target
+
+                def start(self) -> None:
+                    if self._target is not None:
+                        self._target()
+
+            access_values = {
+                "INFERENCE_CURRENT_EXPECTED_SHA256": "",
+                "INFERENCE_BASELINE_EXPECTED_SHA256": "",
+                "REMOTE_SNR_BASELINE": "12",
+                "REMOTE_BATCH_BASELINE": "1",
+            }
+            if variant == "baseline":
+                access_values.update(
+                    {
+                        inference_runner.DEMO_BASELINE_ADMISSION_MODE_ENV: "signed_manifest_v1",
+                        inference_runner.DEMO_BASELINE_SIGNED_MANIFEST_FILE_ENV: str(bundle_path),
+                        inference_runner.DEMO_BASELINE_SIGNED_MANIFEST_PUBLIC_KEY_ENV: str(public_key),
+                    }
+                )
+            else:
+                access_values.update(
+                    {
+                        inference_runner.DEMO_ADMISSION_MODE_ENV: "signed_manifest_v1",
+                        inference_runner.DEMO_SIGNED_MANIFEST_FILE_ENV: str(bundle_path),
+                        inference_runner.DEMO_SIGNED_MANIFEST_PUBLIC_KEY_ENV: str(public_key),
+                    }
+                )
+            access = make_access(access_values)
+            runner_cmd = (
+                "python3 -c "
+                "\"import json; print(json.dumps({'result': 'ok', 'samples': []}, ensure_ascii=False))\""
+            )
+
+            with (
+                patch("inference_runner.generate_live_job_id", return_value="4242"),
+                patch("inference_runner.tempfile.mkdtemp", return_value=str(output_dir)),
+                patch("inference_runner.build_runner_command", return_value=runner_cmd),
+                patch.object(
+                    LiveRemoteReconstructionJob,
+                    "_build_hook_command",
+                    return_value=shlex.join(["python3", str(hook_script)]),
+                ),
+                patch("inference_runner.Thread", ImmediateThread),
+            ):
+                job = LiveRemoteReconstructionJob(access, variant=variant)
+
+            trace_events = [
+                json.loads(line)
+                for line in (output_dir / "control_trace.jsonl").read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            manifest = json.loads((output_dir / "job_manifest.json").read_text(encoding="utf-8"))
+
+        self.assertIsNotNone(job._final_snapshot)
+        self.assertEqual(job._final_snapshot["status"], "success")
+        self.assertEqual(job._final_snapshot["execution_mode"], "live")
+        self.assertEqual(job._final_snapshot["variant"], variant)
+        self.assertEqual(
+            [event["phase"] for event in trace_events],
+            ["STATUS_REQ", *[frame["phase"] for frame in transport_plan["frames"]], "JOB_ACK", "JOB_DONE"],
+        )
+        self.assertEqual(manifest["admission_mode"], "signed_manifest_v1")
+        self.assertEqual(manifest["variant"], variant)
+
     def test_generate_live_job_id_uses_non_zero_uint32_nonce_and_stays_unique(self) -> None:
         original_last_job_id = inference_runner._LAST_LIVE_JOB_ID
         try:
@@ -646,6 +774,12 @@ class RunRemoteReconstructionTest(unittest.TestCase):
         self.assertEqual(command[command.index("--admission-mode") + 1], "signed_manifest_v1")
         self.assertEqual(command[command.index("--signed-manifest-file") + 1], str(bundle_path))
         self.assertEqual(command[command.index("--signed-manifest-public-key") + 1], str(public_key))
+
+    def test_live_job_current_signed_manifest_runs_wrapper_sideband_sequence(self) -> None:
+        self.assert_live_signed_demo_trace(variant="current")
+
+    def test_live_job_baseline_signed_manifest_runs_wrapper_sideband_sequence(self) -> None:
+        self.assert_live_signed_demo_trace(variant="baseline")
 
     def test_live_job_control_hook_timeout_is_capped_at_runner_timeout_when_shorter(self) -> None:
         access = make_access()
