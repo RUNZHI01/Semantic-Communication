@@ -1,6 +1,6 @@
 # Session Progress Log（长期维护）
 
-- 最后更新：2026-03-16 20:38 +0800（在 2026-03-15 已完成 OpenAMP 最小控制面与 FIT 收证的基础上，本轮又把 signed-admission 这条线的真实板级进展收口成了独立证据包：session 已确认 live firmware 现为 `140e2e8c...12f1`、冷启动可存活、真实 signed sideband `BEGIN/CHUNK/SIGNATURE/COMMIT` 全部 ACK，并且 follow-up `JOB_REQ` 返回 `JOB_ACK(ALLOW)`；同一结论又在 `SAFE_STOP` 清理后以 fresh `job_id` 复验成立。与此同时，仓库内也保留了签名准入 fixture、transport/firmware-contract 参考件，以及 recovered 的 board build/install lineage 与 minimal-crypto blocker 处理路径。由于最终 `140e...` 原始 ACK frame dump 未自动落盘，本轮新证据包会明确区分“committed fixture / recovered local transcript / operator-confirmed final facts”三类来源，不会把缺失原始日志伪装成已恢复。）
+- 最后更新：2026-03-17 05:45 +0800（本轮继续不是回翻旧 benchmark，而是把 3/16 晚到 3/17 凌晨这条 OpenAMP demo live 线的最新板端事实重新核了一遍并固化：**8115 现为唯一该用的 demo 实例**；`current` 的 live wrapper 目录 `/tmp/openamp_demo_live_5pegf64z` 已确认 `JOB_ACK(ALLOW)`、runner 成功退出、可信 current SHA `6f236b07...6dc1` 对齐、真实 reconstruction `300/300` 完成；`baseline` 的 live wrapper 目录 `/tmp/openamp_demo_live_dlqi53n2` 也已确认不再 legacy 秒退，而是在 signed sideband `BEGIN/CHUNK/SIGNATURE/COMMIT` 全部 ACK 后获得 `JOB_ACK(ALLOW)`，随后 baseline 真机 reconstruction 同样完成 `300/300`。与此同时，`cool-har` 这一条只是中间用于重打 signed probe 的一次性本地会话被外部 `SIGTERM` 结束，并没有改变任何板端结论；最新板态探针 `session_bootstrap/reports/openamp_demo_live_probe_latest.json` 也显示飞腾派可达、`remoteproc0=running`、`/dev/rpmsg0` 存在、live firmware SHA 为 `ef14bc26...6007`。)
 - 作用：沉淀“当前状态 + 失败经验 + 下一步最小执行方案”，避免重复踩坑。
 
 ## 1) 时间线（关键里程碑）
