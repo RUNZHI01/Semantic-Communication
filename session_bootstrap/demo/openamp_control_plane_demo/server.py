@@ -279,7 +279,8 @@ class DashboardState:
                     "execution_mode": "live",
                     "status_category": "success",
                     "source_label": "真实在线推进 + 归档样例图",
-                    "message": (
+                    "message": live_attempt.get("message")
+                    or (
                         "本次演示已通过 OpenAMP 控制面完成作业下发、板端执行与结果回收；图像对比继续使用归档样例，"
                         "现场呈现更稳定。"
                     ),

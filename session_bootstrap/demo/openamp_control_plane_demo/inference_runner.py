@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 import secrets
 import shlex
+import statistics
 import subprocess
 import tempfile
 from threading import Lock, Thread
@@ -336,6 +337,53 @@ def normalize_positive_int(value: Any) -> int | None:
     if normalized < 0:
         return None
     return normalized
+
+
+def hook_result_for_trace_event(event: dict[str, Any]) -> dict[str, Any]:
+    hook_result = event.get("hook_result")
+    return hook_result if isinstance(hook_result, dict) else {}
+
+
+def build_control_hook_stats(events: list[dict[str, Any]]) -> dict[str, Any]:
+    hook_events = [event for event in events if hook_result_for_trace_event(event)]
+    if not hook_events:
+        return {}
+
+    timeout_events = [event for event in hook_events if hook_result_for_trace_event(event).get("timed_out")]
+    nonzero_events = []
+    duration_values: list[float] = []
+    heartbeat_duration_values: list[float] = []
+
+    for event in hook_events:
+        hook_result = hook_result_for_trace_event(event)
+        returncode = hook_result.get("returncode")
+        if returncode not in (None, 0):
+            nonzero_events.append(event)
+        duration_ms = hook_result.get("duration_ms")
+        try:
+            numeric_duration = float(duration_ms)
+        except (TypeError, ValueError):
+            numeric_duration = None
+        if numeric_duration is not None and numeric_duration >= 0:
+            duration_values.append(numeric_duration)
+            if str(event.get("phase") or "").upper() == "HEARTBEAT":
+                heartbeat_duration_values.append(numeric_duration)
+
+    timeout_phases = [str(event.get("phase") or "UNKNOWN").upper() for event in timeout_events]
+    stats: dict[str, Any] = {
+        "event_count": len(hook_events),
+        "timeout_count": len(timeout_events),
+        "timeout_phases": timeout_phases,
+        "nonzero_return_count": len(nonzero_events),
+    }
+    if duration_values:
+        stats["duration_median_ms"] = round(statistics.median(duration_values), 3)
+        stats["duration_max_ms"] = round(max(duration_values), 3)
+    if heartbeat_duration_values:
+        stats["heartbeat_event_count"] = len(heartbeat_duration_values)
+        stats["heartbeat_duration_median_ms"] = round(statistics.median(heartbeat_duration_values), 3)
+        stats["heartbeat_duration_max_ms"] = round(max(heartbeat_duration_values), 3)
+    return stats
 
 
 def build_completion_counts(
@@ -876,6 +924,7 @@ class LiveRemoteReconstructionJob:
         trace_events = load_trace_events(self._trace_path)
         last_hook_response = latest_hook_response(trace_events)
         hook_error_text = control_hook_error_text(last_hook_response)
+        control_hook_stats = build_control_hook_stats(trace_events)
         classify_stdout = sanitize_wrapper_stdout_for_classification(stdout)
         runner_log_tail = read_runner_log_tail(self._runner_log_path)
         classification_error_text = "\n".join(part for part in (hook_error_text, runner_log_tail) if part)
@@ -901,7 +950,12 @@ class LiveRemoteReconstructionJob:
             else:
                 status = "success"
                 status_category = "success"
-                message = "OpenAMP 控制面已完成作业下发、板端执行与结果回收。"
+                if control_hook_stats.get("timeout_count", 0) > 0:
+                    message = (
+                        "板端执行已完成；控制 hook 超时已记录，界面不再将其误报为 runner timeout。"
+                    )
+                else:
+                    message = "OpenAMP 控制面已完成作业下发、板端执行与结果回收。"
         else:
             status = "error"
             status_category = hook_status_category(last_hook_response) or classify_status_category(
@@ -927,6 +981,8 @@ class LiveRemoteReconstructionJob:
         hook_diagnostics = control_hook_diagnostics(last_hook_response)
         if hook_diagnostics:
             diagnostics["control_hook"] = hook_diagnostics
+        if control_hook_stats:
+            diagnostics["control_hook_stats"] = control_hook_stats
         count_payload = build_completion_counts(
             runner_log_path=self._runner_log_path,
             runner_summary=runner_summary,

@@ -46,6 +46,8 @@ class OpenampRemoteHookProxyTest(unittest.TestCase):
 
     def test_build_remote_command_stages_bundle_without_remote_repo_lookup(self) -> None:
         args = SimpleNamespace(
+            remote_project_root="",
+            remote_jscc_dir="",
             remote_output_root="/tmp/openamp_demo_hook",
             rpmsg_ctrl="/dev/rpmsg_ctrl0",
             rpmsg_dev="/dev/rpmsg0",
@@ -54,23 +56,40 @@ class OpenampRemoteHookProxyTest(unittest.TestCase):
         command = build_remote_command(args, phase="JOB_REQ", job_id=123)
 
         self.assertIn('STAGE_ROOT="$(mktemp -d /tmp/openamp_demo_bridge.XXXXXX)"', command)
-        self.assertIn('STAGE_ROOT="$STAGE_ROOT" python3 - <<\'PY\'', command)
+        self.assertIn("REMOTE_PROJECT_ROOT=''", command)
+        self.assertIn('STAGE_ROOT="$STAGE_ROOT" PYTHONDONTWRITEBYTECODE=1 python3 - <<\'PY\'', command)
         self.assertIn('bundle = base64.b64decode(', command)
         self.assertIn('HOOK_INPUT_FILE="$STAGE_ROOT/hook_event.json"', command)
         self.assertIn('IFS= read -r SUDO_PASSWORD || SUDO_PASSWORD=""', command)
         self.assertIn('cat >"$HOOK_INPUT_FILE"', command)
         self.assertIn("run_bridge()", command)
         self.assertIn("run_bridge_with_sudo()", command)
-        self.assertIn("""printf '%s\\n' "$SUDO_PASSWORD" | sudo -S -p '' env OPENAMP_PHASE="$PHASE" bash -lc 'python3 "$1" --hook-stdin --rpmsg-ctrl "$2" --rpmsg-dev "$3" --output-dir "$4" < "$5"'""", command)
+        self.assertIn("""printf '%s\\n' "$SUDO_PASSWORD" | sudo -S -p '' env PYTHONDONTWRITEBYTECODE=1 OPENAMP_PHASE="$PHASE" PYTHONPATH="$BRIDGE_PYTHONPATH" bash -lc 'python3 "$1" --hook-stdin --rpmsg-ctrl "$2" --rpmsg-dev "$3" --output-dir "$4" < "$5"'""", command)
         self.assertIn("could not launch the board-side bridge under sudo", command)
-        self.assertIn(
-            'python3 "$STAGE_ROOT/session_bootstrap/scripts/openamp_rpmsg_bridge.py"',
-            command,
-        )
+        self.assertIn('BRIDGE_SCRIPT="${REMOTE_BRIDGE_SCRIPT:-$STAGE_ROOT/session_bootstrap/scripts/openamp_rpmsg_bridge.py}"', command)
+        self.assertIn('PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$BRIDGE_PYTHONPATH${PYTHONPATH:+:$PYTHONPATH}" OPENAMP_PHASE="$PHASE" python3 "$BRIDGE_SCRIPT"', command)
         self.assertIn("OUTPUT_DIR=/tmp/openamp_demo_hook/123/job_req", command)
         self.assertNotIn("remote_project_root_missing", command)
         self.assertNotIn('cd "$PROJECT_ROOT"', command)
         self.assertNotIn("sudo -n true >/dev/null 2>&1", command)
+
+    def test_build_remote_command_prefers_existing_remote_project_root_when_present(self) -> None:
+        args = SimpleNamespace(
+            remote_project_root="/tmp/openamp_wrong_sha_fit/project",
+            remote_jscc_dir="",
+            remote_output_root="/tmp/openamp_demo_hook",
+            rpmsg_ctrl="/dev/rpmsg_ctrl0",
+            rpmsg_dev="/dev/rpmsg0",
+        )
+
+        command = build_remote_command(args, phase="HEARTBEAT", job_id=4242)
+
+        self.assertIn("REMOTE_PROJECT_ROOT=/tmp/openamp_wrong_sha_fit/project", command)
+        self.assertIn('[[ -f "$REMOTE_PROJECT_ROOT/session_bootstrap/scripts/openamp_rpmsg_bridge.py" ]]', command)
+        self.assertIn('REMOTE_BRIDGE_SCRIPT="$REMOTE_PROJECT_ROOT/session_bootstrap/scripts/openamp_rpmsg_bridge.py"', command)
+        self.assertIn('REMOTE_BRIDGE_PYTHONPATH="$REMOTE_PROJECT_ROOT"', command)
+        self.assertIn('BRIDGE_SCRIPT="${REMOTE_BRIDGE_SCRIPT:-$STAGE_ROOT/session_bootstrap/scripts/openamp_rpmsg_bridge.py}"', command)
+        self.assertIn("PYTHONDONTWRITEBYTECODE=1", command)
 
     def test_main_prefixes_password_before_hook_event_for_remote_sudo(self) -> None:
         args = SimpleNamespace(

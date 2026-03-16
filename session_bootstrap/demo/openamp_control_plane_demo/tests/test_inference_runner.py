@@ -497,6 +497,99 @@ class RunRemoteReconstructionTest(unittest.TestCase):
             self.assertIn("/dev/rpmsg0", snapshot["progress"]["stages"][2]["detail"])
             self.assertIn("transport=permission_gate", snapshot["progress"]["event_log"][2])
 
+    def test_success_snapshot_keeps_control_hook_timeout_as_diagnostic_not_runner_timeout(self) -> None:
+        with tempfile.TemporaryDirectory(dir=PROJECT_ROOT) as temp_dir:
+            output_dir = Path(temp_dir)
+            trace_path = output_dir / "control_trace.jsonl"
+            summary_path = output_dir / "wrapper_summary.json"
+            runner_log_path = output_dir / "runner.log"
+
+            summary_path.write_text(
+                json.dumps({"result": "success"}, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+            trace_events = [
+                {
+                    "at": "2026-03-16T10:00:00+0800",
+                    "phase": "STATUS_REQ",
+                    "payload": {"job_id": 4242},
+                    "hook_result": {
+                        "returncode": 0,
+                        "timed_out": False,
+                        "duration_ms": 820,
+                        "response": {
+                            "phase": "STATUS_REQ",
+                            "transport_status": "status_resp_received",
+                            "protocol_semantics": "implemented",
+                        },
+                    },
+                },
+                {
+                    "at": "2026-03-16T10:00:02+0800",
+                    "phase": "HEARTBEAT",
+                    "payload": {"job_id": 4242, "elapsed_ms": 2000, "runtime_state": "RUNNING"},
+                    "hook_result": {
+                        "returncode": None,
+                        "timed_out": True,
+                        "timeout_sec": 30.0,
+                        "duration_ms": 30012,
+                        "response": {
+                            "phase": "HEARTBEAT",
+                            "source": "openamp_control_wrapper",
+                            "transport_status": "hook_timeout",
+                            "protocol_semantics": "not_verified",
+                            "note": "HEARTBEAT control hook timed out after 30.0s.",
+                        },
+                    },
+                },
+            ]
+            trace_path.write_text(
+                "\n".join(json.dumps(event, ensure_ascii=False) for event in trace_events) + "\n",
+                encoding="utf-8",
+            )
+            runner_log_path.write_text(
+                json.dumps(
+                    {
+                        "processed_count": 300,
+                        "input_count": 300,
+                        "load_ms": 2.9,
+                        "vm_init_ms": 0.5,
+                        "run_median_ms": 230.339,
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            job = LiveRemoteReconstructionJob.__new__(LiveRemoteReconstructionJob)
+            job.job_id = "4242"
+            job.variant = "current"
+            job._timeout_sec = 10.0
+            job._expected_outputs = inference_runner.DEFAULT_MAX_INPUTS
+            job._output_dir = output_dir
+            job._trace_path = trace_path
+            job._summary_path = summary_path
+            job._runner_log_path = runner_log_path
+            job._lock = Lock()
+            job._final_snapshot = None
+
+            fake_process = Mock()
+            fake_process.communicate.return_value = ("", "")
+            fake_process.returncode = 0
+            job._process = fake_process
+
+            job._wait_for_completion()
+
+            snapshot = job._final_snapshot
+            assert snapshot is not None
+            self.assertEqual(snapshot["status"], "success")
+            self.assertEqual(snapshot["status_category"], "success")
+            self.assertIn("hook 超时", snapshot["message"])
+            self.assertEqual(snapshot["diagnostics"]["control_hook_stats"]["timeout_count"], 1)
+            self.assertEqual(snapshot["diagnostics"]["control_hook_stats"]["heartbeat_event_count"], 1)
+            self.assertAlmostEqual(snapshot["runner_summary"]["run_median_ms"], 230.339)
+
     def test_baseline_live_job_ack_artifact_mismatch_is_not_mislabeled_as_permission_error(self) -> None:
         with tempfile.TemporaryDirectory(dir=PROJECT_ROOT) as temp_dir:
             output_dir = Path(temp_dir)

@@ -204,6 +204,16 @@ def build_job_ack_payload(
     return payload
 
 
+def build_hook_timeout_response(*, phase: str, timeout_sec: float) -> dict[str, Any]:
+    return {
+        "phase": phase,
+        "source": "openamp_control_wrapper",
+        "transport_status": "hook_timeout",
+        "protocol_semantics": "not_verified",
+        "note": f"{phase} control hook timed out after {timeout_sec:.1f}s.",
+    }
+
+
 def emit_event(
     *,
     trace_path: Path,
@@ -223,22 +233,40 @@ def emit_event(
         env = os.environ.copy()
         env["OPENAMP_PHASE"] = phase
         env["OPENAMP_JOB_ID"] = str(payload.get("job_id", ""))
-        result = subprocess.run(
-            ["bash", "-lc", hook_cmd],
-            check=False,
-            input=json.dumps(event, ensure_ascii=False),
-            text=True,
-            capture_output=True,
-            cwd=PROJECT_ROOT,
-            env=env,
-            timeout=hook_timeout_sec,
-        )
-        hook_result = {
-            "returncode": result.returncode,
-            "stdout": result.stdout,
-            "stderr": result.stderr,
-            "response": parse_response(result.stdout),
-        }
+        hook_started = time.monotonic()
+        try:
+            result = subprocess.run(
+                ["bash", "-lc", hook_cmd],
+                check=False,
+                input=json.dumps(event, ensure_ascii=False),
+                text=True,
+                capture_output=True,
+                cwd=PROJECT_ROOT,
+                env=env,
+                timeout=hook_timeout_sec,
+            )
+        except subprocess.TimeoutExpired as exc:
+            stdout = str(exc.stdout or exc.output or "")
+            stderr = str(exc.stderr or "")
+            hook_result = {
+                "returncode": None,
+                "stdout": stdout,
+                "stderr": stderr,
+                "response": parse_response(stdout) or build_hook_timeout_response(phase=phase, timeout_sec=hook_timeout_sec),
+                "timed_out": True,
+                "timeout_sec": hook_timeout_sec,
+                "duration_ms": int((time.monotonic() - hook_started) * 1000),
+            }
+        else:
+            hook_result = {
+                "returncode": result.returncode,
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+                "response": parse_response(result.stdout),
+                "timed_out": False,
+                "timeout_sec": hook_timeout_sec,
+                "duration_ms": int((time.monotonic() - hook_started) * 1000),
+            }
         event["hook_result"] = hook_result
     jsonl_append(trace_path, event)
     return hook_result or {}
