@@ -86,21 +86,22 @@ def generate_keypair(temp_dir: Path) -> tuple[Path, Path]:
     return private_key, public_key
 
 
-def build_signed_bundle(temp_dir: Path) -> tuple[Path, Path, Path, str]:
-    artifact_path = temp_dir / "optimized_model.so"
-    artifact_path.write_bytes(b"demo-signed-current-artifact")
+def build_signed_bundle(temp_dir: Path, *, variant: str = "current") -> tuple[Path, Path, Path, str]:
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    artifact_path = temp_dir / f"{variant}_optimized_model.so"
+    artifact_path.write_bytes(f"demo-signed-{variant}-artifact".encode("utf-8"))
     private_key, public_key = generate_keypair(temp_dir)
     bundle = openamp_signed_manifest.build_signed_manifest_bundle(
         artifact_path=artifact_path,
-        variant="current",
-        key_id="demo-live-20260316",
+        variant=variant,
+        key_id=f"demo-live-{variant}-20260316",
         publisher_channel="openamp-demo",
         deadline_ms=300000,
         expected_outputs=inference_runner.DEFAULT_MAX_INPUTS,
         job_flags="reconstruction",
         private_key=private_key,
     )
-    bundle_path = temp_dir / "current.bundle.json"
+    bundle_path = temp_dir / f"{variant}.bundle.json"
     openamp_signed_manifest.write_json(bundle_path, bundle)
     return artifact_path, bundle_path, public_key, str(bundle["manifest"]["artifact"]["sha256"])
 
@@ -415,6 +416,32 @@ class RunRemoteReconstructionTest(unittest.TestCase):
         )
         popen_mock.assert_not_called()
 
+    def test_signed_manifest_baseline_live_job_requires_bundle_and_public_key(self) -> None:
+        access = make_access(
+            {
+                "REMOTE_SNR_BASELINE": "12",
+                "REMOTE_BATCH_BASELINE": "1",
+                "INFERENCE_BASELINE_EXPECTED_SHA256": "",
+                inference_runner.DEMO_BASELINE_ADMISSION_MODE_ENV: "signed_manifest_v1",
+            }
+        )
+
+        with patch("inference_runner.subprocess.Popen") as popen_mock:
+            live_job = LiveRemoteReconstructionJob(access, variant="baseline")
+
+        snapshot = live_job.snapshot()
+        self.assertEqual(snapshot["status"], "config_error")
+        self.assertEqual(snapshot["status_category"], "config_error")
+        self.assertIn("Baseline live 已切到 signed-manifest admission", snapshot["message"])
+        self.assertEqual(
+            snapshot["diagnostics"]["missing_fields"],
+            [
+                inference_runner.DEMO_BASELINE_SIGNED_MANIFEST_FILE_ENV,
+                inference_runner.DEMO_BASELINE_SIGNED_MANIFEST_PUBLIC_KEY_ENV,
+            ],
+        )
+        popen_mock.assert_not_called()
+
     def test_describe_demo_admission_verifies_signed_manifest_overlay(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir_raw:
             temp_dir = Path(temp_dir_raw)
@@ -438,27 +465,57 @@ class RunRemoteReconstructionTest(unittest.TestCase):
         self.assertEqual(summary["bundle_path"], str(bundle_path))
         self.assertEqual(summary["public_key_path"], str(public_key))
 
-    def test_describe_demo_variant_support_marks_baseline_live_as_unsupported_during_signed_demo(self) -> None:
+    def test_describe_demo_admission_reports_baseline_signed_manifest_variant_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir_raw:
             temp_dir = Path(temp_dir_raw)
-            _, bundle_path, public_key, _ = build_signed_bundle(temp_dir)
+            _, bundle_path, public_key, _ = build_signed_bundle(temp_dir, variant="current")
             access = make_access(
                 {
                     "REMOTE_SNR_BASELINE": "12",
                     "REMOTE_BATCH_BASELINE": "1",
-                    "INFERENCE_BASELINE_EXPECTED_SHA256": "b" * 64,
+                    "INFERENCE_BASELINE_EXPECTED_SHA256": "",
+                    inference_runner.DEMO_BASELINE_ADMISSION_MODE_ENV: "signed_manifest_v1",
+                    inference_runner.DEMO_BASELINE_SIGNED_MANIFEST_FILE_ENV: str(bundle_path),
+                    inference_runner.DEMO_BASELINE_SIGNED_MANIFEST_PUBLIC_KEY_ENV: str(public_key),
+                }
+            )
+
+            summary = inference_runner.describe_demo_admission(access, variant="baseline")
+
+        self.assertEqual(summary["status"], "config_error")
+        self.assertEqual(summary["mode"], "signed_manifest_v1")
+        self.assertIn("does not match demo variant 'baseline'", summary["note"])
+
+    def test_describe_demo_variant_support_marks_baseline_signed_live_as_ready_independently(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir_raw:
+            temp_dir = Path(temp_dir_raw)
+            _, current_bundle_path, current_public_key, _ = build_signed_bundle(temp_dir / "current", variant="current")
+            _, baseline_bundle_path, baseline_public_key, _ = build_signed_bundle(
+                temp_dir / "baseline",
+                variant="baseline",
+            )
+            access = make_access(
+                {
+                    "REMOTE_SNR_BASELINE": "12",
+                    "REMOTE_BATCH_BASELINE": "1",
+                    "INFERENCE_CURRENT_EXPECTED_SHA256": "",
+                    "INFERENCE_BASELINE_EXPECTED_SHA256": "",
                     inference_runner.DEMO_ADMISSION_MODE_ENV: "signed_manifest_v1",
-                    inference_runner.DEMO_SIGNED_MANIFEST_FILE_ENV: str(bundle_path),
-                    inference_runner.DEMO_SIGNED_MANIFEST_PUBLIC_KEY_ENV: str(public_key),
+                    inference_runner.DEMO_SIGNED_MANIFEST_FILE_ENV: str(current_bundle_path),
+                    inference_runner.DEMO_SIGNED_MANIFEST_PUBLIC_KEY_ENV: str(current_public_key),
+                    inference_runner.DEMO_BASELINE_ADMISSION_MODE_ENV: "signed_manifest_v1",
+                    inference_runner.DEMO_BASELINE_SIGNED_MANIFEST_FILE_ENV: str(baseline_bundle_path),
+                    inference_runner.DEMO_BASELINE_SIGNED_MANIFEST_PUBLIC_KEY_ENV: str(baseline_public_key),
                 }
             )
 
             support = inference_runner.describe_demo_variant_support(access, variant="baseline")
 
-        self.assertEqual(support["status"], "unsupported")
-        self.assertFalse(support["launch_allowed"])
-        self.assertIn("未适配 signed admission", support["label"])
-        self.assertIn("formal baseline", support["note"])
+        self.assertEqual(support["status"], "ready")
+        self.assertEqual(support["mode"], "signed_manifest_v1")
+        self.assertTrue(support["launch_allowed"])
+        self.assertEqual(support["label"], "Baseline signed live 已支持")
+        self.assertIn("Baseline signed-admission live path is supported.", support["note"])
 
     def test_live_job_constructor_passes_generated_uint32_job_id_to_wrapper_and_hook(self) -> None:
         access = make_access(
@@ -537,6 +594,52 @@ class RunRemoteReconstructionTest(unittest.TestCase):
             ):
                 thread_cls.return_value.start.return_value = None
                 LiveRemoteReconstructionJob(access, variant="current")
+
+        command = popen_mock.call_args.args[0]
+        self.assertEqual(command[command.index("--expected-sha256") + 1], expected_sha256)
+        self.assertEqual(command[command.index("--admission-mode") + 1], "signed_manifest_v1")
+        self.assertEqual(command[command.index("--signed-manifest-file") + 1], str(bundle_path))
+        self.assertEqual(command[command.index("--signed-manifest-public-key") + 1], str(public_key))
+
+    def test_live_job_constructor_passes_signed_manifest_args_for_baseline_overlay(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir_raw:
+            temp_dir = Path(temp_dir_raw)
+            _, bundle_path, public_key, expected_sha256 = build_signed_bundle(temp_dir, variant="baseline")
+            access = make_access(
+                {
+                    "REMOTE_SNR_BASELINE": "12",
+                    "REMOTE_BATCH_BASELINE": "1",
+                    "INFERENCE_BASELINE_EXPECTED_SHA256": "",
+                    inference_runner.DEMO_BASELINE_ADMISSION_MODE_ENV: "signed_manifest_v1",
+                    inference_runner.DEMO_BASELINE_SIGNED_MANIFEST_FILE_ENV: str(bundle_path),
+                    inference_runner.DEMO_BASELINE_SIGNED_MANIFEST_PUBLIC_KEY_ENV: str(public_key),
+                }
+            )
+
+            with (
+                patch("inference_runner.generate_live_job_id", return_value="4242"),
+                patch("inference_runner.tempfile.mkdtemp", return_value="/tmp/openamp_demo_live_test"),
+                patch(
+                    "inference_runner.verify_signed_manifest_bundle",
+                    return_value={
+                        "admission_mode": "signed_manifest_v1",
+                        "artifact_sha256": expected_sha256,
+                        "variant": "baseline",
+                        "deadline_ms": 300000,
+                        "expected_outputs": inference_runner.DEFAULT_MAX_INPUTS,
+                        "job_flags": "reconstruction",
+                        "manifest_sha256": "c" * 64,
+                        "key_id": "demo-live-baseline-20260316",
+                        "signature_algorithm": "ecdsa-p256-sha256",
+                        "verified_locally": True,
+                        "artifact_match": True,
+                    },
+                ),
+                patch("inference_runner.subprocess.Popen", return_value=object()) as popen_mock,
+                patch("inference_runner.Thread") as thread_cls,
+            ):
+                thread_cls.return_value.start.return_value = None
+                LiveRemoteReconstructionJob(access, variant="baseline")
 
         command = popen_mock.call_args.args[0]
         self.assertEqual(command[command.index("--expected-sha256") + 1], expected_sha256)
