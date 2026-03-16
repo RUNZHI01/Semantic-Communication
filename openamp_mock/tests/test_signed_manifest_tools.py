@@ -269,6 +269,7 @@ class SignedManifestToolsTest(unittest.TestCase):
         self.assertIsNotNone(signed_admission)
         assert signed_admission is not None
         self.assertTrue(signed_admission["verified_locally"])
+        self.assertTrue(signed_admission["artifact_match"])
         self.assertEqual(expected_sha256, bundle["manifest"]["artifact"]["sha256"])
         self.assertEqual(signed_admission["variant"], "current")
         self.assertEqual(signed_admission["deadline_ms"], 42000)

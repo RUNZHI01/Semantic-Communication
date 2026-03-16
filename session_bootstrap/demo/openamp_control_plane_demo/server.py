@@ -25,7 +25,14 @@ from demo_data import (
     resolve_repo_path,
 )
 from fault_injector import query_live_status, run_fault_action, run_recover_action
-from inference_runner import DEFAULT_MAX_INPUTS, launch_remote_reconstruction_job
+from inference_runner import (
+    DEFAULT_MAX_INPUTS,
+    DEMO_ADMISSION_MODE_ENV,
+    DEMO_SIGNED_MANIFEST_FILE_ENV,
+    DEMO_SIGNED_MANIFEST_PUBLIC_KEY_ENV,
+    describe_demo_admission,
+    launch_remote_reconstruction_job,
+)
 
 
 STATIC_ROOT = Path(__file__).resolve().parent / "static"
@@ -50,6 +57,22 @@ def parse_args() -> argparse.Namespace:
         "--probe-startup",
         action="store_true",
         help="Run one read-only board probe during startup.",
+    )
+    parser.add_argument(
+        "--demo-admission-mode",
+        choices=("legacy_sha", "signed_manifest_v1"),
+        default="",
+        help="Optional current-demo admission mode override.",
+    )
+    parser.add_argument(
+        "--signed-manifest-file",
+        default="",
+        help="Optional signed bundle path for the current demo artifact.",
+    )
+    parser.add_argument(
+        "--signed-manifest-public-key",
+        default="",
+        help="Optional PEM public key used to verify --signed-manifest-file locally before launch.",
     )
     return parser.parse_args()
 
@@ -82,12 +105,16 @@ class DashboardState:
         probe_env: str | None,
         probe_timeout_sec: float,
         probe_cache_path: str | Path | None = DEFAULT_LIVE_PROBE_OUTPUT,
+        demo_startup_env_overrides: dict[str, str] | None = None,
     ) -> None:
         self._probe_env = probe_env or None
         self._probe_timeout_sec = probe_timeout_sec
         self._probe_cache_path = probe_cache_path
         self._lock = Lock()
-        self._board_access = build_demo_default_board_access(self._probe_env)
+        self._board_access = build_demo_default_board_access(
+            self._probe_env,
+            startup_env_overrides=demo_startup_env_overrides,
+        )
         self._last_control_status: dict[str, Any] | None = None
         self._last_inference_result: dict[str, Any] | None = None
         self._last_fault_result: dict[str, Any] | None = None
@@ -126,6 +153,7 @@ class DashboardState:
             last_fault = self._last_fault_result
 
         snapshot = build_snapshot(live_probe=live_probe)
+        admission = describe_demo_admission(board_access, variant="current")
         evidence_status = snapshot["board"]["evidence_status"]
         live_details = live_probe.get("details", {}) if live_probe else {}
         remoteproc_entries = live_details.get("remoteproc", [])
@@ -194,6 +222,7 @@ class DashboardState:
                 "trusted_sha": snapshot["project"]["trusted_current_sha"],
                 "target": self._target_label,
                 "runtime": self._runtime_label,
+                "admission": admission,
                 "last_probe_at": live_probe.get("requested_at", "") if live_probe else "",
                 "status_source": status_source,
                 "status_note": status_note,
@@ -517,6 +546,17 @@ class DemoHTTPServer(ThreadingHTTPServer):
         self.app_state = app_state
 
 
+def demo_startup_env_overrides(args: argparse.Namespace) -> dict[str, str]:
+    overrides: dict[str, str] = {}
+    if str(getattr(args, "demo_admission_mode", "") or "").strip():
+        overrides[DEMO_ADMISSION_MODE_ENV] = str(args.demo_admission_mode).strip()
+    if str(getattr(args, "signed_manifest_file", "") or "").strip():
+        overrides[DEMO_SIGNED_MANIFEST_FILE_ENV] = str(args.signed_manifest_file).strip()
+    if str(getattr(args, "signed_manifest_public_key", "") or "").strip():
+        overrides[DEMO_SIGNED_MANIFEST_PUBLIC_KEY_ENV] = str(args.signed_manifest_public_key).strip()
+    return overrides
+
+
 class DemoRequestHandler(SimpleHTTPRequestHandler):
     server: DemoHTTPServer
 
@@ -720,7 +760,11 @@ class DemoRequestHandler(SimpleHTTPRequestHandler):
 
 def main() -> int:
     args = parse_args()
-    app_state = DashboardState(args.probe_env, args.probe_timeout_sec)
+    app_state = DashboardState(
+        args.probe_env,
+        args.probe_timeout_sec,
+        demo_startup_env_overrides=demo_startup_env_overrides(args),
+    )
     if args.probe_startup:
         app_state.refresh_live_probe()
     server = DemoHTTPServer((args.host, args.port), DemoRequestHandler, app_state)

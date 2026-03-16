@@ -567,13 +567,19 @@ def build_board_access_config(
     )
 
 
-def build_demo_default_board_access(probe_env: str | None) -> BoardAccessConfig:
+def build_demo_default_board_access(
+    probe_env: str | None,
+    *,
+    startup_env_overrides: dict[str, str] | None = None,
+) -> BoardAccessConfig:
     ssh_env_path = resolve_existing_env(probe_env) or first_existing_env(DEFAULT_SSH_ENV_CANDIDATES)
     inference_env_path = discover_validated_inference_env() or first_existing_env(DEFAULT_INFERENCE_ENV_CANDIDATES)
 
     ssh_env_values = sanitize_env_values(load_env_path(ssh_env_path)) if ssh_env_path else {}
     inference_env_values = sanitize_env_values(load_env_path(inference_env_path)) if inference_env_path else {}
     startup_env_values = dict(ssh_env_values)
+    if startup_env_overrides:
+        startup_env_values.update({str(key): str(value) for key, value in startup_env_overrides.items() if str(value)})
     remote_project_root = discover_validated_openamp_remote_project_root()
     if (
         remote_project_root
