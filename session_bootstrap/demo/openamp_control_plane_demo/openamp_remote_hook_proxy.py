@@ -138,19 +138,31 @@ def build_bridge_bundle_base64() -> str:
 
 def build_remote_command(args: argparse.Namespace, *, phase: str, job_id: int) -> str:
     remote_output_dir = f"{args.remote_output_root.rstrip('/')}/{job_id or 'adhoc'}/{phase.lower()}"
-    # Ship the validated bridge runtime from the local repo so the board does not need a repo checkout.
+    remote_project_root = str(args.remote_project_root or "").strip()
+    # Keep the validated bundle fallback, but prefer the existing remote project copy when available
+    # to avoid re-extracting the bridge runtime on every heartbeat.
     bridge_bundle = build_bridge_bundle_base64()
     return f"""
 set -euo pipefail
 PHASE={shlex.quote(phase)}
 OUTPUT_DIR={shlex.quote(remote_output_dir)}
+REMOTE_PROJECT_ROOT={shlex.quote(remote_project_root)}
 STAGE_ROOT="$(mktemp -d /tmp/openamp_demo_bridge.XXXXXX)"
 HOOK_INPUT_FILE="$STAGE_ROOT/hook_event.json"
 cleanup() {{
-  rm -rf "$STAGE_ROOT"
+  if command -v sudo >/dev/null 2>&1; then
+    printf '%s\\n' "${{SUDO_PASSWORD:-}}" | sudo -S -p '' rm -rf "$STAGE_ROOT" >/dev/null 2>&1 || true
+  fi
+  rm -rf "$STAGE_ROOT" >/dev/null 2>&1 || true
 }}
 trap cleanup EXIT
-STAGE_ROOT="$STAGE_ROOT" python3 - <<'PY'
+REMOTE_BRIDGE_SCRIPT=""
+REMOTE_BRIDGE_PYTHONPATH=""
+if [[ -n "$REMOTE_PROJECT_ROOT" ]] && [[ -f "$REMOTE_PROJECT_ROOT/session_bootstrap/scripts/openamp_rpmsg_bridge.py" ]] && [[ -f "$REMOTE_PROJECT_ROOT/openamp_mock/protocol.py" ]]; then
+  REMOTE_BRIDGE_SCRIPT="$REMOTE_PROJECT_ROOT/session_bootstrap/scripts/openamp_rpmsg_bridge.py"
+  REMOTE_BRIDGE_PYTHONPATH="$REMOTE_PROJECT_ROOT"
+else
+  STAGE_ROOT="$STAGE_ROOT" PYTHONDONTWRITEBYTECODE=1 python3 - <<'PY'
 import base64
 import gzip
 import io
@@ -165,6 +177,9 @@ with gzip.GzipFile(fileobj=io.BytesIO(bundle), mode="rb") as gzip_file:
     with tarfile.open(fileobj=gzip_file, mode="r:") as archive:
         archive.extractall(stage_root)
 PY
+fi
+BRIDGE_SCRIPT="${{REMOTE_BRIDGE_SCRIPT:-$STAGE_ROOT/session_bootstrap/scripts/openamp_rpmsg_bridge.py}}"
+BRIDGE_PYTHONPATH="${{REMOTE_BRIDGE_PYTHONPATH:-$STAGE_ROOT}}"
 IFS= read -r SUDO_PASSWORD || SUDO_PASSWORD=""
 cat >"$HOOK_INPUT_FILE"
 mkdir -p "$OUTPUT_DIR"
@@ -193,12 +208,12 @@ print(
 PY
 }}
 run_bridge() {{
-  OPENAMP_PHASE="$PHASE" python3 "$STAGE_ROOT/session_bootstrap/scripts/openamp_rpmsg_bridge.py" --hook-stdin --rpmsg-ctrl {shlex.quote(args.rpmsg_ctrl)} --rpmsg-dev {shlex.quote(args.rpmsg_dev)} --output-dir "$OUTPUT_DIR" <"$HOOK_INPUT_FILE"
+  PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$BRIDGE_PYTHONPATH${{PYTHONPATH:+:$PYTHONPATH}}" OPENAMP_PHASE="$PHASE" python3 "$BRIDGE_SCRIPT" --hook-stdin --rpmsg-ctrl {shlex.quote(args.rpmsg_ctrl)} --rpmsg-dev {shlex.quote(args.rpmsg_dev)} --output-dir "$OUTPUT_DIR" <"$HOOK_INPUT_FILE"
 }}
 run_bridge_with_sudo() {{
   local bridge_stdout="$STAGE_ROOT/bridge.stdout"
   local bridge_stderr="$STAGE_ROOT/bridge.stderr"
-  if printf '%s\\n' "$SUDO_PASSWORD" | sudo -S -p '' env OPENAMP_PHASE="$PHASE" bash -lc 'python3 "$1" --hook-stdin --rpmsg-ctrl "$2" --rpmsg-dev "$3" --output-dir "$4" < "$5"' bash "$STAGE_ROOT/session_bootstrap/scripts/openamp_rpmsg_bridge.py" {shlex.quote(args.rpmsg_ctrl)} {shlex.quote(args.rpmsg_dev)} "$OUTPUT_DIR" "$HOOK_INPUT_FILE" >"$bridge_stdout" 2>"$bridge_stderr"; then
+  if printf '%s\\n' "$SUDO_PASSWORD" | sudo -S -p '' env PYTHONDONTWRITEBYTECODE=1 OPENAMP_PHASE="$PHASE" PYTHONPATH="$BRIDGE_PYTHONPATH" bash -lc 'python3 "$1" --hook-stdin --rpmsg-ctrl "$2" --rpmsg-dev "$3" --output-dir "$4" < "$5"' bash "$BRIDGE_SCRIPT" {shlex.quote(args.rpmsg_ctrl)} {shlex.quote(args.rpmsg_dev)} "$OUTPUT_DIR" "$HOOK_INPUT_FILE" >"$bridge_stdout" 2>"$bridge_stderr"; then
     if [[ -s "$bridge_stdout" ]]; then
       cat "$bridge_stdout"
     fi

@@ -4,6 +4,7 @@ import contextlib
 import io
 import json
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -18,6 +19,46 @@ import openamp_control_wrapper  # noqa: E402
 
 
 class OpenAMPControlWrapperTest(unittest.TestCase):
+    def test_emit_event_records_hook_timeout_instead_of_raising(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            trace_path = Path(temp_dir) / "control_trace.jsonl"
+            timeout_error = subprocess.TimeoutExpired(
+                cmd=["bash", "-lc", "echo hook"],
+                timeout=7.5,
+                output="",
+            )
+            timeout_error.stderr = "hook timed out\n"
+
+            with patch(
+                "openamp_control_wrapper.subprocess.run",
+                side_effect=timeout_error,
+            ):
+                result = openamp_control_wrapper.emit_event(
+                    trace_path=trace_path,
+                    phase="HEARTBEAT",
+                    payload={"job_id": 101},
+                    transport="hook",
+                    hook_cmd="echo hook",
+                    hook_timeout_sec=7.5,
+                )
+            event = json.loads(trace_path.read_text(encoding="utf-8").strip())
+
+        self.assertIsNone(result["returncode"])
+        self.assertTrue(result["timed_out"])
+        self.assertEqual(result["timeout_sec"], 7.5)
+        self.assertEqual(result["stderr"], "hook timed out\n")
+        self.assertEqual(
+            result["response"],
+            {
+                "phase": "HEARTBEAT",
+                "source": "openamp_control_wrapper",
+                "transport_status": "hook_timeout",
+                "protocol_semantics": "not_verified",
+                "note": "HEARTBEAT control hook timed out after 7.5s.",
+            },
+        )
+        self.assertTrue(event["hook_result"]["timed_out"])
+
     def test_main_retries_duplicate_job_id_once_with_fresh_control_plane_id(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             output_dir = Path(temp_dir)
