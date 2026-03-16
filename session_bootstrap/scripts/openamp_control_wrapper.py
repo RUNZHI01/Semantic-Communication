@@ -25,6 +25,11 @@ from openamp_trusted_artifacts import (  # noqa: E402
     normalize_sha256,
     resolve_trusted_artifacts_path,
 )
+from openamp_signed_manifest import (  # noqa: E402
+    load_signed_manifest_bundle,
+    signed_manifest_summary,
+    verify_signed_manifest_bundle,
+)
 
 
 UINT32_MAX = (1 << 32) - 1
@@ -55,6 +60,22 @@ def parse_args() -> argparse.Namespace:
         "--trusted-artifacts-file",
         default=str(DEFAULT_TRUSTED_ARTIFACTS_PATH),
         help="JSON allowlist used by --trusted-artifact-label and variant-based resolution.",
+    )
+    parser.add_argument(
+        "--admission-mode",
+        choices=("legacy_sha", "signed_manifest_v1"),
+        default="legacy_sha",
+        help="legacy_sha keeps the current SHA path; signed_manifest_v1 enables the draft signed-manifest flow.",
+    )
+    parser.add_argument(
+        "--signed-manifest-file",
+        default="",
+        help="Signed manifest bundle JSON used when --admission-mode signed_manifest_v1 is selected.",
+    )
+    parser.add_argument(
+        "--signed-manifest-public-key",
+        default="",
+        help="Optional PEM public key used to verify --signed-manifest-file locally before emission.",
     )
     parser.add_argument("--deadline-ms", type=int, default=300000, help="Control-plane deadline metadata.")
     parser.add_argument("--expected-outputs", type=int, default=300, help="Expected output count metadata.")
@@ -285,24 +306,36 @@ def terminate_process(process: subprocess.Popen[str]) -> None:
     process.wait(timeout=5)
 
 
-def build_manifest(args: argparse.Namespace, output_dir: Path, expected_sha256: str) -> dict[str, Any]:
+def build_manifest(
+    args: argparse.Namespace,
+    output_dir: Path,
+    expected_sha256: str,
+    *,
+    variant: str,
+    deadline_ms: int,
+    expected_outputs: int,
+    job_flags: str,
+    signed_admission: dict[str, Any] | None,
+) -> dict[str, Any]:
     return {
         "created_at": now_iso(),
         "job_id": args.job_id,
-        "variant": args.variant,
-        "job_flags": args.job_flags,
+        "variant": variant,
+        "job_flags": job_flags,
         "runner_cmd": args.runner_cmd,
         "runner_cmd_shell_quoted": shlex.join(["bash", "-lc", args.runner_cmd]),
         "expected_sha256": expected_sha256,
-        "expected_outputs": args.expected_outputs,
-        "deadline_ms": args.deadline_ms,
+        "expected_outputs": expected_outputs,
+        "deadline_ms": deadline_ms,
         "heartbeat_interval_sec": args.heartbeat_interval_sec,
         "runner_timeout_sec": args.runner_timeout_sec,
         "transport": args.transport,
         "control_hook_cmd": args.control_hook_cmd,
         "dry_run": args.dry_run,
+        "admission_mode": "signed_manifest_v1" if signed_admission is not None else "legacy_sha",
         "output_dir": str(output_dir),
         "boundary_note": "control plane only; the wrapped runner remains the existing inference data path",
+        "protocol_status": "draft_only" if signed_admission is not None else "current",
     }
 
 
@@ -313,6 +346,7 @@ def build_status_req_payload(
     expected_sha256: str,
     job_flags: str,
     trusted_artifact: dict[str, Any] | None,
+    signed_admission: dict[str, Any] | None,
 ) -> dict[str, Any]:
     payload = {
         "job_id": job_id,
@@ -322,6 +356,9 @@ def build_status_req_payload(
     }
     if trusted_artifact is not None:
         payload["trusted_artifact_label"] = trusted_artifact["label"]
+    if signed_admission is not None:
+        payload["admission_mode"] = signed_admission["admission_mode"]
+        payload["signed_manifest"] = build_signed_manifest_hook_payload(signed_admission)
     return payload
 
 
@@ -334,6 +371,7 @@ def build_job_req_payload(
     job_flags: str,
     runner_cmd: str,
     trusted_artifact: dict[str, Any] | None,
+    signed_admission: dict[str, Any] | None,
 ) -> dict[str, Any]:
     payload = {
         "job_id": job_id,
@@ -345,7 +383,25 @@ def build_job_req_payload(
     }
     if trusted_artifact is not None:
         payload["trusted_artifact_label"] = trusted_artifact["label"]
+    if signed_admission is not None:
+        payload["admission_mode"] = signed_admission["admission_mode"]
+        payload["signed_manifest"] = build_signed_manifest_hook_payload(signed_admission)
     return payload
+
+
+def build_signed_manifest_hook_payload(signed_admission: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "bundle_schema": signed_admission["bundle_schema"],
+        "bundle_version": signed_admission["bundle_version"],
+        "manifest_schema": signed_admission["manifest_schema"],
+        "manifest_version": signed_admission["manifest_version"],
+        "manifest_sha256": signed_admission["manifest_sha256"],
+        "artifact_sha256": signed_admission["artifact_sha256"],
+        "artifact_size_bytes": signed_admission["artifact_size_bytes"],
+        "signature_algorithm": signed_admission["signature_algorithm"],
+        "key_id": signed_admission["key_id"],
+        "protocol_status": signed_admission["protocol_status"],
+    }
 
 
 def resolve_expected_sha256(args: argparse.Namespace) -> tuple[str, dict[str, Any] | None, str]:
@@ -392,6 +448,67 @@ def resolve_expected_sha256(args: argparse.Namespace) -> tuple[str, dict[str, An
     return "", None, "unset"
 
 
+def resolve_admission_context(args: argparse.Namespace) -> tuple[str, dict[str, Any] | None, str, dict[str, Any] | None]:
+    expected_sha256, trusted_artifact, expected_sha256_source = resolve_expected_sha256(args)
+    admission_mode = str(getattr(args, "admission_mode", "legacy_sha") or "legacy_sha").strip().lower()
+    if admission_mode == "legacy_sha":
+        return expected_sha256, trusted_artifact, expected_sha256_source, None
+    if admission_mode != "signed_manifest_v1":
+        raise SystemExit(f"ERROR: unsupported --admission-mode value {admission_mode!r}.")
+
+    signed_manifest_file = str(getattr(args, "signed_manifest_file", "") or "").strip()
+    if not signed_manifest_file:
+        raise SystemExit("ERROR: --signed-manifest-file is required when --admission-mode signed_manifest_v1 is used.")
+
+    bundle_path = Path(signed_manifest_file)
+    if not bundle_path.is_absolute():
+        bundle_path = PROJECT_ROOT / bundle_path
+    bundle = load_signed_manifest_bundle(bundle_path)
+
+    public_key = str(getattr(args, "signed_manifest_public_key", "") or "").strip()
+    if public_key:
+        summary = verify_signed_manifest_bundle(bundle, public_key=public_key)
+        summary["bundle_path"] = str(bundle_path)
+    else:
+        summary = signed_manifest_summary(
+            bundle,
+            bundle_path=bundle_path,
+            verified=False,
+            artifact_match=None,
+            verification_public_key=None,
+        )
+
+    manifest_expected_sha256 = str(bundle["manifest"]["artifact"]["sha256"])
+    if expected_sha256 and expected_sha256 != manifest_expected_sha256:
+        raise SystemExit("ERROR: --expected-sha256 / trusted-artifact resolution does not match --signed-manifest-file.")
+
+    return manifest_expected_sha256, trusted_artifact, "--signed-manifest-file", summary
+
+
+def get_effective_variant(args: argparse.Namespace, signed_admission: dict[str, Any] | None) -> str:
+    if signed_admission is not None:
+        return str(signed_admission["variant"])
+    return str(args.variant)
+
+
+def get_effective_deadline_ms(args: argparse.Namespace, signed_admission: dict[str, Any] | None) -> int:
+    if signed_admission is not None:
+        return int(signed_admission["deadline_ms"])
+    return int(args.deadline_ms)
+
+
+def get_effective_expected_outputs(args: argparse.Namespace, signed_admission: dict[str, Any] | None) -> int:
+    if signed_admission is not None:
+        return int(signed_admission["expected_outputs"])
+    return int(args.expected_outputs)
+
+
+def get_effective_job_flags(args: argparse.Namespace, signed_admission: dict[str, Any] | None) -> str:
+    if signed_admission is not None:
+        return str(signed_admission["job_flags"])
+    return str(args.job_flags)
+
+
 def main() -> int:
     args = parse_args()
     if args.transport == "hook" and not args.control_hook_cmd:
@@ -409,12 +526,28 @@ def main() -> int:
     manifest_path = output_dir / "job_manifest.json"
     runner_log_path = output_dir / "runner.log"
 
-    expected_sha256, trusted_artifact, expected_sha256_source = resolve_expected_sha256(args)
-    manifest = build_manifest(args, output_dir, expected_sha256)
+    expected_sha256, trusted_artifact, expected_sha256_source, signed_admission = resolve_admission_context(args)
+    variant = get_effective_variant(args, signed_admission)
+    deadline_ms = get_effective_deadline_ms(args, signed_admission)
+    expected_outputs = get_effective_expected_outputs(args, signed_admission)
+    job_flags = get_effective_job_flags(args, signed_admission)
+
+    manifest = build_manifest(
+        args,
+        output_dir,
+        expected_sha256,
+        variant=variant,
+        deadline_ms=deadline_ms,
+        expected_outputs=expected_outputs,
+        job_flags=job_flags,
+        signed_admission=signed_admission,
+    )
     manifest["expected_sha256_source"] = expected_sha256_source
     manifest["trusted_artifacts_file"] = str(resolve_trusted_artifacts_path(args.trusted_artifacts_file))
     if trusted_artifact is not None:
         manifest["trusted_artifact"] = trusted_artifact
+    if signed_admission is not None:
+        manifest["signed_manifest"] = signed_admission
     json_dump(manifest_path, manifest)
 
     control_job_id = args.job_id
@@ -422,10 +555,11 @@ def main() -> int:
     while True:
         status_req_payload = build_status_req_payload(
             job_id=control_job_id,
-            variant=args.variant,
+            variant=variant,
             expected_sha256=expected_sha256,
-            job_flags=args.job_flags,
+            job_flags=job_flags,
             trusted_artifact=trusted_artifact,
+            signed_admission=signed_admission,
         )
         status_response = emit_event(
             trace_path=trace_path,
@@ -439,11 +573,12 @@ def main() -> int:
         job_req_payload = build_job_req_payload(
             job_id=control_job_id,
             expected_sha256=expected_sha256,
-            deadline_ms=args.deadline_ms,
-            expected_outputs=args.expected_outputs,
-            job_flags=args.job_flags,
+            deadline_ms=deadline_ms,
+            expected_outputs=expected_outputs,
+            job_flags=job_flags,
             runner_cmd=args.runner_cmd,
             trusted_artifact=trusted_artifact,
+            signed_admission=signed_admission,
         )
         job_req_response = emit_event(
             trace_path=trace_path,
