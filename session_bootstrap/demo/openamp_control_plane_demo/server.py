@@ -5,6 +5,7 @@ import argparse
 import html
 import json
 import mimetypes
+import os
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -721,18 +722,26 @@ class DemoHTTPServer(ThreadingHTTPServer):
 
 def demo_startup_env_overrides(args: argparse.Namespace) -> dict[str, str]:
     overrides: dict[str, str] = {}
-    if str(getattr(args, "demo_admission_mode", "") or "").strip():
-        overrides[DEMO_ADMISSION_MODE_ENV] = str(args.demo_admission_mode).strip()
-    if str(getattr(args, "signed_manifest_file", "") or "").strip():
-        overrides[DEMO_SIGNED_MANIFEST_FILE_ENV] = str(args.signed_manifest_file).strip()
-    if str(getattr(args, "signed_manifest_public_key", "") or "").strip():
-        overrides[DEMO_SIGNED_MANIFEST_PUBLIC_KEY_ENV] = str(args.signed_manifest_public_key).strip()
-    if str(getattr(args, "baseline_admission_mode", "") or "").strip():
-        overrides[DEMO_BASELINE_ADMISSION_MODE_ENV] = str(args.baseline_admission_mode).strip()
-    if str(getattr(args, "baseline_signed_manifest_file", "") or "").strip():
-        overrides[DEMO_BASELINE_SIGNED_MANIFEST_FILE_ENV] = str(args.baseline_signed_manifest_file).strip()
-    if str(getattr(args, "baseline_signed_manifest_public_key", "") or "").strip():
-        overrides[DEMO_BASELINE_SIGNED_MANIFEST_PUBLIC_KEY_ENV] = str(args.baseline_signed_manifest_public_key).strip()
+
+    env_or_arg_pairs = (
+        (DEMO_ADMISSION_MODE_ENV, str(getattr(args, "demo_admission_mode", "") or "").strip()),
+        (DEMO_SIGNED_MANIFEST_FILE_ENV, str(getattr(args, "signed_manifest_file", "") or "").strip()),
+        (DEMO_SIGNED_MANIFEST_PUBLIC_KEY_ENV, str(getattr(args, "signed_manifest_public_key", "") or "").strip()),
+        (DEMO_BASELINE_ADMISSION_MODE_ENV, str(getattr(args, "baseline_admission_mode", "") or "").strip()),
+        (
+            DEMO_BASELINE_SIGNED_MANIFEST_FILE_ENV,
+            str(getattr(args, "baseline_signed_manifest_file", "") or "").strip(),
+        ),
+        (
+            DEMO_BASELINE_SIGNED_MANIFEST_PUBLIC_KEY_ENV,
+            str(getattr(args, "baseline_signed_manifest_public_key", "") or "").strip(),
+        ),
+    )
+
+    for env_name, cli_value in env_or_arg_pairs:
+        value = cli_value or str(os.environ.get(env_name, "") or "").strip()
+        if value:
+            overrides[env_name] = value
     return overrides
 
 
