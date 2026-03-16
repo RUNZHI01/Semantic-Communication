@@ -8,6 +8,7 @@
   - [README.md](README.md)
   - [summary_report.md](summary_report.md)
   - [coverage_matrix.md](coverage_matrix.md)
+  - [../openamp_demo_live_dualpath_status_20260317.md](../openamp_demo_live_dualpath_status_20260317.md)
   - [../../PROGRESS_LOG.md](../../PROGRESS_LOG.md)
 
 ## 使用原则
@@ -31,10 +32,11 @@
 如果答辩前只剩 10 分钟，按这个顺序打开：
 
 1. [demo_four_act_runbook.md](demo_four_act_runbook.md)
-2. [degraded_demo_plan.md](degraded_demo_plan.md)
-3. [summary_report.md](summary_report.md)
-4. [coverage_matrix.md](coverage_matrix.md)
-5. [../../scripts/run_openamp_demo.sh](../../scripts/run_openamp_demo.sh)
+2. [../openamp_demo_live_dualpath_status_20260317.md](../openamp_demo_live_dualpath_status_20260317.md)
+3. [degraded_demo_plan.md](degraded_demo_plan.md)
+4. [summary_report.md](summary_report.md)
+5. [coverage_matrix.md](coverage_matrix.md)
+6. [../../scripts/run_openamp_demo.sh](../../scripts/run_openamp_demo.sh)
 
 ## 四幕与证据映射
 
