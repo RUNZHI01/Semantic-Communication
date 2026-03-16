@@ -17,8 +17,16 @@
 - `session_bootstrap/reports/openamp_control_plane_evidence_package_20260315/degraded_demo_plan.md`
 - `session_bootstrap/reports/openamp_control_plane_evidence_package_20260315/summary_report.md`
 - `session_bootstrap/reports/openamp_control_plane_evidence_package_20260315/coverage_matrix.md`
+- `session_bootstrap/reports/openamp_demo_live_dualpath_status_20260317.md`
 - `session_bootstrap/scripts/run_openamp_demo.sh`
 - `session_bootstrap/demo/openamp_control_plane_demo/README.md`
+
+补充说明：
+- `openamp_demo_live_dualpath_status_20260317.md` 是 2026-03-17 这轮最近聊天上下文对应的正式留档，专门回答“8115 当前 live demo 到底是什么状态”：
+  - current 已在 8115 上成功跑通；
+  - baseline 也已通过 signed sideband 进入真机执行；
+  - 两侧最近 live reconstruction 均完成 `300/300`；
+  - `cool-har` 只是一次本地 probe 会话被外部 `SIGTERM`，不构成新的板端失败。
 
 关键结论：
 - P0 最小板级控制闭环已落证：`STATUS_REQ/RESP`、`JOB_REQ/JOB_ACK`、`HEARTBEAT/HEARTBEAT_ACK`、wrapper-backed board smoke、`SAFE_STOP`、`JOB_DONE`
