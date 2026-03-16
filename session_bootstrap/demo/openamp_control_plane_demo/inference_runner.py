@@ -38,6 +38,10 @@ MIN_LIVE_CONTROL_HOOK_TIMEOUT_SEC = 5.0
 # without drifting into a full dataset benchmark.
 DEFAULT_MAX_INPUTS = 300
 DEFAULT_SEED = 0
+TRUSTED_CURRENT_E2E_MS = 230.339
+CURRENT_SLOWDOWN_MIN_DELTA_MS = 40.0
+HEAVY_HEARTBEAT_DURATION_MS = 1500.0
+HEAVY_HEARTBEAT_COUNT = 8
 UINT32_MAX = (1 << 32) - 1
 DEMO_MODE_ENV = "OPENAMP_DEMO_MODE"
 DEMO_MAX_INPUTS_ENV = "OPENAMP_DEMO_MAX_INPUTS"
@@ -339,6 +343,16 @@ def normalize_positive_int(value: Any) -> int | None:
     return normalized
 
 
+def normalize_nonnegative_float(value: Any) -> float | None:
+    try:
+        normalized = float(value)
+    except (TypeError, ValueError):
+        return None
+    if normalized < 0:
+        return None
+    return normalized
+
+
 def hook_result_for_trace_event(event: dict[str, Any]) -> dict[str, Any]:
     hook_result = event.get("hook_result")
     return hook_result if isinstance(hook_result, dict) else {}
@@ -377,13 +391,84 @@ def build_control_hook_stats(events: list[dict[str, Any]]) -> dict[str, Any]:
         "nonzero_return_count": len(nonzero_events),
     }
     if duration_values:
+        stats["duration_total_ms"] = round(sum(duration_values), 3)
         stats["duration_median_ms"] = round(statistics.median(duration_values), 3)
         stats["duration_max_ms"] = round(max(duration_values), 3)
     if heartbeat_duration_values:
         stats["heartbeat_event_count"] = len(heartbeat_duration_values)
+        stats["heartbeat_duration_total_ms"] = round(sum(heartbeat_duration_values), 3)
         stats["heartbeat_duration_median_ms"] = round(statistics.median(heartbeat_duration_values), 3)
         stats["heartbeat_duration_max_ms"] = round(max(heartbeat_duration_values), 3)
     return stats
+
+
+def detect_current_live_slowdown(
+    *,
+    variant: str,
+    runner_summary: dict[str, Any],
+    control_hook_stats: dict[str, Any],
+) -> dict[str, Any]:
+    if variant != "current":
+        return {}
+
+    observed_run_median_ms = normalize_nonnegative_float(
+        runner_summary.get("run_median_ms") or runner_summary.get("run_mean_ms")
+    )
+    if observed_run_median_ms is None:
+        return {}
+
+    delta_ms = observed_run_median_ms - TRUSTED_CURRENT_E2E_MS
+    if delta_ms < CURRENT_SLOWDOWN_MIN_DELTA_MS:
+        return {}
+
+    heartbeat_event_count = normalize_positive_int(control_hook_stats.get("heartbeat_event_count")) or 0
+    heartbeat_duration_median_ms = normalize_nonnegative_float(control_hook_stats.get("heartbeat_duration_median_ms"))
+    heartbeat_duration_max_ms = normalize_nonnegative_float(control_hook_stats.get("heartbeat_duration_max_ms"))
+    heartbeat_duration_total_ms = normalize_nonnegative_float(control_hook_stats.get("heartbeat_duration_total_ms"))
+
+    diagnostics: dict[str, Any] = {
+        "trusted_run_median_ms": round(TRUSTED_CURRENT_E2E_MS, 3),
+        "observed_run_median_ms": round(observed_run_median_ms, 3),
+        "delta_ms": round(delta_ms, 3),
+        "heartbeat_event_count": heartbeat_event_count,
+    }
+    if heartbeat_duration_median_ms is not None:
+        diagnostics["heartbeat_duration_median_ms"] = round(heartbeat_duration_median_ms, 3)
+    if heartbeat_duration_max_ms is not None:
+        diagnostics["heartbeat_duration_max_ms"] = round(heartbeat_duration_max_ms, 3)
+    if heartbeat_duration_total_ms is not None:
+        diagnostics["heartbeat_duration_total_ms"] = round(heartbeat_duration_total_ms, 3)
+
+    likely_causes: list[str] = []
+    if (
+        heartbeat_event_count >= HEAVY_HEARTBEAT_COUNT
+        and heartbeat_duration_median_ms is not None
+        and heartbeat_duration_median_ms >= HEAVY_HEARTBEAT_DURATION_MS
+    ):
+        diagnostics["control_plane_interference_suspected"] = True
+        likely_causes.append(
+            "OpenAMP live heartbeat hook round-trips are expensive enough to perturb the same-board inference run."
+        )
+    if likely_causes:
+        diagnostics["likely_causes"] = likely_causes
+    return diagnostics
+
+
+def build_current_live_slowdown_message(performance_diag: dict[str, Any]) -> str:
+    observed = float(performance_diag["observed_run_median_ms"])
+    trusted = float(performance_diag["trusted_run_median_ms"])
+    heartbeat_event_count = int(performance_diag.get("heartbeat_event_count") or 0)
+    heartbeat_duration_median_ms = normalize_nonnegative_float(performance_diag.get("heartbeat_duration_median_ms"))
+    if performance_diag.get("control_plane_interference_suspected") and heartbeat_duration_median_ms is not None:
+        return (
+            f"板端作业已完成，但 live current 中位数 {observed:.3f} ms 高于 trusted {trusted:.3f} ms；"
+            f"本次 {heartbeat_event_count} 次 HEARTBEAT hook 的中位往返约 {heartbeat_duration_median_ms:.0f} ms，"
+            "最可能是 OpenAMP live 控制面心跳对同板推理造成了额外干扰。"
+        )
+    return (
+        f"板端作业已完成，但 live current 中位数 {observed:.3f} ms 仍高于 trusted {trusted:.3f} ms；"
+        "当前已保留真实在线结果，请继续复核板端负载与现场环境。"
+    )
 
 
 def build_completion_counts(
@@ -934,6 +1019,7 @@ class LiveRemoteReconstructionJob:
             status_category = "timeout"
             runner_summary: dict[str, Any] = {}
             message = build_inference_message(status_category, variant=self.variant, include_fallback=True)
+            performance_diag: dict[str, Any] = {}
         elif (self._process.returncode or 0) == 0:
             try:
                 runner_summary = parse_runner_summary_from_log(self._runner_log_path)
@@ -947,10 +1033,18 @@ class LiveRemoteReconstructionJob:
                 )
                 runner_summary = {}
                 message = build_inference_message(status_category, variant=self.variant, include_fallback=True)
+                performance_diag = {}
             else:
                 status = "success"
                 status_category = "success"
-                if control_hook_stats.get("timeout_count", 0) > 0:
+                performance_diag = detect_current_live_slowdown(
+                    variant=self.variant,
+                    runner_summary=runner_summary,
+                    control_hook_stats=control_hook_stats,
+                )
+                if performance_diag:
+                    message = build_current_live_slowdown_message(performance_diag)
+                elif control_hook_stats.get("timeout_count", 0) > 0:
                     message = (
                         "板端执行已完成；控制 hook 超时已记录，界面不再将其误报为 runner timeout。"
                     )
@@ -965,6 +1059,7 @@ class LiveRemoteReconstructionJob:
                 error=classification_error_text,
             )
             runner_summary = {}
+            performance_diag = {}
             if wrapper_summary.get("result") == "denied_by_control_hook":
                 if status_category != "error":
                     message = build_inference_message(status_category, variant=self.variant, include_fallback=True)
@@ -983,6 +1078,8 @@ class LiveRemoteReconstructionJob:
             diagnostics["control_hook"] = hook_diagnostics
         if control_hook_stats:
             diagnostics["control_hook_stats"] = control_hook_stats
+        if performance_diag:
+            diagnostics["performance_regression"] = performance_diag
         count_payload = build_completion_counts(
             runner_log_path=self._runner_log_path,
             runner_summary=runner_summary,

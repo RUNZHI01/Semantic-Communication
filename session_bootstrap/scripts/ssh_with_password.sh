@@ -91,6 +91,21 @@ build_remote_command() {
 }
 
 REMOTE_COMMAND="$(build_remote_command "$@")"
+SSH_OPTIONS=(
+  -p "$PORT"
+  -o StrictHostKeyChecking=no
+  -o UserKnownHostsFile=/dev/null
+)
+if [[ "${SSH_WITH_PASSWORD_DISABLE_CONTROLMASTER:-0}" != "1" ]]; then
+  SSH_CONTROL_DIR="${TMPDIR:-/tmp}/ssh_mux"
+  mkdir -p "$SSH_CONTROL_DIR"
+  chmod 700 "$SSH_CONTROL_DIR" >/dev/null 2>&1 || true
+  SSH_OPTIONS+=(
+    -o ControlMaster=auto
+    -o ControlPersist=60
+    -o ControlPath="$SSH_CONTROL_DIR/%C"
+  )
+fi
 
 ASKPASS_FILE="$(mktemp /tmp/ssh_askpass_XXXXXX.sh)"
 cleanup() {
@@ -110,8 +125,6 @@ SSH_ASKPASS="$ASKPASS_FILE" \
 SSH_ASKPASS_REQUIRE=force \
 setsid -w \
 ssh \
-  -p "$PORT" \
-  -o StrictHostKeyChecking=no \
-  -o UserKnownHostsFile=/dev/null \
+  "${SSH_OPTIONS[@]}" \
   "${SSH_USER}@${HOST}" \
   "$REMOTE_COMMAND"
