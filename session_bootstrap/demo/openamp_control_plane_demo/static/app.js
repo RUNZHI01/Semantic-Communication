@@ -144,12 +144,21 @@ function setFeedback(message, tone) {
 
 function renderTop(snapshot, systemStatus) {
   const admission = systemStatus.live?.admission || {};
+  const currentSupport = systemStatus.live?.variant_support?.current || {};
+  const baselineSupport = systemStatus.live?.variant_support?.baseline || {};
+  const latestLive = snapshot.latest_live_status || {};
+  const currentSummary = currentSupport.note
+    ? ` 第二幕使用 ${currentSupport.label || "Current live"}。${currentSupport.note}`
+    : " 第二幕展示 Current live。";
+  const baselineSummary = baselineSupport.note
+    ? ` 第三幕会明确标注 Baseline：${baselineSupport.note}`
+    : " 第三幕展示 formal baseline 对比。";
   const admissionSuffix = admission.mode === "signed_manifest_v1"
     ? ` 当前 live 预检已切到 signed manifest，key_id=${admission.key_id || "unknown"}.`
     : "";
   document.getElementById("heroSummary").textContent =
-    `trusted current SHA ${snapshot.project.trusted_current_sha.slice(0, 12)} 已与当前演示材料对齐。` +
-    ` 第一幕展示板卡状态，第二幕与第三幕会展示 current / baseline 300 张图 live run 的真实在线推进与实时完成计数，第四幕保留 FIT-01 / FIT-02 / FIT-03 证据。` +
+    `${latestLive.hero_summary || ""} trusted current SHA ${snapshot.project.trusted_current_sha.slice(0, 12)} 已与当前演示材料对齐。` +
+    ` 第一幕展示板卡状态。${currentSummary}${baselineSummary} 第四幕保留 FIT-01 / FIT-02 / FIT-03 证据。` +
     admissionSuffix;
 
   const modePill = document.getElementById("modePill");
@@ -163,6 +172,36 @@ function renderTop(snapshot, systemStatus) {
     statCard("Payload", `${snapshot.stats.payload_current_ms} ms`, "正式 current 口径"),
     statCard("端到端", `${snapshot.stats.end_to_end_current_ms} ms/image`, "正式 current 口径"),
   ].join("");
+}
+
+function renderLatestLiveStatus(snapshot) {
+  const latest = snapshot.latest_live_status;
+  if (!latest) return;
+  document.getElementById("latestLiveStatusCard").innerHTML = `
+    <div class="label">最新 live 双路径结论</div>
+    <div class="inline-actions">
+      <div class="mini-title">${escapeHtml(latest.headline)}</div>
+      <div class="status-pill tone-online">${escapeHtml(latest.status_label)}</div>
+    </div>
+    <p class="compact-copy">${escapeHtml(latest.summary)}</p>
+    <div class="status-meta">
+      <span>收口时间=${escapeHtml(latest.as_of)}</span>
+      <span>唯一实例=${escapeHtml(latest.valid_instance)}</span>
+      <span>${escapeHtml(latest.current.label)}=${escapeHtml(latest.current.completed)}</span>
+      <span>${escapeHtml(latest.baseline.label)}=${escapeHtml(latest.baseline.completed)}</span>
+    </div>
+    <div class="metric-strip">
+      ${statCard("有效实例", latest.valid_instance, "当前唯一有效 live demo 实例")}
+      ${statCard(latest.current.label, latest.current.completed, latest.current.note)}
+      ${statCard(latest.baseline.label, latest.baseline.completed, latest.baseline.note)}
+      ${statCard(latest.board.label, latest.board.value, latest.board.note)}
+    </div>
+    <ul class="list-plain">
+      ${latest.facts.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+    </ul>
+    <p class="compact-copy">${escapeHtml(latest.boundary_note)}</p>
+    ${renderLinks([latest.report, latest.probe])}
+  `;
 }
 
 function renderBoardAccess(systemStatus) {
@@ -218,6 +257,8 @@ function renderBoardAccess(systemStatus) {
 function renderAct1(snapshot, systemStatus) {
   const live = systemStatus.live;
   const admission = live.admission || {};
+  const currentSupport = live.variant_support?.current || {};
+  const baselineSupport = live.variant_support?.baseline || {};
   document.getElementById("act1StatusNote").textContent = live.status_note;
   document.getElementById("act1StatusGrid").innerHTML = [
     kpiCard("飞腾派 / SSH", live.board_online ? "在线" : "未在线", live.board_online ? "当前演示进程已拿到最新只读读数。" : "尚无新的在线读数，回退到证据。", live.board_online ? "online" : "offline"),
@@ -225,6 +266,8 @@ function renderAct1(snapshot, systemStatus) {
     kpiCard("guard_state", live.guard_state, `last_fault_code：${live.last_fault_code}`, live.guard_state),
     kpiCard("运行目标", live.target, `runtime：${live.runtime}`, "online"),
     kpiCard("准入策略", admission.label || "Legacy SHA allowlist", admission.note || "当前 live 准入配置。", admission.tone || "neutral"),
+    kpiCard("Current live", currentSupport.label || "Current live", currentSupport.note || "Current 路径状态。", currentSupport.tone || "neutral"),
+    kpiCard("Baseline live", baselineSupport.label || "Baseline live", baselineSupport.note || "Baseline 路径状态。", baselineSupport.tone || "neutral"),
   ].join("");
 
   const evidence = snapshot.board.evidence_status;
@@ -520,6 +563,9 @@ function comparisonCard(label, baselineMs, currentMs, improvementPct, speedupX, 
 
 function renderComparison(snapshot) {
   const comparison = snapshot.guided_demo.comparison;
+  const currentSupport = state.systemStatus?.live?.variant_support?.current || {};
+  const baselineSupport = state.systemStatus?.live?.variant_support?.baseline || {};
+  const boardBusy = String(state.systemStatus?.live?.guard_state || "").toUpperCase() === "JOB_ACTIVE";
   renderComparisonProgressCards();
   document.getElementById("comparisonBoard").innerHTML = [
     comparisonCard(
@@ -547,8 +593,17 @@ function renderComparison(snapshot) {
   if (state.currentResult) {
     notes.push(`Current：${state.currentResult.source_label}，${state.currentResult.message}`);
   }
+  if (!state.baselineResult && baselineSupport.note) {
+    notes.push(`Baseline：${baselineSupport.note}`);
+  }
+  if (!state.currentResult && currentSupport.note) {
+    notes.push(`Current：${currentSupport.note}`);
+  }
+  if (boardBusy) {
+    notes.push("板端当前 guard_state=JOB_ACTIVE；demo 会保守阻断新的 live launch，不自动 SAFE_STOP。");
+  }
   document.getElementById("comparisonRunNote").textContent =
-    notes.join(" ") || "一键顺序运行会先拉起 Baseline，再拉起 Current；两条 live run 默认各执行 300 张图，并在此处同步展示实时计数轴。";
+    notes.join(" ") || "Current signed live 可在线推进；第三幕保留 formal baseline 对比，Baseline live 是否开放会在此处明确标注。";
 }
 
 function renderFault(snapshot) {
@@ -629,9 +684,48 @@ function renderActLamps(systemStatus) {
   }
 }
 
+function applyLaunchPolicy(systemStatus) {
+  const currentSupport = systemStatus.live?.variant_support?.current || {};
+  const baselineSupport = systemStatus.live?.variant_support?.baseline || {};
+  const boardBusy = String(systemStatus.live?.guard_state || "").toUpperCase() === "JOB_ACTIVE";
+  const boardBusyReason = "板端当前 guard_state=JOB_ACTIVE；demo 保守阻断新的 live launch，不自动 SAFE_STOP。";
+  const currentBlocked = boardBusy || currentSupport.launch_allowed === false;
+  const baselineBlocked = boardBusy || baselineSupport.launch_allowed === false;
+
+  const currentButton = document.getElementById("runCurrentButton");
+  const currentAgainButton = document.getElementById("runCurrentAgainButton");
+  const baselineButton = document.getElementById("runBaselineButton");
+  const runAllButton = document.getElementById("runAllButton");
+
+  const currentLabel = currentSupport.mode === "signed_manifest_v1"
+    ? "启动 Current signed 300 张图在线推进"
+    : "启动 Current 300 张图在线推进";
+  currentButton.textContent = currentLabel;
+  currentAgainButton.textContent = currentSupport.mode === "signed_manifest_v1"
+    ? "运行 Current signed 300 张图"
+    : "运行 Current 300 张图";
+  baselineButton.textContent = baselineSupport.launch_allowed === false
+    ? "Baseline live 未适配 signed admission"
+    : "运行 Baseline 300 张图";
+  runAllButton.textContent = baselineSupport.launch_allowed === false
+    ? "双版本 live 当前未开放"
+    : "一键顺序运行双版本 300 张图";
+
+  currentButton.disabled = currentBlocked;
+  currentAgainButton.disabled = currentBlocked;
+  baselineButton.disabled = baselineBlocked;
+  runAllButton.disabled = currentBlocked || baselineBlocked;
+
+  currentButton.title = boardBusy ? boardBusyReason : (currentSupport.note || "");
+  currentAgainButton.title = currentButton.title;
+  baselineButton.title = boardBusy ? boardBusyReason : (baselineSupport.note || "");
+  runAllButton.title = boardBusy ? boardBusyReason : (baselineSupport.launch_allowed === false ? (baselineSupport.note || "") : "");
+}
+
 function renderAll() {
   if (!state.snapshot || !state.systemStatus) return;
   renderTop(state.snapshot, state.systemStatus);
+  renderLatestLiveStatus(state.snapshot);
   renderBoardAccess(state.systemStatus);
   renderAct1(state.snapshot, state.systemStatus);
   renderSampleOptions(state.snapshot);
@@ -641,6 +735,7 @@ function renderAll() {
   renderPerformance(state.snapshot);
   renderSources(state.snapshot);
   renderActLamps(state.systemStatus);
+  applyLaunchPolicy(state.systemStatus);
 }
 
 function switchAct(actId) {

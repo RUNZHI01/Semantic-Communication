@@ -13,6 +13,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 REPORTS_ROOT = PROJECT_ROOT / "session_bootstrap" / "reports"
 PACKAGE_ROOT = REPORTS_ROOT / "openamp_control_plane_evidence_package_20260315"
 SCRIPTS_ROOT = PROJECT_ROOT / "session_bootstrap" / "scripts"
+LATEST_LIVE_DUALPATH_REPORT = REPORTS_ROOT / "openamp_demo_live_dualpath_status_20260317.md"
 
 FAULT_CODE_NAMES = {
     0: "NONE",
@@ -270,6 +271,14 @@ def parse_markdown_key_values(path: Path) -> dict[str, str]:
             continue
         values[normalize_key(match.group(1))] = clean_markdown_value(match.group(2))
     return values
+
+
+def markdown_heading(path: Path) -> str:
+    for line in read_text(path).splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            return stripped.lstrip("#").strip()
+    return repo_relative(path)
 
 
 def parse_links(cell: str, base_dir: Path) -> list[dict[str, Any]]:
@@ -882,6 +891,55 @@ def build_guided_demo_snapshot() -> dict[str, Any]:
     }
 
 
+def build_latest_live_status_snapshot() -> dict[str, Any]:
+    report_text = read_text(LATEST_LIVE_DUALPATH_REPORT)
+    as_of_match = re.search(r"截至\s+\*\*(.+?)\*\*", report_text)
+    as_of = as_of_match.group(1) if as_of_match else "2026-03-17 05:45 +0800"
+    return {
+        "title": markdown_heading(LATEST_LIVE_DUALPATH_REPORT),
+        "report_date": "2026-03-17",
+        "as_of": as_of,
+        "status_label": "最新 live 双路径已收口",
+        "headline": "8115 唯一有效；Current 与 Baseline 最近 live reconstruction 均完成 300 / 300",
+        "hero_summary": (
+            "2026-03-17 最新 live 双路径收口：8115 为唯一有效 demo 实例；"
+            "Current 已在 8115 上跑通，Baseline 也已通过 signed sideband 进入真机执行；"
+            "两侧最近 live reconstruction 均完成 300 / 300。"
+        ),
+        "summary": (
+            "Current 路径已在 8115 上成功跑通；Baseline 已不再是 legacy 秒退，"
+            "而是通过 signed sideband 完成 BEGIN / CHUNK / SIGNATURE / COMMIT 全 ACK 后进入真机执行。"
+        ),
+        "valid_instance": "8115",
+        "current": {
+            "label": "Current live",
+            "completed": "300 / 300",
+            "note": "最近 live reconstruction 已在 8115 板端成功完成。",
+        },
+        "baseline": {
+            "label": "Baseline live",
+            "completed": "300 / 300",
+            "note": "已通过 signed sideband 进入真机执行，不再是未上板的 legacy 秒退。",
+        },
+        "board": {
+            "label": "板卡在线状态",
+            "value": "reachable / remoteproc0=running",
+            "note": "/dev/rpmsg0 与 /dev/rpmsg_ctrl0 仍可见，可继续演示。",
+        },
+        "facts": [
+            "8115 是当前唯一该用的 demo 实例。",
+            "Current 路径最近一次 live reconstruction 已完成真实 300 / 300。",
+            "Baseline 路径已通过 signed sideband 进入真机执行，并完成真实 300 / 300。",
+        ],
+        "boundary_note": (
+            "`cool-har` 只是一次本地 signed probe 会话被外部 SIGTERM 终止，"
+            "没有改变任何板端结论。"
+        ),
+        "report": link_entry(LATEST_LIVE_DUALPATH_REPORT, "2026-03-17 live 双路径状态报告"),
+        "probe": link_entry(REPORTS_ROOT / "openamp_demo_live_probe_latest.json", "最新在线探板 JSON"),
+    }
+
+
 def build_operator_snapshot() -> dict[str, Any]:
     return {
         "launch_commands": [
@@ -931,6 +989,7 @@ def build_operator_snapshot() -> dict[str, Any]:
 
 def build_docs_snapshot() -> list[dict[str, Any]]:
     return [
+        link_entry(LATEST_LIVE_DUALPATH_REPORT, "2026-03-17 最新 live 双路径状态"),
         link_entry(PACKAGE_ROOT / "README.md", "OpenAMP 证据包"),
         link_entry(PACKAGE_ROOT / "summary_report.md", "总报告"),
         link_entry(PACKAGE_ROOT / "coverage_matrix.md", "覆盖矩阵"),
@@ -969,6 +1028,7 @@ def build_snapshot(live_probe: dict[str, Any] | None = None) -> dict[str, Any]:
             "payload_current_ms": performance["micro_summary"]["payload_current_ms"],
             "end_to_end_current_ms": performance["micro_summary"]["end_to_end_current_ms"],
         },
+        "latest_live_status": build_latest_live_status_snapshot(),
         "milestones": build_milestones_snapshot(),
         "fits": fits,
         "performance": performance,
