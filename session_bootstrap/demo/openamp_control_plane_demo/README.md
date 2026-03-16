@@ -1,6 +1,6 @@
 # OpenAMP Control Plane Demo
 
-This package ships a real local dashboard for the current repo state. It is not a disconnected mock: the backend reads the existing OpenAMP evidence package, raw probe JSON, FIT summaries, wrapper evidence, and the trusted-current performance reports that already live under `session_bootstrap/reports/`.
+This package ships a real local dashboard for the current repo state. It is not a disconnected mock: the backend reads the existing OpenAMP evidence package, raw probe JSON, FIT summaries, wrapper evidence, the latest live dual-path status snapshot (`session_bootstrap/reports/openamp_demo_live_dualpath_status_20260317.md`), and the trusted-current performance reports that already live under `session_bootstrap/reports/`.
 
 ## What it shows
 
@@ -10,6 +10,7 @@ This package ships a real local dashboard for the current repo state. It is not 
 - key OpenAMP milestones across cold boot, `STATUS_REQ/RESP`, `JOB_REQ/JOB_ACK`, heartbeat, wrapper-backed board smoke, `SAFE_STOP`, and `JOB_DONE`
 - final `FIT-01`, `FIT-02`, `FIT-03` state, including `FIT-03` pre-fix FAIL -> post-fix PASS history
 - performance positioning for the trusted current SHA aligned to the OpenAMP FIT package
+- latest 2026-03-17 live board status for the demo line: 8115 is the only valid live instance, current has passed on-board, and baseline has also entered real-board execution through signed sideband with both sides completing `300/300`
 - operator launch commands and source-of-truth document links
 
 ## Launch
@@ -46,7 +47,7 @@ The demo keeps the legacy path intact by default. Current and Baseline are confi
 - if a variant-specific signed bundle and public key are supplied, that live path switches to `signed_manifest_v1` preflight
 - the signed bundle is verified locally with the supplied public key before the wrapper launches
 - wrapper traces and manifests carry the signed-manifest metadata for the user-facing demo
-- the final board trigger still stays on the existing 44-byte `JOB_REQ` until the board firmware signed-admission patch is actually deployed
+- the live control hook now emits `SIGNED_ADMISSION_BEGIN/CHUNK/SIGNATURE/COMMIT` before the unchanged 44-byte `JOB_REQ`
 - if Baseline signed admission is not configured or fails local verification, the demo stays explicit: Baseline live falls back to legacy expected-SHA admission when available, otherwise the UI keeps the formal archived baseline comparison only
 
 The same override can also be carried in the active inference env file with:
@@ -121,6 +122,7 @@ It does not reboot the board, does not send `JOB_REQ`, and does not modify firmw
 Host side inputs:
 
 - `session_bootstrap/reports/openamp_control_plane_evidence_package_20260315/`
+- `session_bootstrap/reports/openamp_demo_live_dualpath_status_20260317.md`
 - raw board probes such as `openamp_job_done_real_probe_20260315_001.json`
 - FIT bundles under `openamp_*_fit_*`
 - `session_bootstrap/scripts/openamp_control_wrapper.py`
