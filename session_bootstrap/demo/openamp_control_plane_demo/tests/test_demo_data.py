@@ -68,6 +68,20 @@ class DemoDataTest(unittest.TestCase):
         self.assertAlmostEqual(guided_demo["comparison"]["payload"]["baseline_ms"], 1846.9)
         self.assertAlmostEqual(guided_demo["comparison"]["end_to_end"]["current_ms"], 230.339)
 
+    def test_snapshot_surfaces_latest_live_dualpath_status_report(self) -> None:
+        snapshot = build_snapshot()
+        latest = snapshot["latest_live_status"]
+
+        self.assertEqual(latest["report_date"], "2026-03-17")
+        self.assertEqual(latest["valid_instance"], "8115")
+        self.assertEqual(latest["current"]["completed"], "300 / 300")
+        self.assertEqual(latest["baseline"]["completed"], "300 / 300")
+        self.assertEqual(
+            latest["report"]["path"],
+            "session_bootstrap/reports/openamp_demo_live_dualpath_status_20260317.md",
+        )
+        self.assertEqual(snapshot["docs"][0]["path"], latest["report"]["path"])
+
 
 if __name__ == "__main__":
     unittest.main()

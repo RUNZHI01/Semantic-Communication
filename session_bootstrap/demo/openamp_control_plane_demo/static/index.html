@@ -19,6 +19,7 @@
           <button id="reloadButton" class="button button-secondary" type="button">刷新证据快照</button>
           <button id="probeButton" class="button button-primary" type="button">探测板卡 / OpenAMP</button>
         </div>
+        <div id="latestLiveStatusCard" class="panel-lite evidence-stack">正在加载最新 live 双路径状态...</div>
       </div>
       <div class="hero-side">
         <div class="status-card panel-lite">
@@ -127,7 +128,7 @@
           <span>测试图</span>
           <select id="imageSelect"></select>
         </label>
-        <button id="runCurrentButton" class="button button-primary" type="button">启动 Current 300 张图在线推进</button>
+        <button id="runCurrentButton" class="button button-primary" type="button">启动 Current signed 300 张图在线推进</button>
       </div>
       <div class="panel-lite live-progress-shell">
         <div class="live-progress-top">
@@ -207,11 +208,11 @@
       </div>
       <div id="comparisonBoard" class="comparison-board"></div>
       <div class="inline-actions">
-        <button id="runBaselineButton" class="button button-secondary" type="button">运行 Baseline 300 张图</button>
-        <button id="runCurrentAgainButton" class="button button-primary" type="button">运行 Current 300 张图</button>
-        <button id="runAllButton" class="button button-secondary" type="button">一键顺序运行双版本 300 张图</button>
+        <button id="runBaselineButton" class="button button-secondary" type="button">Baseline live 未适配时会在此明确标注</button>
+        <button id="runCurrentAgainButton" class="button button-primary" type="button">运行 Current signed 300 张图</button>
+        <button id="runAllButton" class="button button-secondary" type="button">双版本 live 当前未开放时会在此明确标注</button>
       </div>
-      <div class="panel-lite" id="comparisonRunNote">等待执行基线对比动作。</div>
+      <div class="panel-lite" id="comparisonRunNote">Current signed live 与 Baseline formal compare 的支持边界会在此处明确显示。</div>
     </section>
 
     <section class="act-panel panel" id="act4Panel">
