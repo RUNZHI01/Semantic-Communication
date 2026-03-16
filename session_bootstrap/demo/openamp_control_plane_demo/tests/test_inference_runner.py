@@ -234,18 +234,14 @@ class RunRemoteReconstructionTest(unittest.TestCase):
             },
         )
 
-    def test_build_hook_command_forwards_remote_project_root_to_proxy(self) -> None:
+    def test_build_hook_command_keeps_live_demo_on_bundled_bridge_runtime(self) -> None:
         access = make_access({"REMOTE_PROJECT_ROOT": "/tmp/openamp_wrong_sha_fit/project"})
         job = LiveRemoteReconstructionJob.__new__(LiveRemoteReconstructionJob)
         job.job_id = "job-123"
 
         command = shlex.split(job._build_hook_command(access))
 
-        self.assertIn("--remote-project-root", command)
-        self.assertEqual(
-            command[command.index("--remote-project-root") + 1],
-            "/tmp/openamp_wrong_sha_fit/project",
-        )
+        self.assertNotIn("--remote-project-root", command)
 
     def test_build_runner_command_adds_sample_cap_for_configured_legacy_baseline_cmd(self) -> None:
         access = make_access(
