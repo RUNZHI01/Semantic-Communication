@@ -430,22 +430,49 @@ class DemoHTTPServerTest(unittest.TestCase):
     def test_system_status_endpoint_includes_demo_admission_summary(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
 
-        with patch(
-            "server.describe_demo_admission",
-            return_value={
-                "status": "ready",
-                "mode": "signed_manifest_v1",
-                "label": "Signed manifest v1",
-                "tone": "online",
-                "bundle_path": "/tmp/openamp_demo_signed_admission/current.bundle.json",
-                "public_key_path": "/tmp/openamp_demo_signed_admission/current.public.pem",
-                "manifest_sha256": "a" * 64,
-                "artifact_sha256": "b" * 64,
-                "key_id": "demo-live-20260316",
-                "verified_locally": True,
-                "artifact_match": True,
-                "note": "key_id=demo-live-20260316 | bundle=current.bundle.json",
-            },
+        with (
+            patch(
+                "server.describe_demo_admission",
+                return_value={
+                    "status": "ready",
+                    "mode": "signed_manifest_v1",
+                    "label": "Signed manifest v1",
+                    "tone": "online",
+                    "bundle_path": "/tmp/openamp_demo_signed_admission/current.bundle.json",
+                    "public_key_path": "/tmp/openamp_demo_signed_admission/current.public.pem",
+                    "manifest_sha256": "a" * 64,
+                    "artifact_sha256": "b" * 64,
+                    "key_id": "demo-live-20260316",
+                    "verified_locally": True,
+                    "artifact_match": True,
+                    "note": "key_id=demo-live-20260316 | bundle=current.bundle.json",
+                },
+            ),
+            patch(
+                "server.describe_demo_variant_support",
+                side_effect=[
+                    {
+                        "variant": "current",
+                        "status": "ready",
+                        "mode": "signed_manifest_v1",
+                        "label": "Current signed live 已支持",
+                        "tone": "online",
+                        "note": "Current signed-admission live path is supported.",
+                        "supported": True,
+                        "launch_allowed": True,
+                    },
+                    {
+                        "variant": "baseline",
+                        "status": "unsupported",
+                        "mode": "legacy_sha",
+                        "label": "Baseline live 未适配 signed admission",
+                        "tone": "degraded",
+                        "note": "第三幕保留 formal baseline 对比；Baseline live 不作为当前 signed-admission demo 路径。",
+                        "supported": False,
+                        "launch_allowed": False,
+                    },
+                ],
+            ),
         ):
             status, _, payload = request_json(state, "GET", "/api/system-status")
 
@@ -453,6 +480,8 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(payload["live"]["admission"]["mode"], "signed_manifest_v1")
         self.assertEqual(payload["live"]["admission"]["key_id"], "demo-live-20260316")
         self.assertTrue(payload["live"]["admission"]["verified_locally"])
+        self.assertEqual(payload["live"]["variant_support"]["current"]["label"], "Current signed live 已支持")
+        self.assertFalse(payload["live"]["variant_support"]["baseline"]["launch_allowed"])
 
     def test_board_access_endpoint_accepts_password_only_and_keeps_preloaded_defaults(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
@@ -596,10 +625,23 @@ class DemoHTTPServerTest(unittest.TestCase):
             ]
         )
 
-        with patch(
-            "server.launch_remote_reconstruction_job",
-            return_value=live_job,
-        ) as launch_job:
+        with (
+            patch(
+                "server.query_live_status",
+                return_value={
+                    "status": "success",
+                    "guard_state": "READY",
+                    "active_job_id": 0,
+                    "last_fault_code": "NONE",
+                    "total_fault_count": 0,
+                    "logs": [],
+                },
+            ),
+            patch(
+                "server.launch_remote_reconstruction_job",
+                return_value=live_job,
+            ) as launch_job,
+        ):
             status, _, payload = request_json(
                 state,
                 "POST",
@@ -617,6 +659,137 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(access.user, "user")
         self.assertEqual(access.password, "demo-pass")
         self.assertEqual(access.env_file, saved_access.env_file)
+
+    def test_run_inference_endpoint_blocks_when_demo_already_has_running_live_job(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        request_json(
+            state,
+            "POST",
+            "/api/session/board-access",
+            body=json.dumps({"password": "demo-pass"}).encode("utf-8"),
+        )
+        running_job = FakeInferenceJob(
+            [
+                {
+                    "status": "running",
+                    "request_state": "running",
+                    "status_category": "running",
+                    "execution_mode": "live",
+                    "variant": "current",
+                    "message": "OpenAMP 控制面已接管本次演示，界面正在同步板端阶段。",
+                    "runner_summary": {},
+                    "wrapper_summary": {},
+                    "diagnostics": {},
+                    "progress": live_progress_payload("真实在线推进", "running", 76, "板端执行中"),
+                    "artifacts": {},
+                }
+            ],
+            job_id="demo-job-001",
+        )
+        state._inference_jobs[running_job.job_id] = {
+            "job": running_job,
+            "job_id": running_job.job_id,
+            "variant": "current",
+            "image_index": 0,
+        }
+
+        with patch("server.launch_remote_reconstruction_job") as launch_job:
+            status, _, payload = request_json(
+                state,
+                "POST",
+                "/api/run-inference",
+                body=json.dumps({"image_index": 0, "mode": "current"}).encode("utf-8"),
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["status"], "fallback")
+        self.assertEqual(payload["status_category"], "board_busy")
+        self.assertIn("demo-job-001", payload["message"])
+        self.assertEqual(payload["live_attempt"]["status"], "blocked")
+        launch_job.assert_not_called()
+
+    def test_run_inference_endpoint_blocks_when_live_status_reports_job_active(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        request_json(
+            state,
+            "POST",
+            "/api/session/board-access",
+            body=json.dumps({"password": "demo-pass"}).encode("utf-8"),
+        )
+
+        with (
+            patch(
+                "server.describe_demo_variant_support",
+                return_value={
+                    "variant": "current",
+                    "status": "ready",
+                    "mode": "signed_manifest_v1",
+                    "label": "Current signed live 已支持",
+                    "tone": "online",
+                    "note": "Current signed-admission live path is supported.",
+                    "supported": True,
+                    "launch_allowed": True,
+                },
+            ),
+            patch(
+                "server.query_live_status",
+                return_value={
+                    "status": "success",
+                    "guard_state": "JOB_ACTIVE",
+                    "active_job_id": 8093,
+                    "last_fault_code": "DUPLICATE_JOB_ID",
+                    "logs": ["[02:27:52] STATUS_RESP: guard=JOB_ACTIVE"],
+                },
+            ),
+            patch("server.launch_remote_reconstruction_job") as launch_job,
+        ):
+            status, _, payload = request_json(
+                state,
+                "POST",
+                "/api/run-inference",
+                body=json.dumps({"image_index": 0, "mode": "current"}).encode("utf-8"),
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["status"], "fallback")
+        self.assertEqual(payload["status_category"], "board_busy")
+        self.assertIn("Current signed-admission live path 已支持", payload["message"])
+        self.assertIn("guard_state=JOB_ACTIVE", payload["message"])
+        self.assertEqual(payload["live_attempt"]["diagnostics"]["board_status"]["active_job_id"], 8093)
+        launch_job.assert_not_called()
+
+    def test_run_baseline_endpoint_blocks_signed_demo_path_as_unsupported(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+
+        with (
+            patch(
+                "server.describe_demo_variant_support",
+                return_value={
+                    "variant": "baseline",
+                    "status": "unsupported",
+                    "mode": "legacy_sha",
+                    "label": "Baseline live 未适配 signed admission",
+                    "tone": "degraded",
+                    "note": "第三幕保留 formal baseline 对比；Baseline live 不作为当前 signed-admission demo 路径。",
+                    "supported": False,
+                    "launch_allowed": False,
+                },
+            ),
+            patch("server.launch_remote_reconstruction_job") as launch_job,
+        ):
+            status, _, payload = request_json(
+                state,
+                "POST",
+                "/api/run-baseline",
+                body=json.dumps({"image_index": 0}).encode("utf-8"),
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["status"], "fallback")
+        self.assertEqual(payload["status_category"], "unsupported_live_path")
+        self.assertIn("Baseline live 未适配当前 signed-admission demo", payload["message"])
+        self.assertEqual(payload["live_attempt"]["status"], "blocked")
+        launch_job.assert_not_called()
 
     def test_inference_progress_endpoint_returns_completed_live_payload(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
@@ -670,10 +843,23 @@ class DemoHTTPServerTest(unittest.TestCase):
             ]
         )
 
-        with patch(
-            "server.launch_remote_reconstruction_job",
-            return_value=live_job,
-        ) as launch_job:
+        with (
+            patch(
+                "server.query_live_status",
+                return_value={
+                    "status": "success",
+                    "guard_state": "READY",
+                    "active_job_id": 0,
+                    "last_fault_code": "NONE",
+                    "total_fault_count": 0,
+                    "logs": [],
+                },
+            ),
+            patch(
+                "server.launch_remote_reconstruction_job",
+                return_value=live_job,
+            ) as launch_job,
+        ):
             start_status, _, start_payload = request_json(
                 state,
                 "POST",
@@ -751,9 +937,22 @@ class DemoHTTPServerTest(unittest.TestCase):
             ]
         )
 
-        with patch(
-            "server.launch_remote_reconstruction_job",
-            return_value=live_job,
+        with (
+            patch(
+                "server.query_live_status",
+                return_value={
+                    "status": "success",
+                    "guard_state": "READY",
+                    "active_job_id": 0,
+                    "last_fault_code": "NONE",
+                    "total_fault_count": 0,
+                    "logs": [],
+                },
+            ),
+            patch(
+                "server.launch_remote_reconstruction_job",
+                return_value=live_job,
+            ),
         ):
             status, _, payload = request_json(
                 state,

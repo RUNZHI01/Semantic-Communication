@@ -31,6 +31,7 @@ from inference_runner import (
     DEMO_SIGNED_MANIFEST_FILE_ENV,
     DEMO_SIGNED_MANIFEST_PUBLIC_KEY_ENV,
     describe_demo_admission,
+    describe_demo_variant_support,
     launch_remote_reconstruction_job,
 )
 
@@ -154,6 +155,8 @@ class DashboardState:
 
         snapshot = build_snapshot(live_probe=live_probe)
         admission = describe_demo_admission(board_access, variant="current")
+        current_support = describe_demo_variant_support(board_access, variant="current")
+        baseline_support = describe_demo_variant_support(board_access, variant="baseline")
         evidence_status = snapshot["board"]["evidence_status"]
         live_details = live_probe.get("details", {}) if live_probe else {}
         remoteproc_entries = live_details.get("remoteproc", [])
@@ -180,6 +183,13 @@ class DashboardState:
             total_fault_count = fallback_timeout.get("total_fault_count", 0)
             status_source = "evidence"
             status_note = "当前 guard_state / fault_code 仍以正式证据包为准。"
+
+        if str(guard_state or "").upper() == "JOB_ACTIVE":
+            active_job_text = f" active_job_id={active_job_id}。" if active_job_id else ""
+            status_note = (
+                "板端当前 guard_state=JOB_ACTIVE；demo 会保守阻断新的 live launch，"
+                f"不会自动 SAFE_STOP。{active_job_text}请等待现有作业完成，或由操作员手动 SAFE_STOP 后再重试。"
+            )
 
         board_online = bool(live_probe and live_probe.get("reachable"))
         if board_online:
@@ -223,6 +233,10 @@ class DashboardState:
                 "target": self._target_label,
                 "runtime": self._runtime_label,
                 "admission": admission,
+                "variant_support": {
+                    "current": current_support,
+                    "baseline": baseline_support,
+                },
                 "last_probe_at": live_probe.get("requested_at", "") if live_probe else "",
                 "status_source": status_source,
                 "status_note": status_note,
@@ -356,23 +370,177 @@ class DashboardState:
             "request_state": payload.get("request_state", "completed"),
         }
 
+    def _running_inference_job_record(self) -> dict[str, Any] | None:
+        with self._lock:
+            records = list(self._inference_jobs.values())
+        for record in records:
+            snapshot = record["job"].snapshot()
+            if snapshot.get("request_state") == "running":
+                return {
+                    "job_id": record["job_id"],
+                    "variant": record["variant"],
+                    "snapshot": snapshot,
+                }
+        return None
+
+    def _blocked_live_progress(
+        self,
+        *,
+        label: str,
+        detail: str,
+        event_log: list[str] | None = None,
+    ) -> dict[str, Any]:
+        expected_count = DEFAULT_MAX_INPUTS
+        return {
+            "state": "completed",
+            "label": label,
+            "tone": "degraded",
+            "percent": 0,
+            "phase_percent": 100,
+            "completed_count": 0,
+            "expected_count": expected_count,
+            "remaining_count": expected_count,
+            "completion_ratio": 0.0,
+            "count_source": "demo_default",
+            "count_label": f"0 / {expected_count}",
+            "current_stage": "未发起 live launch",
+            "stages": [
+                {
+                    "key": "launch_guard",
+                    "label": "启动前检查",
+                    "status": "error",
+                    "detail": detail,
+                }
+            ],
+            "event_log": list(event_log or []),
+        }
+
+    def _build_blocked_inference_payload(
+        self,
+        *,
+        variant: str,
+        image_index: int,
+        status_category: str,
+        source_label: str,
+        message: str,
+        detail: str,
+        diagnostics: dict[str, Any],
+        event_log: list[str] | None = None,
+    ) -> dict[str, Any]:
+        payload = build_prerecorded_inference_result(image_index, variant)
+        payload.update(
+            {
+                "status": "fallback",
+                "execution_mode": "prerecorded",
+                "request_state": "completed",
+                "status_category": status_category,
+                "source_label": source_label,
+                "message": message,
+                "live_progress": self._blocked_live_progress(label=source_label, detail=detail, event_log=event_log),
+                "live_attempt": {
+                    "status": "blocked",
+                    "request_state": "completed",
+                    "status_category": status_category,
+                    "message": message,
+                    "diagnostics": diagnostics,
+                },
+            }
+        )
+        return payload
+
     def run_demo_inference(self, *, variant: str, image_index: int) -> dict[str, Any]:
         payload = build_prerecorded_inference_result(image_index, variant)
         with self._lock:
             board_access = self._board_access
+        variant_support = describe_demo_variant_support(board_access, variant=variant)
 
-        if board_access.configured:
-            live_job = launch_remote_reconstruction_job(board_access, variant=variant)
-            live_result = live_job.snapshot()
-            record = {
-                "job": live_job,
-                "job_id": live_job.job_id,
-                "variant": variant,
-                "image_index": image_index,
-            }
-            with self._lock:
-                self._inference_jobs[live_job.job_id] = record
-            payload = self._build_inference_response(record, live_result)
+        if variant == "baseline" and variant_support.get("status") == "unsupported":
+            payload = self._build_blocked_inference_payload(
+                variant=variant,
+                image_index=image_index,
+                status_category="unsupported_live_path",
+                source_label="Baseline 保留正式归档对比",
+                message=(
+                    "Baseline live 未适配当前 signed-admission demo；第三幕继续展示 formal baseline 归档结果，"
+                    "不会把 Baseline live 说成已支持路径。"
+                ),
+                detail=str(variant_support.get("note") or "Baseline live 未适配当前 signed-admission demo。"),
+                diagnostics={"variant_support": variant_support},
+                event_log=[str(variant_support.get("note") or "Baseline live 未适配当前 signed-admission demo。")],
+            )
+        elif board_access.configured:
+            active_record = self._running_inference_job_record()
+            if active_record is not None:
+                active_variant = str(active_record["variant"])
+                active_job_id = str(active_record["job_id"])
+                message = (
+                    f"当前 demo 已有 live 作业在跑（job_id={active_job_id}，variant={active_variant}）；"
+                    "为避免板端落入 DUPLICATE_JOB_ID / JOB_ACTIVE，已保守阻断新的 launch。"
+                )
+                payload = self._build_blocked_inference_payload(
+                    variant=variant,
+                    image_index=image_index,
+                    status_category="board_busy",
+                    source_label="保守阻断（已有 live 作业）",
+                    message=message,
+                    detail="当前 demo 进程内已有 live 作业尚未完成。",
+                    diagnostics={
+                        "running_job_id": active_job_id,
+                        "running_variant": active_variant,
+                    },
+                    event_log=[message],
+                )
+            elif board_access.probe_ready:
+                status_payload = query_live_status(board_access, trusted_sha=self._trusted_current_sha)
+                if status_payload.get("status") == "success":
+                    with self._lock:
+                        self._last_control_status = status_payload
+                    guard_state = str(status_payload.get("guard_state") or "UNKNOWN").upper()
+                    if guard_state == "JOB_ACTIVE":
+                        active_job_id = int(status_payload.get("active_job_id") or 0)
+                        active_suffix = f" active_job_id={active_job_id}。" if active_job_id else ""
+                        message_prefix = ""
+                        if variant == "current" and variant_support.get("mode") == "signed_manifest_v1":
+                            message_prefix = "Current signed-admission live path 已支持，但"
+                        message = (
+                            f"{message_prefix}板端当前 guard_state=JOB_ACTIVE，"
+                            "本次 launch 已被保守阻断，demo 不会自动 SAFE_STOP。"
+                            f"{active_suffix}请等待现有作业完成，或由操作员手动 SAFE_STOP 后再重试。"
+                        )
+                        payload = self._build_blocked_inference_payload(
+                            variant=variant,
+                            image_index=image_index,
+                            status_category="board_busy",
+                            source_label="保守阻断（板端已有活动作业）",
+                            message=message,
+                            detail="STATUS_RESP 显示 guard_state=JOB_ACTIVE；未再发起新的 live launch。",
+                            diagnostics={"board_status": status_payload},
+                            event_log=status_payload.get("logs", []),
+                        )
+                if payload.get("status") != "fallback":
+                    live_job = launch_remote_reconstruction_job(board_access, variant=variant)
+                    live_result = live_job.snapshot()
+                    record = {
+                        "job": live_job,
+                        "job_id": live_job.job_id,
+                        "variant": variant,
+                        "image_index": image_index,
+                    }
+                    with self._lock:
+                        self._inference_jobs[live_job.job_id] = record
+                    payload = self._build_inference_response(record, live_result)
+            else:
+                live_job = launch_remote_reconstruction_job(board_access, variant=variant)
+                live_result = live_job.snapshot()
+                record = {
+                    "job": live_job,
+                    "job_id": live_job.job_id,
+                    "variant": variant,
+                    "image_index": image_index,
+                }
+                with self._lock:
+                    self._inference_jobs[live_job.job_id] = record
+                payload = self._build_inference_response(record, live_result)
         else:
             payload.update(
                 {
