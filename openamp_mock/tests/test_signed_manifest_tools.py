@@ -361,7 +361,24 @@ class SignedManifestToolsTest(unittest.TestCase):
             artifact["manifest_contract"]["artifact_sha256"],
             "09af47ee1b0e2a7d3cad3add031f36811926e1fe34cfd58fa98d70eba9526b91",
         )
+        self.assertEqual(artifact["manifest_contract"]["artifact_size_bytes"], 119)
+        self.assertEqual(
+            artifact["manifest_contract"]["artifact_path"],
+            "session_bootstrap/examples/openamp_signed_manifest.fixture.artifact.so",
+        )
         self.assertEqual(artifact["manifest_contract"]["job_flags_wire"], 2)
+        self.assertEqual(artifact["manifest_contract"]["input_shape"], [1, 32, 32, 32])
+        self.assertEqual(artifact["manifest_contract"]["input_dtype"], "float32")
+        self.assertEqual(
+            artifact["manifest_contract"]["provenance_source_git_commit"],
+            "execution-batch-fixture",
+        )
+        self.assertIn("firmware-side admission bring-up", artifact["manifest_contract"]["provenance_note"])
+        field_paths = {entry["json_path"] for entry in artifact["manifest_contract"]["field_plan"]}
+        self.assertIn("artifact.path", field_paths)
+        self.assertIn("input_contract.shape", field_paths)
+        self.assertIn("provenance.source_repo", field_paths)
+        self.assertIn("provenance.note", field_paths)
         self.assertEqual(
             artifact["parser_strategy"]["slot_binding_markers"],
             [
@@ -369,9 +386,23 @@ class SignedManifestToolsTest(unittest.TestCase):
                 "strcmp(contract.publisher_channel, slot->channel)",
             ],
         )
+        self.assertIn("sc_ctrl_json_find_optional_string_field", artifact["parser_strategy"]["required_helpers"])
+        self.assertIn("out_contract->artifact_path", artifact["parser_strategy"]["strict_field_markers"])
+        self.assertIn(
+            "sc_ctrl_json_find_optional_string_field(provenance_object.begin,",
+            artifact["parser_strategy"]["optional_field_markers"],
+        )
+        self.assertEqual(artifact["crypto_boundary"]["enable_macro"], "SC_CTRL_USE_MBEDTLS")
+        self.assertIn("mbedtls_sha256_ret", artifact["crypto_boundary"]["required_symbols"])
+        self.assertIn("mbedtls_ecdsa_read_signature", artifact["crypto_boundary"]["required_symbols"])
+        self.assertIn("#if defined(SC_CTRL_USE_MBEDTLS)", artifact["crypto_boundary"]["include_guard_markers"])
         self.assertIn(
             "mbedtls_ecp_check_pubkey(&ecdsa.grp, &ecdsa.Q)",
             artifact["crypto_boundary"]["mbedtls_call_sequence"],
+        )
+        self.assertIn(
+            "sdk_status = mbedtls_sha256_ret(input, input_len, out_digest, 0);",
+            artifact["crypto_boundary"]["sha256_wrapper"]["implementation_markers"],
         )
         self.assertNotIn("mbedtls_ecdsa_from_keypair", json.dumps(artifact["crypto_boundary"]))
 
