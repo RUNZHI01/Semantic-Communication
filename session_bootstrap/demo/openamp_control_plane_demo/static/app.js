@@ -287,6 +287,7 @@ function clampPercent(value) {
 
 function progressSourceLabel(source) {
   const labels = {
+    "runner_log.missing": "未生成 runner 日志",
     "runner_log.sample_latency_lines": "实时 runner 日志",
     "runner_summary.processed_count": "最终 runner 汇总",
     demo_default: "演示默认值",

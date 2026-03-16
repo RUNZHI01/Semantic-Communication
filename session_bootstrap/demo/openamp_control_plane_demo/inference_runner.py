@@ -488,9 +488,12 @@ def build_completion_counts(
     if summary_processed is not None:
         completed_count = summary_processed
         count_source = "runner_summary.processed_count"
-    else:
+    elif runner_log_path.exists():
         completed_count = count_completed_images_from_runner_log(runner_log_path)
         count_source = "runner_log.sample_latency_lines"
+    else:
+        completed_count = 0
+        count_source = "runner_log.missing"
 
     expected_count = (
         normalize_positive_int(summary.get("input_count"))
