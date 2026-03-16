@@ -840,7 +840,9 @@ def build_firmware_contract_artifact(
     manifest = require_dict(bundle.get("manifest"), field_name="bundle.manifest")
     artifact = require_dict(manifest.get("artifact"), field_name="manifest.artifact")
     job = require_dict(manifest.get("job"), field_name="manifest.job")
+    input_contract = require_dict(manifest.get("input_contract"), field_name="manifest.input_contract")
     publisher = require_dict(manifest.get("publisher"), field_name="manifest.publisher")
+    provenance = require_dict(manifest.get("provenance"), field_name="manifest.provenance")
     if key_slot < 0 or key_slot > 0xFF:
         raise ValueError("key_slot must fit in u8.")
 
@@ -850,6 +852,9 @@ def build_firmware_contract_artifact(
     job_flags_text = require_text(job.get("job_flags"), field_name="manifest.job.job_flags")
     job_flags_wire = parse_job_flags_to_wire(job_flags_text)
     manifest_sha256 = normalize_sha256(bundle.get("manifest_sha256"), field_name="bundle.manifest_sha256")
+    input_shape = input_contract.get("shape")
+    if not isinstance(input_shape, list) or len(input_shape) != 4:
+        raise ValueError("manifest.input_contract.shape must be a 4-element list.")
 
     public_key_slot_entry = "\n".join(
         [
@@ -863,6 +868,157 @@ def build_firmware_contract_artifact(
             "}",
         ]
     )
+    field_plan = [
+        {
+            "json_path": "schema",
+            "c_field": "schema_id",
+            "c_type": "char[32]",
+            "parser": "json_string_exact",
+            "required": True,
+            "max_len": 32,
+            "expected": MANIFEST_SCHEMA,
+        },
+        {
+            "json_path": "manifest_version",
+            "c_field": "manifest_version",
+            "c_type": "uint32_t",
+            "parser": "json_u32_exact",
+            "required": True,
+            "expected": 1,
+        },
+        {
+            "json_path": "artifact.sha256",
+            "c_field": "artifact_sha256",
+            "c_type": "uint8_t[32]",
+            "parser": "json_sha256_hex",
+            "required": True,
+        },
+        {
+            "json_path": "artifact.size_bytes",
+            "c_field": "artifact_size_bytes",
+            "c_type": "uint32_t",
+            "parser": "json_u32",
+            "required": True,
+            "allow_zero": True,
+        },
+        {
+            "json_path": "artifact.path",
+            "c_field": "artifact_path",
+            "c_type": "char[160]",
+            "parser": "json_string_copy",
+            "required": True,
+            "max_len": 160,
+        },
+        {
+            "json_path": "artifact.format",
+            "c_field": "artifact_format",
+            "c_type": "char[48]",
+            "parser": "json_string_copy",
+            "required": True,
+            "max_len": 48,
+        },
+        {
+            "json_path": "artifact.variant",
+            "c_field": "artifact_variant",
+            "c_type": "char[32]",
+            "parser": "json_string_copy",
+            "required": True,
+            "max_len": 32,
+        },
+        {
+            "json_path": "job.deadline_ms",
+            "c_field": "deadline_ms",
+            "c_type": "uint32_t",
+            "parser": "json_u32",
+            "required": True,
+        },
+        {
+            "json_path": "job.expected_outputs",
+            "c_field": "expected_outputs",
+            "c_type": "uint32_t",
+            "parser": "json_u32",
+            "required": True,
+        },
+        {
+            "json_path": "job.job_flags",
+            "c_field": "flags",
+            "c_type": "uint32_t",
+            "parser": "json_string_enum",
+            "required": True,
+            "enum_map": dict(JOB_FLAG_NAME_TO_WIRE),
+        },
+        {
+            "json_path": "input_contract.shape",
+            "c_field": "input_shape",
+            "c_type": "uint32_t[4]",
+            "parser": "json_u32_array4",
+            "required": True,
+        },
+        {
+            "json_path": "input_contract.dtype",
+            "c_field": "input_dtype",
+            "c_type": "char[16]",
+            "parser": "json_string_copy",
+            "required": True,
+            "max_len": 16,
+        },
+        {
+            "json_path": "publisher.key_id",
+            "c_field": "publisher_key_id",
+            "c_type": "char[32]",
+            "parser": "json_string_copy",
+            "required": True,
+            "max_len": 32,
+        },
+        {
+            "json_path": "publisher.channel",
+            "c_field": "publisher_channel",
+            "c_type": "char[32]",
+            "parser": "json_string_copy",
+            "required": True,
+            "max_len": 32,
+        },
+        {
+            "json_path": "provenance.created_at",
+            "c_field": "provenance_created_at",
+            "c_type": "char[40]",
+            "parser": "json_string_copy",
+            "required": True,
+            "max_len": 40,
+        },
+        {
+            "json_path": "provenance.builder",
+            "c_field": "provenance_builder",
+            "c_type": "char[64]",
+            "parser": "json_string_copy",
+            "required": True,
+            "max_len": 64,
+        },
+        {
+            "json_path": "provenance.source_repo",
+            "c_field": "provenance_source_repo",
+            "c_type": "char[64]",
+            "parser": "json_string_copy",
+            "required": True,
+            "max_len": 64,
+        },
+        {
+            "json_path": "provenance.source_git_commit",
+            "c_field": "provenance_source_git_commit",
+            "c_type": "char[64]",
+            "parser": "json_string_optional",
+            "required": False,
+            "max_len": 64,
+        },
+        {
+            "json_path": "provenance.note",
+            "c_field": "provenance_note",
+            "c_type": "char[128]",
+            "parser": "json_string_optional",
+            "required": False,
+            "max_len": 128,
+        },
+    ]
 
     return {
         "schema": FIRMWARE_CONTRACT_SCHEMA,
@@ -897,65 +1053,24 @@ def build_firmware_contract_artifact(
             "schema": str(manifest["schema"]),
             "manifest_version": int(manifest["manifest_version"]),
             "artifact_sha256": str(artifact["sha256"]),
+            "artifact_size_bytes": int(artifact["size_bytes"]),
+            "artifact_path": str(artifact["path"]),
+            "artifact_format": str(artifact["format"]),
+            "artifact_variant": str(artifact["variant"]),
             "deadline_ms": int(job["deadline_ms"]),
             "expected_outputs": int(job["expected_outputs"]),
             "job_flags_text": job_flags_text,
             "job_flags_wire": job_flags_wire,
+            "input_shape": [int(require_u32(dim, field_name=f"manifest.input_contract.shape[{index}]")) for index, dim in enumerate(input_shape)],
+            "input_dtype": str(input_contract["dtype"]),
             "publisher_key_id": str(publisher["key_id"]),
             "publisher_channel": str(publisher["channel"]),
-            "field_plan": [
-                {
-                    "json_path": "schema",
-                    "c_field": "schema_id",
-                    "c_type": "char[32]",
-                    "parser": "json_string_exact",
-                    "expected": MANIFEST_SCHEMA,
-                },
-                {
-                    "json_path": "manifest_version",
-                    "c_field": "manifest_version",
-                    "c_type": "uint32_t",
-                    "parser": "json_u32_exact",
-                    "expected": 1,
-                },
-                {
-                    "json_path": "artifact.sha256",
-                    "c_field": "artifact_sha256",
-                    "c_type": "uint8_t[32]",
-                    "parser": "json_sha256_hex",
-                },
-                {
-                    "json_path": "job.deadline_ms",
-                    "c_field": "deadline_ms",
-                    "c_type": "uint32_t",
-                    "parser": "json_u32",
-                },
-                {
-                    "json_path": "job.expected_outputs",
-                    "c_field": "expected_outputs",
-                    "c_type": "uint32_t",
-                    "parser": "json_u32",
-                },
-                {
-                    "json_path": "job.job_flags",
-                    "c_field": "flags",
-                    "c_type": "uint32_t",
-                    "parser": "json_string_enum",
-                    "enum_map": dict(JOB_FLAG_NAME_TO_WIRE),
-                },
-                {
-                    "json_path": "publisher.key_id",
-                    "c_field": "publisher_key_id",
-                    "c_type": "char[32]",
-                    "parser": "json_string_copy",
-                },
-                {
-                    "json_path": "publisher.channel",
-                    "c_field": "publisher_channel",
-                    "c_type": "char[32]",
-                    "parser": "json_string_copy",
-                },
-            ],
+            "provenance_created_at": str(provenance["created_at"]),
+            "provenance_builder": str(provenance["builder"]),
+            "provenance_source_repo": str(provenance["source_repo"]),
+            "provenance_source_git_commit": str(provenance.get("source_git_commit", "")),
+            "provenance_note": str(provenance.get("note", "")),
+            "field_plan": field_plan,
         },
         "parser_strategy": {
             "entrypoint": "sc_ctrl_parse_manifest_contract",
@@ -964,10 +1079,14 @@ def build_firmware_contract_artifact(
                 "sc_ctrl_json_expect_u32_field",
                 "sc_ctrl_json_find_object",
                 "sc_ctrl_json_find_string_field",
+                "sc_ctrl_json_find_optional_string_field",
                 "sc_ctrl_json_find_u32_field",
+                "sc_ctrl_json_find_u32_array4_field",
                 "sc_ctrl_parse_manifest_artifact_contract",
                 "sc_ctrl_parse_manifest_job_contract",
+                "sc_ctrl_parse_manifest_input_contract",
                 "sc_ctrl_parse_manifest_publisher_contract",
+                "sc_ctrl_parse_manifest_provenance_contract",
                 "sc_ctrl_parse_sha256_hex",
                 "sc_ctrl_manifest_flag_from_string",
             ],
@@ -976,7 +1095,25 @@ def build_firmware_contract_artifact(
                 "sc_ctrl_json_expect_u32_field(manifest_bytes,",
                 "sc_ctrl_parse_manifest_artifact_contract(manifest_bytes,",
                 "sc_ctrl_parse_manifest_job_contract(manifest_bytes,",
+                "sc_ctrl_parse_manifest_input_contract(manifest_bytes,",
                 "sc_ctrl_parse_manifest_publisher_contract(manifest_bytes,",
+                "sc_ctrl_parse_manifest_provenance_contract(manifest_bytes,",
+            ],
+            "strict_field_markers": [
+                "out_contract->artifact_size_bytes",
+                "out_contract->artifact_path",
+                "out_contract->artifact_format",
+                "out_contract->artifact_variant",
+                "out_contract->input_shape",
+                "out_contract->input_dtype",
+                "out_contract->provenance_created_at",
+                "out_contract->provenance_builder",
+                "out_contract->provenance_source_repo",
+            ],
+            "optional_field_markers": [
+                "sc_ctrl_json_find_optional_string_field(provenance_object.begin,",
+                "out_contract->provenance_source_git_commit",
+                "out_contract->provenance_note",
             ],
             "slot_binding_markers": [
                 "strcmp(contract.publisher_key_id, slot->key_id)",
@@ -986,6 +1123,7 @@ def build_firmware_contract_artifact(
                 "manifest bytes are the exact canonical UTF-8 bytes staged over SIGNED_ADMISSION_CHUNK",
                 "parser is narrow and only accepts the committed openamp_artifact_manifest/v1 schema",
                 "string fields reject escape sequences to keep the firmware parser small and deterministic",
+                "artifact.path / artifact.format / artifact.variant / input_contract / provenance fields are still parsed even though JOB_REQ only mirrors a subset",
             ],
         },
         "crypto_boundary": {
@@ -995,6 +1133,23 @@ def build_firmware_contract_artifact(
             "public_key_format": "uncompressed-sec1",
             "signature_format": "asn1-der",
             "request_struct_name": "ScEcdsaP256VerifyRequest",
+            "enable_macro": "SC_CTRL_USE_MBEDTLS",
+            "include_guard_markers": [
+                "#if defined(SC_CTRL_USE_MBEDTLS)",
+                "#include <mbedtls/ecdsa.h>",
+                "#include <mbedtls/ecp.h>",
+                "#include <mbedtls/sha256.h>",
+                "#endif",
+            ],
+            "required_symbols": [
+                "mbedtls_sha256_ret",
+                "mbedtls_ecdsa_init",
+                "mbedtls_ecp_group_load",
+                "mbedtls_ecp_point_read_binary",
+                "mbedtls_ecp_check_pubkey",
+                "mbedtls_ecdsa_read_signature",
+                "mbedtls_ecdsa_free",
+            ],
             "sha256_wrapper": {
                 "name": "sc_ctrl_crypto_sha256",
                 "prototype": (
@@ -1008,6 +1163,14 @@ def build_firmware_contract_artifact(
                 ],
                 "call_sequence": [
                     "mbedtls_sha256_ret(input, input_len, out_digest, 0)",
+                ],
+                "implementation_markers": [
+                    "#if defined(SC_CTRL_USE_MBEDTLS)",
+                    "sdk_status = mbedtls_sha256_ret(input, input_len, out_digest, 0);",
+                    "return (sdk_status == 0);",
+                    "#else",
+                    "return 0;",
+                    "#endif",
                 ],
             },
             "verify_wrapper": {
@@ -1032,6 +1195,20 @@ def build_firmware_contract_artifact(
                 "cleanup_sequence": [
                     "mbedtls_ecdsa_free(&ecdsa)",
                 ],
+                "implementation_markers": [
+                    "#if defined(SC_CTRL_USE_MBEDTLS)",
+                    "mbedtls_ecdsa_context ecdsa;",
+                    "mbedtls_ecdsa_init(&ecdsa);",
+                    "sdk_status = mbedtls_ecp_group_load(&ecdsa.grp, MBEDTLS_ECP_DP_SECP256R1);",
+                    "sdk_status = mbedtls_ecp_point_read_binary(&ecdsa.grp,",
+                    "sdk_status = mbedtls_ecp_check_pubkey(&ecdsa.grp, &ecdsa.Q);",
+                    "sdk_status = mbedtls_ecdsa_read_signature(&ecdsa,",
+                    "mbedtls_ecdsa_free(&ecdsa);",
+                    "return (sdk_status == 0);",
+                    "#else",
+                    "return 0;",
+                    "#endif",
+                ],
             },
             "sdk_headers": [
                 "mbedtls/ecdsa.h",
@@ -1044,6 +1221,11 @@ def build_firmware_contract_artifact(
                 "mbedtls_ecp_point_read_binary(&ecdsa.grp,",
                 "mbedtls_ecp_check_pubkey(&ecdsa.grp, &ecdsa.Q)",
                 "mbedtls_ecdsa_read_signature(&ecdsa,",
+            ],
+            "integration_checklist": [
+                "define SC_CTRL_USE_MBEDTLS only after the openamp_for_linux example resolves the mbedTLS headers",
+                "link the standalone-SDK archive set that resolves every symbol in required_symbols",
+                "keep SC_CTRL_USE_MBEDTLS undefined until that link step is complete so signed admission remains deny-by-default",
             ],
         },
     }

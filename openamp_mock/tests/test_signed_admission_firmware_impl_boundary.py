@@ -67,8 +67,12 @@ class SignedAdmissionFirmwareImplBoundaryTest(unittest.TestCase):
 
         self.assertEqual(parse_patch_define(patch_text, "SC_PUBLIC_KEY_UNCOMPRESSED_LEN"), 65)
         self.assertEqual(parse_patch_define(patch_text, "SC_MANIFEST_SCHEMA_ID_MAX_LEN"), 32)
+        self.assertEqual(parse_patch_define(patch_text, "SC_MANIFEST_ARTIFACT_PATH_MAX_LEN"), 160)
+        self.assertEqual(parse_patch_define(patch_text, "SC_MANIFEST_ARTIFACT_FORMAT_MAX_LEN"), 48)
+        self.assertEqual(parse_patch_define(patch_text, "SC_MANIFEST_VARIANT_MAX_LEN"), 32)
         self.assertEqual(parse_patch_define(patch_text, "SC_MANIFEST_KEY_ID_MAX_LEN"), 32)
         self.assertEqual(parse_patch_define(patch_text, "SC_MANIFEST_CHANNEL_MAX_LEN"), 32)
+        self.assertEqual(parse_patch_define(patch_text, "SC_MANIFEST_INPUT_DTYPE_MAX_LEN"), 16)
 
     def test_patch_embeds_fixture_public_key_and_parser_boundary(self) -> None:
         patch_text = PATCH_PATH.read_text(encoding="utf-8")
@@ -91,11 +95,21 @@ class SignedAdmissionFirmwareImplBoundaryTest(unittest.TestCase):
             self.assertIn(helper_name, patch_text)
         for marker in firmware_contract["parser_strategy"]["parse_call_markers"]:
             self.assertIn(marker, patch_text)
+        for marker in firmware_contract["parser_strategy"]["strict_field_markers"]:
+            self.assertIn(marker, patch_text)
+        for marker in firmware_contract["parser_strategy"]["optional_field_markers"]:
+            self.assertIn(marker, patch_text)
         for marker in firmware_contract["parser_strategy"]["slot_binding_markers"]:
+            self.assertIn(marker, patch_text)
+        for marker in firmware_contract["crypto_boundary"]["include_guard_markers"]:
+            self.assertIn(marker, patch_text)
+        for marker in firmware_contract["crypto_boundary"]["required_symbols"]:
             self.assertIn(marker, patch_text)
         for marker in firmware_contract["crypto_boundary"]["sha256_wrapper"]["validation_markers"]:
             self.assertIn(marker, patch_text)
         for marker in firmware_contract["crypto_boundary"]["sha256_wrapper"]["call_sequence"]:
+            self.assertIn(marker, patch_text)
+        for marker in firmware_contract["crypto_boundary"]["sha256_wrapper"]["implementation_markers"]:
             self.assertIn(marker, patch_text)
         for marker in firmware_contract["crypto_boundary"]["verify_wrapper"]["validation_markers"]:
             self.assertIn(marker, patch_text)
@@ -103,11 +117,15 @@ class SignedAdmissionFirmwareImplBoundaryTest(unittest.TestCase):
             self.assertIn(marker, patch_text)
         for marker in firmware_contract["crypto_boundary"]["verify_wrapper"]["cleanup_sequence"]:
             self.assertIn(marker, patch_text)
+        for marker in firmware_contract["crypto_boundary"]["verify_wrapper"]["implementation_markers"]:
+            self.assertIn(marker, patch_text)
         for marker in firmware_contract["crypto_boundary"]["mbedtls_call_sequence"]:
             self.assertIn(marker, patch_text)
 
         self.assertNotIn("+            /* TODO(next): replace placeholder bytes", patch_text)
         self.assertNotIn("+    /* TODO(next): implement strict field extraction", patch_text)
+        self.assertNotIn("standalone SDK drop-in", patch_text)
+        self.assertNotIn("+     * TODO(next): replace this deny-by-default stub", patch_text)
         self.assertNotIn("mbedtls_ecdsa_from_keypair", patch_text)
 
     def test_patch_note_keeps_non_admitting_status_explicit(self) -> None:
@@ -116,8 +134,12 @@ class SignedAdmissionFirmwareImplBoundaryTest(unittest.TestCase):
         self.assertIn("Board firmware does not support signed admission yet.", note_text)
         self.assertIn("deny-by-default", note_text)
         self.assertIn("openamp_signed_manifest.fixture.firmware_contract.json", note_text)
+        self.assertIn("SC_CTRL_USE_MBEDTLS", note_text)
         self.assertIn("sc_ctrl_crypto_sha256(...)", note_text)
         self.assertIn("sc_ctrl_crypto_verify_ecdsa_p256_sha256_der(...)", note_text)
+        self.assertIn("artifact.size_bytes", note_text)
+        self.assertIn("provenance.source_repo", note_text)
+        self.assertIn("mbedtls_sha256_ret", note_text)
         self.assertIn("publisher.key_id / publisher.channel", note_text)
         self.assertIn("mbedtls_ecp_check_pubkey", note_text)
         self.assertIn("Legacy `JOB_REQ` SHA allowlist behavior remains intact", note_text)
