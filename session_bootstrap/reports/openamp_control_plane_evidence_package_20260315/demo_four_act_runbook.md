@@ -25,16 +25,17 @@
 
 1. [summary_report.md](summary_report.md)
 2. [coverage_matrix.md](coverage_matrix.md)
-3. [../openamp_phase5_release_v1.4.0_cold_boot_and_demo_success_2026-03-14.md](../openamp_phase5_release_v1.4.0_cold_boot_and_demo_success_2026-03-14.md)
-4. [../openamp_wrapper_hook_board_smoke_success_2026-03-14.md](../openamp_wrapper_hook_board_smoke_success_2026-03-14.md)
-5. [../openamp_phase5_job_done_success_2026-03-15.md](../openamp_phase5_job_done_success_2026-03-15.md)
-6. [../openamp_phase5_fit01_wrong_sha_success_2026-03-15.md](../openamp_phase5_fit01_wrong_sha_success_2026-03-15.md)
-7. [../openamp_phase5_fit02_input_contract_success_2026-03-15.md](../openamp_phase5_fit02_input_contract_success_2026-03-15.md)
-8. [../openamp_phase5_fit03_timeout_gap_2026-03-15.md](../openamp_phase5_fit03_timeout_gap_2026-03-15.md)
-9. [../openamp_phase5_fit03_watchdog_success_2026-03-15.md](../openamp_phase5_fit03_watchdog_success_2026-03-15.md)
-10. [../inference_compare_currentsafe_chunk4_refresh_20260313_1758.md](../inference_compare_currentsafe_chunk4_refresh_20260313_1758.md)
-11. [../inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md](../inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md)
-12. [../../PROGRESS_LOG.md](../../PROGRESS_LOG.md)
+3. [../openamp_demo_live_dualpath_status_20260317.md](../openamp_demo_live_dualpath_status_20260317.md)
+4. [../openamp_phase5_release_v1.4.0_cold_boot_and_demo_success_2026-03-14.md](../openamp_phase5_release_v1.4.0_cold_boot_and_demo_success_2026-03-14.md)
+5. [../openamp_wrapper_hook_board_smoke_success_2026-03-14.md](../openamp_wrapper_hook_board_smoke_success_2026-03-14.md)
+6. [../openamp_phase5_job_done_success_2026-03-15.md](../openamp_phase5_job_done_success_2026-03-15.md)
+7. [../openamp_phase5_fit01_wrong_sha_success_2026-03-15.md](../openamp_phase5_fit01_wrong_sha_success_2026-03-15.md)
+8. [../openamp_phase5_fit02_input_contract_success_2026-03-15.md](../openamp_phase5_fit02_input_contract_success_2026-03-15.md)
+9. [../openamp_phase5_fit03_timeout_gap_2026-03-15.md](../openamp_phase5_fit03_timeout_gap_2026-03-15.md)
+10. [../openamp_phase5_fit03_watchdog_success_2026-03-15.md](../openamp_phase5_fit03_watchdog_success_2026-03-15.md)
+11. [../inference_compare_currentsafe_chunk4_refresh_20260313_1758.md](../inference_compare_currentsafe_chunk4_refresh_20260313_1758.md)
+12. [../inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md](../inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md)
+13. [../../PROGRESS_LOG.md](../../PROGRESS_LOG.md)
 
 如果要插入 live cue，额外要求：
 
@@ -59,8 +60,9 @@
 
 ### 默认路径
 
-1. 打开 [summary_report.md](summary_report.md)，先报总判定：`P0 已板级闭环；P1 FIT-01 / FIT-02 / FIT-03 最终均为 PASS`。
-2. 切到 [../openamp_phase5_release_v1.4.0_cold_boot_and_demo_success_2026-03-14.md](../openamp_phase5_release_v1.4.0_cold_boot_and_demo_success_2026-03-14.md)，强调三个关键事实：
+1. 先打开 [../openamp_demo_live_dualpath_status_20260317.md](../openamp_demo_live_dualpath_status_20260317.md)，用一句话把最近 live 状态定住：**8115 是当前唯一有效 demo 实例，current 已成功跑通，baseline 也已通过 signed sideband 进入真机执行，且两侧最新 live reconstruction 均完成 `300/300`。**
+2. 再打开 [summary_report.md](summary_report.md)，先报总判定：`P0 已板级闭环；P1 FIT-01 / FIT-02 / FIT-03 最终均为 PASS`。
+3. 切到 [../openamp_phase5_release_v1.4.0_cold_boot_and_demo_success_2026-03-14.md](../openamp_phase5_release_v1.4.0_cold_boot_and_demo_success_2026-03-14.md)，强调三个关键事实：
    - `remoteproc0=running`
    - `creating channel rpmsg-openamp-demo-channel`
    - `rpmsg-demo` 已真实 echo 到 `Hello World! No:100`
