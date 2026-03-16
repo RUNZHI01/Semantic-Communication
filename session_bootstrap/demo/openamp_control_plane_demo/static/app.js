@@ -143,9 +143,14 @@ function setFeedback(message, tone) {
 }
 
 function renderTop(snapshot, systemStatus) {
+  const admission = systemStatus.live?.admission || {};
+  const admissionSuffix = admission.mode === "signed_manifest_v1"
+    ? ` 当前 live 预检已切到 signed manifest，key_id=${admission.key_id || "unknown"}.`
+    : "";
   document.getElementById("heroSummary").textContent =
     `trusted current SHA ${snapshot.project.trusted_current_sha.slice(0, 12)} 已与当前演示材料对齐。` +
-    ` 第一幕展示板卡状态，第二幕与第三幕会展示 current / baseline 300 张图 live run 的真实在线推进与实时完成计数，第四幕保留 FIT-01 / FIT-02 / FIT-03 证据。`;
+    ` 第一幕展示板卡状态，第二幕与第三幕会展示 current / baseline 300 张图 live run 的真实在线推进与实时完成计数，第四幕保留 FIT-01 / FIT-02 / FIT-03 证据。` +
+    admissionSuffix;
 
   const modePill = document.getElementById("modePill");
   modePill.className = `mode-pill ${toneClass(systemStatus.execution_mode.tone)}`;
@@ -212,12 +217,14 @@ function renderBoardAccess(systemStatus) {
 
 function renderAct1(snapshot, systemStatus) {
   const live = systemStatus.live;
+  const admission = live.admission || {};
   document.getElementById("act1StatusNote").textContent = live.status_note;
   document.getElementById("act1StatusGrid").innerHTML = [
     kpiCard("飞腾派 / SSH", live.board_online ? "在线" : "未在线", live.board_online ? "当前演示进程已拿到最新只读读数。" : "尚无新的在线读数，回退到证据。", live.board_online ? "online" : "offline"),
     kpiCard("OpenAMP / remoteproc", live.remoteproc_state, `RPMsg 设备：${live.rpmsg_device}`, live.remoteproc_state),
     kpiCard("guard_state", live.guard_state, `last_fault_code：${live.last_fault_code}`, live.guard_state),
     kpiCard("运行目标", live.target, `runtime：${live.runtime}`, "online"),
+    kpiCard("准入策略", admission.label || "Legacy SHA allowlist", admission.note || "当前 live 准入配置。", admission.tone || "neutral"),
   ].join("");
 
   const evidence = snapshot.board.evidence_status;

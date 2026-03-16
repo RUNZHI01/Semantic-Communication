@@ -234,15 +234,23 @@ class ServerMainTest(unittest.TestCase):
             probe_env="config/openamp.env",
             probe_timeout_sec=12.5,
             probe_startup=False,
+            demo_admission_mode="",
+            signed_manifest_file="",
+            signed_manifest_public_key="",
         )
         events: list[str] = []
         fake_app_state = Mock()
         fake_server = Mock()
 
-        def build_state(probe_env: str, probe_timeout_sec: float) -> Mock:
+        def build_state(
+            probe_env: str,
+            probe_timeout_sec: float,
+            demo_startup_env_overrides: dict[str, str] | None = None,
+        ) -> Mock:
             events.append("state_init")
             self.assertEqual(probe_env, args.probe_env)
             self.assertEqual(probe_timeout_sec, args.probe_timeout_sec)
+            self.assertEqual(demo_startup_env_overrides, {})
             return fake_app_state
 
         def build_server(server_address: tuple[str, int], handler: type[DemoRequestHandler], app_state: Mock) -> Mock:
@@ -262,7 +270,11 @@ class ServerMainTest(unittest.TestCase):
         ):
             exit_code = server.main()
 
-        state_cls.assert_called_once_with(args.probe_env, args.probe_timeout_sec)
+        state_cls.assert_called_once_with(
+            args.probe_env,
+            args.probe_timeout_sec,
+            demo_startup_env_overrides={},
+        )
         server_cls.assert_called_once_with((args.host, args.port), DemoRequestHandler, fake_app_state)
         fake_app_state.refresh_live_probe.assert_not_called()
         fake_server.serve_forever.assert_called_once_with()
@@ -283,15 +295,23 @@ class ServerMainTest(unittest.TestCase):
             probe_env="config/probe.env",
             probe_timeout_sec=5.0,
             probe_startup=True,
+            demo_admission_mode="",
+            signed_manifest_file="",
+            signed_manifest_public_key="",
         )
         events: list[str] = []
         fake_app_state = Mock()
         fake_server = Mock()
 
-        def build_state(probe_env: str, probe_timeout_sec: float) -> Mock:
+        def build_state(
+            probe_env: str,
+            probe_timeout_sec: float,
+            demo_startup_env_overrides: dict[str, str] | None = None,
+        ) -> Mock:
             events.append("state_init")
             self.assertEqual(probe_env, args.probe_env)
             self.assertEqual(probe_timeout_sec, args.probe_timeout_sec)
+            self.assertEqual(demo_startup_env_overrides, {})
             return fake_app_state
 
         def build_server(server_address: tuple[str, int], handler: type[DemoRequestHandler], app_state: Mock) -> Mock:
@@ -312,7 +332,11 @@ class ServerMainTest(unittest.TestCase):
         ):
             exit_code = server.main()
 
-        state_cls.assert_called_once_with(args.probe_env, args.probe_timeout_sec)
+        state_cls.assert_called_once_with(
+            args.probe_env,
+            args.probe_timeout_sec,
+            demo_startup_env_overrides={},
+        )
         server_cls.assert_called_once_with((args.host, args.port), DemoRequestHandler, fake_app_state)
         fake_app_state.refresh_live_probe.assert_called_once_with()
         fake_server.serve_forever.assert_called_once_with()
@@ -402,6 +426,33 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(payload["board_access"]["user"], "demo-user")
         self.assertTrue(payload["board_access"]["has_password"])
         self.assertNotIn("password", payload["board_access"])
+
+    def test_system_status_endpoint_includes_demo_admission_summary(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+
+        with patch(
+            "server.describe_demo_admission",
+            return_value={
+                "status": "ready",
+                "mode": "signed_manifest_v1",
+                "label": "Signed manifest v1",
+                "tone": "online",
+                "bundle_path": "/tmp/openamp_demo_signed_admission/current.bundle.json",
+                "public_key_path": "/tmp/openamp_demo_signed_admission/current.public.pem",
+                "manifest_sha256": "a" * 64,
+                "artifact_sha256": "b" * 64,
+                "key_id": "demo-live-20260316",
+                "verified_locally": True,
+                "artifact_match": True,
+                "note": "key_id=demo-live-20260316 | bundle=current.bundle.json",
+            },
+        ):
+            status, _, payload = request_json(state, "GET", "/api/system-status")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["live"]["admission"]["mode"], "signed_manifest_v1")
+        self.assertEqual(payload["live"]["admission"]["key_id"], "demo-live-20260316")
+        self.assertTrue(payload["live"]["admission"]["verified_locally"])
 
     def test_board_access_endpoint_accepts_password_only_and_keeps_preloaded_defaults(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)

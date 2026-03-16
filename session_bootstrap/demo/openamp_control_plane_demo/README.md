@@ -31,6 +31,28 @@ bash ./session_bootstrap/scripts/run_openamp_demo.sh \
   --probe-env ./session_bootstrap/config/phytium_pi_login.env
 ```
 
+Optional signed-manifest demo admission for the current artifact:
+
+```bash
+bash ./session_bootstrap/scripts/run_openamp_demo.sh \
+  --signed-manifest-file /tmp/openamp_demo_signed_admission/current.bundle.json \
+  --signed-manifest-public-key /tmp/openamp_demo_signed_admission/current.public.pem
+```
+
+The current demo keeps the legacy path intact by default. When the two flags above are supplied, the demo switches only the Current live path to `signed_manifest_v1` preflight:
+
+- the signed bundle is verified locally with the supplied public key before the wrapper launches
+- wrapper traces and manifests carry the signed-manifest metadata for the user-facing demo
+- the final board trigger still stays on the existing 44-byte `JOB_REQ` until the board firmware signed-admission patch is actually deployed
+
+The same override can also be carried in the active inference env file with:
+
+```bash
+OPENAMP_DEMO_ADMISSION_MODE=signed_manifest_v1
+OPENAMP_DEMO_SIGNED_MANIFEST_FILE=/tmp/openamp_demo_signed_admission/current.bundle.json
+OPENAMP_DEMO_SIGNED_MANIFEST_PUBLIC_KEY=/tmp/openamp_demo_signed_admission/current.public.pem
+```
+
 The dashboard stays evidence-led either way. The "探测板卡 / OpenAMP" action only runs a read-only SSH probe plus an optional cached RPMsg status query.
 If `session_bootstrap/reports/openamp_demo_live_probe_latest.json` already exists, the dashboard loads that saved successful probe on startup and keeps showing it if a later in-dashboard refresh fails.
 

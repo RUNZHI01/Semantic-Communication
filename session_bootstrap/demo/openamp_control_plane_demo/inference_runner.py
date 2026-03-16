@@ -7,6 +7,7 @@ import secrets
 import shlex
 import statistics
 import subprocess
+import sys
 import tempfile
 from threading import Lock, Thread
 import time
@@ -17,6 +18,12 @@ from remote_failure import build_diagnostics, build_operator_message, classify_s
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+SCRIPTS_ROOT = PROJECT_ROOT / "session_bootstrap" / "scripts"
+if str(SCRIPTS_ROOT) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_ROOT))
+
+from openamp_signed_manifest import load_signed_manifest_bundle, verify_signed_manifest_bundle  # noqa: E402
+
 REMOTE_RECONSTRUCTION_SCRIPT = (
     PROJECT_ROOT / "session_bootstrap" / "scripts" / "run_remote_current_real_reconstruction.sh"
 )
@@ -45,6 +52,9 @@ HEAVY_HEARTBEAT_COUNT = 8
 UINT32_MAX = (1 << 32) - 1
 DEMO_MODE_ENV = "OPENAMP_DEMO_MODE"
 DEMO_MAX_INPUTS_ENV = "OPENAMP_DEMO_MAX_INPUTS"
+DEMO_ADMISSION_MODE_ENV = "OPENAMP_DEMO_ADMISSION_MODE"
+DEMO_SIGNED_MANIFEST_FILE_ENV = "OPENAMP_DEMO_SIGNED_MANIFEST_FILE"
+DEMO_SIGNED_MANIFEST_PUBLIC_KEY_ENV = "OPENAMP_DEMO_SIGNED_MANIFEST_PUBLIC_KEY"
 
 _LIVE_JOB_ID_LOCK = Lock()
 _LAST_LIVE_JOB_ID = 0
@@ -709,11 +719,220 @@ def build_progress_payload(
     }
 
 
-def expected_sha_for_variant(access: BoardAccessConfig, variant: str) -> str:
+def resolve_demo_path(raw_path: str) -> Path:
+    path = Path(raw_path)
+    if not path.is_absolute():
+        path = PROJECT_ROOT / path
+    return path
+
+
+def expected_sha_for_variant_from_env(access: BoardAccessConfig, variant: str) -> str:
     values = access.build_env()
     if variant == "baseline":
         return str(values.get("INFERENCE_BASELINE_EXPECTED_SHA256") or values.get("INFERENCE_EXPECTED_SHA256") or "")
     return str(values.get("INFERENCE_CURRENT_EXPECTED_SHA256") or values.get("INFERENCE_EXPECTED_SHA256") or "")
+
+
+def configured_admission_mode(values: dict[str, str], *, variant: str) -> str:
+    if variant != "current":
+        return "legacy_sha"
+    raw_mode = str(values.get(DEMO_ADMISSION_MODE_ENV) or "").strip().lower()
+    if raw_mode:
+        return raw_mode
+    if str(values.get(DEMO_SIGNED_MANIFEST_FILE_ENV) or "").strip():
+        return "signed_manifest_v1"
+    return "legacy_sha"
+
+
+def load_signed_manifest_summary(
+    values: dict[str, str],
+    *,
+    variant: str,
+    require_public_key: bool,
+) -> dict[str, Any]:
+    admission_mode = configured_admission_mode(values, variant=variant)
+    if admission_mode != "signed_manifest_v1":
+        raise ValueError("signed manifest summary requested while admission mode is not signed_manifest_v1")
+
+    signed_manifest_file = str(values.get(DEMO_SIGNED_MANIFEST_FILE_ENV) or "").strip()
+    if not signed_manifest_file:
+        raise ValueError(f"{DEMO_SIGNED_MANIFEST_FILE_ENV} is required for signed-manifest demo admission")
+    public_key_file = str(values.get(DEMO_SIGNED_MANIFEST_PUBLIC_KEY_ENV) or "").strip()
+    if require_public_key and not public_key_file:
+        raise ValueError(f"{DEMO_SIGNED_MANIFEST_PUBLIC_KEY_ENV} is required for signed-manifest demo admission")
+
+    bundle_path = resolve_demo_path(signed_manifest_file)
+    if not bundle_path.exists():
+        raise ValueError(f"signed manifest bundle not found: {bundle_path}")
+    bundle = load_signed_manifest_bundle(bundle_path)
+
+    artifact_path_raw = str(bundle["manifest"]["artifact"]["path"])
+    verification_kwargs: dict[str, Any] = {}
+    artifact_path = resolve_demo_path(artifact_path_raw)
+    if artifact_path.exists():
+        verification_kwargs["artifact_path"] = artifact_path
+
+    if public_key_file:
+        public_key_path = resolve_demo_path(public_key_file)
+        if not public_key_path.exists():
+            raise ValueError(f"signed manifest public key not found: {public_key_path}")
+        summary = verify_signed_manifest_bundle(bundle, public_key=public_key_path, **verification_kwargs)
+        summary["bundle_path"] = str(bundle_path)
+        summary["public_key_path"] = str(public_key_path)
+        return summary
+
+    return {
+        "admission_mode": "signed_manifest_v1",
+        "bundle_path": str(bundle_path),
+        "public_key_path": "",
+        "artifact_sha256": str(bundle["manifest"]["artifact"]["sha256"]),
+        "artifact_path": artifact_path_raw,
+        "artifact_size_bytes": int(bundle["manifest"]["artifact"]["size_bytes"]),
+        "variant": str(bundle["manifest"]["artifact"]["variant"]),
+        "deadline_ms": int(bundle["manifest"]["job"]["deadline_ms"]),
+        "expected_outputs": int(bundle["manifest"]["job"]["expected_outputs"]),
+        "job_flags": str(bundle["manifest"]["job"]["job_flags"]),
+        "manifest_sha256": str(bundle["manifest_sha256"]),
+        "key_id": str(bundle["signature"]["key_id"]),
+        "signature_algorithm": str(bundle["signature"]["algorithm"]),
+        "verified_locally": False,
+        "artifact_match": None,
+    }
+
+
+def resolve_live_admission(access: BoardAccessConfig, *, variant: str) -> dict[str, Any]:
+    values = access.build_env()
+    admission_mode = configured_admission_mode(values, variant=variant)
+    expected_sha256 = expected_sha_for_variant_from_env(access, variant)
+    if admission_mode == "legacy_sha":
+        return {
+            "mode": "legacy_sha",
+            "expected_sha256": expected_sha256,
+            "wrapper_args": [],
+            "summary": None,
+        }
+    if admission_mode != "signed_manifest_v1":
+        raise ValueError(
+            f"unsupported {DEMO_ADMISSION_MODE_ENV} value {admission_mode!r}; use legacy_sha or signed_manifest_v1"
+        )
+
+    summary = load_signed_manifest_summary(values, variant=variant, require_public_key=True)
+    if str(summary.get("variant") or "").strip().lower() != variant:
+        raise ValueError(
+            f"signed manifest variant {summary.get('variant')!r} does not match demo variant {variant!r}"
+        )
+    manifest_expected_sha256 = str(summary["artifact_sha256"])
+    if expected_sha256 and expected_sha256 != manifest_expected_sha256:
+        raise ValueError(
+            "configured current expected SHA does not match the signed manifest artifact SHA"
+        )
+    return {
+        "mode": "signed_manifest_v1",
+        "expected_sha256": manifest_expected_sha256,
+        "wrapper_args": [
+            "--admission-mode",
+            "signed_manifest_v1",
+            "--signed-manifest-file",
+            str(summary["bundle_path"]),
+            "--signed-manifest-public-key",
+            str(summary["public_key_path"]),
+        ],
+        "summary": summary,
+    }
+
+
+def describe_demo_admission(access: BoardAccessConfig, *, variant: str = "current") -> dict[str, Any]:
+    values = access.build_env()
+    admission_mode = configured_admission_mode(values, variant=variant)
+    if admission_mode == "legacy_sha":
+        expected_sha256 = expected_sha_for_variant_from_env(access, variant)
+        note = "Current 44-byte JOB_REQ stays on the legacy trusted SHA allowlist path."
+        if expected_sha256:
+            note = f"Legacy 44-byte JOB_REQ; expected_sha={expected_sha256[:12]}."
+        return {
+            "status": "ready" if expected_sha256 or variant != "current" else "config_error",
+            "mode": "legacy_sha",
+            "label": "Legacy SHA allowlist",
+            "tone": "online" if expected_sha256 or variant != "current" else "degraded",
+            "bundle_path": "",
+            "public_key_path": "",
+            "manifest_sha256": "",
+            "artifact_sha256": expected_sha256,
+            "key_id": "",
+            "verified_locally": False,
+            "artifact_match": None,
+            "note": note,
+        }
+
+    if admission_mode != "signed_manifest_v1":
+        return {
+            "status": "config_error",
+            "mode": admission_mode,
+            "label": "Signed admission config error",
+            "tone": "degraded",
+            "bundle_path": "",
+            "public_key_path": "",
+            "manifest_sha256": "",
+            "artifact_sha256": "",
+            "key_id": "",
+            "verified_locally": False,
+            "artifact_match": None,
+            "note": f"Unsupported {DEMO_ADMISSION_MODE_ENV}={admission_mode!r}.",
+        }
+
+    try:
+        summary = resolve_live_admission(access, variant=variant)["summary"]
+    except ValueError as err:
+        return {
+            "status": "config_error",
+            "mode": "signed_manifest_v1",
+            "label": "Signed manifest v1",
+            "tone": "degraded",
+            "bundle_path": str(values.get(DEMO_SIGNED_MANIFEST_FILE_ENV) or ""),
+            "public_key_path": str(values.get(DEMO_SIGNED_MANIFEST_PUBLIC_KEY_ENV) or ""),
+            "manifest_sha256": "",
+            "artifact_sha256": "",
+            "key_id": "",
+            "verified_locally": False,
+            "artifact_match": None,
+            "note": str(err),
+        }
+
+    assert summary is not None
+    note_parts = [
+        f"key_id={summary['key_id']}",
+        f"bundle={Path(str(summary['bundle_path'])).name}",
+    ]
+    if summary.get("artifact_match") is True:
+        note_parts.append(f"artifact sha={str(summary['artifact_sha256'])[:12]}")
+    return {
+        "status": "ready",
+        "mode": "signed_manifest_v1",
+        "label": "Signed manifest v1",
+        "tone": "online" if summary.get("verified_locally") else "degraded",
+        "bundle_path": str(summary["bundle_path"]),
+        "public_key_path": str(summary["public_key_path"]),
+        "manifest_sha256": str(summary["manifest_sha256"]),
+        "artifact_sha256": str(summary["artifact_sha256"]),
+        "key_id": str(summary["key_id"]),
+        "verified_locally": bool(summary.get("verified_locally")),
+        "artifact_match": summary.get("artifact_match"),
+        "note": " | ".join(note_parts),
+    }
+
+
+def expected_sha_for_variant(access: BoardAccessConfig, variant: str) -> str:
+    expected_sha256 = expected_sha_for_variant_from_env(access, variant)
+    if expected_sha256:
+        return expected_sha256
+    values = access.build_env()
+    if configured_admission_mode(values, variant=variant) != "signed_manifest_v1":
+        return ""
+    try:
+        summary = load_signed_manifest_summary(values, variant=variant, require_public_key=False)
+    except ValueError:
+        return ""
+    return str(summary.get("artifact_sha256") or "")
 
 
 def configured_runner_command(access: BoardAccessConfig, variant: str) -> str:
@@ -796,8 +1015,17 @@ def build_inference_message(status_category: str, *, variant: str, include_fallb
 
 
 def missing_control_plane_fields(access: BoardAccessConfig, variant: str) -> list[str]:
-    if expected_sha_for_variant(access, variant):
+    values = access.build_env()
+    admission_mode = configured_admission_mode(values, variant=variant)
+    if admission_mode == "legacy_sha" and expected_sha_for_variant(access, variant):
         return []
+    if admission_mode == "signed_manifest_v1":
+        missing: list[str] = []
+        if not str(values.get(DEMO_SIGNED_MANIFEST_FILE_ENV) or "").strip():
+            missing.append(DEMO_SIGNED_MANIFEST_FILE_ENV)
+        if not str(values.get(DEMO_SIGNED_MANIFEST_PUBLIC_KEY_ENV) or "").strip():
+            missing.append(DEMO_SIGNED_MANIFEST_PUBLIC_KEY_ENV)
+        return missing
     if variant == "baseline":
         return ["INFERENCE_BASELINE_EXPECTED_SHA256"]
     return ["INFERENCE_CURRENT_EXPECTED_SHA256"]
@@ -872,6 +1100,11 @@ class LiveRemoteReconstructionJob:
                     "当前演示缺少 formal baseline expected SHA，Baseline 无法诚实进入 OpenAMP live 准入；"
                     "界面将保留正式 baseline 对比结果。"
                 )
+            elif configured_admission_mode(access.build_env(), variant=variant) == "signed_manifest_v1":
+                message = (
+                    "当前演示已切到 signed-manifest admission，但本地签名包或公钥路径仍未补齐；"
+                    "界面将先回退到归档样例。"
+                )
             else:
                 message = build_inference_message(status_category, variant=variant, include_fallback=True)
             self._final_snapshot = {
@@ -884,6 +1117,39 @@ class LiveRemoteReconstructionJob:
                 "runner_summary": {},
                 "wrapper_summary": {},
                 "diagnostics": build_diagnostics(missing_fields=control_plane_missing),
+                "progress": build_progress_payload(
+                    [],
+                    request_state="completed",
+                    final_status="config_error",
+                    expected_count=max_inputs,
+                    remaining_count=max_inputs,
+                    count_source="demo_default",
+                    count_label=f"0 / {max_inputs}",
+                ),
+                "artifacts": self._artifact_paths(),
+            }
+            return
+
+        try:
+            admission = resolve_live_admission(access, variant=variant)
+        except ValueError as exc:
+            status_category = classify_status_category(status="config_error", error=str(exc))
+            message = build_inference_message(status_category, variant=variant, include_fallback=True)
+            if configured_admission_mode(access.build_env(), variant=variant) == "signed_manifest_v1":
+                message = (
+                    "当前演示已切到 signed-manifest admission，但本地签名包校验未通过；"
+                    "界面将先回退到归档样例。"
+                )
+            self._final_snapshot = {
+                "status": "config_error",
+                "request_state": "completed",
+                "status_category": status_category,
+                "execution_mode": "fallback",
+                "variant": variant,
+                "message": message,
+                "runner_summary": {},
+                "wrapper_summary": {},
+                "diagnostics": build_diagnostics(error=str(exc)),
                 "progress": build_progress_payload(
                     [],
                     request_state="completed",
@@ -915,7 +1181,7 @@ class LiveRemoteReconstructionJob:
             "--runner-cmd",
             runner_cmd,
             "--expected-sha256",
-            expected_sha_for_variant(access, variant),
+            admission["expected_sha256"],
             "--expected-outputs",
             str(max_inputs),
             "--output-dir",
@@ -931,6 +1197,7 @@ class LiveRemoteReconstructionJob:
             "--control-hook-cmd",
             hook_cmd,
         ]
+        command.extend(admission["wrapper_args"])
 
         try:
             self._process = subprocess.Popen(

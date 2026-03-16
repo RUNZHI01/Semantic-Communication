@@ -464,10 +464,19 @@ def resolve_admission_context(args: argparse.Namespace) -> tuple[str, dict[str, 
     if not bundle_path.is_absolute():
         bundle_path = PROJECT_ROOT / bundle_path
     bundle = load_signed_manifest_bundle(bundle_path)
+    artifact_verification_path: Path | None = None
+    artifact_path = Path(str(bundle["manifest"]["artifact"]["path"]))
+    if not artifact_path.is_absolute():
+        artifact_path = PROJECT_ROOT / artifact_path
+    if artifact_path.exists():
+        artifact_verification_path = artifact_path
 
     public_key = str(getattr(args, "signed_manifest_public_key", "") or "").strip()
     if public_key:
-        summary = verify_signed_manifest_bundle(bundle, public_key=public_key)
+        verify_kwargs: dict[str, Any] = {}
+        if artifact_verification_path is not None:
+            verify_kwargs["artifact_path"] = artifact_verification_path
+        summary = verify_signed_manifest_bundle(bundle, public_key=public_key, **verify_kwargs)
         summary["bundle_path"] = str(bundle_path)
     else:
         summary = signed_manifest_summary(
