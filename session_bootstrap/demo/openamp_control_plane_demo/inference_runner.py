@@ -206,7 +206,12 @@ def hook_transport_failed(response: dict[str, Any]) -> bool:
     transport_status = str(response.get("transport_status") or "").strip().lower()
     if not transport_status:
         return False
-    return transport_status.endswith("_failed")
+    return transport_status not in {
+        "status_resp_received",
+        "job_ack_received",
+        "heartbeat_ack_received",
+        "job_done_status_received",
+    }
 
 
 def hook_fault_name(response: dict[str, Any]) -> str:
@@ -525,6 +530,12 @@ def build_progress_payload(
     count_label: str = "0",
     percent: int = 0,
 ) -> dict[str, Any]:
+    failure_stage_labels = {
+        "connected": "连接失败",
+        "dispatched": "下发失败",
+        "running": "执行失败",
+        "returned": "返回失败",
+    }
     status_event = last_event_by_phase(events, "STATUS_REQ")
     job_req_event = last_event_by_phase(events, "JOB_REQ")
     job_ack_event = last_event_by_phase(events, "JOB_ACK")
@@ -655,7 +666,10 @@ def build_progress_payload(
 
     current_stage = "准备中"
     for stage in stages:
-        if stage["status"] in {"current", "error"}:
+        if stage["status"] == "error":
+            current_stage = failure_stage_labels.get(stage["key"], stage["label"])
+            break
+        if stage["status"] == "current":
             current_stage = stage["label"]
             break
         if stage["status"] == "done":

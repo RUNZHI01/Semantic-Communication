@@ -493,6 +493,128 @@ class RunRemoteReconstructionTest(unittest.TestCase):
             self.assertIn("/dev/rpmsg0", snapshot["progress"]["stages"][2]["detail"])
             self.assertIn("transport=permission_gate", snapshot["progress"]["event_log"][2])
 
+    def test_tx_ok_rx_timeout_marks_control_stages_as_failed_and_keeps_zero_progress(self) -> None:
+        with tempfile.TemporaryDirectory(dir=PROJECT_ROOT) as temp_dir:
+            output_dir = Path(temp_dir)
+            trace_path = output_dir / "control_trace.jsonl"
+            summary_path = output_dir / "wrapper_summary.json"
+
+            summary_path.write_text(
+                json.dumps({"result": "denied_by_control_hook"}, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+            trace_events = [
+                {
+                    "at": "2026-03-16T11:24:03+0800",
+                    "phase": "STATUS_REQ",
+                    "payload": {
+                        "job_id": 4203105938,
+                        "variant": "current_reconstruction",
+                        "expected_sha256": "6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1",
+                        "job_flags": "reconstruction",
+                    },
+                    "hook_result": {
+                        "returncode": 0,
+                        "response": {
+                            "phase": "STATUS_REQ",
+                            "transport_status": "tx_ok_rx_timeout",
+                            "protocol_semantics": "not_verified",
+                            "note": (
+                                "write to /dev/rpmsg0 succeeded but no response arrived before timeout. "
+                                "Do not claim STATUS_RESP semantics from this result."
+                            ),
+                        },
+                    },
+                },
+                {
+                    "at": "2026-03-16T11:24:06+0800",
+                    "phase": "JOB_REQ",
+                    "payload": {
+                        "job_id": 4203105938,
+                        "expected_sha256": "6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1",
+                        "deadline_ms": 300000,
+                        "expected_outputs": 300,
+                        "job_flags": "reconstruction",
+                        "runner_cmd": (
+                            "bash /home/tianxing/tvm_metaschedule_execution_project/"
+                            "session_bootstrap/scripts/run_remote_current_real_reconstruction.sh "
+                            "--variant current --max-inputs 300 --seed 0"
+                        ),
+                    },
+                    "hook_result": {
+                        "returncode": 0,
+                        "response": {
+                            "phase": "JOB_REQ",
+                            "decision": "DENY",
+                            "fault_code": 0,
+                            "fault_name": "NONE",
+                            "guard_state": 0,
+                            "guard_state_name": "BOOT",
+                            "source": "linux_bridge_transport_guard",
+                            "transport_status": "tx_ok_rx_timeout",
+                            "protocol_semantics": "not_verified",
+                            "note": (
+                                "JOB_REQ was written to /dev/rpmsg0 but no JOB_ACK arrived before timeout. "
+                                "The wrapper must deny locally instead of assuming admission."
+                            ),
+                        },
+                    },
+                },
+                {
+                    "at": "2026-03-16T11:24:09+0800",
+                    "phase": "JOB_ACK",
+                    "payload": {
+                        "job_id": 4203105938,
+                        "decision": "DENY",
+                        "source": "linux_bridge_transport_guard",
+                        "fault_code": 0,
+                        "fault_name": "NONE",
+                        "guard_state": 0,
+                        "guard_state_name": "BOOT",
+                        "transport_status": "tx_ok_rx_timeout",
+                        "protocol_semantics": "not_verified",
+                        "note": (
+                            "JOB_REQ was written to /dev/rpmsg0 but no JOB_ACK arrived before timeout. "
+                            "The wrapper must deny locally instead of assuming admission."
+                        ),
+                    },
+                },
+            ]
+            trace_path.write_text(
+                "\n".join(json.dumps(event, ensure_ascii=False) for event in trace_events) + "\n",
+                encoding="utf-8",
+            )
+
+            job = LiveRemoteReconstructionJob.__new__(LiveRemoteReconstructionJob)
+            job.job_id = "4203105938"
+            job.variant = "current"
+            job._timeout_sec = 10.0
+            job._expected_outputs = inference_runner.DEFAULT_MAX_INPUTS
+            job._output_dir = output_dir
+            job._trace_path = trace_path
+            job._summary_path = summary_path
+            job._runner_log_path = output_dir / "runner.log"
+            job._lock = Lock()
+            job._final_snapshot = None
+
+            fake_process = Mock()
+            fake_process.communicate.return_value = ("", "")
+            fake_process.returncode = 2
+            job._process = fake_process
+
+            job._wait_for_completion()
+
+            snapshot = job._final_snapshot
+            assert snapshot is not None
+            self.assertEqual(snapshot["status"], "error")
+            self.assertEqual(snapshot["progress"]["count_label"], f"0 / {inference_runner.DEFAULT_MAX_INPUTS}")
+            self.assertEqual(snapshot["progress"]["count_source"], "runner_log.sample_latency_lines")
+            self.assertEqual(snapshot["progress"]["stages"][0]["status"], "error")
+            self.assertEqual(snapshot["progress"]["stages"][1]["status"], "error")
+            self.assertEqual(snapshot["progress"]["stages"][2]["status"], "error")
+            self.assertEqual(snapshot["progress"]["current_stage"], "连接失败")
+            self.assertIn("tx_ok_rx_timeout", snapshot["progress"]["event_log"][2])
+
     def test_success_snapshot_keeps_control_hook_timeout_as_diagnostic_not_runner_timeout(self) -> None:
         with tempfile.TemporaryDirectory(dir=PROJECT_ROOT) as temp_dir:
             output_dir = Path(temp_dir)
@@ -1250,7 +1372,7 @@ class RunRemoteReconstructionTest(unittest.TestCase):
             self.assertIn("当前主机环境禁止建立 SSH socket", snapshot["message"])
             self.assertNotIn("passwordless sudo", snapshot["message"])
             self.assertEqual(snapshot["diagnostics"]["control_hook"]["transport_status"], "ssh_bridge_launch_failed")
-            self.assertEqual(snapshot["progress"]["current_stage"], "已连接")
+            self.assertEqual(snapshot["progress"]["current_stage"], "连接失败")
             self.assertEqual(snapshot["progress"]["stages"][0]["status"], "error")
             self.assertEqual(snapshot["progress"]["stages"][1]["status"], "error")
             self.assertEqual(snapshot["progress"]["stages"][0]["detail"], "远端 bridge 启动失败，rc=255。")
