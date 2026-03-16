@@ -37,18 +37,20 @@
 
 ## 4. 最小生存包
 
-如果现场只能保留 6 个页面，保留这 6 个：
+如果现场只能保留 7 个页面，保留这 7 个：
 
 1. [summary_report.md](summary_report.md)
 2. [coverage_matrix.md](coverage_matrix.md)
-3. [../openamp_wrapper_hook_board_smoke_success_2026-03-14.md](../openamp_wrapper_hook_board_smoke_success_2026-03-14.md)
-4. [../openamp_phase5_fit03_timeout_gap_2026-03-15.md](../openamp_phase5_fit03_timeout_gap_2026-03-15.md)
-5. [../openamp_phase5_fit03_watchdog_success_2026-03-15.md](../openamp_phase5_fit03_watchdog_success_2026-03-15.md)
-6. [../inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md](../inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md)
+3. [../openamp_demo_live_dualpath_status_20260317.md](../openamp_demo_live_dualpath_status_20260317.md)
+4. [../openamp_wrapper_hook_board_smoke_success_2026-03-14.md](../openamp_wrapper_hook_board_smoke_success_2026-03-14.md)
+5. [../openamp_phase5_fit03_timeout_gap_2026-03-15.md](../openamp_phase5_fit03_timeout_gap_2026-03-15.md)
+6. [../openamp_phase5_fit03_watchdog_success_2026-03-15.md](../openamp_phase5_fit03_watchdog_success_2026-03-15.md)
+7. [../inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md](../inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md)
 
-用这 6 页仍然能讲完整：
+用这 7 页仍然能讲完整：
 
 - 系统总体结论
+- 最近一次 live 板端真实状态（8115 / current / baseline signed sideband / 300/300）
 - 最小控制闭环
 - FIT 收口与历史完整性
 - 性能价值与系统定位
