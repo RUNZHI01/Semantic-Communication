@@ -976,10 +976,10 @@ class LiveRemoteReconstructionJob:
             "--remote-output-root",
             f"/tmp/openamp_demo_hook/{self.job_id}",
         ]
-        remote_project_root = str(values.get("REMOTE_PROJECT_ROOT") or values.get("OPENAMP_REMOTE_PROJECT_ROOT") or "")
         remote_jscc_dir = str(values.get("REMOTE_JSCC_DIR") or "")
-        if remote_project_root:
-            command.extend(["--remote-project-root", remote_project_root])
+        # Keep the live demo on the exact host-side bridge bundle that was previously validated.
+        # Demo defaults may preload transient remote project roots from FIT manifests, and using
+        # those board-side checkouts changes STATUS_REQ/JOB_REQ semantics before inference starts.
         if remote_jscc_dir:
             command.extend(["--remote-jscc-dir", remote_jscc_dir])
         return shlex.join(command)
