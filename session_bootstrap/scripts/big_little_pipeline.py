@@ -536,11 +536,11 @@ def postprocessor_worker(
         stats_queue.put(result)
 
 
-def safe_join_process(process: mp.Process, timeout_sec: float = 5.0) -> None:
+def safe_join_process(process: mp.Process, timeout_sec: float = 300.0) -> None:
     process.join(timeout=timeout_sec)
     if process.is_alive():
         process.terminate()
-        process.join(timeout=timeout_sec)
+        process.join(timeout=5.0)
 
 
 def safe_join_thread(thread: threading.Thread, timeout_sec: float = 5.0) -> None:
