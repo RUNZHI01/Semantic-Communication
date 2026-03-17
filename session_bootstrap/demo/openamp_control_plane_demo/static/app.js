@@ -151,7 +151,7 @@ function renderTop(snapshot, systemStatus) {
     ? ` 第二幕使用 ${currentSupport.label || "Current live"}。${currentSupport.note}`
     : " 第二幕展示 Current live。";
   const baselineSummary = baselineSupport.note
-    ? ` 第三幕会明确标注 Baseline：${baselineSupport.note}`
+    ? ` 第三幕基线：${baselineSupport.note}`
     : " 第三幕展示 formal baseline 对比。";
   const admissionSuffix = admission.mode === "signed_manifest_v1"
     ? ` 当前 live 预检已切到 signed manifest，key_id=${admission.key_id || "unknown"}.`
@@ -177,8 +177,9 @@ function renderTop(snapshot, systemStatus) {
 function renderLatestLiveStatus(snapshot) {
   const latest = snapshot.latest_live_status;
   if (!latest) return;
+  const links = latest.links || [latest.report, latest.probe].filter(Boolean);
   document.getElementById("latestLiveStatusCard").innerHTML = `
-    <div class="label">最新 live 双路径结论</div>
+    <div class="label">最新 demo 结论</div>
     <div class="inline-actions">
       <div class="mini-title">${escapeHtml(latest.headline)}</div>
       <div class="status-pill tone-online">${escapeHtml(latest.status_label)}</div>
@@ -200,15 +201,20 @@ function renderLatestLiveStatus(snapshot) {
       ${latest.facts.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
     </ul>
     <p class="compact-copy">${escapeHtml(latest.boundary_note)}</p>
-    ${renderLinks([latest.report, latest.probe])}
+    ${renderLinks(links)}
   `;
 }
 
 function renderBoardAccess(systemStatus) {
   const access = systemStatus.board_access;
+  const baselineSupport = systemStatus.live?.variant_support?.baseline || {};
   const defaults = access.preloaded_defaults || {};
   const currentMissing = access.missing_inference_fields_by_variant?.current || access.missing_inference_fields || [];
   const baselineMissing = access.missing_inference_fields_by_variant?.baseline || [];
+  const baselineReadiness = access.inference_ready_variants?.baseline ? "已就绪" : `仍缺 ${summarizeMissing(baselineMissing)}`;
+  const baselineSummary = baselineSupport.mode === "pytorch_reference"
+    ? `${baselineSupport.label || "PyTorch 参考基线"}：已归档，无需 live 会话。`
+    : `Baseline：${baselineReadiness}。`;
   const onlyPasswordMissing =
     access.missing_connection_fields.length === 1 && access.missing_connection_fields[0] === "password";
 
@@ -248,7 +254,7 @@ function renderBoardAccess(systemStatus) {
     <div class="credential-note">
       SSH 会话：${escapeHtml(access.connection_ready ? "已就绪" : `仍缺 ${summarizeMissing(access.missing_connection_fields)}`)}。
       Current：${escapeHtml(access.inference_ready_variants?.current ? "已就绪" : `仍缺 ${summarizeMissing(currentMissing)}`)}。
-      Baseline：${escapeHtml(access.inference_ready_variants?.baseline ? "已就绪" : `仍缺 ${summarizeMissing(baselineMissing)}`)}。
+      ${escapeHtml(baselineSummary)}
     </div>
     ${sourceNotes.length ? `<div class="credential-note">${escapeHtml(sourceNotes.join(" ｜ "))}</div>` : ""}
   `;
@@ -267,7 +273,7 @@ function renderAct1(snapshot, systemStatus) {
     kpiCard("运行目标", live.target, `runtime：${live.runtime}`, "online"),
     kpiCard("准入策略", admission.label || "Legacy SHA allowlist", admission.note || "当前 live 准入配置。", admission.tone || "neutral"),
     kpiCard("Current live", currentSupport.label || "Current live", currentSupport.note || "Current 路径状态。", currentSupport.tone || "neutral"),
-    kpiCard("Baseline live", baselineSupport.label || "Baseline live", baselineSupport.note || "Baseline 路径状态。", baselineSupport.tone || "neutral"),
+    kpiCard(baselineSupport.mode === "pytorch_reference" ? "基线来源" : "Baseline live", baselineSupport.label || "Baseline live", baselineSupport.note || "Baseline 路径状态。", baselineSupport.tone || "neutral"),
   ].join("");
 
   const evidence = snapshot.board.evidence_status;
@@ -340,6 +346,7 @@ function progressSourceLabel(source) {
     "runner_log.missing": "未生成 runner 日志",
     "runner_log.sample_latency_lines": "实时 runner 日志",
     "runner_summary.processed_count": "最终 runner 汇总",
+    pytorch_reference_manifest: "PyTorch 参考 manifest",
     demo_default: "演示默认值",
   };
   return labels[source] || "实时状态";
@@ -355,7 +362,7 @@ function progressAxisLabels(expectedCount) {
 }
 
 function normalizeProgress(progress) {
-  const expectedCount = Math.max(Number(progress?.expected_count || 100), 0) || 100;
+  const expectedCount = Math.max(Number(progress?.expected_count || 300), 0) || 300;
   const completedCount = Math.max(Number(progress?.completed_count || 0), 0);
   const remainingCount = progress?.remaining_count !== undefined
     ? Math.max(Number(progress.remaining_count || 0), 0)
@@ -414,7 +421,11 @@ function buildCompactProgressMeta(progress, result) {
   if (!result) {
     return "尚未开始 live run。";
   }
-  const modeLabel = result.execution_mode === "live" ? "真实在线" : "已回退归档样例";
+  const modeLabel = result.execution_mode === "live"
+    ? "真实在线"
+    : result.execution_mode === "reference"
+      ? "PyTorch 参考基线"
+      : "已回退归档样例";
   return `${modeLabel} ｜ 计数来源：${progressSourceLabel(progress.count_source)} ｜ 剩余 ${progress.remaining_count} 张`;
 }
 
@@ -456,8 +467,16 @@ function renderLiveProgress(progress) {
 }
 
 function renderComparisonProgressCards() {
+  const baselineDefaultProgress = state.baselineResult?.live_progress || {
+    expected_count: state.snapshot?.guided_demo?.comparison?.baseline_source?.output_count || 300,
+    completed_count: 0,
+    count_label: `0 / ${state.snapshot?.guided_demo?.comparison?.baseline_source?.output_count || 300}`,
+    label: "等待装载",
+    current_stage: "等待装载 PyTorch 参考基线",
+    count_source: "demo_default",
+  };
   const baselineProgress = renderProgressFrame(
-    state.baselineResult?.live_progress || null,
+    baselineDefaultProgress,
     {
       badgeId: "baselineProgressBadge",
       countId: "baselineProgressCount",
@@ -467,7 +486,9 @@ function renderComparisonProgressCards() {
       stageId: "baselineProgressStage",
       metaId: "baselineProgressMeta",
     },
-    buildCompactProgressMeta(normalizeProgress(state.baselineResult?.live_progress || null), state.baselineResult)
+    state.baselineResult
+      ? buildCompactProgressMeta(normalizeProgress(state.baselineResult?.live_progress || null), state.baselineResult)
+      : "尚未加载参考基线。"
   );
   const currentProgress = renderProgressFrame(
     state.currentResult?.live_progress || null,
@@ -571,17 +592,20 @@ function renderInference(result) {
   ].join("");
 }
 
-function comparisonCard(label, baselineMs, currentMs, improvementPct, speedupX, callout) {
+function comparisonCard(card) {
+  const baselineLabel = card.baseline_label || "baseline";
+  const currentLabel = card.current_label || "current";
+  const { label, baseline_ms: baselineMs, current_ms: currentMs, improvement_pct: improvementPct, speedup_x: speedupX, callout } = card;
   const maxValue = Math.max(baselineMs, currentMs, 1);
   return `
     <article class="comparison-card">
       <div class="comparison-title">${escapeHtml(label)}<span class="comparison-speedup">${speedupX.toFixed(1)}x / ${improvementPct.toFixed(2)}%</span></div>
       <div class="comparison-row">
-        <div class="timing-label"><span>baseline</span><span>${formatMaybeMs(baselineMs)}</span></div>
+        <div class="timing-label"><span>${escapeHtml(baselineLabel)}</span><span>${formatMaybeMs(baselineMs)}</span></div>
         <div class="comparison-bar"><span class="bar-host" style="width:${barWidth(baselineMs, maxValue)}%"></span></div>
       </div>
       <div class="comparison-row">
-        <div class="timing-label"><span>current</span><span>${formatMaybeMs(currentMs)}</span></div>
+        <div class="timing-label"><span>${escapeHtml(currentLabel)}</span><span>${formatMaybeMs(currentMs)}</span></div>
         <div class="comparison-bar"><span class="bar-board" style="width:${barWidth(currentMs, maxValue)}%"></span></div>
       </div>
       <div class="comparison-callout">${escapeHtml(callout)}</div>
@@ -596,33 +620,19 @@ function renderComparison(snapshot) {
   const boardBusy = String(state.systemStatus?.live?.guard_state || "").toUpperCase() === "JOB_ACTIVE";
   renderComparisonProgressCards();
   document.getElementById("comparisonBoard").innerHTML = [
-    comparisonCard(
-      comparison.payload.label,
-      comparison.payload.baseline_ms,
-      comparison.payload.current_ms,
-      comparison.payload.improvement_pct,
-      comparison.payload.speedup_x,
-      comparison.payload.callout
-    ),
-    comparisonCard(
-      comparison.end_to_end.label,
-      comparison.end_to_end.baseline_ms,
-      comparison.end_to_end.current_ms,
-      comparison.end_to_end.improvement_pct,
-      comparison.end_to_end.speedup_x,
-      comparison.end_to_end.callout
-    ),
+    comparisonCard(comparison.payload),
+    comparisonCard(comparison.end_to_end),
   ].join("");
 
   const notes = [];
   if (state.baselineResult) {
-    notes.push(`Baseline：${state.baselineResult.source_label}，${state.baselineResult.message}`);
+    notes.push(`基线：${state.baselineResult.source_label}，${state.baselineResult.message}`);
   }
   if (state.currentResult) {
     notes.push(`Current：${state.currentResult.source_label}，${state.currentResult.message}`);
   }
   if (!state.baselineResult && baselineSupport.note) {
-    notes.push(`Baseline：${baselineSupport.note}`);
+    notes.push(`基线：${baselineSupport.note}`);
   }
   if (!state.currentResult && currentSupport.note) {
     notes.push(`Current：${currentSupport.note}`);
@@ -631,7 +641,7 @@ function renderComparison(snapshot) {
     notes.push("板端当前 guard_state=JOB_ACTIVE；demo 会保守阻断新的 live launch，不自动 SAFE_STOP。");
   }
   document.getElementById("comparisonRunNote").textContent =
-    notes.join(" ") || "Current signed live 可在线推进；第三幕保留 formal baseline 对比，Baseline live 是否开放会在此处明确标注。";
+    notes.join(" ") || "Current signed live 可在线推进；第三幕基线固定使用 PyTorch 参考归档，不再尝试 Baseline TVM live。";
 }
 
 function renderFault(snapshot) {
@@ -683,7 +693,7 @@ function renderPerformance(snapshot) {
           <div class="label">${escapeHtml(metric.label)}</div>
           <h3>${escapeHtml(metric.current)}</h3>
           <div class="compact-copy">baseline ${escapeHtml(metric.baseline)} | 提升 ${escapeHtml(metric.improvement)}</div>
-          ${renderLinks([metric.report])}
+          ${renderLinks(metric.links || (metric.report ? [metric.report] : []))}
         </article>
       `
     )
@@ -715,10 +725,11 @@ function renderActLamps(systemStatus) {
 function applyLaunchPolicy(systemStatus) {
   const currentSupport = systemStatus.live?.variant_support?.current || {};
   const baselineSupport = systemStatus.live?.variant_support?.baseline || {};
+  const baselineIsReference = baselineSupport.mode === "pytorch_reference";
   const boardBusy = String(systemStatus.live?.guard_state || "").toUpperCase() === "JOB_ACTIVE";
   const boardBusyReason = "板端当前 guard_state=JOB_ACTIVE；demo 保守阻断新的 live launch，不自动 SAFE_STOP。";
   const currentBlocked = boardBusy || currentSupport.launch_allowed === false;
-  const baselineBlocked = boardBusy || baselineSupport.launch_allowed === false;
+  const baselineBlocked = baselineIsReference ? false : (boardBusy || baselineSupport.launch_allowed === false);
 
   const currentButton = document.getElementById("runCurrentButton");
   const currentAgainButton = document.getElementById("runCurrentAgainButton");
@@ -732,22 +743,26 @@ function applyLaunchPolicy(systemStatus) {
   currentAgainButton.textContent = currentSupport.mode === "signed_manifest_v1"
     ? "运行 Current signed 300 张图"
     : "运行 Current 300 张图";
-  baselineButton.textContent = baselineSupport.launch_allowed === false
-    ? "Baseline live 未适配 signed admission"
-    : "运行 Baseline 300 张图";
-  runAllButton.textContent = baselineSupport.launch_allowed === false
-    ? "双版本 live 当前未开放"
-    : "一键顺序运行双版本 300 张图";
+  baselineButton.textContent = baselineIsReference
+    ? (baselineSupport.action_label || "加载 PyTorch 参考基线")
+    : baselineSupport.launch_allowed === false
+      ? "Baseline live 未适配 signed admission"
+      : "运行 Baseline 300 张图";
+  runAllButton.textContent = baselineIsReference
+    ? "加载参考基线 + 运行 Current live"
+    : baselineSupport.launch_allowed === false
+      ? "双版本 live 当前未开放"
+      : "一键顺序运行双版本 300 张图";
 
   currentButton.disabled = currentBlocked;
   currentAgainButton.disabled = currentBlocked;
   baselineButton.disabled = baselineBlocked;
-  runAllButton.disabled = currentBlocked || baselineBlocked;
+  runAllButton.disabled = currentBlocked || (!baselineIsReference && baselineBlocked);
 
   currentButton.title = boardBusy ? boardBusyReason : (currentSupport.note || "");
   currentAgainButton.title = currentButton.title;
-  baselineButton.title = boardBusy ? boardBusyReason : (baselineSupport.note || "");
-  runAllButton.title = boardBusy ? boardBusyReason : (baselineSupport.launch_allowed === false ? (baselineSupport.note || "") : "");
+  baselineButton.title = baselineSupport.note || "";
+  runAllButton.title = boardBusy ? boardBusyReason : (currentBlocked ? (currentSupport.note || "") : (baselineSupport.note || ""));
 }
 
 function renderAll() {
@@ -857,6 +872,10 @@ async function pollInferenceJob(jobId, variant) {
   }
 }
 
+function feedbackToneForResult(result) {
+  return result.execution_mode === "live" || result.execution_mode === "reference" ? "success" : "warning";
+}
+
 async function runInferenceAction(endpoint, variant, resultKey, actId, feedbackText) {
   try {
     setFeedback(feedbackText, "warning");
@@ -871,11 +890,11 @@ async function runInferenceAction(endpoint, variant, resultKey, actId, feedbackT
     switchAct(actId);
     if (initial.request_state === "running" && initial.job_id) {
       const finalResult = await pollInferenceJob(initial.job_id, variant);
-      setFeedback(finalResult.message, finalResult.execution_mode === "live" ? "success" : "warning");
+      setFeedback(finalResult.message, feedbackToneForResult(finalResult));
       return finalResult;
     }
     await refreshAll();
-    setFeedback(initial.message, initial.execution_mode === "live" ? "success" : "warning");
+    setFeedback(initial.message, feedbackToneForResult(initial));
     return initial;
   } catch (error) {
     setFeedback(error.message, "error");
@@ -899,7 +918,7 @@ async function runBaseline() {
     "baseline",
     "baselineResult",
     "act3",
-    "正在执行 Baseline 在线推进..."
+    "正在加载 PyTorch 参考基线..."
   );
 }
 

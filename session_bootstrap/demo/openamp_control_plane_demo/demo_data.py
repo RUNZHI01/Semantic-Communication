@@ -14,6 +14,10 @@ REPORTS_ROOT = PROJECT_ROOT / "session_bootstrap" / "reports"
 PACKAGE_ROOT = REPORTS_ROOT / "openamp_control_plane_evidence_package_20260315"
 SCRIPTS_ROOT = PROJECT_ROOT / "session_bootstrap" / "scripts"
 LATEST_LIVE_DUALPATH_REPORT = REPORTS_ROOT / "openamp_demo_live_dualpath_status_20260317.md"
+PYTORCH_REFERENCE_ROOT = (
+    PROJECT_ROOT / "session_bootstrap" / "tmp" / "quality_metrics_inputs_20260312" / "reference"
+)
+PYTORCH_REFERENCE_MANIFEST = PYTORCH_REFERENCE_ROOT / "pytorch_reference_manifest.json"
 
 FAULT_CODE_NAMES = {
     0: "NONE",
@@ -98,7 +102,7 @@ PRERECORDED_SAMPLE_FIXTURES = (
         "sample_id": "places365-208",
         "label": "样例 208",
         "title": "Places365 预置样例 208",
-        "note": "使用仓库内已归档的参考图与 current/baseline 重建图，适合现场稳定演示。",
+        "note": "使用仓库内已归档的参考图、current 重建图和 PyTorch 参考基线图，适合现场稳定演示。",
         "relative_path": "Places365_val_00000208_recon.png",
         "original_path": PROJECT_ROOT / "session_bootstrap" / "tmp" / "quality_samples_20260311" / "current" / "test_208.png",
         "current_path": PROJECT_ROOT
@@ -110,8 +114,9 @@ PRERECORDED_SAMPLE_FIXTURES = (
         "baseline_path": PROJECT_ROOT
         / "session_bootstrap"
         / "tmp"
-        / "quality_samples_20260311"
-        / "baseline"
+        / "quality_metrics_inputs_20260312"
+        / "reference"
+        / "reconstructions"
         / "Places365_val_00000208_recon.png",
     },
 )
@@ -169,6 +174,49 @@ def quality_metrics_by_relative_path(report_path_value: str) -> dict[str, dict[s
     }
 
 
+@lru_cache(maxsize=1)
+def pytorch_reference_manifest() -> dict[str, Any]:
+    return read_json(PYTORCH_REFERENCE_MANIFEST)
+
+
+@lru_cache(maxsize=1)
+def pytorch_reference_records_by_relative_path() -> dict[str, dict[str, Any]]:
+    payload = pytorch_reference_manifest()
+    records: dict[str, dict[str, Any]] = {}
+    for item in payload.get("records", []):
+        if not isinstance(item, dict):
+            continue
+        file_name = Path(str(item.get("output_path") or "")).name
+        if not file_name:
+            base_name = str(item.get("base_name") or "").strip()
+            if not base_name:
+                continue
+            file_name = f"{base_name}_recon.png"
+        records[file_name] = item
+    return records
+
+
+def build_pytorch_reference_baseline_snapshot() -> dict[str, Any]:
+    payload = pytorch_reference_manifest()
+    output_count = int(payload.get("output_count") or len(payload.get("records", [])) or 0)
+    timing = payload.get("timing") if isinstance(payload.get("timing"), dict) else {}
+    total_ms = float(timing.get("total_ms") or 0.0)
+    mean_ms = float(timing.get("mean_ms") or (total_ms / output_count if output_count else 0.0))
+    return {
+        "label": "PyTorch 参考基线",
+        "completed_at": str(payload.get("completed_at") or payload.get("started_at") or ""),
+        "output_count": output_count,
+        "mean_ms": round(mean_ms, 3),
+        "total_ms": round(total_ms, 3),
+        "manifest_path": repo_relative(PYTORCH_REFERENCE_MANIFEST),
+        "reconstructions_dir": repo_relative(PYTORCH_REFERENCE_ROOT / "reconstructions"),
+        "generator_ckpt_sha256": str(payload.get("generator_ckpt_sha256") or ""),
+        "origin_ckpt_sha256": str(payload.get("origin_ckpt_sha256") or ""),
+        "device": str(payload.get("device") or ""),
+        "snr": float(payload.get("snr") or 0.0),
+    }
+
+
 def clean_markdown_value(raw: str) -> str:
     value = raw.strip()
     if value.startswith("`") and value.endswith("`") and len(value) >= 2:
@@ -182,6 +230,12 @@ def normalize_key(raw: str) -> str:
 
 def to_float(value: Any) -> float:
     return float(str(value).replace(",", "").replace("%", "").replace("x", ""))
+
+
+def improvement_pct(baseline_ms: float, current_ms: float) -> float:
+    if baseline_ms <= 0:
+        return 0.0
+    return round(((baseline_ms - current_ms) / baseline_ms) * 100, 2)
 
 
 def short_sha(value: str) -> str:
@@ -563,56 +617,70 @@ def build_performance_snapshot() -> dict[str, Any]:
     )
     speedup = parse_markdown_key_values(REPORTS_ROOT / "current_scheme_b_compare_20260311_195303.md")
     artifact_sha = payload["current_expected_sha256_configured"]
+    reference_baseline = build_pytorch_reference_baseline_snapshot()
+    reference_mean_ms = reference_baseline["mean_ms"]
+    payload_current_ms = to_float(payload["current_run_median_ms"])
+    end_to_end_current_ms = to_float(end_to_end["current_run_median_ms"])
 
     return {
         "artifact_sha": artifact_sha,
         "positioning_note": (
-            "OpenAMP FIT 使用的 trusted current SHA，也有最新解码性能报告做交叉支撑。OpenAMP wrapper 负责准入和状态控制，不替代现有推理数据通路。"
+            "第三幕基线已切到 2026-03-12 归档的 PyTorch reference manifest。Current 继续保留 live / formal report 口径；"
+            "OpenAMP wrapper 负责准入和状态控制，不替代现有推理数据通路。"
         ),
         "metrics": [
             {
-                "label": "Payload 中位延迟",
+                "label": "Current payload vs PyTorch 参考均值",
                 "current": f"{payload['current_run_median_ms']} ms",
-                "baseline": f"{payload['baseline_run_median_ms']} ms",
-                "improvement": f"{payload['improvement_pct']}%",
-                "report": link_entry(
-                    REPORTS_ROOT / "inference_compare_currentsafe_chunk4_refresh_20260313_1758.md",
-                    "Payload 对比报告",
-                ),
-                "delta_ms": payload["delta_ms_current_minus_baseline"],
+                "baseline": f"PyTorch 参考 {reference_mean_ms:.3f} ms/image",
+                "improvement": f"{improvement_pct(reference_mean_ms, payload_current_ms):.2f}%",
+                "links": [
+                    link_entry(PYTORCH_REFERENCE_MANIFEST, "PyTorch 参考 manifest"),
+                    link_entry(
+                        REPORTS_ROOT / "inference_compare_currentsafe_chunk4_refresh_20260313_1758.md",
+                        "Current payload 报告",
+                    ),
+                ],
+                "delta_ms": round(payload_current_ms - reference_mean_ms, 3),
             },
             {
-                "label": "端到端中位延迟",
+                "label": "Current 端到端 vs PyTorch 参考均值",
                 "current": f"{end_to_end['current_run_median_ms']} ms/image",
-                "baseline": f"{end_to_end['baseline_run_median_ms']} ms/image",
-                "improvement": f"{end_to_end['improvement_pct']}%",
-                "report": link_entry(
-                    REPORTS_ROOT / "inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md",
-                    "端到端对比报告",
-                ),
-                "delta_ms": end_to_end["delta_ms_current_minus_baseline"],
+                "baseline": f"PyTorch 参考 {reference_mean_ms:.3f} ms/image",
+                "improvement": f"{improvement_pct(reference_mean_ms, end_to_end_current_ms):.2f}%",
+                "links": [
+                    link_entry(PYTORCH_REFERENCE_MANIFEST, "PyTorch 参考 manifest"),
+                    link_entry(
+                        REPORTS_ROOT / "inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md",
+                        "Current 端到端报告",
+                    ),
+                ],
+                "delta_ms": round(end_to_end_current_ms - reference_mean_ms, 3),
             },
             {
                 "label": "增量调优加速比",
                 "current": speedup["incremental_speedup_vs_rebuild_only"],
                 "baseline": "仅重编译 current",
                 "improvement": speedup["incremental_improvement_vs_rebuild_only"],
-                "report": link_entry(
-                    REPORTS_ROOT / "current_scheme_b_compare_20260311_195303.md",
-                    "current-only 加速报告",
-                ),
+                "links": [
+                    link_entry(
+                        REPORTS_ROOT / "current_scheme_b_compare_20260311_195303.md",
+                        "current-only 加速报告",
+                    )
+                ],
                 "delta_ms": speedup["incremental_vs_rebuild_only_delta"],
             },
         ],
         "micro_summary": {
-            "payload_current_ms": to_float(payload["current_run_median_ms"]),
-            "payload_baseline_ms": to_float(payload["baseline_run_median_ms"]),
-            "payload_improvement_pct": to_float(payload["improvement_pct"]),
-            "end_to_end_current_ms": to_float(end_to_end["current_run_median_ms"]),
-            "end_to_end_baseline_ms": to_float(end_to_end["baseline_run_median_ms"]),
-            "end_to_end_improvement_pct": to_float(end_to_end["improvement_pct"]),
+            "payload_current_ms": payload_current_ms,
+            "payload_baseline_ms": reference_mean_ms,
+            "payload_improvement_pct": improvement_pct(reference_mean_ms, payload_current_ms),
+            "end_to_end_current_ms": end_to_end_current_ms,
+            "end_to_end_baseline_ms": reference_mean_ms,
+            "end_to_end_improvement_pct": improvement_pct(reference_mean_ms, end_to_end_current_ms),
             "incremental_speedup_x": to_float(speedup["incremental_speedup_vs_rebuild_only"]),
         },
+        "reference_baseline": reference_baseline,
     }
 
 
@@ -626,26 +694,31 @@ def build_comparison_snapshot() -> dict[str, Any]:
     performance = build_performance_snapshot()
     micro = performance["micro_summary"]
     return {
+        "baseline_source": performance["reference_baseline"],
         "payload": {
-            "label": "Payload 推理延迟",
+            "label": "Current payload vs PyTorch 参考均值",
+            "baseline_label": "PyTorch 参考单图均值",
+            "current_label": "Current payload 中位数",
             "baseline_ms": micro["payload_baseline_ms"],
             "current_ms": micro["payload_current_ms"],
             "improvement_pct": micro["payload_improvement_pct"],
             "speedup_x": speedup_x(micro["payload_baseline_ms"], micro["payload_current_ms"]),
             "callout": (
-                f"正式 payload 口径：{micro['payload_baseline_ms']:.1f} → "
-                f"{micro['payload_current_ms']:.3f} ms"
+                f"基线来自 2026-03-12 归档 PyTorch reference manifest："
+                f"{micro['payload_baseline_ms']:.3f} → {micro['payload_current_ms']:.3f} ms"
             ),
         },
         "end_to_end": {
-            "label": "端到端重建延迟",
+            "label": "Current 端到端 vs PyTorch 参考均值",
+            "baseline_label": "PyTorch 参考单图均值",
+            "current_label": "Current 端到端中位数",
             "baseline_ms": micro["end_to_end_baseline_ms"],
             "current_ms": micro["end_to_end_current_ms"],
             "improvement_pct": micro["end_to_end_improvement_pct"],
             "speedup_x": speedup_x(micro["end_to_end_baseline_ms"], micro["end_to_end_current_ms"]),
             "callout": (
-                f"正式真实端到端口径：{micro['end_to_end_baseline_ms']:.1f} → "
-                f"{micro['end_to_end_current_ms']:.3f} ms/image"
+                f"Current 正式端到端口径对比 PyTorch 参考："
+                f"{micro['end_to_end_baseline_ms']:.3f} → {micro['end_to_end_current_ms']:.3f} ms/image"
             ),
         },
         "trusted_current_sha": performance["artifact_sha"],
@@ -684,24 +757,21 @@ def build_prerecorded_inference_result(image_index: int, variant: str) -> dict[s
     fixture = PRERECORDED_SAMPLE_FIXTURES[image_index]
     comparison = build_comparison_snapshot()
     current_quality = quality_metrics_by_relative_path(str(QUALITY_CURRENT_REPORT))
-    baseline_quality = quality_metrics_by_relative_path(str(QUALITY_BASELINE_REPORT))
-    quality_entry = (
-        current_quality.get(fixture["relative_path"], {})
-        if variant_key == "current"
-        else baseline_quality.get(fixture["relative_path"], {})
-    )
+    reference_baseline = build_pytorch_reference_baseline_snapshot()
+    reference_record = pytorch_reference_records_by_relative_path().get(fixture["relative_path"], {})
+    quality_entry = current_quality.get(fixture["relative_path"], {}) if variant_key == "current" else {}
     original_path = fixture["original_path"]
     reconstructed_path = fixture["current_path"] if variant_key == "current" else fixture["baseline_path"]
 
     total_ms = (
         comparison["end_to_end"]["current_ms"]
         if variant_key == "current"
-        else comparison["end_to_end"]["baseline_ms"]
+        else float(reference_record.get("elapsed_ms") or reference_baseline["mean_ms"])
     )
     payload_ms = (
         comparison["payload"]["current_ms"]
         if variant_key == "current"
-        else comparison["payload"]["baseline_ms"]
+        else float(reference_record.get("elapsed_ms") or reference_baseline["mean_ms"])
     )
     prep_ms = round(max(total_ms - payload_ms, 0.0), 3)
 
@@ -725,9 +795,13 @@ def build_prerecorded_inference_result(image_index: int, variant: str) -> dict[s
 
     return {
         "status": "success",
-        "execution_mode": "prerecorded",
-        "source_label": "预录结果",
-        "message": "当前展示使用已校验的预录图像与正式速度报告，可稳定支撑答辩演示。",
+        "execution_mode": "prerecorded" if variant_key == "current" else "reference",
+        "source_label": "预录结果" if variant_key == "current" else "PyTorch 参考基线",
+        "message": (
+            "当前展示使用已校验的预录图像与正式速度报告，可稳定支撑答辩演示。"
+            if variant_key == "current"
+            else "第三幕基线固定使用 2026-03-12 归档的 PyTorch reference manifest，不再尝试 Baseline TVM live。"
+        ),
         "variant": variant_key,
         "image_index": image_index,
         "sample": {
@@ -748,9 +822,17 @@ def build_prerecorded_inference_result(image_index: int, variant: str) -> dict[s
             "psnr_db": quality_entry.get("psnr_db"),
             "ssim": quality_entry.get("ssim"),
         },
-        "artifact_sha": comparison["trusted_current_sha"] if variant_key == "current" else "formal-baseline",
+        "artifact_sha": (
+            comparison["trusted_current_sha"]
+            if variant_key == "current"
+            else reference_baseline["generator_ckpt_sha256"] or "pytorch-reference"
+        ),
         "evidence": [
-            link_entry(QUALITY_CURRENT_REPORT if variant_key == "current" else QUALITY_BASELINE_REPORT, "质量报告"),
+            (
+                link_entry(QUALITY_CURRENT_REPORT, "质量报告")
+                if variant_key == "current"
+                else link_entry(PYTORCH_REFERENCE_MANIFEST, "PyTorch 参考 manifest")
+            ),
             link_entry(
                 fixture["current_path"] if variant_key == "current" else fixture["baseline_path"],
                 "重建图像",
@@ -892,23 +974,22 @@ def build_guided_demo_snapshot() -> dict[str, Any]:
 
 
 def build_latest_live_status_snapshot() -> dict[str, Any]:
-    report_text = read_text(LATEST_LIVE_DUALPATH_REPORT)
-    as_of_match = re.search(r"截至\s+\*\*(.+?)\*\*", report_text)
-    as_of = as_of_match.group(1) if as_of_match else "2026-03-17 05:45 +0800"
+    reference_baseline = build_pytorch_reference_baseline_snapshot()
     return {
-        "title": markdown_heading(LATEST_LIVE_DUALPATH_REPORT),
+        "title": "最新可用 demo 结论",
         "report_date": "2026-03-17",
-        "as_of": as_of,
-        "status_label": "最新 live 双路径已收口",
-        "headline": "8115 唯一有效；Current 与 Baseline 最近 live reconstruction 均完成 300 / 300",
+        "as_of": "2026-03-17 current live / 2026-03-12 reference baseline",
+        "status_label": "Current live + PyTorch 参考基线",
+        "headline": "Current live 300 / 300；基线固定切到 PyTorch reference archive",
         "hero_summary": (
-            "2026-03-17 最新 live 双路径收口：8115 为唯一有效 demo 实例；"
-            "Current 已在 8115 上跑通，Baseline 也已通过 signed sideband 进入真机执行；"
-            "两侧最近 live reconstruction 均完成 300 / 300。"
+            "2026-03-17 当前 demo 以 Current live 为唯一在线执行路径；"
+            "Current 最近一次真机 reconstruction 已完成 300 / 300。"
+            "由于 Baseline TVM live 仍受 artifact SHA mismatch 阻塞，第三幕已切到 "
+            "2026-03-12 归档的 PyTorch 参考基线。"
         ),
         "summary": (
-            "Current 路径已在 8115 上成功跑通；Baseline 已不再是 legacy 秒退，"
-            "而是通过 signed sideband 完成 BEGIN / CHUNK / SIGNATURE / COMMIT 全 ACK 后进入真机执行。"
+            "Current 路径继续保留 live 300 / 300 演示。Baseline TVM live 当前不作为现场路径；"
+            "第三幕基线改用 2026-03-12 归档的 PyTorch reference manifest 与 300 张重建结果。"
         ),
         "valid_instance": "8115",
         "current": {
@@ -917,9 +998,9 @@ def build_latest_live_status_snapshot() -> dict[str, Any]:
             "note": "最近 live reconstruction 已在 8115 板端成功完成。",
         },
         "baseline": {
-            "label": "Baseline live",
-            "completed": "300 / 300",
-            "note": "已通过 signed sideband 进入真机执行，不再是未上板的 legacy 秒退。",
+            "label": "PyTorch 参考基线",
+            "completed": f"{reference_baseline['output_count']} / {reference_baseline['output_count']} (archive)",
+            "note": "来源于 2026-03-12 归档 manifest，不触发 baseline TVM live。",
         },
         "board": {
             "label": "板卡在线状态",
@@ -929,14 +1010,17 @@ def build_latest_live_status_snapshot() -> dict[str, Any]:
         "facts": [
             "8115 是当前唯一该用的 demo 实例。",
             "Current 路径最近一次 live reconstruction 已完成真实 300 / 300。",
-            "Baseline 路径已通过 signed sideband 进入真机执行，并完成真实 300 / 300。",
+            "Baseline TVM live 当前仍受 artifact SHA mismatch 阻塞，现场不再宣称 baseline live 可运行。",
+            "第三幕基线固定改用 2026-03-12 归档的 PyTorch reference 300 / 300。",
         ],
-        "boundary_note": (
-            "`cool-har` 只是一次本地 signed probe 会话被外部 SIGTERM 终止，"
-            "没有改变任何板端结论。"
-        ),
-        "report": link_entry(LATEST_LIVE_DUALPATH_REPORT, "2026-03-17 live 双路径状态报告"),
+        "boundary_note": "基线按钮只加载归档 PyTorch reference 结果，不再尝试 baseline TVM live。",
+        "report": link_entry(LATEST_LIVE_DUALPATH_REPORT, "2026-03-17 current live 状态报告"),
         "probe": link_entry(REPORTS_ROOT / "openamp_demo_live_probe_latest.json", "最新在线探板 JSON"),
+        "links": [
+            link_entry(LATEST_LIVE_DUALPATH_REPORT, "2026-03-17 current live 状态报告"),
+            link_entry(REPORTS_ROOT / "openamp_demo_live_probe_latest.json", "最新在线探板 JSON"),
+            link_entry(PYTORCH_REFERENCE_MANIFEST, "PyTorch 参考 manifest"),
+        ],
     }
 
 
@@ -990,6 +1074,7 @@ def build_operator_snapshot() -> dict[str, Any]:
 def build_docs_snapshot() -> list[dict[str, Any]]:
     return [
         link_entry(LATEST_LIVE_DUALPATH_REPORT, "2026-03-17 最新 live 双路径状态"),
+        link_entry(PYTORCH_REFERENCE_MANIFEST, "PyTorch 参考基线 manifest"),
         link_entry(PACKAGE_ROOT / "README.md", "OpenAMP 证据包"),
         link_entry(PACKAGE_ROOT / "summary_report.md", "总报告"),
         link_entry(PACKAGE_ROOT / "coverage_matrix.md", "覆盖矩阵"),
