@@ -207,7 +207,7 @@ class DemoBoardAccessDefaultsTest(unittest.TestCase):
         self.assertEqual(access.build_env().get("REMOTE_PROJECT_ROOT", ""), expected_remote_project_root)
         self.assertEqual(
             access.build_env().get("INFERENCE_BASELINE_EXPECTED_SHA256", ""),
-            "85d701db0021c26412c3e5e08a4ca043470aaa01fb2d6792cb3b3b29e93bf849",
+            "3afcebc7471695a23bba9448dbc96bf4c07eee84d2ddf5f808501cb583e87763",
         )
         self.assertEqual(
             access.build_env().get("LOCAL_CURRENT_ARTIFACT_SOURCE", ""),
