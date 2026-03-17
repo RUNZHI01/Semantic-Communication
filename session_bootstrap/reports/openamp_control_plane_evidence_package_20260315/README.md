@@ -8,13 +8,14 @@
 
 ## 答辩最短路径
 
-只看五份文件时，按这个顺序：
+只看六份文件时，按这个顺序：
 
 1. [summary_report.md](summary_report.md)
 2. [coverage_matrix.md](coverage_matrix.md)
 3. [../openamp_demo_live_dualpath_status_20260317.md](../openamp_demo_live_dualpath_status_20260317.md)
 4. [../openamp_demo_dashboard_local_acceptance_20260317.md](../openamp_demo_dashboard_local_acceptance_20260317.md)
-5. [../openamp_phase5_fit03_watchdog_success_2026-03-15.md](../openamp_phase5_fit03_watchdog_success_2026-03-15.md)
+5. [../openamp_demo_live_delivery_snapshot_20260317.md](../openamp_demo_live_delivery_snapshot_20260317.md)
+6. [../openamp_phase5_fit03_watchdog_success_2026-03-15.md](../openamp_phase5_fit03_watchdog_success_2026-03-15.md)
 
 ## 答辩 / Demo 材料
 
@@ -23,11 +24,12 @@
 1. [demo_materials_index.md](demo_materials_index.md)
 2. [../openamp_demo_live_dualpath_status_20260317.md](../openamp_demo_live_dualpath_status_20260317.md)
 3. [../openamp_demo_dashboard_local_acceptance_20260317.md](../openamp_demo_dashboard_local_acceptance_20260317.md)
-4. [demo_four_act_runbook.md](demo_four_act_runbook.md)
-5. [defense_talk_outline.md](defense_talk_outline.md)
-6. [degraded_demo_plan.md](degraded_demo_plan.md)
-7. [../../demo/openamp_control_plane_demo/README.md](../../demo/openamp_control_plane_demo/README.md)
-8. [../../scripts/run_openamp_demo.sh](../../scripts/run_openamp_demo.sh)
+4. [../openamp_demo_live_delivery_snapshot_20260317.md](../openamp_demo_live_delivery_snapshot_20260317.md)
+5. [demo_four_act_runbook.md](demo_four_act_runbook.md)
+6. [defense_talk_outline.md](defense_talk_outline.md)
+7. [degraded_demo_plan.md](degraded_demo_plan.md)
+8. [../../demo/openamp_control_plane_demo/README.md](../../demo/openamp_control_plane_demo/README.md)
+9. [../../scripts/run_openamp_demo.sh](../../scripts/run_openamp_demo.sh)
 
 ## 阅读顺序
 

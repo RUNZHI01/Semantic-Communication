@@ -10,6 +10,7 @@
   - [coverage_matrix.md](coverage_matrix.md)
   - [../openamp_demo_live_dualpath_status_20260317.md](../openamp_demo_live_dualpath_status_20260317.md)
   - [../openamp_demo_dashboard_local_acceptance_20260317.md](../openamp_demo_dashboard_local_acceptance_20260317.md)
+  - [../openamp_demo_live_delivery_snapshot_20260317.md](../openamp_demo_live_delivery_snapshot_20260317.md)
   - [../../PROGRESS_LOG.md](../../PROGRESS_LOG.md)
 
 ## 使用原则
@@ -34,10 +35,12 @@
 
 1. [demo_four_act_runbook.md](demo_four_act_runbook.md)
 2. [../openamp_demo_live_dualpath_status_20260317.md](../openamp_demo_live_dualpath_status_20260317.md)
-3. [degraded_demo_plan.md](degraded_demo_plan.md)
-4. [summary_report.md](summary_report.md)
-5. [coverage_matrix.md](coverage_matrix.md)
-6. [../../scripts/run_openamp_demo.sh](../../scripts/run_openamp_demo.sh)
+3. [../openamp_demo_dashboard_local_acceptance_20260317.md](../openamp_demo_dashboard_local_acceptance_20260317.md)
+4. [../openamp_demo_live_delivery_snapshot_20260317.md](../openamp_demo_live_delivery_snapshot_20260317.md)
+5. [degraded_demo_plan.md](degraded_demo_plan.md)
+6. [summary_report.md](summary_report.md)
+7. [coverage_matrix.md](coverage_matrix.md)
+8. [../../scripts/run_openamp_demo.sh](../../scripts/run_openamp_demo.sh)
 
 ## 四幕与证据映射
 
