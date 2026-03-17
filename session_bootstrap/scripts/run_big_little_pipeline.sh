@@ -14,6 +14,9 @@ Usage:
 Options:
   --env <path>                    Optional env file to source before running.
   --variant <baseline|current>    Artifact/runtime variant to execute.
+  --execution-mode <pipeline|serial>
+                                  `pipeline` runs the heterogeneous workers.
+                                  `serial` is a local/mock dry-run baseline.
   --max-inputs <n>                Optional cap on the number of latent inputs.
   --seed <int>                    Optional AWGN seed.
   --run-id <id>                   Override the local report/log run_id.
@@ -35,6 +38,7 @@ Env:
     or INFERENCE_BASELINE_ARCHIVE / INFERENCE_CURRENT_ARCHIVE
 
   big.LITTLE-specific knobs:
+    REMOTE_LOCAL_PYTHON_CANDIDATES=<cmd1>:<cmd2>:...
     BIG_LITTLE_BIG_CORES=0,1
     BIG_LITTLE_LITTLE_CORES=2,3
     BIG_LITTLE_BACKEND=processes|threads
@@ -42,6 +46,7 @@ Env:
     BIG_LITTLE_INPUT_QUEUE_SIZE=4
     BIG_LITTLE_OUTPUT_QUEUE_SIZE=4
     BIG_LITTLE_DRY_RUN=0|1
+    BIG_LITTLE_EXECUTION_MODE=pipeline|serial
     BIG_LITTLE_MOCK_INFER_MS=15
     BIG_LITTLE_MAX_INPUTS=300
     BIG_LITTLE_SEED=123
@@ -102,6 +107,71 @@ resolve_artifact_path() {
   return 1
 }
 
+append_candidate() {
+  local candidate="$1"
+  [[ -z "$candidate" ]] && return 0
+  LOCAL_PYTHON_CANDIDATES_EFFECTIVE+=("$candidate")
+}
+
+python_command_supports_modules() {
+  local candidate="$1"
+  shift
+  [[ -z "$candidate" ]] && return 1
+  local probe_script
+  local cmd
+  local module
+  local rc=0
+  probe_script="$(mktemp)"
+  cat >"$probe_script" <<'PY'
+import importlib
+import sys
+
+for name in sys.argv[1:]:
+    importlib.import_module(name)
+PY
+  cmd="$candidate $(printf '%q' "$probe_script")"
+  for module in "$@"; do
+    cmd+=" $(printf '%q' "$module")"
+  done
+  set +e
+  bash -lc "$cmd" >/dev/null 2>&1
+  rc=$?
+  set -e
+  rm -f "$probe_script"
+  return "$rc"
+}
+
+resolve_local_python_command() {
+  local modules=("$@")
+  local candidate
+  local extra_candidate
+  LOCAL_PYTHON_CANDIDATES_EFFECTIVE=()
+  append_candidate "${REMOTE_TVM_PYTHON:-}"
+  if [[ -n "${REMOTE_LOCAL_PYTHON_CANDIDATES:-}" ]]; then
+    IFS=':' read -r -a LOCAL_PYTHON_EXTRA_CANDIDATES <<<"${REMOTE_LOCAL_PYTHON_CANDIDATES}"
+    for extra_candidate in "${LOCAL_PYTHON_EXTRA_CANDIDATES[@]}"; do
+      append_candidate "$extra_candidate"
+    done
+  fi
+  append_candidate "$HOME/.venvs/tvm-ms/bin/python"
+  append_candidate "$PROJECT_DIR/.venv/bin/python"
+  append_candidate "$PROJECT_DIR/venv/bin/python"
+  append_candidate "python3"
+  append_candidate "/usr/bin/python3"
+
+  for candidate in "${LOCAL_PYTHON_CANDIDATES_EFFECTIVE[@]}"; do
+    if python_command_supports_modules "$candidate" "${modules[@]}"; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+
+  printf 'ERROR: failed to resolve a local Python command with required modules: %s\n' "${modules[*]}" >&2
+  printf 'Candidates tried:\n' >&2
+  printf '  %s\n' "${LOCAL_PYTHON_CANDIDATES_EFFECTIVE[@]}" >&2
+  return 1
+}
+
 render_wrapper_report() {
   local pipeline_json_file="$1"
   local report_json="$2"
@@ -142,6 +212,7 @@ lines = [
     f"- status: {payload['status']}",
     f"- run_id: {run_id}",
     f"- variant: {variant}",
+    f"- execution_mode: {pipeline.get('execution_mode')}",
     f"- remote_mode: {remote_mode}",
     f"- env_file: {env_file}",
     f"- processed_count: {pipeline.get('processed_count')}",
@@ -171,6 +242,7 @@ PY
 
 ENV_FILE=""
 VARIANT=""
+EXECUTION_MODE=""
 MAX_INPUTS=""
 SEED=""
 RUN_ID_OVERRIDE=""
@@ -187,6 +259,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --variant)
       VARIANT="${2:-}"
+      shift 2
+      ;;
+    --execution-mode)
+      EXECUTION_MODE="${2:-}"
       shift 2
       ;;
     --max-inputs)
@@ -257,11 +333,11 @@ if [[ "$REMOTE_MODE" != "ssh" && "$REMOTE_MODE" != "local" ]]; then
   exit 1
 fi
 
-require_var REMOTE_TVM_PYTHON
 require_var REMOTE_INPUT_DIR
 require_var REMOTE_OUTPUT_BASE
 
 if [[ "$REMOTE_MODE" == "ssh" ]]; then
+  require_var REMOTE_TVM_PYTHON
   for req in REMOTE_HOST REMOTE_USER REMOTE_PASS; do
     require_var "$req"
   done
@@ -308,12 +384,26 @@ ALLOW_MISSING_AFFINITY="${BIG_LITTLE_ALLOW_MISSING_AFFINITY:-0}"
 INPUT_QUEUE_SIZE="${BIG_LITTLE_INPUT_QUEUE_SIZE:-4}"
 OUTPUT_QUEUE_SIZE="${BIG_LITTLE_OUTPUT_QUEUE_SIZE:-4}"
 DRY_RUN="${DRY_RUN_OVERRIDE:-${BIG_LITTLE_DRY_RUN:-0}}"
+EXECUTION_MODE_EFFECTIVE="${EXECUTION_MODE:-${BIG_LITTLE_EXECUTION_MODE:-pipeline}}"
 MOCK_INFER_MS="${BIG_LITTLE_MOCK_INFER_MS:-15}"
 MAX_INPUTS_EFFECTIVE="${MAX_INPUTS:-${BIG_LITTLE_MAX_INPUTS:-}}"
 SEED_EFFECTIVE="${SEED:-${BIG_LITTLE_SEED:-}}"
 OUTPUT_PREFIX="${BIG_LITTLE_OUTPUT_PREFIX:-big_little_pipeline}"
 REPORT_PREFIX="${BIG_LITTLE_REPORT_PREFIX:-big_little_pipeline}"
 BACKEND="${BIG_LITTLE_BACKEND:-processes}"
+
+if [[ "$EXECUTION_MODE_EFFECTIVE" != "pipeline" && "$EXECUTION_MODE_EFFECTIVE" != "serial" ]]; then
+  echo "ERROR: execution mode must be pipeline or serial (got: $EXECUTION_MODE_EFFECTIVE)." >&2
+  exit 1
+fi
+
+if [[ "$REMOTE_MODE" == "local" ]]; then
+  if [[ "$DRY_RUN" == "1" ]]; then
+    REMOTE_TVM_PYTHON="$(resolve_local_python_command numpy)"
+  else
+    REMOTE_TVM_PYTHON="$(resolve_local_python_command numpy tvm)"
+  fi
+fi
 
 LOG_DIR_RESOLVED="$(resolve_path "${LOG_DIR:-./session_bootstrap/logs}")"
 REPORT_DIR_RESOLVED="$(resolve_path "${REPORT_DIR:-./session_bootstrap/reports}")"
@@ -355,6 +445,8 @@ REAL_EXTRA_PYTHONPATH="${REMOTE_REAL_EXTRA_PYTHONPATH:-${REMOTE_TORCH_PYTHONPATH
   echo "output_dir=$REAL_OUTPUT_DIR"
   echo "snr=$REAL_SNR"
   echo "batch_size=$REAL_BATCH"
+  echo "execution_mode=$EXECUTION_MODE_EFFECTIVE"
+  echo "resolved_remote_tvm_python=$REMOTE_TVM_PYTHON"
   echo "big_cores=$BIG_CORES"
   echo "little_cores=$LITTLE_CORES"
   echo "backend=$BACKEND"
@@ -372,7 +464,7 @@ run_pipeline_remote() {
 #!/usr/bin/env bash
 set -euo pipefail
 SH
-    declare -p REMOTE_TVM_PYTHON REMOTE_INPUT_DIR REAL_OUTPUT_DIR REAL_SNR REAL_BATCH VARIANT REAL_ARTIFACT_PATH REAL_EXPECTED_SHA256 REAL_EXTRA_PYTHONPATH BIG_CORES LITTLE_CORES BACKEND ALLOW_MISSING_AFFINITY INPUT_QUEUE_SIZE OUTPUT_QUEUE_SIZE DRY_RUN MOCK_INFER_MS MAX_INPUTS_EFFECTIVE SEED_EFFECTIVE
+    declare -p REMOTE_TVM_PYTHON REMOTE_INPUT_DIR REAL_OUTPUT_DIR REAL_SNR REAL_BATCH VARIANT REAL_ARTIFACT_PATH REAL_EXPECTED_SHA256 REAL_EXTRA_PYTHONPATH BIG_CORES LITTLE_CORES BACKEND ALLOW_MISSING_AFFINITY INPUT_QUEUE_SIZE OUTPUT_QUEUE_SIZE DRY_RUN MOCK_INFER_MS MAX_INPUTS_EFFECTIVE SEED_EFFECTIVE EXECUTION_MODE_EFFECTIVE
     cat <<'SH'
 
 remote_python="$REMOTE_TVM_PYTHON"
@@ -394,6 +486,7 @@ dry_run="$DRY_RUN"
 mock_infer_ms="$MOCK_INFER_MS"
 max_inputs="$MAX_INPUTS_EFFECTIVE"
 seed="$SEED_EFFECTIVE"
+execution_mode="$EXECUTION_MODE_EFFECTIVE"
 
 mkdir -p "$output_dir"
 rm -rf "$output_dir/reconstructions"
@@ -454,6 +547,7 @@ run_remote_python - \
   --snr "$snr" \
   --batch-size "$batch_size" \
   --variant "$variant" \
+  --execution-mode "$execution_mode" \
   --expected-sha256 "$expected_sha256" \
   --input-queue-size "$input_queue_size" \
   --output-queue-size "$output_queue_size" \
