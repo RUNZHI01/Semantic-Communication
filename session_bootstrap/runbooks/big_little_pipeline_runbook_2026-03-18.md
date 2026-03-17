@@ -10,7 +10,20 @@ Produce a low-risk heterogeneous-core result tomorrow without changing board fir
 
 ## Shortest Credible Path
 
-Use the repo-side wrappers added tonight:
+If you want the least manual work tomorrow, use the one-shot entrypoint added tonight:
+
+```bash
+bash ./session_bootstrap/scripts/run_big_little_first_real_attempt.sh
+```
+
+It will:
+1. copy the fixed env template to a runtime env,
+2. run a read-only topology probe,
+3. apply the suggested BIG/LITTLE core split into that runtime env,
+4. run the pipeline path,
+5. run the serial vs pipeline comparison.
+
+If you prefer to run the pieces manually, the underlying wrappers are still available:
 
 - pipeline run:
 
@@ -31,16 +44,23 @@ This preserves the trusted serial command as the baseline while giving the pipel
 
 ### Tomorrow morning command chain
 
-If you want the least-thinking path tomorrow morning, run in this order:
+If you want the least-thinking path tomorrow morning, one command is enough:
+
+```bash
+bash ./session_bootstrap/scripts/run_big_little_first_real_attempt.sh
+```
+
+If you prefer to inspect each step manually, this is the expanded form the entrypoint will execute:
 
 ```bash
 # 1) Re-check the topology once (read-only)
 python3 ./session_bootstrap/scripts/big_little_topology_probe.py ssh \
   --env session_bootstrap/config/big_little_pipeline.current.2026-03-18.phytium_pi.env \
+  --timeout-sec 180 \
   --write-raw session_bootstrap/reports/big_little_topology_capture_latest.txt \
   > session_bootstrap/reports/big_little_topology_suggestion_latest.json
 
-# 2) Apply the suggested BIG/LITTLE split into your env automatically
+# 2) Apply the suggested BIG/LITTLE split into the runtime env automatically
 python3 ./session_bootstrap/scripts/apply_big_little_topology_suggestion.py \
   --env session_bootstrap/config/big_little_pipeline.current.2026-03-18.phytium_pi.env \
   --suggestion session_bootstrap/reports/big_little_topology_suggestion_latest.json
