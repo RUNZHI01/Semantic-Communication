@@ -19,6 +19,7 @@
 - `session_bootstrap/reports/openamp_control_plane_evidence_package_20260315/coverage_matrix.md`
 - `session_bootstrap/reports/openamp_demo_live_dualpath_status_20260317.md`
 - `session_bootstrap/reports/openamp_demo_dashboard_local_acceptance_20260317.md`
+- `session_bootstrap/reports/openamp_demo_live_delivery_snapshot_20260317.md`
 - `session_bootstrap/scripts/run_openamp_demo.sh`
 - `session_bootstrap/demo/openamp_control_plane_demo/README.md`
 
@@ -29,6 +30,7 @@
   - 两侧最近 live reconstruction 均完成 `300/300`；
   - `cool-har` 只是一次本地 probe 会话被外部 `SIGTERM`，不构成新的板端失败。
 - `openamp_demo_dashboard_local_acceptance_20260317.md` 则补上了“这套最新状态已经被 dashboard 实际跑起来并通过本地 API 验收”的证据：`run_openamp_demo.sh --port 8092` 可正常启动，`/api/snapshot` 已正确暴露 `latest_live_status`（`8115`、current `300/300`、baseline `300/300`）。
+- `openamp_demo_live_delivery_snapshot_20260317.md` 用一页把本轮两份核心报告、已接入入口、相关代码文件与提交链集中列出，适合作为后续直接 handoff / 接手入口。
 
 关键结论：
 - P0 最小板级控制闭环已落证：`STATUS_REQ/RESP`、`JOB_REQ/JOB_ACK`、`HEARTBEAT/HEARTBEAT_ACK`、wrapper-backed board smoke、`SAFE_STOP`、`JOB_DONE`
