@@ -116,7 +116,8 @@ class BigLittlePipelineTest(unittest.TestCase):
                         f"LOG_DIR={shlex.quote(str(log_dir))}",
                         f"REPORT_DIR={shlex.quote(str(report_dir))}",
                         "REMOTE_MODE=local",
-                        f"REMOTE_TVM_PYTHON={shlex.quote(sys.executable)}",
+                        "REMOTE_TVM_PYTHON=/usr/bin/python3",
+                        f"REMOTE_LOCAL_PYTHON_CANDIDATES={shlex.quote(sys.executable)}",
                         f"REMOTE_INPUT_DIR={shlex.quote(str(input_dir))}",
                         f"REMOTE_OUTPUT_BASE={shlex.quote(str(output_base))}",
                         f"REMOTE_CURRENT_ARTIFACT={shlex.quote(str(artifact_path))}",
@@ -161,12 +162,15 @@ class BigLittlePipelineTest(unittest.TestCase):
             self.assertEqual(payload["status"], "ok")
             self.assertEqual(payload["pipeline"]["status"], "ok")
             self.assertEqual(payload["pipeline"]["processed_count"], 4)
+            self.assertEqual(payload["pipeline"]["execution_mode"], "pipeline")
             report_json = report_dir / "unit_big_little_wrapper.json"
             report_md = report_dir / "unit_big_little_wrapper.md"
+            log_file = log_dir / "unit_big_little_wrapper.log"
             self.assertTrue(report_json.is_file())
             self.assertTrue(report_md.is_file())
+            self.assertIn(f"resolved_remote_tvm_python={sys.executable}", log_file.read_text(encoding="utf-8"))
 
-    def test_compare_wrapper_uses_serial_override_and_pipeline_wrapper(self) -> None:
+    def test_compare_wrapper_local_mock_uses_serial_dry_run_fallback(self) -> None:
         with tempfile.TemporaryDirectory(dir=PROJECT_ROOT) as temp_dir_raw:
             temp_dir = Path(temp_dir_raw)
             artifact_path = temp_dir / "artifact" / "optimized_model.so"
@@ -183,7 +187,8 @@ class BigLittlePipelineTest(unittest.TestCase):
                         f"LOG_DIR={shlex.quote(str(log_dir))}",
                         f"REPORT_DIR={shlex.quote(str(report_dir))}",
                         "REMOTE_MODE=local",
-                        f"REMOTE_TVM_PYTHON={shlex.quote(sys.executable)}",
+                        "REMOTE_TVM_PYTHON=/usr/bin/python3",
+                        f"REMOTE_LOCAL_PYTHON_CANDIDATES={shlex.quote(sys.executable)}",
                         f"REMOTE_INPUT_DIR={shlex.quote(str(input_dir))}",
                         f"REMOTE_OUTPUT_BASE={shlex.quote(str(output_base))}",
                         f"REMOTE_CURRENT_ARTIFACT={shlex.quote(str(artifact_path))}",
@@ -203,18 +208,6 @@ class BigLittlePipelineTest(unittest.TestCase):
                 + "\n",
                 encoding="utf-8",
             )
-            serial_payload = json.dumps(
-                {
-                    "status": "ok",
-                    "load_ms": 5.0,
-                    "vm_init_ms": 1.0,
-                    "run_samples_ms": [100.0, 100.0, 100.0, 100.0],
-                    "processed_count": 4,
-                    "run_count": 4,
-                }
-            )
-            serial_cmd = f"printf '%s\\n' {shlex.quote(serial_payload)}"
-            pipeline_cmd = "bash ./session_bootstrap/scripts/run_big_little_pipeline.sh --variant current --run-id unit_big_little_compare_pipeline --allow-overwrite"
 
             completed = subprocess.run(
                 [
@@ -224,10 +217,6 @@ class BigLittlePipelineTest(unittest.TestCase):
                     str(env_file),
                     "--run-id",
                     "unit_big_little_compare",
-                    "--serial-cmd",
-                    serial_cmd,
-                    "--pipeline-cmd",
-                    pipeline_cmd,
                     "--allow-overwrite",
                 ],
                 cwd=PROJECT_ROOT,
@@ -240,6 +229,9 @@ class BigLittlePipelineTest(unittest.TestCase):
             self.assertEqual(payload["status"], "ok")
             self.assertIn("comparison", payload)
             self.assertIsNotNone(payload["comparison"]["throughput_uplift_pct"])
+            self.assertIn("--execution-mode serial", payload["serial_command"])
+            self.assertEqual(payload["serial"]["pipeline"]["execution_mode"], "serial")
+            self.assertEqual(payload["pipeline"]["pipeline"]["execution_mode"], "pipeline")
 
 
 if __name__ == "__main__":

@@ -20,6 +20,11 @@ Options:
 
 Defaults:
   serial command   -> BIG_LITTLE_SERIAL_CMD or
+                      when REMOTE_MODE=local and BIG_LITTLE_DRY_RUN=1:
+                      BIG_LITTLE_OUTPUT_PREFIX=<prefix>_serial_mock
+                      BIG_LITTLE_REPORT_PREFIX=<prefix>_serial_mock
+                      bash ./session_bootstrap/scripts/run_big_little_pipeline.sh --variant current --execution-mode serial
+                      otherwise:
                       bash ./session_bootstrap/scripts/run_remote_current_real_reconstruction.sh --variant current
   pipeline command -> BIG_LITTLE_PIPELINE_CMD or
                       bash ./session_bootstrap/scripts/run_big_little_pipeline.sh --variant current
@@ -33,6 +38,21 @@ resolve_path() {
   else
     printf '%s\n' "$PROJECT_DIR/$maybe_relative"
   fi
+}
+
+is_local_mock_compare() {
+  local remote_mode_raw="${REMOTE_MODE:-}"
+  local remote_mode
+  remote_mode="$(printf '%s' "$remote_mode_raw" | tr '[:upper:]' '[:lower:]')"
+  [[ "$remote_mode" == "local" && "${BIG_LITTLE_DRY_RUN:-0}" == "1" ]]
+}
+
+build_local_mock_serial_cmd() {
+  local output_prefix="${BIG_LITTLE_OUTPUT_PREFIX:-big_little_pipeline}_serial_mock"
+  local report_prefix="${BIG_LITTLE_REPORT_PREFIX:-big_little_pipeline}_serial_mock"
+  printf 'BIG_LITTLE_OUTPUT_PREFIX=%q BIG_LITTLE_REPORT_PREFIX=%q bash ./session_bootstrap/scripts/run_big_little_pipeline.sh --variant current --execution-mode serial\n' \
+    "$output_prefix" \
+    "$report_prefix"
 }
 
 parse_last_json_line() {
@@ -215,7 +235,16 @@ if [[ -n "$ENV_FILE" ]]; then
   set +a
 fi
 
-SERIAL_CMD="${SERIAL_CMD_OVERRIDE:-${BIG_LITTLE_SERIAL_CMD:-bash ./session_bootstrap/scripts/run_remote_current_real_reconstruction.sh --variant current}}"
+if [[ -n "$SERIAL_CMD_OVERRIDE" ]]; then
+  SERIAL_CMD="$SERIAL_CMD_OVERRIDE"
+elif [[ -n "${BIG_LITTLE_SERIAL_CMD:-}" ]]; then
+  SERIAL_CMD="$BIG_LITTLE_SERIAL_CMD"
+elif is_local_mock_compare; then
+  SERIAL_CMD="$(build_local_mock_serial_cmd)"
+else
+  SERIAL_CMD='bash ./session_bootstrap/scripts/run_remote_current_real_reconstruction.sh --variant current'
+fi
+
 PIPELINE_CMD="${PIPELINE_CMD_OVERRIDE:-${BIG_LITTLE_PIPELINE_CMD:-bash ./session_bootstrap/scripts/run_big_little_pipeline.sh --variant current}}"
 LOG_DIR_RESOLVED="$(resolve_path "${LOG_DIR:-./session_bootstrap/logs}")"
 REPORT_DIR_RESOLVED="$(resolve_path "${REPORT_DIR:-./session_bootstrap/reports}")"

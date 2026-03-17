@@ -72,6 +72,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--snr", type=float, required=True)
     parser.add_argument("--batch-size", type=int, required=True)
     parser.add_argument("--variant", default="current")
+    parser.add_argument("--execution-mode", choices=("pipeline", "serial"), default="pipeline")
     parser.add_argument("--expected-sha256", default="")
     parser.add_argument("--max-inputs", type=int, default=0)
     parser.add_argument("--seed", type=int, default=None)
@@ -587,6 +588,7 @@ def build_markdown(summary: dict[str, Any]) -> str:
         "",
         f"- status: {summary.get('status')}",
         f"- variant: {summary.get('variant')}",
+        f"- execution_mode: {summary.get('execution_mode')}",
         f"- dry_run: {summary.get('dry_run')}",
         f"- processed_count: {summary.get('processed_count')}",
         f"- output_count: {summary.get('output_count')}",
@@ -613,6 +615,179 @@ def build_markdown(summary: dict[str, Any]) -> str:
         for error in summary["errors"]:
             lines.append(f"- {error}")
     return "\n".join(lines) + "\n"
+
+
+def run_serial(args: argparse.Namespace) -> dict[str, Any]:
+    if not args.dry_run:
+        raise SystemExit("ERROR: --execution-mode serial currently requires --dry-run.")
+
+    artifact_path = Path(args.artifact_path)
+    input_dir = Path(args.input_dir)
+    output_dir = Path(args.output_dir)
+    if not artifact_path.is_file():
+        raise SystemExit(f"ERROR: artifact not found: {artifact_path}")
+    if not input_dir.is_dir():
+        raise SystemExit(f"ERROR: input dir not found: {input_dir}")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    big_cores = parse_cpu_list(args.big_cores)
+    little_cores = parse_cpu_list(args.little_cores)
+    input_files, available_input_count = collect_input_files(input_dir=input_dir, max_inputs=args.max_inputs)
+    if not input_files:
+        raise SystemExit(f"ERROR: no supported latent files found in {input_dir}")
+
+    expected_sha256 = args.expected_sha256.strip().lower()
+    artifact_sha256 = file_sha256(artifact_path)
+    if expected_sha256 and artifact_sha256 != expected_sha256:
+        raise SystemExit(
+            "ERROR: artifact sha256 mismatch "
+            f"path={artifact_path} expected={expected_sha256} actual={artifact_sha256}"
+        )
+
+    reconstructions_dir = output_dir / "reconstructions"
+    reconstructions_dir.mkdir(parents=True, exist_ok=True)
+    serial_started_at = time.perf_counter()
+    affinity_target = big_cores or little_cores
+    serial_affinity = apply_affinity(
+        "serial",
+        affinity_target,
+        args.allow_missing_affinity,
+        backend="processes",
+    )
+    rng = np.random.default_rng(args.seed)
+    load_samples_ms: list[float] = []
+    awgn_samples_ms: list[float] = []
+    run_samples_ms: list[float] = []
+    save_samples_ms: list[float] = []
+    processed_count = 0
+    last_output = None
+
+    for input_path in input_files:
+        base_name = input_path.stem.split("_latent")[0]
+        load_t0 = time.perf_counter()
+        latent = load_latent(input_path)
+        load_t1 = time.perf_counter()
+        noisy = awgn_channel(latent, snr=args.snr, rng=rng).astype(np.float32)
+        load_t2 = time.perf_counter()
+        run_t0 = time.perf_counter()
+        output = mock_infer(noisy, args.mock_infer_ms)
+        run_t1 = time.perf_counter()
+        save_reconstruction(output, reconstructions_dir / f"{base_name}_recon")
+        save_t1 = time.perf_counter()
+        load_samples_ms.append((load_t1 - load_t0) * 1000.0)
+        awgn_samples_ms.append((load_t2 - load_t1) * 1000.0)
+        run_samples_ms.append((run_t1 - run_t0) * 1000.0)
+        save_samples_ms.append((save_t1 - run_t1) * 1000.0)
+        processed_count += 1
+        last_output = output
+
+    serial_ended_at = time.perf_counter()
+    output_count = len(list(reconstructions_dir.glob("*")))
+    total_wall_ms = (serial_ended_at - serial_started_at) * 1000.0
+    images_per_sec = None if processed_count == 0 else round(processed_count / (total_wall_ms / 1000.0), 3)
+    ms_per_image = None if processed_count == 0 else round(total_wall_ms / processed_count, 3)
+    output_shape = None if last_output is None else list(np.asarray(last_output).shape)
+    output_dtype = None if last_output is None else str(np.asarray(last_output).dtype)
+    preload_load_summary = summarize_samples(load_samples_ms)
+    preload_awgn_summary = summarize_samples(awgn_samples_ms)
+    run_summary = summarize_samples(run_samples_ms)
+    save_summary = summarize_samples(save_samples_ms)
+    inferencer_stage = {
+        "role": "inferencer",
+        "status": "ok",
+        "affinity": serial_affinity,
+        "artifact_path": str(artifact_path),
+        "artifact_sha256": artifact_sha256,
+        "artifact_sha256_expected": expected_sha256 or None,
+        "artifact_sha256_match": None if not expected_sha256 else artifact_sha256 == expected_sha256,
+        "load_ms": 0.0,
+        "vm_init_ms": 0.0,
+        "run_samples_ms": [round(value, 3) for value in run_samples_ms],
+        "run_summary": run_summary,
+        "processed_count": processed_count,
+        "output_shape": output_shape,
+        "output_dtype": output_dtype,
+        "dry_run": True,
+    }
+    preloader_stage = {
+        "role": "preloader",
+        "status": "ok",
+        "affinity": None,
+        "load_samples_ms": [round(value, 3) for value in load_samples_ms],
+        "awgn_samples_ms": [round(value, 3) for value in awgn_samples_ms],
+        "load_summary": preload_load_summary,
+        "awgn_summary": preload_awgn_summary,
+        "queued_count": processed_count,
+    }
+    postprocessor_stage = {
+        "role": "postprocessor",
+        "status": "ok",
+        "affinity": None,
+        "output_count": output_count,
+        "save_samples_ms": [round(value, 3) for value in save_samples_ms],
+        "save_summary": save_summary,
+    }
+    return {
+        "status": "ok",
+        "mode": "big_little_serial",
+        "execution_mode": "serial",
+        "backend": "serial",
+        "variant": args.variant,
+        "dry_run": True,
+        "mock_infer_ms": args.mock_infer_ms,
+        "artifact_path": str(artifact_path),
+        "artifact_sha256": artifact_sha256,
+        "artifact_sha256_expected": expected_sha256 or None,
+        "artifact_sha256_match": None if not expected_sha256 else artifact_sha256 == expected_sha256,
+        "input_dir": str(input_dir),
+        "output_dir": str(output_dir),
+        "output_count": output_count,
+        "processed_count": processed_count,
+        "input_count": len(input_files),
+        "available_input_count": available_input_count,
+        "load_ms": 0.0,
+        "vm_init_ms": 0.0,
+        "run_samples_ms": [round(value, 3) for value in run_samples_ms],
+        "run_count": run_summary["count"],
+        "run_median_ms": run_summary["median_ms"],
+        "run_mean_ms": run_summary["mean_ms"],
+        "run_min_ms": run_summary["min_ms"],
+        "run_max_ms": run_summary["max_ms"],
+        "run_variance_ms2": run_summary["variance_ms2"],
+        "output_shape": output_shape,
+        "output_dtype": output_dtype,
+        "preload_load_samples_ms": [round(value, 3) for value in load_samples_ms],
+        "preload_awgn_samples_ms": [round(value, 3) for value in awgn_samples_ms],
+        "save_samples_ms": [round(value, 3) for value in save_samples_ms],
+        "preload_load_summary": preload_load_summary,
+        "preload_awgn_summary": preload_awgn_summary,
+        "save_summary": save_summary,
+        "total_wall_ms": round(total_wall_ms, 3),
+        "images_per_sec": images_per_sec,
+        "ms_per_image": ms_per_image,
+        "snr": args.snr,
+        "batch_size": args.batch_size,
+        "max_inputs": args.max_inputs,
+        "seed": args.seed,
+        "big_cores": big_cores,
+        "little_cores": little_cores,
+        "input_queue_size": 0,
+        "output_queue_size": 0,
+        "save_format": "png" if Image is not None else "npy",
+        "tvm_version": None,
+        "affinity": {
+            "serial": serial_affinity,
+            "preloader": None,
+            "inferencer": serial_affinity,
+            "postprocessor": None,
+        },
+        "stages": {
+            "preloader": preloader_stage,
+            "inferencer": inferencer_stage,
+            "postprocessor": postprocessor_stage,
+        },
+        "errors": [],
+    }
 
 
 def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
@@ -756,6 +931,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
     summary = {
         "status": "error" if errors else "ok",
         "mode": "big_little_pipeline",
+        "execution_mode": "pipeline",
         "backend": args.backend,
         "variant": args.variant,
         "dry_run": args.dry_run,
@@ -825,7 +1001,7 @@ def write_outputs(summary: dict[str, Any], args: argparse.Namespace) -> None:
 def main() -> None:
     configure_logging()
     args = parse_args()
-    summary = run_pipeline(args)
+    summary = run_serial(args) if args.execution_mode == "serial" else run_pipeline(args)
     write_outputs(summary, args)
     LOGGER.info(
         "big.LITTLE pipeline finished status=%s processed=%s total_wall_ms=%s images_per_sec=%s",
