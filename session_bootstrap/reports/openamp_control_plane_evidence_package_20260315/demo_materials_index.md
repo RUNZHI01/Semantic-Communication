@@ -9,6 +9,7 @@
   - [summary_report.md](summary_report.md)
   - [coverage_matrix.md](coverage_matrix.md)
   - [../openamp_demo_live_dualpath_status_20260317.md](../openamp_demo_live_dualpath_status_20260317.md)
+  - [../openamp_demo_dashboard_local_acceptance_20260317.md](../openamp_demo_dashboard_local_acceptance_20260317.md)
   - [../../PROGRESS_LOG.md](../../PROGRESS_LOG.md)
 
 ## 使用原则
