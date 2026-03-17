@@ -366,10 +366,18 @@ class DashboardState:
                 "status": "fallback",
                 "execution_mode": "prerecorded",
                 "status_category": live_attempt.get("status_category", "fallback"),
-                "source_label": "回退展示（归档样例）",
+                "source_label": (
+                    "握手未完成，回退展示（归档样例）"
+                    if live_attempt.get("control_handshake_complete") is False
+                    else "回退展示（归档样例）"
+                ),
                 "message": (
-                    f"{live_attempt.get('message', '在线推进未完成')} 当前画面已切回归档样例，"
-                    "上方阶段条保留本次真机推进停留点。"
+                    f"{live_attempt.get('message', '在线推进未完成')}"
+                    + (
+                        " 当前画面仅显示归档样例与正式报告，不宣称本次 live 已完成。"
+                        if live_attempt.get("control_handshake_complete") is False
+                        else " 当前画面已切回归档样例，上方阶段条保留本次真机推进停留点。"
+                    )
                 ),
                 "live_attempt": live_attempt,
             }

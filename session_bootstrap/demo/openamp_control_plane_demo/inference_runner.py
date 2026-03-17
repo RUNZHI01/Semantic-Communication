@@ -215,8 +215,12 @@ def latest_hook_response(events: list[dict[str, Any]]) -> dict[str, Any]:
     return {}
 
 
+def hook_transport_status(response: dict[str, Any]) -> str:
+    return str(response.get("transport_status") or "").strip().lower()
+
+
 def hook_transport_failed(response: dict[str, Any]) -> bool:
-    transport_status = str(response.get("transport_status") or "").strip().lower()
+    transport_status = hook_transport_status(response)
     if not transport_status:
         return False
     return transport_status not in {
@@ -225,6 +229,36 @@ def hook_transport_failed(response: dict[str, Any]) -> bool:
         "heartbeat_ack_received",
         "job_done_status_received",
     }
+
+
+def control_handshake_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
+    status_response = hook_response_for_phase(events, "STATUS_REQ")
+    job_req_response = hook_response_for_phase(events, "JOB_REQ")
+    status_req_transport = hook_transport_status(status_response)
+    job_req_transport = hook_transport_status(job_req_response)
+    status_req_confirmed = status_req_transport == "status_resp_received"
+    job_req_confirmed = job_req_transport == "job_ack_received"
+    return {
+        "complete": status_req_confirmed and job_req_confirmed,
+        "status_req_transport": status_req_transport,
+        "job_req_transport": job_req_transport,
+        "status_req_confirmed": status_req_confirmed,
+        "job_req_confirmed": job_req_confirmed,
+    }
+
+
+def build_transport_timeout_handshake_message(handshake: dict[str, Any]) -> str:
+    if not handshake:
+        return ""
+
+    notes: list[str] = []
+    if handshake.get("status_req_transport") == "tx_ok_rx_timeout":
+        notes.append("STATUS_REQ 已写入 RPMsg，但超时前未收到 STATUS_RESP")
+    if handshake.get("job_req_transport") == "tx_ok_rx_timeout":
+        notes.append("JOB_REQ 已写入 RPMsg，但超时前未收到 JOB_ACK")
+    if not notes:
+        return ""
+    return "；".join(notes) + "。本次板端握手未完成，界面已回退到预录结果。"
 
 
 def hook_fault_name(response: dict[str, Any]) -> str:
@@ -361,10 +395,16 @@ def format_trace_event(event: dict[str, Any]) -> str:
     response = hook_response_for_event(event)
 
     if phase == "STATUS_REQ":
+        transport = hook_transport_status(response)
+        semantics = str(response.get("protocol_semantics") or "").strip()
+        if transport and transport != "status_resp_received":
+            detail = f"transport={transport}"
+            if semantics:
+                detail = f"{detail} / semantics={semantics}"
+            return f"[{at}] STATUS_REQ -> {detail}"
         guard = (
             safe_nested(response, "rx_frame", "status_resp", "guard_state_name")
             or response.get("guard_state_name")
-            or response.get("transport_status")
             or "PENDING"
         )
         fault = (
@@ -375,6 +415,13 @@ def format_trace_event(event: dict[str, Any]) -> str:
         return f"[{at}] STATUS_REQ -> guard={guard} / fault={fault}"
     if phase == "JOB_REQ":
         sha = str(payload.get("expected_sha256") or "")[:12]
+        transport = hook_transport_status(response)
+        if transport and transport != "job_ack_received":
+            detail_parts = [f"trusted_sha={sha or 'NA'}", f"transport={transport}"]
+            decision = str(response.get("decision") or "").strip().upper()
+            if decision:
+                detail_parts.append(f"decision={decision}")
+            return f"[{at}] JOB_REQ -> {' / '.join(detail_parts)}"
         return f"[{at}] JOB_REQ -> trusted_sha={sha or 'NA'}"
     if phase == "JOB_ACK":
         decision = payload.get("decision") or "UNKNOWN"
@@ -598,6 +645,7 @@ def build_progress_payload(
         "running": "执行失败",
         "returned": "返回失败",
     }
+    handshake = control_handshake_summary(events)
     status_event = last_event_by_phase(events, "STATUS_REQ")
     job_req_event = last_event_by_phase(events, "JOB_REQ")
     job_ack_event = last_event_by_phase(events, "JOB_ACK")
@@ -693,7 +741,10 @@ def build_progress_payload(
             f"/ result={job_done_payload.get('result_code', 'NA')}"
         )
     elif returned_status == "error":
-        returned_detail = "在线推进未完成，界面将切回归档样例。"
+        if events and not handshake["complete"]:
+            returned_detail = "STATUS_RESP/JOB_ACK 握手未完成，界面已切回归档样例。"
+        else:
+            returned_detail = "在线推进未完成，界面将切回归档样例。"
 
     stages = [
         {
@@ -748,7 +799,7 @@ def build_progress_payload(
         label = "真实在线推进"
         tone = "online"
     elif request_state == "completed":
-        label = "在线失败已回退"
+        label = "握手未完成，已回退" if events and not handshake["complete"] else "在线失败已回退"
         tone = "degraded"
     elif events:
         label = "真实在线推进"
@@ -1437,6 +1488,8 @@ class LiveRemoteReconstructionJob:
                 wrapper_summary = {}
 
         trace_events = load_trace_events(self._trace_path)
+        handshake = control_handshake_summary(trace_events) if trace_events else {}
+        transport_timeout_message = build_transport_timeout_handshake_message(handshake)
         last_hook_response = latest_hook_response(trace_events)
         hook_error_text = control_hook_error_text(last_hook_response)
         control_hook_stats = build_control_hook_stats(trace_events)
@@ -1448,7 +1501,11 @@ class LiveRemoteReconstructionJob:
             status = "timeout"
             status_category = "timeout"
             runner_summary: dict[str, Any] = {}
-            message = build_inference_message(status_category, variant=self.variant, include_fallback=True)
+            message = transport_timeout_message or build_inference_message(
+                status_category,
+                variant=self.variant,
+                include_fallback=True,
+            )
             performance_diag: dict[str, Any] = {}
         elif (self._process.returncode or 0) == 0:
             try:
@@ -1491,18 +1548,26 @@ class LiveRemoteReconstructionJob:
             runner_summary = {}
             performance_diag = {}
             if wrapper_summary.get("result") == "denied_by_control_hook":
-                if status_category != "error":
+                if transport_timeout_message:
+                    message = transport_timeout_message
+                elif status_category != "error":
                     message = build_inference_message(status_category, variant=self.variant, include_fallback=True)
                 else:
                     message = "OpenAMP 控制面未放行本次作业，界面已回退到归档样例。"
             else:
-                message = build_inference_message(status_category, variant=self.variant, include_fallback=True)
+                message = transport_timeout_message or build_inference_message(
+                    status_category,
+                    variant=self.variant,
+                    include_fallback=True,
+                )
 
         diagnostics = build_diagnostics(stdout=stdout, stderr=stderr, returncode=self._process.returncode)
         if runner_log_tail and status != "success":
             diagnostics["runner_log_tail"] = runner_log_tail
         if status_category == "artifact_mismatch":
             diagnostics.update(extract_artifact_sha_mismatch(stderr, stdout, runner_log_tail, hook_error_text))
+        if handshake:
+            diagnostics["control_handshake"] = handshake
         hook_diagnostics = control_hook_diagnostics(last_hook_response)
         if hook_diagnostics:
             diagnostics["control_hook"] = hook_diagnostics
@@ -1523,6 +1588,7 @@ class LiveRemoteReconstructionJob:
             "execution_mode": "live" if status == "success" else "fallback",
             "variant": self.variant,
             "message": message,
+            "control_handshake_complete": handshake.get("complete") if handshake else None,
             "runner_summary": runner_summary,
             "wrapper_summary": wrapper_summary,
             "diagnostics": diagnostics,
@@ -1543,6 +1609,7 @@ class LiveRemoteReconstructionJob:
                 return dict(self._final_snapshot)
 
         trace_events = load_trace_events(self._trace_path)
+        handshake = control_handshake_summary(trace_events) if trace_events else {}
         count_payload = build_completion_counts(
             runner_log_path=self._runner_log_path,
             expected_outputs=getattr(self, "_expected_outputs", DEFAULT_MAX_INPUTS),
@@ -1554,6 +1621,7 @@ class LiveRemoteReconstructionJob:
             "execution_mode": "live",
             "variant": self.variant,
             "message": "OpenAMP 控制面已接管本次演示，界面正在同步板端阶段。",
+            "control_handshake_complete": handshake.get("complete") if handshake else None,
             "runner_summary": {},
             "wrapper_summary": {},
             "diagnostics": {},
