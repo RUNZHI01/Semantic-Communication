@@ -765,6 +765,47 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(payload["live_attempt"]["diagnostics"]["board_status"]["active_job_id"], 8093)
         launch_job.assert_not_called()
 
+    def test_run_inference_endpoint_blocks_when_status_preflight_fails(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        request_json(
+            state,
+            "POST",
+            "/api/session/board-access",
+            body=json.dumps({"password": "demo-pass"}).encode("utf-8"),
+        )
+
+        with (
+            patch(
+                "server.query_live_status",
+                return_value={
+                    "status": "timeout",
+                    "status_category": "timeout",
+                    "message": "远端状态查询超时，请确认板卡在线后重试。",
+                    "diagnostics": {"error": "STATUS_REQ tx_ok_rx_timeout"},
+                    "logs": [],
+                },
+            ),
+            patch("server.launch_remote_reconstruction_job") as launch_job,
+        ):
+            status, _, payload = request_json(
+                state,
+                "POST",
+                "/api/run-inference",
+                body=json.dumps({"image_index": 0, "mode": "current"}).encode("utf-8"),
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["status"], "fallback")
+        self.assertEqual(payload["status_category"], "timeout")
+        self.assertEqual(payload["source_label"], "启动前检查失败，回退展示（归档样例）")
+        self.assertIn("启动前 STATUS_REQ 预检未通过", payload["message"])
+        self.assertEqual(payload["live_attempt"]["status"], "blocked")
+        self.assertEqual(
+            payload["live_attempt"]["diagnostics"]["board_status_preflight"]["status"],
+            "timeout",
+        )
+        launch_job.assert_not_called()
+
     def test_run_baseline_endpoint_launches_when_baseline_signed_path_is_ready(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
         request_json(
