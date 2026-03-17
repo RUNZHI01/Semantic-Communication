@@ -1,13 +1,31 @@
 # 产物 / 脚本 / 路径索引（当前可信工程入口）
 
-更新时间：`2026-03-17`
+更新时间：`2026-03-18`
 适用范围：飞腾派 current-safe / baseline 对比、增量调优、真实重建复现，以及 OpenAMP 控制面答辩收证
 
 这份文档的目的很直接：把**当前最重要的产物、脚本、报告和路径**固定下来，后续要复现、汇报、继续优化时，不用再翻聊天记录。
 
 ---
 
-## 0. OpenAMP 控制面答辩证据包（2026-03-15）
+## 0. big.LITTLE 异构大小核首跑入口（2026-03-18）
+
+核心入口：
+- `session_bootstrap/scripts/run_big_little_first_real_attempt.sh`
+- `session_bootstrap/config/big_little_pipeline.current.2026-03-18.phytium_pi.env`
+- `session_bootstrap/runbooks/big_little_pipeline_runbook_2026-03-18.md`
+- `session_bootstrap/scripts/big_little_topology_probe.py`
+- `session_bootstrap/scripts/apply_big_little_topology_suggestion.py`
+- `session_bootstrap/scripts/run_big_little_pipeline.sh`
+- `session_bootstrap/scripts/run_big_little_compare.sh`
+- `session_bootstrap/reports/big_little_topology_capture_20260318_0136.txt`
+- `session_bootstrap/reports/big_little_topology_suggestion_20260318_0136.json`
+
+补充说明：
+- 这条线已经具备明早直接上板执行的 repo 侧条件；
+- `run_big_little_first_real_attempt.sh` 现在会自动复制 runtime env、只读探测 topology、自动回填 BIG/LITTLE core 建议、再顺序跑 pipeline 与 compare；
+- 当前第一次只读拓扑建议为 `BIG_LITTLE_BIG_CORES=2`、`BIG_LITTLE_LITTLE_CORES=0,1`，但因为 CPU 3 在首轮探测时处于 offline，明早仍建议先 re-check 一次再开跑。
+
+## 1. OpenAMP 控制面答辩证据包（2026-03-15）
 
 核心入口：
 - `session_bootstrap/reports/openamp_control_plane_evidence_package_20260315/README.md`
