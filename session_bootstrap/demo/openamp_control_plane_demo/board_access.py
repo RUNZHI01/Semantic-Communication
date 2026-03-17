@@ -21,7 +21,7 @@ INFERENCE_SHARED_REQUIRED_KEYS = (
     "REMOTE_OUTPUT_BASE",
 )
 INFERENCE_VARIANT_REQUIRED_KEYS = {
-    "baseline": ("REMOTE_SNR_BASELINE", "REMOTE_BATCH_BASELINE"),
+    "baseline": ("REMOTE_JSCC_DIR", "REMOTE_SNR_BASELINE", "REMOTE_BATCH_BASELINE"),
     "current": ("REMOTE_SNR_CURRENT", "REMOTE_BATCH_CURRENT"),
 }
 
@@ -49,6 +49,9 @@ TRUSTED_BASELINE_SHA_REPORT_CANDIDATES = (
 TRUSTED_CURRENT_ARTIFACT_REPORT_CANDIDATES = (
     "session_bootstrap/reports/phytium_baseline_seeded_warm_start_current_incremental_chunk4_20260313_131545.json",
     "session_bootstrap/reports/phytium_baseline_seeded_warm_start_current_incremental_chunk3_20260313_131545.json",
+)
+PYTORCH_REFERENCE_MANIFEST_CANDIDATES = (
+    "session_bootstrap/tmp/quality_metrics_inputs_20260312/reference/pytorch_reference_manifest.json",
 )
 VALIDATED_RUNTIME_FALLBACK_KEYS = (
     "REMOTE_TORCH_PYTHONPATH",
@@ -232,6 +235,30 @@ def discover_trusted_baseline_expected_sha(
         if report_artifact_path and report_artifact_path != baseline_artifact_path:
             continue
         return baseline_expected_sha
+    return ""
+
+
+def discover_pytorch_reference_expected_sha(env_values: dict[str, str]) -> str:
+    manifest_candidates: list[Path] = []
+    explicit_manifest = str(env_values.get("PYTORCH_REFERENCE_MANIFEST") or "").strip()
+    if explicit_manifest:
+        manifest_candidates.append(resolve_local_path(explicit_manifest))
+    manifest_candidates.extend(resolve_local_path(raw_path) for raw_path in PYTORCH_REFERENCE_MANIFEST_CANDIDATES)
+
+    seen_paths: set[Path] = set()
+    for manifest_path in manifest_candidates:
+        if manifest_path in seen_paths:
+            continue
+        seen_paths.add(manifest_path)
+        if not manifest_path.exists() or not manifest_path.is_file():
+            continue
+        try:
+            payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        generator_sha = valid_sha256_text(payload.get("generator_ckpt_sha256", ""))
+        if generator_sha:
+            return generator_sha
     return ""
 
 
@@ -631,7 +658,9 @@ def build_demo_default_board_access(
     ):
         startup_env_values["REMOTE_PROJECT_ROOT"] = remote_project_root
     if not str(inference_env_values.get("INFERENCE_BASELINE_EXPECTED_SHA256") or "").strip():
-        baseline_expected_sha = discover_trusted_baseline_expected_sha(inference_env_values)
+        baseline_expected_sha = discover_pytorch_reference_expected_sha(
+            inference_env_values
+        ) or discover_trusted_baseline_expected_sha(inference_env_values)
         if baseline_expected_sha:
             startup_env_values["INFERENCE_BASELINE_EXPECTED_SHA256"] = baseline_expected_sha
     if not str(inference_env_values.get("LOCAL_CURRENT_ARTIFACT_SOURCE") or "").strip():

@@ -28,6 +28,9 @@ REMOTE_RECONSTRUCTION_SCRIPT = (
     PROJECT_ROOT / "session_bootstrap" / "scripts" / "run_remote_current_real_reconstruction.sh"
 )
 REMOTE_LEGACY_COMPAT_SCRIPT = PROJECT_ROOT / "session_bootstrap" / "scripts" / "run_remote_legacy_tvm_compat.sh"
+REMOTE_PYTORCH_REFERENCE_SCRIPT = (
+    PROJECT_ROOT / "session_bootstrap" / "scripts" / "run_remote_pytorch_reference_reconstruction.sh"
+)
 OPENAMP_CONTROL_WRAPPER_SCRIPT = PROJECT_ROOT / "session_bootstrap" / "scripts" / "openamp_control_wrapper.py"
 REMOTE_HOOK_PROXY_SCRIPT = Path(__file__).resolve().parent / "openamp_remote_hook_proxy.py"
 ARTIFACT_SHA_MISMATCH_RE = re.compile(
@@ -894,7 +897,7 @@ def resolve_demo_path(raw_path: str) -> Path:
 
 
 def demo_variant_label(variant: str) -> str:
-    return "Baseline" if variant == "baseline" else "Current"
+    return "PyTorch" if variant == "baseline" else "Current"
 
 
 def demo_admission_env_names(variant: str) -> dict[str, str]:
@@ -1050,7 +1053,7 @@ def describe_demo_admission(access: BoardAccessConfig, *, variant: str = "curren
         if expected_sha256:
             note = f"Legacy 44-byte JOB_REQ; expected_sha={expected_sha256[:12]}."
         elif variant == "baseline":
-            note = "Baseline legacy live needs a formal baseline expected SHA to stay honest."
+            note = "PyTorch live needs a trusted generator checkpoint SHA before the control plane can launch honestly."
         return {
             "status": "ready" if expected_sha256 else "config_error",
             "mode": "legacy_sha",
@@ -1133,6 +1136,8 @@ def describe_demo_variant_support(access: BoardAccessConfig, *, variant: str) ->
             note = f"{variant_label} signed-admission live path is not ready yet."
         if admission.get("note"):
             note = f"{note} {admission['note']}"
+        if variant == "baseline":
+            note = f"{note} Archived PyTorch reference images remain the visual comparison source."
         return {
             "variant": variant,
             "status": admission["status"],
@@ -1150,9 +1155,11 @@ def describe_demo_variant_support(access: BoardAccessConfig, *, variant: str) ->
         if ready and admission.get("artifact_sha256"):
             note = f"{note} expected_sha={str(admission['artifact_sha256'])[:12]}."
         elif variant == "baseline":
-            note = "缺少 formal baseline expected SHA；第三幕仅保留 formal baseline 归档对比。"
+            note = "缺少 PyTorch generator expected SHA；第三幕只能回退到归档参考图与正式报告。"
         else:
             note = "Current live path is not ready; the legacy SHA allowlist still needs a trusted current expected SHA."
+        if variant == "baseline" and ready:
+            note = f"{note} Archived PyTorch reference images remain the visual comparison source."
         return {
             "variant": variant,
             "status": admission["status"],
@@ -1198,8 +1205,9 @@ def configured_runner_command(access: BoardAccessConfig, variant: str) -> str:
 
 
 def default_runner_command(variant: str) -> str:
-    script = REMOTE_LEGACY_COMPAT_SCRIPT if variant == "baseline" else REMOTE_RECONSTRUCTION_SCRIPT
-    return shlex.join(["bash", str(script), "--variant", variant])
+    if variant == "baseline":
+        return shlex.join(["bash", str(REMOTE_PYTORCH_REFERENCE_SCRIPT)])
+    return shlex.join(["bash", str(REMOTE_RECONSTRUCTION_SCRIPT), "--variant", variant])
 
 
 def supports_max_inputs_arg(command: str) -> bool:
@@ -1243,6 +1251,26 @@ def build_current_live_runner_command(*, max_inputs: int, seed: int) -> str:
     )
 
 
+def build_baseline_live_runner_command(
+    access: BoardAccessConfig,
+    *,
+    max_inputs: int,
+    seed: int,
+) -> str:
+    expected_sha256 = expected_sha_for_variant(access, "baseline")
+    command = [
+        "bash",
+        str(REMOTE_PYTORCH_REFERENCE_SCRIPT),
+        "--max-images",
+        str(max_inputs),
+        "--seed",
+        str(seed),
+    ]
+    if expected_sha256:
+        command.extend(["--expected-sha256", expected_sha256])
+    return shlex.join(command)
+
+
 def build_runner_command(
     access: BoardAccessConfig,
     *,
@@ -1254,6 +1282,10 @@ def build_runner_command(
         # Demo live mode pins Current to the reconstruction runner so stale env files
         # cannot drag the UI back onto old single-image or compat semantics.
         return build_current_live_runner_command(max_inputs=max_inputs, seed=seed)
+    if variant == "baseline":
+        # The baseline slot is now the real PyTorch execution path. Ignore stale
+        # env snapshots that still point at the archived legacy TVM wrapper.
+        return build_baseline_live_runner_command(access, max_inputs=max_inputs, seed=seed)
     command = configured_runner_command(access, variant) or default_runner_command(variant)
     return append_runner_options(command, max_inputs=max_inputs, seed=seed)
 
@@ -1261,7 +1293,7 @@ def build_runner_command(
 def build_inference_message(status_category: str, *, variant: str, include_fallback: bool = False) -> str:
     if status_category == "artifact_mismatch" and variant == "baseline":
         message = (
-            "板端 baseline 工件与界面展示的 formal baseline expected SHA 不一致，"
+            "板端 PyTorch generator checkpoint 与界面展示的 expected SHA 不一致，"
             "OpenAMP 控制面已返回 ARTIFACT_SHA_MISMATCH。"
         )
         if include_fallback:
@@ -1367,8 +1399,8 @@ class LiveRemoteReconstructionJob:
                 )
             elif variant == "baseline":
                 message = (
-                    "当前演示缺少 formal baseline expected SHA，Baseline 无法诚实进入 OpenAMP live 准入；"
-                    "界面将保留正式 baseline 对比结果。"
+                    "当前演示缺少 PyTorch generator expected SHA，PyTorch live 无法诚实进入 OpenAMP live 准入；"
+                    "界面将先回退到归档参考图与正式报告。"
                 )
             else:
                 message = build_inference_message(status_category, variant=variant, include_fallback=True)

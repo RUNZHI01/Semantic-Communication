@@ -24,6 +24,7 @@ from board_access import BoardAccessConfig  # noqa: E402
 from inference_runner import (  # noqa: E402
     PROJECT_ROOT,
     LiveRemoteReconstructionJob,
+    REMOTE_PYTORCH_REFERENCE_SCRIPT,
     REMOTE_RECONSTRUCTION_SCRIPT,
     live_control_hook_timeout_sec,
     run_remote_reconstruction,
@@ -35,6 +36,7 @@ def make_access(env_values: dict[str, str] | None = None) -> BoardAccessConfig:
         "REMOTE_TVM_PYTHON": "/usr/bin/python3",
         "REMOTE_INPUT_DIR": "/tmp/input",
         "REMOTE_OUTPUT_BASE": "/tmp/output",
+        "REMOTE_JSCC_DIR": "/tmp/jscc",
         "REMOTE_SNR_CURRENT": "12",
         "REMOTE_BATCH_CURRENT": "1",
         "INFERENCE_CURRENT_EXPECTED_SHA256": "a" * 64,
@@ -444,9 +446,10 @@ class RunRemoteReconstructionTest(unittest.TestCase):
 
         self.assertNotIn("--remote-project-root", command)
 
-    def test_build_runner_command_adds_sample_cap_for_configured_legacy_baseline_cmd(self) -> None:
+    def test_build_runner_command_pins_baseline_to_pytorch_live_runner(self) -> None:
         access = make_access(
             {
+                "REMOTE_JSCC_DIR": "/tmp/jscc",
                 "REMOTE_SNR_BASELINE": "10",
                 "REMOTE_BATCH_BASELINE": "1",
                 "INFERENCE_BASELINE_EXPECTED_SHA256": "b" * 64,
@@ -458,10 +461,13 @@ class RunRemoteReconstructionTest(unittest.TestCase):
 
         self.assertEqual(
             command,
-            "bash ./session_bootstrap/scripts/run_remote_legacy_tvm_compat.sh --variant baseline --max-inputs 1",
+            (
+                f"bash {REMOTE_PYTORCH_REFERENCE_SCRIPT} --max-images 1 --seed 0 "
+                f"--expected-sha256 {'b' * 64}"
+            ),
         )
+        self.assertNotIn("run_remote_legacy_tvm_compat.sh", command)
         self.assertNotIn(REMOTE_RECONSTRUCTION_SCRIPT.name, command)
-        self.assertNotIn("--seed", command)
 
     def test_build_runner_command_keeps_sampling_args_for_current_reconstruction_cmd(self) -> None:
         access = make_access(
@@ -516,7 +522,7 @@ class RunRemoteReconstructionTest(unittest.TestCase):
         snapshot = live_job.snapshot()
         self.assertEqual(snapshot["status"], "config_error")
         self.assertEqual(snapshot["status_category"], "config_error")
-        self.assertIn("formal baseline expected SHA", snapshot["message"])
+        self.assertIn("PyTorch generator expected SHA", snapshot["message"])
         self.assertEqual(snapshot["diagnostics"]["missing_fields"], ["INFERENCE_BASELINE_EXPECTED_SHA256"])
         popen_mock.assert_not_called()
 
@@ -560,7 +566,7 @@ class RunRemoteReconstructionTest(unittest.TestCase):
         snapshot = live_job.snapshot()
         self.assertEqual(snapshot["status"], "config_error")
         self.assertEqual(snapshot["status_category"], "config_error")
-        self.assertIn("Baseline live 已切到 signed-manifest admission", snapshot["message"])
+        self.assertIn("PyTorch live 已切到 signed-manifest admission", snapshot["message"])
         self.assertEqual(
             snapshot["diagnostics"]["missing_fields"],
             [
@@ -642,8 +648,8 @@ class RunRemoteReconstructionTest(unittest.TestCase):
         self.assertEqual(support["status"], "ready")
         self.assertEqual(support["mode"], "signed_manifest_v1")
         self.assertTrue(support["launch_allowed"])
-        self.assertEqual(support["label"], "Baseline signed live 已支持")
-        self.assertIn("Baseline signed-admission live path is supported.", support["note"])
+        self.assertEqual(support["label"], "PyTorch signed live 已支持")
+        self.assertIn("PyTorch signed-admission live path is supported.", support["note"])
 
     def test_live_job_constructor_passes_generated_uint32_job_id_to_wrapper_and_hook(self) -> None:
         access = make_access(
@@ -1373,7 +1379,7 @@ class RunRemoteReconstructionTest(unittest.TestCase):
             assert snapshot is not None
             self.assertEqual(snapshot["status"], "error")
             self.assertEqual(snapshot["status_category"], "artifact_mismatch")
-            self.assertIn("formal baseline expected SHA", snapshot["message"])
+            self.assertIn("PyTorch generator checkpoint", snapshot["message"])
             self.assertNotIn("passwordless sudo", snapshot["message"])
             self.assertEqual(snapshot["diagnostics"]["control_hook"]["fault_name"], "ARTIFACT_SHA_MISMATCH")
             self.assertEqual(snapshot["diagnostics"]["control_hook"]["transport_status"], "job_ack_received")

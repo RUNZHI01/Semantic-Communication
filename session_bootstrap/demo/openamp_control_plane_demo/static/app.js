@@ -212,9 +212,9 @@ function renderBoardAccess(systemStatus) {
   const currentMissing = access.missing_inference_fields_by_variant?.current || access.missing_inference_fields || [];
   const baselineMissing = access.missing_inference_fields_by_variant?.baseline || [];
   const baselineReadiness = access.inference_ready_variants?.baseline ? "已就绪" : `仍缺 ${summarizeMissing(baselineMissing)}`;
-  const baselineSummary = baselineSupport.mode === "pytorch_reference"
-    ? `${baselineSupport.label || "PyTorch 参考基线"}：已归档，无需 live 会话。`
-    : `Baseline：${baselineReadiness}。`;
+  const baselineSummary = baselineSupport.note
+    ? `${baselineSupport.label || "PyTorch live"}：${baselineSupport.note}`
+    : `PyTorch：${baselineReadiness}。`;
   const onlyPasswordMissing =
     access.missing_connection_fields.length === 1 && access.missing_connection_fields[0] === "password";
 
@@ -273,7 +273,7 @@ function renderAct1(snapshot, systemStatus) {
     kpiCard("运行目标", live.target, `runtime：${live.runtime}`, "online"),
     kpiCard("准入策略", admission.label || "Legacy SHA allowlist", admission.note || "当前 live 准入配置。", admission.tone || "neutral"),
     kpiCard("Current live", currentSupport.label || "Current live", currentSupport.note || "Current 路径状态。", currentSupport.tone || "neutral"),
-    kpiCard(baselineSupport.mode === "pytorch_reference" ? "基线来源" : "Baseline live", baselineSupport.label || "Baseline live", baselineSupport.note || "Baseline 路径状态。", baselineSupport.tone || "neutral"),
+    kpiCard("PyTorch live", baselineSupport.label || "PyTorch live", baselineSupport.note || "PyTorch 路径状态。", baselineSupport.tone || "neutral"),
   ].join("");
 
   const evidence = snapshot.board.evidence_status;
@@ -471,8 +471,8 @@ function renderComparisonProgressCards() {
     expected_count: state.snapshot?.guided_demo?.comparison?.baseline_source?.output_count || 300,
     completed_count: 0,
     count_label: `0 / ${state.snapshot?.guided_demo?.comparison?.baseline_source?.output_count || 300}`,
-    label: "等待装载",
-    current_stage: "等待装载 PyTorch 参考基线",
+    label: "等待启动",
+    current_stage: "等待启动 PyTorch live",
     count_source: "demo_default",
   };
   const baselineProgress = renderProgressFrame(
@@ -488,7 +488,7 @@ function renderComparisonProgressCards() {
     },
     state.baselineResult
       ? buildCompactProgressMeta(normalizeProgress(state.baselineResult?.live_progress || null), state.baselineResult)
-      : "尚未加载参考基线。"
+      : "尚未开始 PyTorch live。"
   );
   const currentProgress = renderProgressFrame(
     state.currentResult?.live_progress || null,
@@ -725,11 +725,10 @@ function renderActLamps(systemStatus) {
 function applyLaunchPolicy(systemStatus) {
   const currentSupport = systemStatus.live?.variant_support?.current || {};
   const baselineSupport = systemStatus.live?.variant_support?.baseline || {};
-  const baselineIsReference = baselineSupport.mode === "pytorch_reference";
   const boardBusy = String(systemStatus.live?.guard_state || "").toUpperCase() === "JOB_ACTIVE";
   const boardBusyReason = "板端当前 guard_state=JOB_ACTIVE；demo 保守阻断新的 live launch，不自动 SAFE_STOP。";
   const currentBlocked = boardBusy || currentSupport.launch_allowed === false;
-  const baselineBlocked = baselineIsReference ? false : (boardBusy || baselineSupport.launch_allowed === false);
+  const baselineBlocked = boardBusy || baselineSupport.launch_allowed === false;
 
   const currentButton = document.getElementById("runCurrentButton");
   const currentAgainButton = document.getElementById("runCurrentAgainButton");
@@ -743,21 +742,19 @@ function applyLaunchPolicy(systemStatus) {
   currentAgainButton.textContent = currentSupport.mode === "signed_manifest_v1"
     ? "运行 Current signed 300 张图"
     : "运行 Current 300 张图";
-  baselineButton.textContent = baselineIsReference
-    ? (baselineSupport.action_label || "加载 PyTorch 参考基线")
-    : baselineSupport.launch_allowed === false
-      ? "Baseline live 未适配 signed admission"
-      : "运行 Baseline 300 张图";
-  runAllButton.textContent = baselineIsReference
-    ? "加载参考基线 + 运行 Current live"
-    : baselineSupport.launch_allowed === false
-      ? "双版本 live 当前未开放"
-      : "一键顺序运行双版本 300 张图";
+  baselineButton.textContent = baselineSupport.launch_allowed === false
+    ? "PyTorch live 未就绪"
+    : baselineSupport.mode === "signed_manifest_v1"
+      ? "运行 PyTorch signed 300 张图"
+      : "运行 PyTorch 300 张图";
+  runAllButton.textContent = baselineSupport.launch_allowed === false
+    ? "PyTorch + Current live 当前未开放"
+    : "一键顺序运行 PyTorch + Current 300 张图";
 
   currentButton.disabled = currentBlocked;
   currentAgainButton.disabled = currentBlocked;
   baselineButton.disabled = baselineBlocked;
-  runAllButton.disabled = currentBlocked || (!baselineIsReference && baselineBlocked);
+  runAllButton.disabled = currentBlocked || baselineBlocked;
 
   currentButton.title = boardBusy ? boardBusyReason : (currentSupport.note || "");
   currentAgainButton.title = currentButton.title;
@@ -918,7 +915,7 @@ async function runBaseline() {
     "baseline",
     "baselineResult",
     "act3",
-    "正在加载 PyTorch 参考基线..."
+    "正在执行 PyTorch 在线推进..."
   );
 }
 

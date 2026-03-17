@@ -17,8 +17,10 @@ Purpose:
   used by the trusted Phytium Pi real reconstruction run.
 
 Options:
-  --env-file <path>        Env snapshot to source. Default:
-                           $DEFAULT_ENV_FILE
+  --env-file <path>        Optional env snapshot to source before resolving
+                           remaining values. Defaults to the validated snapshot
+                           only when the current shell has not already provided
+                           the remote execution variables.
   --mode <ssh|local>       Override REMOTE_MODE from the env file.
   --python <path>          Python interpreter to use.
   --jscc-root <path>       Upstream jscc repo root.
@@ -33,6 +35,7 @@ Options:
   --max-images <int>       Maximum latent files to process. Default: 300
   --device <device>        Torch device. Default: cpu
   --manifest-name <name>   Manifest filename. Default: pytorch_reference_manifest.json
+  --expected-sha256 <sha>  Optional trusted generator checkpoint SHA-256.
   -h, --help               Show this help.
 
 Examples:
@@ -48,7 +51,7 @@ Examples:
 EOF
 }
 
-ENV_FILE="$DEFAULT_ENV_FILE"
+ENV_FILE=""
 MODE_OVERRIDE=""
 PYTHON_BIN_OVERRIDE=""
 JSCC_ROOT_OVERRIDE=""
@@ -63,6 +66,7 @@ SEED="20260312"
 MAX_IMAGES="300"
 DEVICE="cpu"
 MANIFEST_NAME="pytorch_reference_manifest.json"
+EXPECTED_SHA256=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -126,6 +130,10 @@ while [[ $# -gt 0 ]]; do
       MANIFEST_NAME="${2:-}"
       shift 2
       ;;
+    --expected-sha256)
+      EXPECTED_SHA256="${2:-}"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -143,15 +151,29 @@ if [[ ! -f "$PYTHON_HELPER_SOURCE" ]]; then
   exit 1
 fi
 
-if [[ ! -f "$ENV_FILE" ]]; then
-  echo "ERROR: env file not found: $ENV_FILE" >&2
-  exit 1
+if [[ -z "$ENV_FILE" ]]; then
+  have_runtime_env=0
+  for key in REMOTE_MODE REMOTE_HOST REMOTE_USER REMOTE_PASS REMOTE_JSCC_DIR REMOTE_INPUT_DIR REMOTE_OUTPUT_BASE; do
+    if [[ -n "${!key:-}" ]]; then
+      have_runtime_env=1
+      break
+    fi
+  done
+  if [[ "$have_runtime_env" -eq 0 && -f "$DEFAULT_ENV_FILE" ]]; then
+    ENV_FILE="$DEFAULT_ENV_FILE"
+  fi
 fi
 
-# shellcheck disable=SC1090
-set -a
-source "$ENV_FILE"
-set +a
+if [[ -n "$ENV_FILE" ]]; then
+  if [[ ! -f "$ENV_FILE" ]]; then
+    echo "ERROR: env file not found: $ENV_FILE" >&2
+    exit 1
+  fi
+  # shellcheck disable=SC1090
+  set -a
+  source "$ENV_FILE"
+  set +a
+fi
 
 require_var() {
   local var_name="$1"
@@ -181,6 +203,10 @@ fi
 if [[ "$NOISE_MODE" != "awgn" && "$NOISE_MODE" != "none" ]]; then
   echo "ERROR: --noise-mode must be awgn or none (got: $NOISE_MODE)" >&2
   exit 1
+fi
+
+if [[ -z "$MAX_IMAGES" && "${OPENAMP_DEMO_MODE:-}" =~ ^(1|true|TRUE|yes|YES|on|ON)$ ]]; then
+  MAX_IMAGES="${OPENAMP_DEMO_MAX_INPUTS:-300}"
 fi
 
 if [[ "$MODE" == "ssh" ]]; then
@@ -220,11 +246,21 @@ run_helper_args=(
   --max-images "$MAX_IMAGES"
   --device "$DEVICE"
   --manifest-name "$MANIFEST_NAME"
+  --variant baseline
 )
+if [[ -n "$EXPECTED_SHA256" ]]; then
+  run_helper_args+=(--expected-sha256 "$EXPECTED_SHA256")
+fi
 
 echo "[pytorch-ref] mode=$MODE python=$PYTHON_BIN jscc_root=$JSCC_ROOT"
 echo "[pytorch-ref] input_dir=$INPUT_DIR output_dir=$OUTPUT_DIR snr=$SNR seed=$SEED max_images=$MAX_IMAGES"
 echo "[pytorch-ref] generator_ckpt=$GENERATOR_CKPT origin_ckpt=$ORIGIN_CKPT"
+if [[ -n "$ENV_FILE" ]]; then
+  echo "[pytorch-ref] env_file=$ENV_FILE"
+fi
+if [[ -n "$EXPECTED_SHA256" ]]; then
+  echo "[pytorch-ref] expected_sha256=${EXPECTED_SHA256:0:12}..."
+fi
 
 if [[ "$MODE" == "local" ]]; then
   mkdir -p "$OUTPUT_DIR"
@@ -243,7 +279,7 @@ trap cleanup EXIT
 #!/usr/bin/env bash
 set -euo pipefail
 SH
-  declare -p PYTHON_BIN JSCC_ROOT GENERATOR_CKPT ORIGIN_CKPT INPUT_DIR OUTPUT_DIR SNR NOISE_MODE SEED MAX_IMAGES DEVICE MANIFEST_NAME
+  declare -p PYTHON_BIN JSCC_ROOT GENERATOR_CKPT ORIGIN_CKPT INPUT_DIR OUTPUT_DIR SNR NOISE_MODE SEED MAX_IMAGES DEVICE MANIFEST_NAME EXPECTED_SHA256
   cat <<'SH'
 mkdir -p "$OUTPUT_DIR"
 cmd=("$PYTHON_BIN" -)
@@ -259,7 +295,11 @@ cmd+=(
   --max-images "$MAX_IMAGES"
   --device "$DEVICE"
   --manifest-name "$MANIFEST_NAME"
+  --variant baseline
 )
+if [[ -n "$EXPECTED_SHA256" ]]; then
+  cmd+=(--expected-sha256 "$EXPECTED_SHA256")
+fi
 printf '[pytorch-ref-remote] running: %q' "${cmd[@]}"
 printf '\n'
 "${cmd[@]}" <<'PY'

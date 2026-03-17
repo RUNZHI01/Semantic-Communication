@@ -37,6 +37,7 @@ from inference_runner import (
     DEMO_SIGNED_MANIFEST_PUBLIC_KEY_ENV,
     describe_demo_admission,
     describe_demo_variant_support,
+    expected_sha_for_variant,
     launch_remote_reconstruction_job,
 )
 
@@ -200,9 +201,10 @@ class DashboardState:
 
         snapshot = build_snapshot(live_probe=live_probe)
         current_board_access = self._live_board_access_for_variant(board_access, variant="current")
+        baseline_board_access = self._live_board_access_for_variant(board_access, variant="baseline")
         admission = describe_demo_admission(current_board_access, variant="current")
         current_support = describe_demo_variant_support(current_board_access, variant="current")
-        baseline_support = describe_reference_baseline_support()
+        baseline_support = describe_demo_variant_support(baseline_board_access, variant="baseline")
         evidence_status = snapshot["board"]["evidence_status"]
         live_details = live_probe.get("details", {}) if live_probe else {}
         remoteproc_entries = live_details.get("remoteproc", [])
@@ -306,7 +308,10 @@ class DashboardState:
                 if self._probe_cache_path:
                     write_probe_output(result, self._probe_cache_path)
             if board_access.probe_ready:
-                status_payload = query_live_status(board_access, trusted_sha=self._trusted_current_sha)
+                status_payload = query_live_status(
+                    board_access,
+                    trusted_sha=expected_sha_for_variant(live_board_access, variant) or self._trusted_current_sha,
+                )
                 if status_payload.get("status") == "success":
                     with self._lock:
                         self._last_control_status = status_payload
@@ -593,17 +598,12 @@ class DashboardState:
         return payload
 
     def run_demo_inference(self, *, variant: str, image_index: int) -> dict[str, Any]:
-        if variant == "baseline":
-            payload = self._build_reference_baseline_payload(image_index)
-            with self._lock:
-                self._update_last_inference_summary(payload, variant)
-            return payload
-
         payload = build_prerecorded_inference_result(image_index, variant)
         with self._lock:
             board_access = self._board_access
             last_live_probe = self._last_live_probe
         live_board_access = self._live_board_access_for_variant(board_access, variant=variant)
+        variant_expected_sha = expected_sha_for_variant(live_board_access, variant) or self._trusted_current_sha
         variant_support = describe_demo_variant_support(live_board_access, variant=variant)
 
         if board_access.configured:
@@ -629,7 +629,7 @@ class DashboardState:
                     event_log=[message],
                 )
             elif board_access.probe_ready:
-                status_payload = query_live_status(board_access, trusted_sha=self._trusted_current_sha)
+                status_payload = query_live_status(board_access, trusted_sha=variant_expected_sha)
                 if status_payload.get("status") == "success":
                     with self._lock:
                         self._last_control_status = status_payload
