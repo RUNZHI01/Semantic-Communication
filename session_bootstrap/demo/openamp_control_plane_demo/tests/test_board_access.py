@@ -185,6 +185,7 @@ class DemoBoardAccessDefaultsTest(unittest.TestCase):
         access = build_demo_default_board_access(None)
         expected_inference_env = discover_validated_inference_env() or first_existing_env(DEFAULT_INFERENCE_ENV_CANDIDATES)
         expected_remote_project_root = discover_validated_openamp_remote_project_root()
+        expected_torch_pythonpath = str(access.env_file_values.get("REMOTE_TORCH_PYTHONPATH") or "").strip()
 
         self.assertEqual(access.host, "100.121.87.73")
         self.assertEqual(access.user, "user")
@@ -217,6 +218,8 @@ class DemoBoardAccessDefaultsTest(unittest.TestCase):
                 ).resolve()
             ),
         )
+        self.assertTrue(expected_torch_pythonpath)
+        self.assertEqual(access.build_env().get("REMOTE_TORCH_PYTHONPATH", ""), expected_torch_pythonpath)
 
     def test_password_only_update_reuses_preloaded_ssh_and_inference_defaults(self) -> None:
         defaults = build_demo_default_board_access(None)
@@ -241,6 +244,40 @@ class DemoBoardAccessDefaultsTest(unittest.TestCase):
             defaults.build_env().get("LOCAL_CURRENT_ARTIFACT_SOURCE", ""),
         )
         self.assertEqual(access.field_sources["password"], "session")
+
+    def test_explicit_env_file_preserves_validated_torch_sidecar_when_older_env_blanks_it(self) -> None:
+        defaults = build_demo_default_board_access(None)
+        validated_torch_pythonpath = defaults.build_env().get("REMOTE_TORCH_PYTHONPATH", "")
+
+        self.assertTrue(validated_torch_pythonpath)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            env_path = temp_root / "older_current.env"
+            env_path.write_text(
+                "\n".join(
+                    [
+                        "REMOTE_TVM_PYTHON=/usr/bin/python3",
+                        "REMOTE_INPUT_DIR=/tmp/input",
+                        "REMOTE_OUTPUT_BASE=/tmp/output",
+                        "REMOTE_SNR_CURRENT=10",
+                        "REMOTE_BATCH_CURRENT=1",
+                        "REMOTE_TORCH_PYTHONPATH=",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            access = build_board_access_config(
+                {
+                    "password": "demo-pass",
+                    "env_file": str(env_path),
+                },
+                fallback=defaults,
+            )
+
+        self.assertEqual(access.build_env()["REMOTE_TORCH_PYTHONPATH"], validated_torch_pythonpath)
 
     def test_with_env_overrides_replaces_stale_current_expected_sha_from_env_file(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
