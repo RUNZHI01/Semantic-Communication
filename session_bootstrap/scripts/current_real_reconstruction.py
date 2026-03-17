@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import statistics
+import sys
 import time
 from pathlib import Path
 
@@ -13,10 +14,34 @@ import numpy as np
 import tvm
 from tvm import relax
 
-try:
-    import torch
-except ImportError:
-    torch = None
+
+def import_torch_with_fallback():
+    try:
+        import torch as torch_mod
+        return torch_mod
+    except ImportError:
+        extra_pythonpath = (
+            os.environ.get("REMOTE_TORCH_PYTHONPATH")
+            or os.environ.get("REMOTE_REAL_EXTRA_PYTHONPATH")
+            or os.environ.get("DEMO_EXTRA_PYTHONPATH")
+            or ""
+        )
+        candidates = [entry for entry in extra_pythonpath.split(":") if entry]
+        added = False
+        for entry in reversed(candidates):
+            if entry not in sys.path:
+                sys.path.insert(0, entry)
+                added = True
+        if added:
+            try:
+                import torch as torch_mod
+                return torch_mod
+            except ImportError:
+                pass
+        return None
+
+
+torch = import_torch_with_fallback()
 
 try:
     from PIL import Image
