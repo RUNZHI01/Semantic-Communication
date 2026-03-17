@@ -170,14 +170,14 @@
           <p class="eyebrow">第三幕</p>
           <h2>正式基线对比</h2>
         </div>
-        <span class="muted">Current live 对比 PyTorch reference baseline，不再尝试 baseline TVM live</span>
+        <span class="muted">第三幕将真实启动 PyTorch live，并与 Current live 做第一类对比</span>
       </div>
       <div class="dual-progress-grid">
         <article class="panel-lite progress-summary-card">
           <div class="progress-summary-head">
             <div>
               <div class="label">PyTorch Reference</div>
-              <h3>参考基线 300 张图</h3>
+              <h3>PyTorch live 300 张图</h3>
             </div>
             <div class="status-pill tone-neutral" id="baselineProgressBadge">等待触发</div>
           </div>
@@ -187,7 +187,7 @@
             <div class="progress-track"><span class="progress-fill" id="baselineProgressBar"></span><span class="progress-marker" id="baselineProgressMarker"></span></div>
             <div class="progress-axis-labels" id="baselineProgressAxis"></div>
           </div>
-          <div class="compact-copy progress-summary-meta" id="baselineProgressMeta">尚未加载参考基线。</div>
+          <div class="compact-copy progress-summary-meta" id="baselineProgressMeta">尚未开始 PyTorch live。</div>
         </article>
         <article class="panel-lite progress-summary-card">
           <div class="progress-summary-head">
@@ -208,11 +208,11 @@
       </div>
       <div id="comparisonBoard" class="comparison-board"></div>
       <div class="inline-actions">
-        <button id="runBaselineButton" class="button button-secondary" type="button">加载 PyTorch 参考基线</button>
+        <button id="runBaselineButton" class="button button-secondary" type="button">运行 PyTorch 300 张图</button>
         <button id="runCurrentAgainButton" class="button button-primary" type="button">运行 Current signed 300 张图</button>
-        <button id="runAllButton" class="button button-secondary" type="button">加载参考基线 + 运行 Current live</button>
+        <button id="runAllButton" class="button button-secondary" type="button">一键顺序运行 PyTorch + Current 300 张图</button>
       </div>
-      <div class="panel-lite" id="comparisonRunNote">Current signed live 与 PyTorch 参考基线的边界会在此处明确显示。</div>
+      <div class="panel-lite" id="comparisonRunNote">Current live 与 PyTorch live 的控制面边界会在此处明确显示；样例图仍保留归档参考图用于稳定展示。</div>
     </section>
 
     <section class="act-panel panel" id="act4Panel">

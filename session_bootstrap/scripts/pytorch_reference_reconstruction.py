@@ -12,6 +12,7 @@ import logging
 import os
 import random
 import re
+import statistics
 import sys
 import time
 from pathlib import Path
@@ -85,6 +86,16 @@ def parse_args() -> argparse.Namespace:
         "--manifest-name",
         default="pytorch_reference_manifest.json",
         help="Manifest filename written under --output-dir.",
+    )
+    parser.add_argument(
+        "--expected-sha256",
+        default="",
+        help="Optional trusted generator checkpoint SHA-256. Mismatches fail fast.",
+    )
+    parser.add_argument(
+        "--variant",
+        default="baseline",
+        help="Human-readable variant tag surfaced in the final JSON summary.",
     )
     parser.add_argument(
         "--log-level",
@@ -385,12 +396,23 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     reconstructions_dir.mkdir(parents=True, exist_ok=True)
 
-    input_files = collect_input_files(input_dir, args.max_images)
-    if not input_files:
+    all_input_files = collect_input_files(input_dir, 0)
+    if not all_input_files:
         raise SystemExit(f"ERROR: no latent files found in {input_dir}")
+    input_files = all_input_files[: args.max_images] if args.max_images > 0 else all_input_files
+
+    generator_ckpt_sha256 = file_sha256(generator_ckpt)
+    expected_sha256 = str(args.expected_sha256 or "").strip().lower()
+    if expected_sha256 and generator_ckpt_sha256 != expected_sha256:
+        raise SystemExit(
+            "ERROR: generator checkpoint sha256 mismatch "
+            f"path={generator_ckpt} expected={expected_sha256} actual={generator_ckpt_sha256}"
+        )
 
     device = torch.device(args.device)
+    model_load_started = time.perf_counter()
     model, spec = load_generator(jscc_root, generator_ckpt, device)
+    model_load_ms = (time.perf_counter() - model_load_started) * 1000.0
 
     started_at = iso_timestamp()
     LOGGER.info(
@@ -404,9 +426,10 @@ def main() -> None:
 
     records: list[dict[str, Any]] = []
     total_elapsed_ms = 0.0
+    run_samples_ms: list[float] = []
 
     with torch.inference_mode():
-        for input_path in input_files:
+        for index, input_path in enumerate(input_files, start=1):
             base_name = input_path.stem.split("_latent")[0]
             sample_seed = per_file_seed(args.seed, str(input_path.name))
             started = time.perf_counter()
@@ -421,6 +444,7 @@ def main() -> None:
             save_png(output_cpu, save_path)
             elapsed_ms = (time.perf_counter() - started) * 1000.0
             total_elapsed_ms += elapsed_ms
+            run_samples_ms.append(elapsed_ms)
             output_min = float(output_cpu.min().item())
             output_max = float(output_cpu.max().item())
             LOGGER.info(
@@ -449,6 +473,23 @@ def main() -> None:
                     "latent_metadata": json_ready(latent_meta),
                 }
             )
+            print(
+                json.dumps(
+                    {
+                        "openamp_demo_progress": {
+                            "completed_count": index,
+                            "expected_count": len(input_files),
+                            "remaining_count": max(len(input_files) - index, 0),
+                            "completion_ratio": round(index / len(input_files), 4) if input_files else 0.0,
+                            "current_stage": "PyTorch reconstruction",
+                            "sample": input_path.name,
+                            "output_path": str(save_path),
+                        }
+                    },
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
 
     completed_at = iso_timestamp()
     manifest = {
@@ -457,7 +498,7 @@ def main() -> None:
         "completed_at": completed_at,
         "jscc_root": str(jscc_root),
         "generator_ckpt": str(generator_ckpt),
-        "generator_ckpt_sha256": file_sha256(generator_ckpt),
+        "generator_ckpt_sha256": generator_ckpt_sha256,
         "origin_ckpt": None if origin_ckpt is None else str(origin_ckpt),
         "origin_ckpt_sha256": None if origin_ckpt is None or not origin_ckpt.is_file() else file_sha256(origin_ckpt),
         "origin_ckpt_metadata": None if origin_ckpt is None else load_origin_checkpoint_metadata(origin_ckpt),
@@ -480,6 +521,42 @@ def main() -> None:
     manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     LOGGER.info("Manifest written to %s", manifest_path)
     LOGGER.info("Completed %s/%s reference reconstructions", len(records), len(input_files))
+    summary = {
+        "variant": str(args.variant),
+        "runtime": "pytorch_reference",
+        "artifact_path": str(generator_ckpt),
+        "artifact_sha256": generator_ckpt_sha256,
+        "artifact_sha256_expected": expected_sha256 or None,
+        "artifact_sha256_match": None if not expected_sha256 else generator_ckpt_sha256 == expected_sha256,
+        "input_dir": str(input_dir),
+        "output_dir": str(reconstructions_dir),
+        "manifest_path": str(manifest_path),
+        "output_count": len(records),
+        "processed_count": len(records),
+        "input_count": len(input_files),
+        "available_input_count": len(all_input_files),
+        "load_ms": round(model_load_ms, 3),
+        "vm_init_ms": 0.0,
+        "run_count": len(run_samples_ms),
+        "run_samples_ms": [round(value, 3) for value in run_samples_ms],
+        "run_median_ms": round(statistics.median(run_samples_ms), 3) if run_samples_ms else None,
+        "run_mean_ms": round(sum(run_samples_ms) / len(run_samples_ms), 3) if run_samples_ms else None,
+        "run_min_ms": round(min(run_samples_ms), 3) if run_samples_ms else None,
+        "run_max_ms": round(max(run_samples_ms), 3) if run_samples_ms else None,
+        "run_variance_ms2": round(statistics.pvariance(run_samples_ms), 6) if len(run_samples_ms) > 1 else 0.0,
+        "output_shape": records[-1]["output_shape"] if records else None,
+        "output_dtype": "uint8" if records else None,
+        "snr": args.snr,
+        "batch_size": 1,
+        "save_format": "png",
+        "seed": args.seed,
+        "max_inputs": args.max_images,
+        "noise_mode": args.noise_mode,
+        "device": str(device),
+        "generator_ckpt": str(generator_ckpt),
+        "origin_ckpt": None if origin_ckpt is None else str(origin_ckpt),
+    }
+    print(json.dumps(summary, ensure_ascii=False), flush=True)
 
 
 if __name__ == "__main__":
