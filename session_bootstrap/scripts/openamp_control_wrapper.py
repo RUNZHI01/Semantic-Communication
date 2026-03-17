@@ -173,6 +173,53 @@ def normalize_decision(response: dict[str, Any] | None) -> str | None:
     return text or None
 
 
+def hook_response_payload(hook_result: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(hook_result, dict):
+        return {}
+    response = hook_result.get("response")
+    return response if isinstance(response, dict) else {}
+
+
+def status_req_allows_progress(*, transport: str, status_response: dict[str, Any] | None) -> bool:
+    if transport != "hook":
+        return True
+    response = hook_response_payload(status_response)
+    return str(response.get("transport_status") or "").strip().lower() == "status_resp_received"
+
+
+def signed_admission_allows_progress(*, transport: str, hook_result: dict[str, Any] | None) -> bool:
+    if transport != "hook":
+        return True
+    response = hook_response_payload(hook_result)
+    return bool(response.get("acknowledged"))
+
+
+def build_denied_summary(
+    *,
+    blocked_phase: str,
+    status_response: dict[str, Any],
+    signed_admission_responses: list[dict[str, Any]],
+    job_req_response: dict[str, Any],
+    control_job_id: int,
+    runner_log_path: Path,
+    manifest_path: Path,
+    trace_path: Path,
+) -> dict[str, Any]:
+    return {
+        "finished_at": now_iso(),
+        "job_id": control_job_id,
+        "result": "denied_by_control_hook",
+        "blocked_phase": blocked_phase,
+        "status_response": status_response,
+        "signed_admission_responses": signed_admission_responses,
+        "job_req_response": job_req_response,
+        "runner_exit_code": None,
+        "runner_log": str(runner_log_path),
+        "manifest_path": str(manifest_path),
+        "control_trace_path": str(trace_path),
+    }
+
+
 def build_job_ack_payload(
     *,
     job_id: int,
@@ -599,6 +646,20 @@ def main() -> int:
         hook_cmd=args.control_hook_cmd,
         hook_timeout_sec=args.control_hook_timeout_sec,
     )
+    if not status_req_allows_progress(transport=args.transport, status_response=status_response):
+        summary = build_denied_summary(
+            blocked_phase="STATUS_REQ",
+            status_response=status_response,
+            signed_admission_responses=[],
+            job_req_response={},
+            control_job_id=control_job_id,
+            runner_log_path=runner_log_path,
+            manifest_path=manifest_path,
+            trace_path=trace_path,
+        )
+        json_dump(summary_path, summary)
+        print(json.dumps(summary, ensure_ascii=False))
+        return 2
 
     signed_admission_responses: list[dict[str, Any]] = []
     final_job_req_transport_frame: dict[str, Any] | None = None
@@ -611,21 +672,34 @@ def main() -> int:
             if phase == "JOB_REQ":
                 final_job_req_transport_frame = frame
                 continue
-            signed_admission_responses.append(
-                emit_event(
-                    trace_path=trace_path,
-                    phase=phase,
-                    payload=build_signed_admission_frame_payload(
-                        job_id=control_job_id,
-                        signed_admission=signed_admission,
-                        frame=frame,
-                        trusted_artifact=trusted_artifact,
-                    ),
-                    transport=args.transport,
-                    hook_cmd=args.control_hook_cmd,
-                    hook_timeout_sec=args.control_hook_timeout_sec,
-                )
+            signed_response = emit_event(
+                trace_path=trace_path,
+                phase=phase,
+                payload=build_signed_admission_frame_payload(
+                    job_id=control_job_id,
+                    signed_admission=signed_admission,
+                    frame=frame,
+                    trusted_artifact=trusted_artifact,
+                ),
+                transport=args.transport,
+                hook_cmd=args.control_hook_cmd,
+                hook_timeout_sec=args.control_hook_timeout_sec,
             )
+            signed_admission_responses.append(signed_response)
+            if not signed_admission_allows_progress(transport=args.transport, hook_result=signed_response):
+                summary = build_denied_summary(
+                    blocked_phase=phase,
+                    status_response=status_response,
+                    signed_admission_responses=signed_admission_responses,
+                    job_req_response={},
+                    control_job_id=control_job_id,
+                    runner_log_path=runner_log_path,
+                    manifest_path=manifest_path,
+                    trace_path=trace_path,
+                )
+                json_dump(summary_path, summary)
+                print(json.dumps(summary, ensure_ascii=False))
+                return 2
 
     job_req_payload = build_job_req_payload(
         job_id=control_job_id,
@@ -664,18 +738,16 @@ def main() -> int:
     )
 
     if args.transport == "hook" and decision != "ALLOW":
-        summary = {
-            "finished_at": now_iso(),
-            "job_id": control_job_id,
-            "result": "denied_by_control_hook",
-            "status_response": status_response,
-            "signed_admission_responses": signed_admission_responses,
-            "job_req_response": job_req_response,
-            "runner_exit_code": None,
-            "runner_log": str(runner_log_path),
-            "manifest_path": str(manifest_path),
-            "control_trace_path": str(trace_path),
-        }
+        summary = build_denied_summary(
+            blocked_phase="JOB_REQ",
+            status_response=status_response,
+            signed_admission_responses=signed_admission_responses,
+            job_req_response=job_req_response,
+            control_job_id=control_job_id,
+            runner_log_path=runner_log_path,
+            manifest_path=manifest_path,
+            trace_path=trace_path,
+        )
         json_dump(summary_path, summary)
         emit_event(
             trace_path=trace_path,
