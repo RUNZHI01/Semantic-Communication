@@ -47,14 +47,35 @@ Critical fields to fill before the first board run:
 
 ## Read-Only Board Inspection
 
-Read-only inspection is still useful once tomorrow, before the first real run:
+Run the repo-side topology helper once tomorrow, before the first real run:
+
+```bash
+python3 ./session_bootstrap/scripts/big_little_topology_probe.py ssh \
+  --env session_bootstrap/config/<your-big-little-env>.env
+```
+
+The helper performs a read-only SSH probe, runs only `lscpu` / `lscpu -e`, and prints:
+
+- a structured JSON summary
+- a suggested `BIG_LITTLE_BIG_CORES=...`
+- a suggested `BIG_LITTLE_LITTLE_CORES=...`
+
+If you want a local reparseable capture file as well:
+
+```bash
+python3 ./session_bootstrap/scripts/big_little_topology_probe.py ssh \
+  --env session_bootstrap/config/<your-big-little-env>.env \
+  --write-raw session_bootstrap/reports/big_little_topology_capture_latest.txt
+```
+
+Fallback raw commands, if you need to inspect the board output yourself:
 
 ```bash
 lscpu
 lscpu -e=CPU,CORE,SOCKET,NODE,MAXMHZ,MINMHZ
 ```
 
-Use those outputs only to confirm the CPU numbering for:
+Use the helper suggestion, or those raw outputs if needed, only to confirm the CPU numbering for:
 
 - `BIG_LITTLE_BIG_CORES`
 - `BIG_LITTLE_LITTLE_CORES`
