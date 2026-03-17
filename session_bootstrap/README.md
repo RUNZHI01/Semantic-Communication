@@ -31,6 +31,7 @@
 | 真实端到端重建正式结论 | `reports/inference_real_reconstruction_compare_run_20260311_212301.md` |
 | 下一轮性能优化执行清单 | `runbooks/next_round_optimization_checklist.md` |
 | big.LITTLE 首次真机一键入口 | `scripts/run_big_little_first_real_attempt.sh` |
+| big.LITTLE 明早执行交接 | `reports/big_little_overnight_handoff_20260318.md` |
 | big.LITTLE 异构流水线 runbook | `runbooks/big_little_pipeline_runbook_2026-03-18.md` |
 | 后续性能优化路线 | `runbooks/optimization_roadmap.md` |
 

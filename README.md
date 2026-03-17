@@ -57,6 +57,7 @@
 | OpenAMP demo 软件说明 | `session_bootstrap/demo/openamp_control_plane_demo/README.md` |
 | 下一轮性能优化执行清单 | `session_bootstrap/runbooks/next_round_optimization_checklist.md` |
 | big.LITTLE 首次真机一键入口 | `bash session_bootstrap/scripts/run_big_little_first_real_attempt.sh` |
+| big.LITTLE 明早执行交接 | `session_bootstrap/reports/big_little_overnight_handoff_20260318.md` |
 | big.LITTLE 异构流水线 runbook | `session_bootstrap/runbooks/big_little_pipeline_runbook_2026-03-18.md` |
 | 后续性能优化路线 | `session_bootstrap/runbooks/optimization_roadmap.md` |
 | 飞腾派 RPC 调优 | `session_bootstrap/scripts/rpc_tune.py` |
