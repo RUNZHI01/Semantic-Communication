@@ -1,6 +1,6 @@
 # big.LITTLE Pipeline Runbook
 
-> Operators who only need the final outcome should read `session_bootstrap/reports/big_little_real_run_summary_20260318.md` first; if you need the original step-by-step first-run chain, read `session_bootstrap/reports/big_little_overnight_handoff_20260318.md`. 
+> Operators who only need the final outcome should read `session_bootstrap/reports/big_little_real_run_summary_20260318.md` first; if you need the historical step-by-step first-run chain, read `session_bootstrap/reports/big_little_overnight_handoff_20260318.md`. 
 
 ## Goal
 
@@ -44,9 +44,9 @@ bash ./session_bootstrap/scripts/run_big_little_compare.sh \
 
 This preserves the trusted serial command as the baseline while giving the pipeline path its own isolated wrapper and report files.
 
-### Tomorrow morning command chain
+### Historical first-run command chain
 
-If you want the least-thinking path tomorrow morning, one command is enough:
+If you want the least-thinking path for the original first real run, one command is enough:
 
 ```bash
 bash ./session_bootstrap/scripts/run_big_little_first_real_attempt.sh

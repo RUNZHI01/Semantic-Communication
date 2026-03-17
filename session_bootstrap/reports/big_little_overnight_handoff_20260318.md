@@ -1,4 +1,4 @@
-# big.LITTLE 明早执行交接（2026-03-18 夜间）
+# big.LITTLE 首跑前交接（2026-03-18 夜间，现作历史参考）
 
 > 更新：这份文档现在主要保留为“首跑前操作链”参考；若只想看当前最终结论，优先读 `session_bootstrap/reports/big_little_real_run_summary_20260318.md`。首轮真机 compare 为 `2.886 -> 3.952 images/s`（`+36.937%`），第二轮复跑为 `2.879 -> 3.931 images/s`（`+36.54%`）；背景与完整细节见 `session_bootstrap/runbooks/big_little_pipeline_runbook_2026-03-18.md`。
 
@@ -61,8 +61,8 @@ bash ./session_bootstrap/scripts/run_big_little_compare.sh \
   - `BIG_LITTLE_BIG_CORES=2`
   - `BIG_LITTLE_LITTLE_CORES=0,1`
 - 依据：在线 CPU 为 `0,1,2`，其中 CPU `2` 的 `MAXMHZ=1800`，CPU `0,1` 为 `1500`
-- caveat：CPU `3` 在首轮探测时 offline，所以这只是明早首跑前的工作建议，不是最终硬编码结论；明早先重新跑一次只读 probe，再让脚本自动回填
-- 额外提醒：`session_bootstrap/reports/big_little_topology_suggestion_latest.json` 当前是零字节临时文件，不要拿它当现成结论；明早重新 probe 后它会被覆盖成新的 latest
+- caveat：CPU `3` 在首轮探测时 offline，所以这只是首轮执行前的工作建议，不是最终硬编码结论；后续复跑前仍建议先重新跑一次只读 probe，再让脚本自动回填
+- 额外提醒：`session_bootstrap/reports/big_little_topology_suggestion_latest.json` 当前保留的是那次首轮前 probe 的 latest 产物；后续复跑前若重新 probe，它会被覆盖成新的 latest
 
 ## 5. 预期输出
 
@@ -83,7 +83,7 @@ bash ./session_bootstrap/scripts/run_big_little_compare.sh \
   - `session_bootstrap/reports/big_little_compare_<timestamp>.pipeline.raw.log`
 - 真机 pipeline 成功时，远端输出目录默认落在：`/home/user/Downloads/jscc-test/big_little_runs/big_little_pipeline_current`
 
-## 6. 剩余真实 blocker
+## 6. 当前定位
 
-- 现在剩下的真实 blocker 只有一件事：明早在真实飞腾派上跑一次
-- repo 侧脚本、env、runbook、拓扑探测、自动回填、报告落盘都已就位；本地/mock 结果只能证明链路可执行，不能替代真机结论
+- 这份文档对应的“剩余真实 blocker”已经被后续执行消化完；首轮真机 pipeline、两轮 compare 与 profiling 都已完成
+- repo 侧脚本、env、runbook、拓扑探测、自动回填与报告落盘都已被真机 run 实际验证；本地/mock 结果现仅保留为脚手架验证历史
