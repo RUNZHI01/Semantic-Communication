@@ -1,6 +1,6 @@
 # Session Progress Log（长期维护）
 
-- 最后更新：2026-03-17 08:12 +0800（在 05:45 +0800 已完成 3/16 晚到 3/17 凌晨这条 OpenAMP demo live 线的板端事实收口之后，本轮又把同一事实继续推进到了 dashboard 与本地运行验收层：新增 `session_bootstrap/reports/openamp_demo_dashboard_local_acceptance_20260317.md`，并确认 `run_openamp_demo.sh --port 8092` 实际启动后 `/api/health` 返回 `ok`、`/api/snapshot` 已正确暴露 `latest_live_status`，其中明确给出 **8115 是唯一有效 demo 实例**、`current=300/300`、`baseline=300/300` 与最新状态报告路径。与此同时，这份 3/17 最新 live 双路径状态已经同步进入项目根 README、`session_bootstrap/README.md`、artifact registry、证据包 README/summary/demo runbook、讲稿提纲、降级方案以及 demo 软件 README；而 `young-fjord` 的 `SIGTERM` 只是我在验收完成后主动结束临时本地 demo 进程，不构成新的失败。）
+- 最后更新：2026-03-18 00:06 +0800（本轮工作重心已经从“补文档入口”切回“把 demo 真正跑起来”。现状已经明显前进：**current live 已在最新代码下真实跑通 `300/300`**，并完成 `STATUS_REQ(READY) -> JOB_REQ(ALLOW) -> HEARTBEAT_ACK -> JOB_DONE(success)` 的整条控制面闭环；其间也已修复 current trusted SHA 错配（`bc9d836`）、torch sidecar fallback/runner 导入问题（`f17c665` / `ab01b5f` / `6b9a8a7`）。另一方面，**baseline 已不再停留在归档 reference 面板，而是已接成真实 PyTorch live 执行路径**（`f94fee1`），但最新终验表明板端仍会对其返回 `JOB_ACK(DENY, ARTIFACT_SHA_MISMATCH)`；也就是说，当前剩余主 blocker 已从 demo 接线切到固件/控制面对 PyTorch generator checkpoint 工件语义的接受规则，而不再是前端或 launch 流程本身。）
 - 作用：沉淀“当前状态 + 失败经验 + 下一步最小执行方案”，避免重复踩坑。
 
 ## 1) 时间线（关键里程碑）
@@ -53,6 +53,8 @@
 | 2026-03-15 02:50 | OpenAMP 控制面总证据包收口完成 | 已新增 `session_bootstrap/reports/openamp_control_plane_evidence_package_20260315/{README.md,coverage_matrix.md,summary_report.md}`，并同步更新根 `README.md`、`session_bootstrap/README.md` 与 `runbooks/artifact_registry.md`，形成可直接用于答辩 / 演示的统一入口。至此 OpenAMP 工程推进阶段可判断为：P1 风险/FIT/覆盖分析基本完成，主焦点切换到 Demo / 视频 / PPT / 讲稿与评委高频追问补证 | `session_bootstrap/reports/openamp_control_plane_evidence_package_20260315/README.md` / `coverage_matrix.md` / `summary_report.md` |
 | 2026-03-16 20:38 | OpenAMP signed-admission 真机成功证据包收口 | session 已确认 live firmware `140e2e8c...12f1` 冷启动可存活，真实 signed sideband `BEGIN/CHUNK/SIGNATURE/COMMIT` 全部 ACK，follow-up `JOB_REQ` 返回 `JOB_ACK(ALLOW)`，并在 `SAFE_STOP` 清理 + fresh `job_id` 后复验成立。本轮新增的 signed-admission 证据包同时固化了 committed fixture 形状、recovered board build/install lineage、minimal-crypto / sha fix helper 线索，以及“matching private key 不在 repo/workspace，因此 baseline signed validation 未执行”的明确边界。 | `session_bootstrap/reports/openamp_signed_admission_real_board_success_20260316/README.md` / `session_bootstrap/reports/openamp_signed_admission_real_board_success_20260316/evidence_summary.json` |
 | 2026-03-17 07:50 | OpenAMP dashboard 最新 live 状态本地启动验收通过 | 本轮在本地临时启动 `run_openamp_demo.sh --port 8092` 后，已确认 `GET /api/health -> {"status":"ok"}`，且 `GET /api/snapshot` 正确暴露 `latest_live_status`：`report_date=2026-03-17`、`valid_instance=8115`、`current=300/300`、`baseline=300/300`，并把 3/17 最新状态报告置于 dashboard docs 入口首位。随后收到的 `young-fjord` `SIGTERM` 只是验收完成后主动结束临时本地 demo 进程。 | `session_bootstrap/reports/openamp_demo_dashboard_local_acceptance_20260317.md` / `session_bootstrap/demo/openamp_control_plane_demo/demo_data.py` / `session_bootstrap/demo/openamp_control_plane_demo/static/app.js` |
+| 2026-03-17 21:44 | OpenAMP demo `current live` 真机链路恢复并完成 `300/300` | 经 reboot + `set_env.sh -> rpmsg-demo` bring-up、current trusted SHA 对齐（`bc9d836`）以及 torch sidecar / runner 导入链修复（`f17c665` / `ab01b5f` / `6b9a8a7`）后，`current live` 已在最新代码下真实跑通：控制面成功完成 `STATUS_REQ(READY) -> JOB_REQ(ALLOW) -> HEARTBEAT_ACK -> JOB_DONE(success)`，runner summary 报告 `processed_count=300`、`output_count=300`、`artifact_sha256_match=true`，中位推理时间约 `356.438 ms`。这说明最关键的 current demo live 路径已经从 0/300 恢复到真实可运行状态。 | 本地终验 `job_id=2520907865` 的 `/api/inference-progress` 完整 payload / `runner_summary` / `control_trace` / `wrapper_summary`；相关修复提交：`bc9d836`、`f17c665`、`ab01b5f`、`6b9a8a7` |
+| 2026-03-17 23:57 | OpenAMP demo baseline 已接入真实 `PyTorch live` 执行路径，但板端 admission 仍拒绝 | baseline 不再只是归档 reference，而是已切到 `run_remote_pytorch_reference_reconstruction.sh` + `pytorch_reference_reconstruction.py` 的真实执行链（提交 `f94fee1`）。板上 `/home/user/Downloads/jscc-test/export/compressed_gan.pt` 的真实 SHA 已确认是 `3afcebc7...e87763`，并且 demo 发起 baseline live 时已经以该 SHA 作为 expected artifact 发出 `JOB_REQ`；但最新终验仍收到 `JOB_ACK(DENY, ARTIFACT_SHA_MISMATCH)`。这说明当前剩余主 blocker 已经收敛为：**固件 / 控制面对 PyTorch generator checkpoint 这类工件的接受语义尚未对齐**。 | `f94fee1` / baseline live 终验 `job_id=2719112481` 的 `event_log`（`JOB_REQ -> trusted_sha=3afcebc74716`，`JOB_ACK(DENY) -> fault=ARTIFACT_SHA_MISMATCH`）/ 板上 `compressed_gan.pt` SHA 实测 |
 | 2026-03-14 21:04 | OpenAMP 最小 `HEARTBEAT/HEARTBEAT_ACK` 真机闭环打通且 fresh-boot 状态一致性修复成功 | 修复后的 heartbeat-fix 版固件（size `1646088`，SHA `c1172b7c...4711`）已在真机上验证：fresh boot 后初始 `STATUS_RESP` 为 `guard_state=READY, active_job_id=0, heartbeat_ok=0, total_fault_count=0`；随后真实 `JOB_REQ(ALLOW)`、`HEARTBEAT_ACK(heartbeat_ok=1)` 与 follow-up `STATUS_RESP(guard_state=JOB_ACTIVE, active_job_id=9501, heartbeat_ok=1)` 全部成立，说明先前 deny/heartbeat 状态不一致问题已被 reset/normalize 修复收住 | `session_bootstrap/reports/openamp_heartbeat_fix_validate_20260314/phase3_probe.log` / `session_bootstrap/patches/phytium_openamp_for_linux_status_req_resp_release_v1.4.0_2026-03-14.patch` |
 
 ## 2) 已完成项 / 阻断项
@@ -64,6 +66,8 @@
 - realcmd 级 quick 已跑通：`status=success`，说明远端 Python/TVM/输入目录/输出目录链路可用。
 - full realcmd baseline 已成功执行，说明 `tvm_002.py + batch=1` 路径本身可运行。
 - current real reconstruction runner 已入库：`session_bootstrap/scripts/current_real_reconstruction.py`、`session_bootstrap/scripts/run_remote_current_real_reconstruction.sh` 与 `session_bootstrap/config/inference_real_reconstruction_compare.2026-03-11.phytium_pi.env` 已落盘；current 真实 reconstruction 入口现统一为 `session_bootstrap/scripts/run_remote_current_real_reconstruction.sh --variant current`。
+- 2026-03-17 夜间 `current live` demo 路径已经恢复到真机可运行状态：在最新代码下，current live 已真实完成 `300/300`，并通过控制面拿到 `STATUS_REQ(READY) -> JOB_REQ(ALLOW) -> HEARTBEAT_ACK -> JOB_DONE(success)` 的整条闭环。当前最关键的 demo 主路径因此不再 blocked。
+- baseline 已经从“PyTorch reference 展示卡片”进一步推进成真实 `PyTorch live` 执行路径：demo baseline 现改走 `run_remote_pytorch_reference_reconstruction.sh` / `pytorch_reference_reconstruction.py`，而不再是 legacy TVM compat runner。
 - `chunk4` 新 current fresh 真实端到端 reconstruction 正式成对验证已完成：`session_bootstrap/reports/inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md` 已确认 baseline/current run count 均为 `300`，baseline median `1850.0 ms/image`，current median `230.339 ms/image`，improvement `87.55%`；相对上一代 trusted current `234.219 ms/image` 再快约 `1.66%`。
 - `chunk4` 新 current fresh payload 正式成对验证已完成：当前正式 trusted current SHA 已推进到 `6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1`，正式 payload 中位时间为 `130.219 ms`，较上一代 trusted current `65747fb3...b6377` 的 `131.343 ms` 再快约 `0.86%`；对应 fresh payload / e2e 两份正式报告已落盘。
 - OpenAMP `release_v1.4.0` 候选真机冷启动 + 官方 RPMsg demo 路径已验证成功：board 当前 live `/lib/firmware/openamp_core0.elf` 为 size `1627224`、SHA `685f39b0bcdd4eee31ad81d196cf8dda4ba6e33e2285b32985727bd1465e5dc8`；安装候选后冷启动成功，`remoteproc0=running`，dmesg 已出现 `size 1627224` / `remote processor homo_rproc is now up` / `creating channel rpmsg-openamp-demo-channel`，`/dev/rpmsg_ctrl0` 与 `/dev/rpmsg0` 均存在，`sudo rpmsg-demo` 已 echo 至 `Hello World! No:100`。这说明候选已通过板级冷启动与官方 userspace demo 门禁，但不代表已证明与板原始官方固件 byte-identical。
@@ -84,9 +88,10 @@
 
 ### 当前阻断项（P0）
 
-- **baseline 与 current 运行时已确认分叉**：
-  - baseline 仍依赖旧 compat runtime 路径；
-  - current 已验证应走 `tvm310_safe + safe 0.24.dev0 runtime`。
+- **baseline 与 current 运行时已确认继续分叉，但语义已更新**：
+  - current 已在 latest demo 代码下真实跑通 `300/300`，当前主线已不再是 blocker；
+  - baseline 不再优先走旧 TVM compat live，而是已切成真实 `PyTorch live` 路径；
+  - baseline 当前剩余 blocker 不是 demo 接线，而是板端 admission 仍会对 PyTorch generator checkpoint 返回 `ARTIFACT_SHA_MISMATCH`。
 - **remote current-safe artifact 身份现在必须显式受控**：
   - 2026-03-11 的 `failed_current` 已确认由远端 `optimized_model.so` 漂移触发；
   - 当前 inference 路径已支持 `INFERENCE_CURRENT_EXPECTED_SHA256`，safe env 现默认应跟踪最新 trusted current 产物 SHA `6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1`；
