@@ -1,5 +1,7 @@
 # big.LITTLE 明早执行交接（2026-03-18 夜间）
 
+> 背景与完整细节见 `session_bootstrap/runbooks/big_little_pipeline_runbook_2026-03-18.md`。
+
 ## 1. repo 侧已完成
 
 - 一键入口已就位：`session_bootstrap/scripts/run_big_little_first_real_attempt.sh`

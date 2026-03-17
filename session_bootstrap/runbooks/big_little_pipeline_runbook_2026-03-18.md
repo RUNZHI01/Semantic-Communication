@@ -1,5 +1,7 @@
 # big.LITTLE Pipeline Runbook
 
+> Operators who only need tomorrow-morning execution should read `session_bootstrap/reports/big_little_overnight_handoff_20260318.md` first.
+
 ## Goal
 
 Produce a low-risk heterogeneous-core result tomorrow without changing board firmware or rebooting:
