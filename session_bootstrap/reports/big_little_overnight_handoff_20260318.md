@@ -1,6 +1,6 @@
 # big.LITTLE 明早执行交接（2026-03-18 夜间）
 
-> 更新：首轮真机执行已完成，正式结果见 `session_bootstrap/reports/big_little_compare_20260318_051326.md`（`2.886 -> 3.952 images/s`，吞吐提升 `36.937%`）；背景与完整细节见 `session_bootstrap/runbooks/big_little_pipeline_runbook_2026-03-18.md`。
+> 更新：这份文档现在主要保留为“首跑前操作链”参考；若只想看当前最终结论，优先读 `session_bootstrap/reports/big_little_real_run_summary_20260318.md`。首轮真机 compare 为 `2.886 -> 3.952 images/s`（`+36.937%`），第二轮复跑为 `2.879 -> 3.931 images/s`（`+36.54%`）；背景与完整细节见 `session_bootstrap/runbooks/big_little_pipeline_runbook_2026-03-18.md`。
 
 ## 1. repo 侧已完成
 

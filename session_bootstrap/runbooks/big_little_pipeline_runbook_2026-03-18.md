@@ -1,6 +1,6 @@
 # big.LITTLE Pipeline Runbook
 
-> Operators who only need tomorrow-morning execution should read `session_bootstrap/reports/big_little_overnight_handoff_20260318.md` first.
+> Operators who only need the final outcome should read `session_bootstrap/reports/big_little_real_run_summary_20260318.md` first; if you need the original step-by-step first-run chain, read `session_bootstrap/reports/big_little_overnight_handoff_20260318.md`. 
 
 ## Goal
 
