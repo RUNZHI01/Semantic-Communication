@@ -32,6 +32,7 @@
 | 下一轮性能优化执行清单 | `runbooks/next_round_optimization_checklist.md` |
 | big.LITTLE 首次真机一键入口 | `scripts/run_big_little_first_real_attempt.sh` |
 | big.LITTLE 明早执行交接 | `reports/big_little_overnight_handoff_20260318.md` |
+| big.LITTLE 真机结论摘要 | `reports/big_little_real_run_summary_20260318.md` |
 | big.LITTLE 首轮真机对比结果 | `reports/big_little_compare_20260318_051326.md` |
 | big.LITTLE 首轮资源 profiling | `reports/resource_profile_big_little_current_20260318_052922.md` |
 | big.LITTLE 异构流水线 runbook | `runbooks/big_little_pipeline_runbook_2026-03-18.md` |

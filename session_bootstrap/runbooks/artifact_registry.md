@@ -12,6 +12,7 @@
 核心入口：
 - `session_bootstrap/scripts/run_big_little_first_real_attempt.sh`
 - `session_bootstrap/reports/big_little_overnight_handoff_20260318.md`
+- `session_bootstrap/reports/big_little_real_run_summary_20260318.md`
 - `session_bootstrap/reports/big_little_compare_20260318_051326.md`
 - `session_bootstrap/reports/big_little_pipeline_current_20260318_051520.md`
 - `session_bootstrap/reports/resource_profile_big_little_current_20260318_052922.md`
@@ -26,7 +27,9 @@
 
 补充说明：
 - 这条线已经从“明早可执行”推进到“首轮真机结果已落盘”；
+- `big_little_real_run_summary_20260318.md` 是当前最适合直接引用的一页摘要：收拢了首轮 compare、第二轮复跑和 profiling；
 - `big_little_compare_20260318_051326.md` 给出首轮真机对比：serial `2.886 images/s` -> pipeline `3.952 images/s`，吞吐提升 `36.937%`；
+- `big_little_compare_20260318_053619.md` 给出第二轮复跑：serial `2.879 images/s` -> pipeline `3.931 images/s`，吞吐提升 `36.54%`；
 - `big_little_pipeline_current_20260318_051520.md` 给出真机 pipeline 本体结果：`processed_count=300`、`artifact_sha256_match=true`、`big_cores=[2]`、`little_cores=[0,1]`；
 - `resource_profile_big_little_current_20260318_052922.md` 给出同一条真机 pipeline current 路径的板级资源证据：wall time `84s`、vmstat 平均 CPU `user/system/idle/wait = 53.812 / 2.706 / 43.435 / 0.129 %`、平均 runnable `2.165`、最小 free memory `217480 KB`；
 - `big_little_overnight_handoff_20260318.md` 现保留为这次首跑前的短交接，同时在顶部补了真机结果回链；
