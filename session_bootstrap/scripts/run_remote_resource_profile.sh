@@ -380,13 +380,20 @@ exit 0
 SH
 )"
 
-if ! capture_remote_file "$TOOL_PROBE_FILE" bash -lc "$TOOL_PROBE_SCRIPT"; then
-  echo "ERROR: remote tool probe failed; see $TOOL_PROBE_FILE" >&2
+set +e
+ssh_exec bash -lc "$TOOL_PROBE_SCRIPT" >"$TOOL_PROBE_FILE" 2>&1
+TOOL_PROBE_RC=$?
+set -e
+if [[ ! -s "$TOOL_PROBE_FILE" ]]; then
+  echo "ERROR: remote tool probe produced no output; see $TOOL_PROBE_FILE" >&2
   exit 1
 fi
 if grep -q '^required_missing=1$' "$TOOL_PROBE_FILE"; then
   echo "ERROR: remote required tools missing; see $TOOL_PROBE_FILE" >&2
   exit 1
+fi
+if [[ "$TOOL_PROBE_RC" -ne 0 ]]; then
+  log "WARN: remote tool probe returned rc=$TOOL_PROBE_RC but produced a usable probe file; continuing"
 fi
 
 FREE_H_SCRIPT="$(make_snapshot_script "free -h")"
