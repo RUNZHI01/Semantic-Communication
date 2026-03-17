@@ -36,19 +36,23 @@ If you want the least-thinking path tomorrow morning, run in this order:
 ```bash
 # 1) Re-check the topology once (read-only)
 python3 ./session_bootstrap/scripts/big_little_topology_probe.py ssh \
-  --env session_bootstrap/config/big_little_pipeline.current.example.env \
-  --write-raw session_bootstrap/reports/big_little_topology_capture_latest.txt
+  --env session_bootstrap/config/big_little_pipeline.current.2026-03-18.phytium_pi.env \
+  --write-raw session_bootstrap/reports/big_little_topology_capture_latest.txt \
+  > session_bootstrap/reports/big_little_topology_suggestion_latest.json
 
-# 2) If needed, edit BIG_LITTLE_BIG_CORES / BIG_LITTLE_LITTLE_CORES in your copied env
+# 2) Apply the suggested BIG/LITTLE split into your env automatically
+python3 ./session_bootstrap/scripts/apply_big_little_topology_suggestion.py \
+  --env session_bootstrap/config/big_little_pipeline.current.2026-03-18.phytium_pi.env \
+  --suggestion session_bootstrap/reports/big_little_topology_suggestion_latest.json
 
 # 3) Run the pipeline path itself
 bash ./session_bootstrap/scripts/run_big_little_pipeline.sh \
-  --env session_bootstrap/config/big_little_pipeline.current.example.env \
+  --env session_bootstrap/config/big_little_pipeline.current.2026-03-18.phytium_pi.env \
   --variant current
 
 # 4) Run serial vs pipeline comparison
 bash ./session_bootstrap/scripts/run_big_little_compare.sh \
-  --env session_bootstrap/config/big_little_pipeline.current.example.env
+  --env session_bootstrap/config/big_little_pipeline.current.2026-03-18.phytium_pi.env
 ```
 
 ## Env Files
