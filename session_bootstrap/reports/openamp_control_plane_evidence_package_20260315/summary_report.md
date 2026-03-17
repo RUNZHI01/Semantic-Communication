@@ -5,6 +5,7 @@
 - scope: `release_v1.4.0` 派生最小控制面在飞腾派真机上的控制闭环与正式 FIT 收证
 - primary_matrix: [coverage_matrix.md](coverage_matrix.md)
 - latest_live_status: [../openamp_demo_live_dualpath_status_20260317.md](../openamp_demo_live_dualpath_status_20260317.md)
+- dashboard_local_acceptance: [../openamp_demo_dashboard_local_acceptance_20260317.md](../openamp_demo_dashboard_local_acceptance_20260317.md)
 - final_verdict: `P0 已板级闭环；P1 FIT-01 / FIT-02 / FIT-03 最终均为 PASS`
 
 ## 执行摘要
@@ -12,6 +13,8 @@
 当前仓库已经形成一套可直接用于答辩 / 演示的 OpenAMP 控制面证据链。底座方面，`release_v1.4.0` 派生控制固件已经在飞腾派真实板上依次打通 `STATUS_REQ/RESP`、`JOB_REQ/JOB_ACK`、`HEARTBEAT/HEARTBEAT_ACK`、`SAFE_STOP`、`JOB_DONE`，并由 wrapper-backed board smoke 证明 Linux wrapper 会基于真实 firmware `JOB_ACK(ALLOW)` 放行 runner。风险收口方面，`FIT-01` 与 `FIT-02` 已分别证明错误 SHA 和输入契约违规会在 admission gate 被真机拒绝；`FIT-03` 则保留了完整历史链条，即旧 live firmware 先真实暴露 watchdog 缺口，随后在部署基于本地提交 `0503b04 openamp: add lazy firmware heartbeat timeout watchdog` 构建出的修复固件后，以同一探针顺序复跑转为 PASS。
 
 补充到最近一轮 live 事实层：见 [../openamp_demo_live_dualpath_status_20260317.md](../openamp_demo_live_dualpath_status_20260317.md)。该摘要明确确认 **8115 是当前唯一有效 demo 实例**，且最近一轮 live 中 **current 已成功跑通、baseline 也已通过 signed sideband 进入真机执行，两侧 reconstruction 均完成 `300/300`**。
+
+补充到本地可运行性层：见 [../openamp_demo_dashboard_local_acceptance_20260317.md](../openamp_demo_dashboard_local_acceptance_20260317.md)。该验收报告确认本地执行 `run_openamp_demo.sh --port 8092` 后，`/api/health` 返回 `ok`，并且 `/api/snapshot` 已实际暴露 `latest_live_status`，说明这份 3/17 最新状态不只存在于文档里，也已经真实进入 dashboard 运行面。
 
 ## 最终状态
 
