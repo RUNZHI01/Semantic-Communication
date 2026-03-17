@@ -287,9 +287,22 @@ class DashboardState:
                 result["control_status"] = status_payload
         return result
 
+    def _can_launch_runner_only_fallback(
+        self,
+        *,
+        board_access,
+        status_payload: dict[str, Any],
+    ) -> bool:
+        if not board_access.connection_ready:
+            return False
+        status_category = str(status_payload.get("status_category") or "")
+        return status_category in {"timeout", "permission_error", "error"}
+
     def _build_inference_response(self, record: dict[str, Any], live_attempt: dict[str, Any]) -> dict[str, Any]:
         variant = str(record["variant"])
         image_index = int(record["image_index"])
+        control_transport = str(live_attempt.get("control_transport") or "hook").strip().lower()
+        runner_only_mode = control_transport == "none"
         payload = build_prerecorded_inference_result(image_index, variant)
         progress = live_attempt.get("progress", {})
         payload["job_id"] = record["job_id"]
@@ -302,8 +315,15 @@ class DashboardState:
                     "status": "running",
                     "execution_mode": "live",
                     "status_category": "running",
-                    "source_label": "真实在线推进",
-                    "message": "OpenAMP 控制面已接入本次演示，界面正在同步板端推进阶段。",
+                    "source_label": "真实在线执行（控制面降级）" if runner_only_mode else "真实在线推进",
+                    "message": (
+                        live_attempt.get("message")
+                        or (
+                            "控制面预检未通过后已切到 SSH 兼容模式，界面正在同步板端执行进度。"
+                            if runner_only_mode
+                            else "OpenAMP 控制面已接入本次演示，界面正在同步板端推进阶段。"
+                        )
+                    ),
                     "timings": {
                         "payload_ms": None,
                         "prepare_ms": None,
@@ -341,11 +361,20 @@ class DashboardState:
                     "status": "success",
                     "execution_mode": "live",
                     "status_category": "success",
-                    "source_label": "真实在线推进 + 归档样例图",
+                    "source_label": (
+                        "真实在线执行（控制面降级） + 归档样例图"
+                        if runner_only_mode
+                        else "真实在线推进 + 归档样例图"
+                    ),
                     "message": live_attempt.get("message")
                     or (
                         "本次演示已通过 OpenAMP 控制面完成作业下发、板端执行与结果回收；图像对比继续使用归档样例，"
                         "现场呈现更稳定。"
+                        if not runner_only_mode
+                        else (
+                            "本次演示已在 SSH 兼容模式下完成真实板端执行；"
+                            "图像对比继续使用归档样例，当前不宣称控制面握手已成功。"
+                        )
                     ),
                     "timings": {
                         "payload_ms": round(float(summary.get("run_median_ms") or summary.get("run_mean_ms") or 0.0), 3),
@@ -562,19 +591,37 @@ class DashboardState:
                     if isinstance(last_live_probe, dict):
                         diagnostics["last_live_probe"] = last_live_probe
                     event_log = list(status_payload.get("logs") or [])
-                    if detail not in event_log:
-                        event_log.append(detail)
-                    payload = self._build_blocked_inference_payload(
-                        variant=variant,
-                        image_index=image_index,
-                        status_category=status_category,
-                        source_label="启动前检查失败，回退展示（归档样例）",
-                        message=message,
-                        detail=detail,
-                        diagnostics=diagnostics,
-                        event_log=event_log,
-                    )
-                if payload.get("status") != "fallback":
+                    if self._can_launch_runner_only_fallback(board_access=board_access, status_payload=status_payload):
+                        live_job = launch_remote_reconstruction_job(
+                            board_access,
+                            variant=variant,
+                            control_transport="none",
+                            control_preflight=status_payload,
+                        )
+                        live_result = live_job.snapshot()
+                        record = {
+                            "job": live_job,
+                            "job_id": live_job.job_id,
+                            "variant": variant,
+                            "image_index": image_index,
+                        }
+                        with self._lock:
+                            self._inference_jobs[live_job.job_id] = record
+                        payload = self._build_inference_response(record, live_result)
+                    else:
+                        if detail not in event_log:
+                            event_log.append(detail)
+                        payload = self._build_blocked_inference_payload(
+                            variant=variant,
+                            image_index=image_index,
+                            status_category=status_category,
+                            source_label="启动前检查失败，回退展示（归档样例）",
+                            message=message,
+                            detail=detail,
+                            diagnostics=diagnostics,
+                            event_log=event_log,
+                        )
+                if payload.get("status") != "fallback" and not payload.get("job_id"):
                     live_job = launch_remote_reconstruction_job(board_access, variant=variant)
                     live_result = live_job.snapshot()
                     record = {

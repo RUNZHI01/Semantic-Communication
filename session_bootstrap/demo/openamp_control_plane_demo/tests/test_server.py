@@ -765,13 +765,38 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(payload["live_attempt"]["diagnostics"]["board_status"]["active_job_id"], 8093)
         launch_job.assert_not_called()
 
-    def test_run_inference_endpoint_blocks_when_status_preflight_fails(self) -> None:
+    def test_run_inference_endpoint_falls_back_to_runner_only_live_when_status_preflight_fails(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
         request_json(
             state,
             "POST",
             "/api/session/board-access",
             body=json.dumps({"password": "demo-pass"}).encode("utf-8"),
+        )
+        live_job = FakeInferenceJob(
+            [
+                {
+                    "status": "running",
+                    "request_state": "running",
+                    "status_category": "running",
+                    "execution_mode": "live",
+                    "variant": "current",
+                    "message": "Current live 已切到 SSH 兼容模式，界面正在同步板端执行进度。",
+                    "control_transport": "none",
+                    "control_handshake_complete": False,
+                    "runner_summary": {},
+                    "wrapper_summary": {},
+                    "diagnostics": {
+                        "control_preflight": {
+                            "status": "timeout",
+                            "status_category": "timeout",
+                        }
+                    },
+                    "progress": live_progress_payload("真实在线执行（控制面降级）", "running", 76, "板端执行中"),
+                    "artifacts": {},
+                }
+            ],
+            job_id="compat-live-001",
         )
 
         with (
@@ -785,7 +810,7 @@ class DemoHTTPServerTest(unittest.TestCase):
                     "logs": [],
                 },
             ),
-            patch("server.launch_remote_reconstruction_job") as launch_job,
+            patch("server.launch_remote_reconstruction_job", return_value=live_job) as launch_job,
         ):
             status, _, payload = request_json(
                 state,
@@ -795,16 +820,19 @@ class DemoHTTPServerTest(unittest.TestCase):
             )
 
         self.assertEqual(status, 200)
-        self.assertEqual(payload["status"], "fallback")
-        self.assertEqual(payload["status_category"], "timeout")
-        self.assertEqual(payload["source_label"], "启动前检查失败，回退展示（归档样例）")
-        self.assertIn("启动前 STATUS_REQ 预检未通过", payload["message"])
-        self.assertEqual(payload["live_attempt"]["status"], "blocked")
+        self.assertEqual(payload["status"], "running")
+        self.assertEqual(payload["execution_mode"], "live")
+        self.assertEqual(payload["source_label"], "真实在线执行（控制面降级）")
+        self.assertIn("SSH 兼容模式", payload["message"])
+        self.assertEqual(payload["live_attempt"]["control_transport"], "none")
+        self.assertFalse(payload["live_attempt"]["control_handshake_complete"])
+        launch_job.assert_called_once()
+        _, kwargs = launch_job.call_args
+        self.assertEqual(kwargs["control_transport"], "none")
         self.assertEqual(
-            payload["live_attempt"]["diagnostics"]["board_status_preflight"]["status"],
+            kwargs["control_preflight"]["status"],
             "timeout",
         )
-        launch_job.assert_not_called()
 
     def test_run_baseline_endpoint_launches_when_baseline_signed_path_is_ready(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)

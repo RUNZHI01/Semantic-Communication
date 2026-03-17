@@ -1808,6 +1808,107 @@ class RunRemoteReconstructionTest(unittest.TestCase):
             self.assertEqual(snapshot["progress"]["stages"][0]["detail"], "远端 bridge 启动失败，rc=255。")
             self.assertEqual(snapshot["progress"]["stages"][1]["detail"], "远端 bridge 启动失败，rc=255。")
 
+    def test_runner_only_compat_mode_reports_live_success_without_claiming_control_handshake(self) -> None:
+        with tempfile.TemporaryDirectory(dir=PROJECT_ROOT) as temp_dir:
+            output_dir = Path(temp_dir)
+            trace_path = output_dir / "control_trace.jsonl"
+            summary_path = output_dir / "wrapper_summary.json"
+            runner_log_path = output_dir / "runner.log"
+
+            summary_path.write_text(
+                json.dumps({"result": "success"}, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+            trace_events = [
+                {
+                    "at": "2026-03-17T10:00:00+0800",
+                    "phase": "STATUS_REQ",
+                    "payload": {"job_id": 501},
+                },
+                {
+                    "at": "2026-03-17T10:00:01+0800",
+                    "phase": "JOB_REQ",
+                    "payload": {"job_id": 501, "expected_sha256": "abcd" * 16},
+                },
+                {
+                    "at": "2026-03-17T10:00:01+0800",
+                    "phase": "JOB_ACK",
+                    "payload": {
+                        "job_id": 501,
+                        "decision": "ALLOW",
+                        "guard_state_name": "COMPAT_MODE",
+                        "fault_name": "NONE",
+                    },
+                },
+                {
+                    "at": "2026-03-17T10:00:02+0800",
+                    "phase": "JOB_DONE",
+                    "payload": {
+                        "job_id": 501,
+                        "runner_exit_code": 0,
+                        "result_code": 0,
+                    },
+                },
+            ]
+            trace_path.write_text(
+                "\n".join(json.dumps(event, ensure_ascii=False) for event in trace_events) + "\n",
+                encoding="utf-8",
+            )
+            runner_log_path.write_text(
+                json.dumps(
+                    {
+                        "load_ms": 12.0,
+                        "vm_init_ms": 34.0,
+                        "run_median_ms": 56.0,
+                        "processed_count": inference_runner.DEFAULT_MAX_INPUTS,
+                        "input_count": inference_runner.DEFAULT_MAX_INPUTS,
+                        "artifact_sha256": "a" * 64,
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            job = LiveRemoteReconstructionJob.__new__(LiveRemoteReconstructionJob)
+            job.job_id = "501"
+            job.variant = "baseline"
+            job._timeout_sec = 10.0
+            job._output_dir = output_dir
+            job._trace_path = trace_path
+            job._summary_path = summary_path
+            job._runner_log_path = runner_log_path
+            job._lock = Lock()
+            job._final_snapshot = None
+            job._expected_outputs = inference_runner.DEFAULT_MAX_INPUTS
+            job._control_transport = inference_runner.CONTROL_TRANSPORT_NONE
+            job._control_preflight = {
+                "status": "timeout",
+                "status_category": "timeout",
+                "message": "远端状态查询超时，请确认板卡在线后重试。",
+            }
+            job._admission = {"mode": "signed_manifest_v1"}
+
+            fake_process = Mock()
+            fake_process.communicate.return_value = ("", "")
+            fake_process.returncode = 0
+            job._process = fake_process
+
+            job._wait_for_completion()
+
+            snapshot = job._final_snapshot
+            assert snapshot is not None
+            self.assertEqual(snapshot["status"], "success")
+            self.assertEqual(snapshot["execution_mode"], "live")
+            self.assertEqual(snapshot["control_transport"], "none")
+            self.assertFalse(snapshot["control_handshake_complete"])
+            self.assertIn("SSH 兼容模式", snapshot["message"])
+            self.assertIn("signed-manifest", snapshot["message"])
+            self.assertEqual(snapshot["diagnostics"]["control_preflight"]["status"], "timeout")
+            self.assertEqual(snapshot["progress"]["label"], "真实在线执行（控制面降级）")
+            self.assertEqual(snapshot["progress"]["stages"][0]["detail"], "已跳过 RPMsg STATUS_REQ/RESP；当前以 SSH 兼容模式保持 demo 可用。")
+            self.assertEqual(snapshot["progress"]["event_log"][0], "[10:00:00] STATUS_REQ -> skipped (compat mode)")
+
 
 if __name__ == "__main__":
     unittest.main()
