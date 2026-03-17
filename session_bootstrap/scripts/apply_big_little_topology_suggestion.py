@@ -41,8 +41,33 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def load_payload(path: Path) -> dict:
+    text = path.read_text(encoding="utf-8")
+    try:
+        payload = json.loads(text)
+        if isinstance(payload, dict):
+            return payload
+    except json.JSONDecodeError:
+        pass
+
+    for line in reversed(text.splitlines()):
+        candidate = line.strip()
+        if not candidate:
+            continue
+        if not candidate.startswith("{"):
+            continue
+        try:
+            payload = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            return payload
+
+    raise ValueError(f"could not parse suggestion JSON from {path}")
+
+
 def load_suggestion(path: Path) -> tuple[str, str]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload = load_payload(path)
     suggestion = payload.get("suggestion") if isinstance(payload, dict) else None
     if not isinstance(suggestion, dict):
         raise ValueError(f"missing suggestion object in {path}")
