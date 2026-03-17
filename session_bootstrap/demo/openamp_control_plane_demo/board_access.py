@@ -50,6 +50,9 @@ TRUSTED_CURRENT_ARTIFACT_REPORT_CANDIDATES = (
     "session_bootstrap/reports/phytium_baseline_seeded_warm_start_current_incremental_chunk4_20260313_131545.json",
     "session_bootstrap/reports/phytium_baseline_seeded_warm_start_current_incremental_chunk3_20260313_131545.json",
 )
+VALIDATED_RUNTIME_FALLBACK_KEYS = (
+    "REMOTE_TORCH_PYTHONPATH",
+)
 
 
 def repo_relative(path: Path) -> str:
@@ -335,6 +338,21 @@ def merge_env_values(
     return apply_trusted_current_artifact_binding(values)
 
 
+def preserve_validated_runtime_fallbacks(
+    env_file_values: dict[str, str],
+    startup_env_values: dict[str, str],
+) -> dict[str, str]:
+    values = dict(env_file_values)
+    # Older inference env snapshots blank this field, which would drop the validated
+    # torch sidecar and break `.pt` latent loading in the live demo path.
+    for key in VALIDATED_RUNTIME_FALLBACK_KEYS:
+        if str(values.get(key) or "").strip():
+            continue
+        if str(startup_env_values.get(key) or "").strip():
+            values.pop(key, None)
+    return values
+
+
 def build_field_sources(
     *,
     host: str,
@@ -526,6 +544,7 @@ def build_board_access_config(
     else:
         env_file = fallback.env_file if fallback else None
         env_file_values = fallback_env_file_values
+    env_file_values = preserve_validated_runtime_fallbacks(env_file_values, fallback_startup_env)
 
     host = (
         raw_payload.get("host")
@@ -600,6 +619,10 @@ def build_demo_default_board_access(
     startup_env_values = dict(ssh_env_values)
     if startup_env_overrides:
         startup_env_values.update({str(key): str(value) for key, value in startup_env_overrides.items() if str(value)})
+    for key in VALIDATED_RUNTIME_FALLBACK_KEYS:
+        value = str(inference_env_values.get(key) or "").strip()
+        if value and not str(startup_env_values.get(key) or "").strip():
+            startup_env_values[key] = value
     remote_project_root = discover_validated_openamp_remote_project_root()
     if (
         remote_project_root
