@@ -290,6 +290,12 @@ rm -rf "$output_dir/reconstructions"
 
 if [[ -n "$extra_pythonpath" ]]; then
   export PYTHONPATH="$extra_pythonpath${PYTHONPATH:+:$PYTHONPATH}"
+  # Preserve the torch sidecar path inside the remote Python environment even
+  # when REMOTE_TVM_PYTHON injects its own inline PYTHONPATH and overrides the
+  # shell-level export above.
+  export REMOTE_REAL_EXTRA_PYTHONPATH="$extra_pythonpath"
+  export DEMO_EXTRA_PYTHONPATH="$extra_pythonpath"
+  export REMOTE_TORCH_PYTHONPATH="${REMOTE_TORCH_PYTHONPATH:-$extra_pythonpath}"
 fi
 export PYTHONNOUSERSITE=1
 
