@@ -51,6 +51,7 @@
 | OpenAMP 控制面答辩证据包 | `session_bootstrap/reports/openamp_control_plane_evidence_package_20260315/README.md` |
 | OpenAMP demo / 答辩材料索引 | `session_bootstrap/reports/openamp_control_plane_evidence_package_20260315/demo_materials_index.md` |
 | OpenAMP demo 最新 live 双路径状态（2026-03-17） | `session_bootstrap/reports/openamp_demo_live_dualpath_status_20260317.md` |
+| OpenAMP demo dashboard 本地启动验收（2026-03-17） | `session_bootstrap/reports/openamp_demo_dashboard_local_acceptance_20260317.md` |
 | 启动集成 OpenAMP demo 软件 | `bash session_bootstrap/scripts/run_openamp_demo.sh` |
 | OpenAMP demo 软件说明 | `session_bootstrap/demo/openamp_control_plane_demo/README.md` |
 | 下一轮性能优化执行清单 | `session_bootstrap/runbooks/next_round_optimization_checklist.md` |
