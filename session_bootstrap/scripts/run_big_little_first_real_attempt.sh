@@ -20,6 +20,7 @@ CAPTURE_TXT="./session_bootstrap/reports/big_little_topology_capture_latest.txt"
 echo "=== [1/4] read-only topology probe ==="
 python3 ./session_bootstrap/scripts/big_little_topology_probe.py ssh \
   --env "$ENV_FILE" \
+  --timeout-sec 180 \
   --write-raw "$CAPTURE_TXT" \
   > "$SUGGESTION_JSON"
 cat "$SUGGESTION_JSON"
