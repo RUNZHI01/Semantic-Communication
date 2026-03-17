@@ -18,7 +18,6 @@ from board_probe import DEFAULT_LIVE_PROBE_OUTPUT, is_successful_probe, load_pro
 from demo_data import (
     PROJECT_ROOT,
     build_fault_replay,
-    build_pytorch_reference_baseline_snapshot,
     build_prerecorded_inference_result,
     build_recover_replay,
     build_snapshot,
@@ -120,25 +119,6 @@ def recover_message(guard_state: str, last_fault_code: str) -> str:
     if guard == "READY":
         return "已使用当前会话凭据执行 SAFE_STOP，板端已回到 READY；last_fault_code 保留最近故障证据，不宣称已清零。"
     return "已使用当前会话凭据执行 SAFE_STOP，请以当前 guard_state / last_fault_code 为准。"
-
-
-def describe_reference_baseline_support() -> dict[str, Any]:
-    baseline = build_pytorch_reference_baseline_snapshot()
-    completed_at = baseline.get("completed_at") or "2026-03-12"
-    return {
-        "variant": "baseline",
-        "status": "ready",
-        "mode": "pytorch_reference",
-        "label": baseline["label"],
-        "tone": "online",
-        "note": (
-            f"第三幕基线固定使用 {completed_at} 归档的 PyTorch reference manifest；"
-            "不再尝试 Baseline TVM live。"
-        ),
-        "supported": True,
-        "launch_allowed": False,
-        "action_label": "加载 PyTorch 参考基线",
-    }
 
 
 class DashboardState:
@@ -308,9 +288,10 @@ class DashboardState:
                 if self._probe_cache_path:
                     write_probe_output(result, self._probe_cache_path)
             if board_access.probe_ready:
+                current_board_access = self._live_board_access_for_variant(board_access, variant="current")
                 status_payload = query_live_status(
                     board_access,
-                    trusted_sha=expected_sha_for_variant(live_board_access, variant) or self._trusted_current_sha,
+                    trusted_sha=expected_sha_for_variant(current_board_access, "current") or self._trusted_current_sha,
                 )
                 if status_payload.get("status") == "success":
                     with self._lock:
@@ -470,67 +451,6 @@ class DashboardState:
                     "snapshot": snapshot,
                 }
         return None
-
-    def _reference_baseline_progress(self) -> dict[str, Any]:
-        baseline = build_pytorch_reference_baseline_snapshot()
-        expected_count = int(baseline.get("output_count") or DEFAULT_MAX_INPUTS)
-        completed_at = str(baseline.get("completed_at") or "2026-03-12")
-        return {
-            "state": "completed",
-            "label": "PyTorch 参考基线已装载",
-            "tone": "online",
-            "percent": 100,
-            "phase_percent": 100,
-            "completed_count": expected_count,
-            "expected_count": expected_count,
-            "remaining_count": 0,
-            "completion_ratio": 1.0,
-            "count_source": "pytorch_reference_manifest",
-            "count_label": f"{expected_count} / {expected_count}",
-            "current_stage": "已归档，无需 live run",
-            "stages": [
-                {
-                    "key": "archive_ready",
-                    "label": "归档参考已就绪",
-                    "status": "done",
-                    "detail": f"manifest completed_at={completed_at}",
-                }
-            ],
-            "event_log": [
-                f"[archive] PyTorch reference manifest ready: {completed_at}",
-                "[archive] Baseline button only loads archived reference evidence.",
-            ],
-        }
-
-    def _build_reference_baseline_payload(self, image_index: int) -> dict[str, Any]:
-        payload = build_prerecorded_inference_result(image_index, "baseline")
-        baseline = build_pytorch_reference_baseline_snapshot()
-        payload.update(
-            {
-                "status": "success",
-                "execution_mode": "reference",
-                "request_state": "completed",
-                "status_category": "reference_ready",
-                "source_label": baseline["label"],
-                "message": (
-                    f"第三幕基线固定使用 {baseline.get('completed_at') or '2026-03-12'} 归档的 "
-                    "PyTorch reference manifest，不再尝试 Baseline TVM live。"
-                ),
-                "live_progress": self._reference_baseline_progress(),
-                "live_attempt": {
-                    "status": "reference_ready",
-                    "request_state": "completed",
-                    "status_category": "reference_ready",
-                    "message": "Archived PyTorch reference baseline loaded for act 3.",
-                    "diagnostics": {
-                        "manifest_path": baseline["manifest_path"],
-                        "completed_at": baseline["completed_at"],
-                        "output_count": baseline["output_count"],
-                    },
-                },
-            }
-        )
-        return payload
 
     def _blocked_live_progress(
         self,
