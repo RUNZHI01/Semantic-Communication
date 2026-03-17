@@ -895,6 +895,210 @@ PY
             self.assertEqual(staged_remote_artifact.read_bytes(), trusted_bytes)
             self.assertEqual(mutable_remote_artifact.read_bytes(), b"baseline-artifact")
 
+    def test_ssh_runner_exports_torch_sidecar_env_when_remote_python_overrides_pythonpath(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir_name:
+            temp_dir = Path(temp_dir_name)
+            runner_dir = temp_dir / "runner"
+            runner_dir.mkdir()
+            staged_runner = runner_dir / "run_remote_current_real_reconstruction.sh"
+            staged_runner.write_text(CURRENT_RUNNER.read_text(encoding="utf-8"), encoding="utf-8")
+            staged_runner.chmod(
+                stat.S_IRUSR
+                | stat.S_IWUSR
+                | stat.S_IXUSR
+                | stat.S_IRGRP
+                | stat.S_IXGRP
+                | stat.S_IROTH
+                | stat.S_IXOTH
+            )
+            write_file(
+                runner_dir / "current_real_reconstruction.py",
+                textwrap.dedent(
+                    """\
+                    import argparse
+                    import json
+                    import os
+                    from pathlib import Path
+                    import sys
+
+
+                    def import_torch():
+                        extra_pythonpath = (
+                            os.environ.get("REMOTE_TORCH_PYTHONPATH")
+                            or os.environ.get("REMOTE_REAL_EXTRA_PYTHONPATH")
+                            or os.environ.get("DEMO_EXTRA_PYTHONPATH")
+                            or ""
+                        )
+                        for entry in reversed([value for value in extra_pythonpath.split(":") if value]):
+                            if entry not in sys.path:
+                                sys.path.insert(0, entry)
+                        import torch
+
+                        return torch, extra_pythonpath
+
+
+                    parser = argparse.ArgumentParser()
+                    parser.add_argument("--artifact-path", required=True)
+                    parser.add_argument("--input-dir", required=True)
+                    parser.add_argument("--output-dir", required=True)
+                    parser.add_argument("--variant", required=True)
+                    parser.add_argument("--expected-sha256", default="")
+                    parser.add_argument("--max-inputs", type=int, default=0)
+                    parser.add_argument("--snr")
+                    parser.add_argument("--batch-size")
+                    args = parser.parse_args()
+
+                    torch, extra_pythonpath = import_torch()
+                    pt_inputs = sorted(Path(args.input_dir).glob("*.pt"))
+                    if not pt_inputs:
+                        raise SystemExit("missing pt input")
+                    payload = torch.load(pt_inputs[0], map_location="cpu", weights_only=True)
+                    recon_dir = Path(args.output_dir) / "reconstructions"
+                    recon_dir.mkdir(parents=True, exist_ok=True)
+                    (recon_dir / f"{pt_inputs[0].stem}_recon.npy").write_text("ok", encoding="utf-8")
+                    print(
+                        json.dumps(
+                            {
+                                "variant": args.variant,
+                                "artifact_path": args.artifact_path,
+                                "artifact_sha256": args.expected_sha256,
+                                "artifact_sha256_expected": args.expected_sha256,
+                                "artifact_sha256_match": True,
+                                "input_dir": args.input_dir,
+                                "output_dir": str(recon_dir),
+                                "output_count": 1,
+                                "processed_count": 1,
+                                "input_count": 1,
+                                "available_input_count": 1,
+                                "load_ms": 0.0,
+                                "vm_init_ms": 0.0,
+                                "run_count": 1,
+                                "run_samples_ms": [1.0],
+                                "run_median_ms": 1.0,
+                                "run_mean_ms": 1.0,
+                                "run_min_ms": 1.0,
+                                "run_max_ms": 1.0,
+                                "run_variance_ms2": 0.0,
+                                "output_shape": [1, 1, 1, 1],
+                                "output_dtype": "float32",
+                                "snr": 12.0,
+                                "batch_size": 1,
+                                "save_format": "npy",
+                                "seed": None,
+                                "max_inputs": args.max_inputs,
+                                "torch_sidecar_pythonpath": extra_pythonpath,
+                                "torch_payload_keys": sorted(payload),
+                            },
+                            ensure_ascii=False,
+                        )
+                    )
+                    """
+                ),
+            )
+            write_executable(
+                runner_dir / "ssh_with_password.sh",
+                textwrap.dedent(
+                    """\
+                    #!/usr/bin/env bash
+                    set -euo pipefail
+                    while [[ $# -gt 0 ]]; do
+                      case "$1" in
+                        --host|--user|--pass|--port)
+                          shift 2
+                          ;;
+                        --)
+                          shift
+                          break
+                          ;;
+                        *)
+                          shift
+                          ;;
+                      esac
+                    done
+
+                    exec env -i PATH="$PATH" "$@"
+                    """
+                ),
+            )
+
+            fake_torch_root = temp_dir / "fake_torch"
+            (fake_torch_root / "torch").mkdir(parents=True)
+            write_file(
+                fake_torch_root / "torch" / "__init__.py",
+                textwrap.dedent(
+                    """\
+                    import json
+
+
+                    def load(path, map_location=None, weights_only=None):
+                        with open(path, "r", encoding="utf-8") as infile:
+                            return json.load(infile)
+                    """
+                ),
+            )
+
+            fake_python = temp_dir / "fake_python.sh"
+            write_executable(
+                fake_python,
+                textwrap.dedent(
+                    """\
+                    #!/usr/bin/env bash
+                    set -euo pipefail
+                    exec python3 "$@"
+                    """
+                ),
+            )
+
+            artifact_path = temp_dir / "optimized_model.so"
+            artifact_bytes = b"current-openamp-artifact"
+            artifact_path.write_bytes(artifact_bytes)
+            expected_sha = hashlib.sha256(artifact_bytes).hexdigest()
+
+            input_dir = temp_dir / "inputs"
+            input_dir.mkdir()
+            write_file(
+                input_dir / "sample_000.pt",
+                '{"quant": [[[1.0]]], "scale": [[[1.0]]], "zero_point": [[[0.0]]]}',
+            )
+
+            output_base = temp_dir / "outputs"
+            output_base.mkdir()
+
+            env = os.environ.copy()
+            env.update(
+                {
+                    "REMOTE_MODE": "ssh",
+                    "REMOTE_HOST": "demo-host",
+                    "REMOTE_USER": "demo-user",
+                    "REMOTE_PASS": "demo-pass",
+                    "REMOTE_TVM_PYTHON": f"env PYTHONPATH=/tmp/tvm_only {fake_python}",
+                    "REMOTE_INPUT_DIR": str(input_dir),
+                    "REMOTE_OUTPUT_BASE": str(output_base),
+                    "REMOTE_SNR_CURRENT": "12",
+                    "REMOTE_BATCH_CURRENT": "1",
+                    "REMOTE_CURRENT_ARTIFACT": str(artifact_path),
+                    "REMOTE_TORCH_PYTHONPATH": str(fake_torch_root),
+                    "INFERENCE_CURRENT_EXPECTED_SHA256": expected_sha,
+                }
+            )
+
+            result = subprocess.run(
+                ["bash", str(staged_runner), "--variant", "current", "--max-inputs", "1"],
+                cwd=REPO_ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            summary = json.loads([line.strip() for line in result.stdout.splitlines() if line.strip()][-1])
+            self.assertEqual(summary["processed_count"], 1)
+            self.assertEqual(summary["output_count"], 1)
+            self.assertEqual(summary["torch_sidecar_pythonpath"], str(fake_torch_root))
+            self.assertEqual(summary["torch_payload_keys"], ["quant", "scale", "zero_point"])
+
 
 class LegacyBaselineLiveConsumptionTest(unittest.TestCase):
     def test_live_job_accepts_legacy_summary_json_as_success(self) -> None:
