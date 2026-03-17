@@ -480,6 +480,7 @@ class DashboardState:
         payload = build_prerecorded_inference_result(image_index, variant)
         with self._lock:
             board_access = self._board_access
+            last_live_probe = self._last_live_probe
         variant_support = describe_demo_variant_support(board_access, variant=variant)
 
         if board_access.configured:
@@ -531,6 +532,48 @@ class DashboardState:
                             diagnostics={"board_status": status_payload},
                             event_log=status_payload.get("logs", []),
                         )
+                else:
+                    status_category = str(status_payload.get("status_category") or "error")
+                    preflight_message = str(status_payload.get("message") or "").strip()
+                    firmware_sha = (
+                        str(last_live_probe.get("details", {}).get("firmware", {}).get("sha256", ""))
+                        if isinstance(last_live_probe, dict)
+                        else ""
+                    )
+                    firmware_hint = f" 最近只读探板 firmware={firmware_sha[:12]}..." if firmware_sha else ""
+                    detail = (
+                        "启动前 STATUS_REQ 预检未返回可用 STATUS_RESP；"
+                        "demo 判定当前 lower layer 与现有 live 控制面不兼容，"
+                        "不会继续发起 live launch。"
+                        f"{firmware_hint}"
+                    )
+                    message = (
+                        f"{preflight_message} 启动前 STATUS_REQ 预检未通过，"
+                        "本次不再继续发起 live launch，已回退到预录结果。"
+                        if preflight_message
+                        else (
+                            "启动前 STATUS_REQ 预检未返回 STATUS_RESP，"
+                            "当前 demo 判定下层行为与现有 live 控制面不兼容；"
+                            "本次不再继续发起 live launch，已回退到预录结果。"
+                        )
+                    )
+                    diagnostics = dict(status_payload.get("diagnostics") or {})
+                    diagnostics["board_status_preflight"] = status_payload
+                    if isinstance(last_live_probe, dict):
+                        diagnostics["last_live_probe"] = last_live_probe
+                    event_log = list(status_payload.get("logs") or [])
+                    if detail not in event_log:
+                        event_log.append(detail)
+                    payload = self._build_blocked_inference_payload(
+                        variant=variant,
+                        image_index=image_index,
+                        status_category=status_category,
+                        source_label="启动前检查失败，回退展示（归档样例）",
+                        message=message,
+                        detail=detail,
+                        diagnostics=diagnostics,
+                        event_log=event_log,
+                    )
                 if payload.get("status") != "fallback":
                     live_job = launch_remote_reconstruction_job(board_access, variant=variant)
                     live_result = live_job.snapshot()
