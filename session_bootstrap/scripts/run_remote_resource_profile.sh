@@ -375,12 +375,17 @@ if [[ -x /usr/bin/time ]]; then
 else
   printf '/usr/bin/time=missing\n'
 fi
-exit "$required_missing"
+printf 'required_missing=%s\n' "$required_missing"
+exit 0
 SH
 )"
 
 if ! capture_remote_file "$TOOL_PROBE_FILE" bash -lc "$TOOL_PROBE_SCRIPT"; then
   echo "ERROR: remote tool probe failed; see $TOOL_PROBE_FILE" >&2
+  exit 1
+fi
+if grep -q '^required_missing=1$' "$TOOL_PROBE_FILE"; then
+  echo "ERROR: remote required tools missing; see $TOOL_PROBE_FILE" >&2
   exit 1
 fi
 
@@ -596,7 +601,7 @@ def parse_vmstat(path_str):
         result["error"] = "missing"
         return result
 
-    fields = [
+    base_fields = [
         "r",
         "b",
         "swpd",
@@ -615,15 +620,22 @@ def parse_vmstat(path_str):
         "wa",
         "st",
     ]
+    optional_fields = base_fields + ["gu"]
     rows = []
     for raw in path.read_text(encoding="utf-8", errors="replace").splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
+            if line.startswith("# stopped_local="):
+                break
             continue
         if line.startswith("procs") or line.startswith("r "):
             continue
         parts = line.split()
-        if len(parts) != len(fields):
+        if len(parts) == len(optional_fields):
+            fields = optional_fields
+        elif len(parts) == len(base_fields):
+            fields = base_fields
+        else:
             continue
         if not all(re.fullmatch(r"-?\d+", item) for item in parts):
             continue
@@ -658,6 +670,8 @@ def parse_vmstat(path_str):
             "avg_interrupts_per_sec": avg("in"),
         }
     )
+    if all("gu" in row for row in effective_rows):
+        result["avg_cpu_guest_pct"] = avg("gu")
     if len(rows) > 1:
         result["dropped_boot_average_row"] = True
     return result
@@ -778,10 +792,17 @@ if not memory_lines:
 
 vmstat_lines = []
 if vmstat.get("sample_count", 0) > 0:
+    cpu_line = (
+        f"- avg cpu user/system/idle/wait: {vmstat['avg_cpu_user_pct']} / "
+        f"{vmstat['avg_cpu_system_pct']} / {vmstat['avg_cpu_idle_pct']} / "
+        f"{vmstat['avg_cpu_wait_pct']} %"
+    )
+    if "avg_cpu_guest_pct" in vmstat:
+        cpu_line += f" (guest {vmstat['avg_cpu_guest_pct']} %)"
     vmstat_lines.extend(
         [
             f"- vmstat interval samples: {vmstat['sample_count']}",
-            f"- avg cpu user/system/idle/wait: {vmstat['avg_cpu_user_pct']} / {vmstat['avg_cpu_system_pct']} / {vmstat['avg_cpu_idle_pct']} / {vmstat['avg_cpu_wait_pct']} %",
+            cpu_line,
             f"- avg/max runnable tasks: {vmstat['avg_runnable']} / {vmstat['max_runnable']}",
             f"- avg/max blocked tasks: {vmstat['avg_blocked']} / {vmstat['max_blocked']}",
             f"- min free memory seen by vmstat: {vmstat['min_free_kb']} KB",
