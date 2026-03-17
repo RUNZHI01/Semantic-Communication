@@ -9,7 +9,7 @@ DEMO_ROOT = Path(__file__).resolve().parents[1]
 if str(DEMO_ROOT) not in sys.path:
     sys.path.insert(0, str(DEMO_ROOT))
 
-from demo_data import build_snapshot  # noqa: E402
+from demo_data import build_prerecorded_inference_result, build_snapshot  # noqa: E402
 
 
 class DemoDataTest(unittest.TestCase):
@@ -65,7 +65,8 @@ class DemoDataTest(unittest.TestCase):
         self.assertIn("comparison", guided_demo)
         self.assertIn("sample_catalog", guided_demo)
         self.assertGreaterEqual(len(guided_demo["sample_catalog"]), 1)
-        self.assertAlmostEqual(guided_demo["comparison"]["payload"]["baseline_ms"], 1846.9)
+        self.assertAlmostEqual(guided_demo["comparison"]["payload"]["baseline_ms"], 436.722)
+        self.assertEqual(guided_demo["comparison"]["baseline_source"]["label"], "PyTorch 参考基线")
         self.assertAlmostEqual(guided_demo["comparison"]["end_to_end"]["current_ms"], 230.339)
 
     def test_snapshot_surfaces_latest_live_dualpath_status_report(self) -> None:
@@ -75,12 +76,25 @@ class DemoDataTest(unittest.TestCase):
         self.assertEqual(latest["report_date"], "2026-03-17")
         self.assertEqual(latest["valid_instance"], "8115")
         self.assertEqual(latest["current"]["completed"], "300 / 300")
-        self.assertEqual(latest["baseline"]["completed"], "300 / 300")
+        self.assertEqual(latest["baseline"]["label"], "PyTorch 参考基线")
+        self.assertEqual(latest["baseline"]["completed"], "300 / 300 (archive)")
         self.assertEqual(
             latest["report"]["path"],
             "session_bootstrap/reports/openamp_demo_live_dualpath_status_20260317.md",
         )
         self.assertEqual(snapshot["docs"][0]["path"], latest["report"]["path"])
+        self.assertEqual(snapshot["docs"][1]["path"], "session_bootstrap/tmp/quality_metrics_inputs_20260312/reference/pytorch_reference_manifest.json")
+
+    def test_prerecorded_baseline_uses_pytorch_reference_manifest(self) -> None:
+        payload = build_prerecorded_inference_result(0, "baseline")
+
+        self.assertEqual(payload["execution_mode"], "reference")
+        self.assertEqual(payload["source_label"], "PyTorch 参考基线")
+        self.assertIn("PyTorch reference manifest", payload["message"])
+        self.assertEqual(
+            payload["evidence"][0]["path"],
+            "session_bootstrap/tmp/quality_metrics_inputs_20260312/reference/pytorch_reference_manifest.json",
+        )
 
 
 if __name__ == "__main__":
