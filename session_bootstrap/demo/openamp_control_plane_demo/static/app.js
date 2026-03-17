@@ -485,6 +485,24 @@ function renderComparisonProgressCards() {
   return { baselineProgress, currentProgress };
 }
 
+function renderTimingRows(stageValues, labelFormatter = (label) => label) {
+  const maxValue = Math.max(...stageValues.map((item) => Number(item.value_ms || 0)), 1);
+  return stageValues
+    .map((item) => {
+      const emphasisClass = item.emphasis === "board" ? "bar-board" : item.emphasis === "total" ? "bar-total" : "bar-host";
+      return `
+        <div class="timing-row">
+          <div class="timing-label">
+            <span>${escapeHtml(labelFormatter(item.label))}</span>
+            <span>${formatMaybeMs(item.value_ms)}</span>
+          </div>
+          <div class="timing-bar"><span class="${emphasisClass}" style="width:${barWidth(Number(item.value_ms || 0), maxValue)}%"></span></div>
+        </div>
+      `;
+    })
+    .join("");
+}
+
 function renderInference(result) {
   if (!result) {
     document.getElementById("act2SourceLabel").textContent = "等待执行。";
@@ -519,22 +537,32 @@ function renderInference(result) {
     return;
   }
 
+  if (result.status === "fallback") {
+    const stageValues = result.timings?.stages || [];
+    const handshakeIncomplete = result.live_attempt?.control_handshake_complete === false;
+    const archiveNotice = handshakeIncomplete
+      ? "本次 live 未完成 STATUS_RESP/JOB_ACK 握手，以下图像与指标仅来自归档样例和正式报告。"
+      : "当前画面与以下图像/指标来自归档样例和正式报告，不代表本次 live 已完成。";
+    document.getElementById("timingBoard").innerHTML = `
+      <div class="compact-copy">${escapeHtml(archiveNotice)}</div>
+      ${renderTimingRows(stageValues, (label) => `归档参考 · ${label}`)}
+    `;
+    const qualityChips = [
+      `<div class="metric-chip">live: ${escapeHtml(result.live_progress?.label || "已回退")}</div>`,
+      `<div class="metric-chip">${escapeHtml(handshakeIncomplete ? "握手: 未完成" : "展示: 归档样例")}</div>`,
+    ];
+    if (result.quality?.psnr_db !== null && result.quality?.psnr_db !== undefined) {
+      qualityChips.push(`<div class="metric-chip">归档 PSNR: ${Number(result.quality.psnr_db || 0).toFixed(2)} dB</div>`);
+    }
+    if (result.quality?.ssim !== null && result.quality?.ssim !== undefined) {
+      qualityChips.push(`<div class="metric-chip">归档 SSIM: ${Number(result.quality.ssim || 0).toFixed(4)}</div>`);
+    }
+    document.getElementById("qualityMetrics").innerHTML = qualityChips.join("");
+    return;
+  }
+
   const stageValues = result.timings.stages || [];
-  const maxValue = Math.max(...stageValues.map((item) => Number(item.value_ms || 0)), 1);
-  document.getElementById("timingBoard").innerHTML = stageValues
-    .map((item) => {
-      const emphasisClass = item.emphasis === "board" ? "bar-board" : item.emphasis === "total" ? "bar-total" : "bar-host";
-      return `
-        <div class="timing-row">
-          <div class="timing-label">
-            <span>${escapeHtml(item.label)}</span>
-            <span>${formatMaybeMs(item.value_ms)}</span>
-          </div>
-          <div class="timing-bar"><span class="${emphasisClass}" style="width:${barWidth(Number(item.value_ms || 0), maxValue)}%"></span></div>
-        </div>
-      `;
-    })
-    .join("");
+  document.getElementById("timingBoard").innerHTML = renderTimingRows(stageValues);
 
   document.getElementById("qualityMetrics").innerHTML = [
     `<div class="metric-chip">PSNR: ${Number(result.quality.psnr_db || 0).toFixed(2)} dB</div>`,

@@ -1011,6 +1011,84 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(payload["live_attempt"]["diagnostics"]["stderr"], "Permission denied (publickey,password).")
         self.assertEqual(payload["live_progress"]["label"], "在线失败已回退")
 
+    def test_inference_timeout_fallback_marks_handshake_incomplete_and_archive_only(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        request_json(
+            state,
+            "POST",
+            "/api/session/board-access",
+            body=json.dumps(
+                {
+                    "host": "demo-board",
+                    "user": "demo-user",
+                    "password": "placeholder-pass",
+                    "port": "22",
+                    "env_file": "session_bootstrap/config/inference_tvm310_safe.2026-03-10.phytium_pi.env",
+                }
+            ).encode("utf-8"),
+        )
+        live_job = FakeInferenceJob(
+            [
+                {
+                    "status": "error",
+                    "request_state": "completed",
+                    "status_category": "timeout",
+                    "execution_mode": "fallback",
+                    "variant": "current",
+                    "message": (
+                        "STATUS_REQ 已写入 RPMsg，但超时前未收到 STATUS_RESP；"
+                        "JOB_REQ 已写入 RPMsg，但超时前未收到 JOB_ACK。"
+                        "本次板端握手未完成，界面已回退到预录结果。"
+                    ),
+                    "control_handshake_complete": False,
+                    "runner_summary": {},
+                    "wrapper_summary": {"result": "denied_by_control_hook"},
+                    "diagnostics": {
+                        "control_handshake": {
+                            "complete": False,
+                            "status_req_transport": "tx_ok_rx_timeout",
+                            "job_req_transport": "tx_ok_rx_timeout",
+                        }
+                    },
+                    "progress": live_progress_payload("握手未完成，已回退", "completed", 0, "连接失败"),
+                    "artifacts": {},
+                }
+            ]
+        )
+
+        with (
+            patch(
+                "server.query_live_status",
+                return_value={
+                    "status": "success",
+                    "guard_state": "READY",
+                    "active_job_id": 0,
+                    "last_fault_code": "NONE",
+                    "total_fault_count": 0,
+                    "logs": [],
+                },
+            ),
+            patch(
+                "server.launch_remote_reconstruction_job",
+                return_value=live_job,
+            ),
+        ):
+            status, _, payload = request_json(
+                state,
+                "POST",
+                "/api/run-inference",
+                body=json.dumps({"image_index": 0, "mode": "current"}).encode("utf-8"),
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["execution_mode"], "prerecorded")
+        self.assertEqual(payload["status"], "fallback")
+        self.assertEqual(payload["status_category"], "timeout")
+        self.assertEqual(payload["source_label"], "握手未完成，回退展示（归档样例）")
+        self.assertIn("不宣称本次 live 已完成", payload["message"])
+        self.assertFalse(payload["live_attempt"]["control_handshake_complete"])
+        self.assertEqual(payload["live_progress"]["label"], "握手未完成，已回退")
+
     def test_inject_fault_endpoint_keeps_live_attempt_diagnostics_on_replay_fallback(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
         request_json(

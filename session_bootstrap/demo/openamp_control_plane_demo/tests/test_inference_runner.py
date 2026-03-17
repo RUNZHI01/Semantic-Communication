@@ -1029,12 +1029,18 @@ class RunRemoteReconstructionTest(unittest.TestCase):
             snapshot = job._final_snapshot
             assert snapshot is not None
             self.assertEqual(snapshot["status"], "error")
+            self.assertFalse(snapshot["control_handshake_complete"])
+            self.assertIn("STATUS_REQ 已写入 RPMsg", snapshot["message"])
+            self.assertIn("JOB_REQ 已写入 RPMsg", snapshot["message"])
             self.assertEqual(snapshot["progress"]["count_label"], f"0 / {inference_runner.DEFAULT_MAX_INPUTS}")
             self.assertEqual(snapshot["progress"]["count_source"], "runner_log.missing")
+            self.assertEqual(snapshot["progress"]["label"], "握手未完成，已回退")
             self.assertEqual(snapshot["progress"]["stages"][0]["status"], "error")
             self.assertEqual(snapshot["progress"]["stages"][1]["status"], "error")
             self.assertEqual(snapshot["progress"]["stages"][2]["status"], "error")
             self.assertEqual(snapshot["progress"]["current_stage"], "连接失败")
+            self.assertIn("transport=tx_ok_rx_timeout", snapshot["progress"]["event_log"][0])
+            self.assertIn("transport=tx_ok_rx_timeout", snapshot["progress"]["event_log"][1])
             self.assertIn("tx_ok_rx_timeout", snapshot["progress"]["event_log"][2])
 
     def test_success_snapshot_keeps_control_hook_timeout_as_diagnostic_not_runner_timeout(self) -> None:
