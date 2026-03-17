@@ -11,6 +11,7 @@
 
 核心入口：
 - `session_bootstrap/scripts/run_big_little_first_real_attempt.sh`
+- `session_bootstrap/reports/big_little_overnight_handoff_20260318.md`
 - `session_bootstrap/config/big_little_pipeline.current.2026-03-18.phytium_pi.env`
 - `session_bootstrap/runbooks/big_little_pipeline_runbook_2026-03-18.md`
 - `session_bootstrap/scripts/big_little_topology_probe.py`
@@ -22,6 +23,7 @@
 
 补充说明：
 - 这条线已经具备明早直接上板执行的 repo 侧条件；
+- `big_little_overnight_handoff_20260318.md` 是明早执行时优先看的短交接，集中给出默认入口、手工展开链路、拓扑建议、预期输出和唯一剩余 blocker；
 - `run_big_little_first_real_attempt.sh` 现在会自动复制 runtime env、只读探测 topology、自动回填 BIG/LITTLE core 建议、再顺序跑 pipeline 与 compare；
 - 当前第一次只读拓扑建议为 `BIG_LITTLE_BIG_CORES=2`、`BIG_LITTLE_LITTLE_CORES=0,1`，但因为 CPU 3 在首轮探测时处于 offline，明早仍建议先 re-check 一次再开跑。
 
