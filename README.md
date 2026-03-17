@@ -56,6 +56,8 @@
 | 启动集成 OpenAMP demo 软件 | `bash session_bootstrap/scripts/run_openamp_demo.sh` |
 | OpenAMP demo 软件说明 | `session_bootstrap/demo/openamp_control_plane_demo/README.md` |
 | 下一轮性能优化执行清单 | `session_bootstrap/runbooks/next_round_optimization_checklist.md` |
+| big.LITTLE 首次真机一键入口 | `bash session_bootstrap/scripts/run_big_little_first_real_attempt.sh` |
+| big.LITTLE 异构流水线 runbook | `session_bootstrap/runbooks/big_little_pipeline_runbook_2026-03-18.md` |
 | 后续性能优化路线 | `session_bootstrap/runbooks/optimization_roadmap.md` |
 | 飞腾派 RPC 调优 | `session_bootstrap/scripts/rpc_tune.py` |
 | 真实端到端重建 benchmark | `session_bootstrap/scripts/current_real_reconstruction.py` |
