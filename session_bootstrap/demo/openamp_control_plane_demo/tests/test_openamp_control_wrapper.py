@@ -296,6 +296,136 @@ class OpenAMPControlWrapperTest(unittest.TestCase):
         self.assertEqual(summary["job_id"], 101)
         self.assertEqual(summary["result"], "denied_by_control_hook")
 
+    def test_main_aborts_after_failed_status_req_without_sending_job_req(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+            args = openamp_control_wrapper.argparse.Namespace(
+                runner_cmd="echo runner",
+                output_dir=str(output_dir),
+                job_id=202,
+                variant="current_reconstruction",
+                expected_sha256="",
+                trusted_artifact_label="",
+                trusted_artifacts_file=str(output_dir / "trusted.json"),
+                deadline_ms=300000,
+                expected_outputs=300,
+                job_flags="reconstruction",
+                heartbeat_interval_sec=5.0,
+                runner_timeout_sec=0.0,
+                transport="hook",
+                control_hook_cmd="echo hook",
+                control_hook_timeout_sec=5.0,
+                dry_run=False,
+                admission_mode="legacy_sha",
+                signed_manifest_file="",
+                signed_manifest_public_key="",
+            )
+            emit_calls: list[str] = []
+
+            def fake_emit_event(*, trace_path, phase, payload, transport, hook_cmd, hook_timeout_sec):  # type: ignore[no-untyped-def]
+                emit_calls.append(phase)
+                if phase == "STATUS_REQ":
+                    return {
+                        "response": {
+                            "phase": "STATUS_REQ",
+                            "transport_status": "tx_ok_rx_timeout",
+                            "protocol_semantics": "not_verified",
+                            "note": (
+                                "write to /dev/rpmsg0 succeeded but no response arrived before timeout. "
+                                "Do not claim STATUS_RESP semantics from this result."
+                            ),
+                        }
+                    }
+                self.fail(f"unexpected phase {phase}")
+
+            stdout = io.StringIO()
+            with (
+                patch("openamp_control_wrapper.parse_args", return_value=args),
+                patch(
+                    "openamp_control_wrapper.resolve_expected_sha256",
+                    return_value=("a" * 64, None, "--expected-sha256"),
+                ),
+                patch("openamp_control_wrapper.emit_event", side_effect=fake_emit_event),
+                contextlib.redirect_stdout(stdout),
+            ):
+                result = openamp_control_wrapper.main()
+            summary = json.loads(stdout.getvalue().strip())
+
+        self.assertEqual(result, 2)
+        self.assertEqual(emit_calls, ["STATUS_REQ"])
+        self.assertEqual(summary["result"], "denied_by_control_hook")
+        self.assertEqual(summary["blocked_phase"], "STATUS_REQ")
+        self.assertEqual(summary["job_req_response"], {})
+
+    def test_main_aborts_after_failed_signed_admission_phase_without_job_req(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir_raw:
+            temp_dir = Path(temp_dir_raw)
+            output_dir = temp_dir / "wrapper"
+            bundle_path, public_key = build_signed_bundle(temp_dir, variant="baseline")
+            args = openamp_control_wrapper.argparse.Namespace(
+                runner_cmd="echo runner",
+                output_dir=str(output_dir),
+                job_id=303,
+                variant="baseline",
+                expected_sha256="",
+                trusted_artifact_label="",
+                trusted_artifacts_file=str(openamp_control_wrapper.DEFAULT_TRUSTED_ARTIFACTS_PATH),
+                deadline_ms=300000,
+                expected_outputs=300,
+                job_flags="reconstruction",
+                heartbeat_interval_sec=5.0,
+                runner_timeout_sec=0.0,
+                transport="hook",
+                control_hook_cmd="echo hook",
+                control_hook_timeout_sec=5.0,
+                dry_run=True,
+                admission_mode="signed_manifest_v1",
+                signed_manifest_file=str(bundle_path),
+                signed_manifest_public_key=str(public_key),
+            )
+            emit_calls: list[str] = []
+
+            def fake_emit_event(*, trace_path, phase, payload, transport, hook_cmd, hook_timeout_sec):  # type: ignore[no-untyped-def]
+                emit_calls.append(phase)
+                if phase == "STATUS_REQ":
+                    return {
+                        "response": {
+                            "phase": "STATUS_REQ",
+                            "transport_status": "status_resp_received",
+                            "protocol_semantics": "implemented",
+                        }
+                    }
+                if phase == "SIGNED_ADMISSION_BEGIN":
+                    return {
+                        "response": {
+                            "phase": "SIGNED_ADMISSION_BEGIN",
+                            "acknowledged": False,
+                            "transport_status": "tx_ok_rx_timeout",
+                            "protocol_semantics": "not_verified",
+                        }
+                    }
+                self.fail(f"unexpected phase {phase}")
+
+            stdout = io.StringIO()
+            with (
+                patch("openamp_control_wrapper.parse_args", return_value=args),
+                patch(
+                    "openamp_control_wrapper.resolve_expected_sha256",
+                    return_value=("", None, "unset"),
+                ),
+                patch("openamp_control_wrapper.emit_event", side_effect=fake_emit_event),
+                contextlib.redirect_stdout(stdout),
+            ):
+                result = openamp_control_wrapper.main()
+            summary = json.loads(stdout.getvalue().strip())
+
+        self.assertEqual(result, 2)
+        self.assertEqual(emit_calls, ["STATUS_REQ", "SIGNED_ADMISSION_BEGIN"])
+        self.assertEqual(summary["result"], "denied_by_control_hook")
+        self.assertEqual(summary["blocked_phase"], "SIGNED_ADMISSION_BEGIN")
+        self.assertEqual(summary["job_req_response"], {})
+        self.assertEqual(len(summary["signed_admission_responses"]), 1)
+
     def test_main_signed_current_mode_emits_sideband_phases_before_job_req(self) -> None:
         self.assert_signed_wrapper_trace(variant="current")
 
