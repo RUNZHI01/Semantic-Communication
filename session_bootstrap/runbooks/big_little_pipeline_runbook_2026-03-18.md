@@ -29,6 +29,28 @@ bash ./session_bootstrap/scripts/run_big_little_compare.sh \
 
 This preserves the trusted serial command as the baseline while giving the pipeline path its own isolated wrapper and report files.
 
+### Tomorrow morning command chain
+
+If you want the least-thinking path tomorrow morning, run in this order:
+
+```bash
+# 1) Re-check the topology once (read-only)
+python3 ./session_bootstrap/scripts/big_little_topology_probe.py ssh \
+  --env session_bootstrap/config/big_little_pipeline.current.example.env \
+  --write-raw session_bootstrap/reports/big_little_topology_capture_latest.txt
+
+# 2) If needed, edit BIG_LITTLE_BIG_CORES / BIG_LITTLE_LITTLE_CORES in your copied env
+
+# 3) Run the pipeline path itself
+bash ./session_bootstrap/scripts/run_big_little_pipeline.sh \
+  --env session_bootstrap/config/big_little_pipeline.current.example.env \
+  --variant current
+
+# 4) Run serial vs pipeline comparison
+bash ./session_bootstrap/scripts/run_big_little_compare.sh \
+  --env session_bootstrap/config/big_little_pipeline.current.example.env
+```
+
 ## Env Files
 
 Start from one of:
@@ -79,6 +101,16 @@ Use the helper suggestion, or those raw outputs if needed, only to confirm the C
 
 - `BIG_LITTLE_BIG_CORES`
 - `BIG_LITTLE_LITTLE_CORES`
+
+Current first probe result already captured in:
+- `session_bootstrap/reports/big_little_topology_capture_20260318_0136.txt`
+- `session_bootstrap/reports/big_little_topology_suggestion_20260318_0136.json`
+
+That probe currently suggests:
+- `BIG_LITTLE_BIG_CORES=2`
+- `BIG_LITTLE_LITTLE_CORES=0,1`
+
+because online CPUs were `0,1,2`, CPU `2` reported `MAXMHZ=1800`, and CPU `0,1` reported `1500`. CPU `3` was offline during the probe, so treat this as the first recommendation rather than an immutable final truth.
 
 Keep `BIG_LITTLE_ALLOW_MISSING_AFFINITY=0` for the first real run so any affinity failure surfaces immediately.
 
