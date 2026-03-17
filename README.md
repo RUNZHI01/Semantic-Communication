@@ -59,6 +59,7 @@
 | big.LITTLE 首次真机一键入口 | `bash session_bootstrap/scripts/run_big_little_first_real_attempt.sh` |
 | big.LITTLE 明早执行交接 | `session_bootstrap/reports/big_little_overnight_handoff_20260318.md` |
 | big.LITTLE 首轮真机对比结果 | `session_bootstrap/reports/big_little_compare_20260318_051326.md` |
+| big.LITTLE 首轮资源 profiling | `session_bootstrap/reports/resource_profile_big_little_current_20260318_052922.md` |
 | big.LITTLE 异构流水线 runbook | `session_bootstrap/runbooks/big_little_pipeline_runbook_2026-03-18.md` |
 | 后续性能优化路线 | `session_bootstrap/runbooks/optimization_roadmap.md` |
 | 飞腾派 RPC 调优 | `session_bootstrap/scripts/rpc_tune.py` |

@@ -14,6 +14,7 @@
 - `session_bootstrap/reports/big_little_overnight_handoff_20260318.md`
 - `session_bootstrap/reports/big_little_compare_20260318_051326.md`
 - `session_bootstrap/reports/big_little_pipeline_current_20260318_051520.md`
+- `session_bootstrap/reports/resource_profile_big_little_current_20260318_052922.md`
 - `session_bootstrap/config/big_little_pipeline.current.2026-03-18.phytium_pi.env`
 - `session_bootstrap/runbooks/big_little_pipeline_runbook_2026-03-18.md`
 - `session_bootstrap/scripts/big_little_topology_probe.py`
@@ -27,6 +28,7 @@
 - 这条线已经从“明早可执行”推进到“首轮真机结果已落盘”；
 - `big_little_compare_20260318_051326.md` 给出首轮真机对比：serial `2.886 images/s` -> pipeline `3.952 images/s`，吞吐提升 `36.937%`；
 - `big_little_pipeline_current_20260318_051520.md` 给出真机 pipeline 本体结果：`processed_count=300`、`artifact_sha256_match=true`、`big_cores=[2]`、`little_cores=[0,1]`；
+- `resource_profile_big_little_current_20260318_052922.md` 给出同一条真机 pipeline current 路径的板级资源证据：wall time `84s`、vmstat 平均 CPU `user/system/idle/wait = 53.812 / 2.706 / 43.435 / 0.129 %`、平均 runnable `2.165`、最小 free memory `217480 KB`；
 - `big_little_overnight_handoff_20260318.md` 现保留为这次首跑前的短交接，同时在顶部补了真机结果回链；
 - `run_big_little_first_real_attempt.sh` 现在会自动复制 runtime env、只读探测 topology、自动回填 BIG/LITTLE core 建议、再顺序跑 pipeline 与 compare；
 - 当前第一次只读拓扑建议为 `BIG_LITTLE_BIG_CORES=2`、`BIG_LITTLE_LITTLE_CORES=0,1`，且首轮真机 run 也按这组绑定完成；CPU 3 在 probe 时仍是 offline，后续复跑前依然建议先 re-check 一次。
