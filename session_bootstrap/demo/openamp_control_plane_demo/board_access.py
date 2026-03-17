@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import json
 import os
 from pathlib import Path
@@ -451,6 +451,26 @@ class BoardAccessConfig:
         env = os.environ.copy()
         env.update(self.build_env())
         return env
+
+    def with_env_overrides(self, overrides: dict[str, str]) -> "BoardAccessConfig":
+        clean_overrides = {str(key): str(value).strip() for key, value in overrides.items() if str(value).strip()}
+        if not clean_overrides:
+            return self
+
+        env_values = dict(self.env_values)
+        env_values.update(clean_overrides)
+
+        startup_env_values = dict(self.startup_env_values)
+        env_file_values = dict(self.env_file_values)
+        if startup_env_values or env_file_values:
+            env_file_values.update(clean_overrides)
+
+        return replace(
+            self,
+            env_values=env_values,
+            startup_env_values=startup_env_values,
+            env_file_values=env_file_values,
+        )
 
     def to_public_dict(self) -> dict[str, Any]:
         missing_current = self.missing_inference_fields("current")

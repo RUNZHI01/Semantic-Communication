@@ -404,6 +404,10 @@ class DemoHTTPServerTest(unittest.TestCase):
             expected_env_file,
         )
         self.assertNotIn("password", payload["board_access"])
+        self.assertEqual(
+            payload["live"]["admission"]["artifact_sha256"],
+            payload["live"]["trusted_sha"],
+        )
 
     def test_system_status_endpoint_exposes_redacted_board_access(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
@@ -661,11 +665,15 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(payload["request_state"], "running")
         self.assertEqual(payload["job_id"], live_job.job_id)
         access = launch_job.call_args.args[0]
-        self.assertIs(access, saved_access)
+        self.assertIsNot(access, saved_access)
         self.assertEqual(access.host, "100.121.87.73")
         self.assertEqual(access.user, "user")
         self.assertEqual(access.password, "demo-pass")
         self.assertEqual(access.env_file, saved_access.env_file)
+        self.assertEqual(
+            access.build_env()["INFERENCE_CURRENT_EXPECTED_SHA256"],
+            "6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1",
+        )
 
     def test_run_inference_endpoint_blocks_when_demo_already_has_running_live_job(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
@@ -997,7 +1005,7 @@ class DemoHTTPServerTest(unittest.TestCase):
         access = launch_job.call_args.args[0]
         self.assertEqual(
             access.build_env()["INFERENCE_CURRENT_EXPECTED_SHA256"],
-            "1946b08e6cf20a1259fa43f9e849a06f50ae1230c08d4df7081fba1edae4c644",
+            "6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1",
         )
 
     def test_inference_progress_endpoint_returns_not_found_for_unknown_job(self) -> None:

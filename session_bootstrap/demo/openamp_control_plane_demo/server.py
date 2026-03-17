@@ -13,7 +13,7 @@ from threading import Lock
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from board_access import build_board_access_config, build_demo_default_board_access
+from board_access import BoardAccessConfig, build_board_access_config, build_demo_default_board_access
 from board_probe import DEFAULT_LIVE_PROBE_OUTPUT, is_successful_probe, load_probe_output, run_live_probe, write_probe_output
 from demo_data import (
     PROJECT_ROOT,
@@ -152,6 +152,11 @@ class DashboardState:
         self._target_label = "cortex-a72 + neon"
         self._runtime_label = "tvm"
 
+    def _live_board_access_for_variant(self, board_access: BoardAccessConfig, *, variant: str) -> BoardAccessConfig:
+        if variant != "current" or not self._trusted_current_sha:
+            return board_access
+        return board_access.with_env_overrides({"INFERENCE_CURRENT_EXPECTED_SHA256": self._trusted_current_sha})
+
     def set_board_access(self, payload: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
             fallback = self._board_access
@@ -174,8 +179,9 @@ class DashboardState:
             last_fault = self._last_fault_result
 
         snapshot = build_snapshot(live_probe=live_probe)
-        admission = describe_demo_admission(board_access, variant="current")
-        current_support = describe_demo_variant_support(board_access, variant="current")
+        current_board_access = self._live_board_access_for_variant(board_access, variant="current")
+        admission = describe_demo_admission(current_board_access, variant="current")
+        current_support = describe_demo_variant_support(current_board_access, variant="current")
         baseline_support = describe_demo_variant_support(board_access, variant="baseline")
         evidence_status = snapshot["board"]["evidence_status"]
         live_details = live_probe.get("details", {}) if live_probe else {}
@@ -510,7 +516,8 @@ class DashboardState:
         with self._lock:
             board_access = self._board_access
             last_live_probe = self._last_live_probe
-        variant_support = describe_demo_variant_support(board_access, variant=variant)
+        live_board_access = self._live_board_access_for_variant(board_access, variant=variant)
+        variant_support = describe_demo_variant_support(live_board_access, variant=variant)
 
         if board_access.configured:
             active_record = self._running_inference_job_record()
@@ -593,7 +600,7 @@ class DashboardState:
                     event_log = list(status_payload.get("logs") or [])
                     if self._can_launch_runner_only_fallback(board_access=board_access, status_payload=status_payload):
                         live_job = launch_remote_reconstruction_job(
-                            board_access,
+                            live_board_access,
                             variant=variant,
                             control_transport="none",
                             control_preflight=status_payload,
@@ -622,7 +629,7 @@ class DashboardState:
                             event_log=event_log,
                         )
                 if payload.get("status") != "fallback" and not payload.get("job_id"):
-                    live_job = launch_remote_reconstruction_job(board_access, variant=variant)
+                    live_job = launch_remote_reconstruction_job(live_board_access, variant=variant)
                     live_result = live_job.snapshot()
                     record = {
                         "job": live_job,
@@ -634,7 +641,7 @@ class DashboardState:
                         self._inference_jobs[live_job.job_id] = record
                     payload = self._build_inference_response(record, live_result)
             else:
-                live_job = launch_remote_reconstruction_job(board_access, variant=variant)
+                live_job = launch_remote_reconstruction_job(live_board_access, variant=variant)
                 live_result = live_job.snapshot()
                 record = {
                     "job": live_job,

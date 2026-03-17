@@ -242,6 +242,41 @@ class DemoBoardAccessDefaultsTest(unittest.TestCase):
         )
         self.assertEqual(access.field_sources["password"], "session")
 
+    def test_with_env_overrides_replaces_stale_current_expected_sha_from_env_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            env_path = temp_root / "demo.env"
+            stale_sha = "1946b08e6cf20a1259fa43f9e849a06f50ae1230c08d4df7081fba1edae4c644"
+            trusted_sha = "6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1"
+            env_path.write_text(
+                "\n".join(
+                    [
+                        "REMOTE_TVM_PYTHON=/usr/bin/python3",
+                        "REMOTE_INPUT_DIR=/tmp/input",
+                        "REMOTE_OUTPUT_BASE=/tmp/output",
+                        "REMOTE_SNR_CURRENT=12",
+                        "REMOTE_BATCH_CURRENT=1",
+                        f"INFERENCE_CURRENT_EXPECTED_SHA256={stale_sha}",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            access = build_board_access_config(
+                {
+                    "host": "demo-board",
+                    "user": "demo-user",
+                    "password": "demo-pass",
+                    "port": "22",
+                    "env_file": str(env_path),
+                }
+            )
+            corrected = access.with_env_overrides({"INFERENCE_CURRENT_EXPECTED_SHA256": trusted_sha})
+
+        self.assertEqual(access.build_env()["INFERENCE_CURRENT_EXPECTED_SHA256"], stale_sha)
+        self.assertEqual(corrected.build_env()["INFERENCE_CURRENT_EXPECTED_SHA256"], trusted_sha)
+
 
 if __name__ == "__main__":
     unittest.main()
