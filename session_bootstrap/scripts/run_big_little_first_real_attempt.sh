@@ -14,19 +14,30 @@ fi
 
 cd "$PROJECT_DIR"
 
-echo "=== [1/3] read-only topology probe ==="
+SUGGESTION_JSON="./session_bootstrap/reports/big_little_topology_suggestion_latest.json"
+CAPTURE_TXT="./session_bootstrap/reports/big_little_topology_capture_latest.txt"
+
+echo "=== [1/4] read-only topology probe ==="
 python3 ./session_bootstrap/scripts/big_little_topology_probe.py ssh \
   --env "$ENV_FILE" \
-  --write-raw ./session_bootstrap/reports/big_little_topology_capture_latest.txt
+  --write-raw "$CAPTURE_TXT" \
+  > "$SUGGESTION_JSON"
+cat "$SUGGESTION_JSON"
 
 echo
-echo "=== [2/3] current big.LITTLE pipeline run ==="
+echo "=== [2/4] apply topology suggestion to env ==="
+python3 ./session_bootstrap/scripts/apply_big_little_topology_suggestion.py \
+  --env "$ENV_FILE" \
+  --suggestion "$SUGGESTION_JSON"
+
+echo
+echo "=== [3/4] current big.LITTLE pipeline run ==="
 bash ./session_bootstrap/scripts/run_big_little_pipeline.sh \
   --env "$ENV_FILE" \
   --variant current
 
 echo
-echo "=== [3/3] serial vs pipeline compare ==="
+echo "=== [4/4] serial vs pipeline compare ==="
 bash ./session_bootstrap/scripts/run_big_little_compare.sh \
   --env "$ENV_FILE"
 
