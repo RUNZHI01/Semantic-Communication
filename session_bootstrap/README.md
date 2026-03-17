@@ -30,6 +30,8 @@
 | payload 基准正式结论 | `reports/inference_compare_baseline_vs_currentsafe_rerun_20260311_114828.md` |
 | 真实端到端重建正式结论 | `reports/inference_real_reconstruction_compare_run_20260311_212301.md` |
 | 下一轮性能优化执行清单 | `runbooks/next_round_optimization_checklist.md` |
+| big.LITTLE 首次真机一键入口 | `scripts/run_big_little_first_real_attempt.sh` |
+| big.LITTLE 异构流水线 runbook | `runbooks/big_little_pipeline_runbook_2026-03-18.md` |
 | 后续性能优化路线 | `runbooks/optimization_roadmap.md` |
 
 ## OpenAMP 控制面证据入口（2026-03-15）
