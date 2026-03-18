@@ -48,6 +48,8 @@
 - `reports/award_rescue_execution_checklist_20260319.md`
 - `reports/defense_deck_outline_20260319.md`
 - `reports/defense_talk_track_5min_20260320.md`
+- `reports/defense_talk_track_2min_20260320.md`
+- `reports/defense_demo_operator_card_20260320.md`
 - `reports/project_reframing_for_feiteng_cup_20260319.md`
 
 ## OpenAMP 控制面证据入口（2026-03-15）
