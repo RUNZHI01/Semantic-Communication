@@ -83,6 +83,12 @@
 | big.LITTLE 板态漂移结论 | `session_bootstrap/reports/big_little_board_state_drift_20260318.md`（same-day direct rerun `347.375 → 295.255 → 239.233 ms/image`，CPU online `0-2 → 0-3`，说明板态是 primary factor） |
 | 详细产物 / 脚本 / 路径说明 | `session_bootstrap/runbooks/artifact_registry.md` |
 
+### 飞腾杯冲奖救援文档（2026-03-19）
+
+- `session_bootstrap/reports/award_rescue_execution_checklist_20260319.md`
+- `session_bootstrap/reports/defense_deck_outline_20260319.md`
+- `session_bootstrap/reports/project_reframing_for_feiteng_cup_20260319.md`
+
 ## 技术架构
 
 ```
