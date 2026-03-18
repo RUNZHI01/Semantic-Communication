@@ -17,6 +17,8 @@ Files in this folder:
   `--local-experimental-subprocess-per-image`, which runs each image in its
   own Python subprocess and stores child records under
   `<output-dir>/local_experimental_subprocess_worker_records/`.
+  The isolated helper also exposes `--local-disable-mkldnn` to disable
+  oneDNN/MKLDNN for this copied workflow only.
 - `run_remote_pytorch_reference_reconstruction.sh`: Bash wrapper that resolves
   env/config inputs and invokes the Python helper for remote or local runs.
   For SSH runs it now stages the helper as a temporary real file on the remote
