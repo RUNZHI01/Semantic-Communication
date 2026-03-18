@@ -4,6 +4,18 @@
 
 big.LITTLE 异构流水线已经在飞腾派真机上跑通，并且相对当前 trusted serial real-reconstruction 基线拿到了**稳定可复现的吞吐提升**：两轮 compare 分别为 **`+36.937%`** 和 **`+36.54%`**。
 
+## 0. 口径先说明白
+
+这次 `+36.5% ~ +36.9%` 的提升，比较的是：
+- **同一份 current artifact**
+- **同一批 300 张 latent 输入**
+- **同一条 current real-reconstruction 语义**
+- **同一组 SNR / batch 配置**
+- 只比较 **serial current** vs **big.LITTLE pipeline current**
+
+所以这不是在和更早那份 `230.339 ms/image` 的 historical current 报告直接做横比。
+那份报告（`inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md`）是另一套历史 benchmark 记录，SNR 口径也不同；它可以证明 current 本身已经很强，但**不能直接当成这次 big.LITTLE compare 的对照组**。
+
 ## 1. 真机 pipeline 本体
 
 核心报告：
@@ -21,6 +33,22 @@ big.LITTLE 异构流水线已经在飞腾派真机上跑通，并且相对当前
 说明：
 - 当前首轮真机绑定使用 `BIG_LITTLE_BIG_CORES=2`、`BIG_LITTLE_LITTLE_CORES=0,1`
 - CPU 3 在 probe 时仍是 offline，因此后续复跑前仍建议先做一次 topology re-check
+
+## 1.1 阶段级绑核关系（不是算子级绑核）
+
+本轮证据支持的是**阶段 / worker 级 affinity**，不是逐个 TVM 算子级别的绑核：
+
+- **preloader** → LITTLE 核 `[0,1]`
+  - 负责 latent 读取 / 预处理 / AWGN 注入 / 入队
+- **inferencer** → BIG 核 `[2]`
+  - 负责 TVM `load_module` 后的 VM `main` 推理主计算路径
+- **postprocessor** → LITTLE 核 `[0,1]`
+  - 负责输出保存 / 写图像
+- **CPU 3** → probe 时 offline，本轮未参与绑定
+
+所以更严谨的说法应该是：
+- 这次突破来自**阶段级异构绑核 + 流水线重叠**
+- 不是“已经证明每个算子都被单独绑定到了某个核”
 
 ## 2. 真机 compare（首轮）
 
