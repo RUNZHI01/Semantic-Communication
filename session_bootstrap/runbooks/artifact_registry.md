@@ -7,16 +7,23 @@
 
 ---
 
-## 0. big.LITTLE 异构大小核首跑入口（2026-03-18）
+## 0. big.LITTLE 异构大小核真机入口（2026-03-18）
 
 核心入口：
 - `session_bootstrap/scripts/run_big_little_first_real_attempt.sh`
-- `session_bootstrap/reports/big_little_overnight_handoff_20260318.md`
 - `session_bootstrap/reports/big_little_real_run_summary_20260318.md`
-- `session_bootstrap/reports/big_little_compare_20260318_051326.md`
-- `session_bootstrap/reports/big_little_pipeline_current_20260318_051520.md`
+- `session_bootstrap/reports/big_little_compare_20260318_095615.md`
+- `session_bootstrap/reports/big_little_compare_20260318_095615.json`
+- `session_bootstrap/reports/big_little_compare_20260318_095615.serial.raw.log`
+- `session_bootstrap/reports/big_little_compare_20260318_095615.pipeline.raw.log`
+- `session_bootstrap/reports/big_little_pipeline_bestcurrent_snr10_current_20260318_095811.md`
+- `session_bootstrap/reports/big_little_pipeline_bestcurrent_snr10_current_20260318_095811.json`
+- `session_bootstrap/reports/inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md`
 - `session_bootstrap/reports/resource_profile_big_little_current_20260318_052922.md`
-- `session_bootstrap/config/big_little_pipeline.current.2026-03-18.phytium_pi.env`
+- `session_bootstrap/config/big_little_pipeline.current.bestcurrent_snr10.2026-03-18.phytium_pi.env`
+- `session_bootstrap/reports/big_little_compare_20260318_051326.md`
+- `session_bootstrap/reports/big_little_compare_20260318_053619.md`
+- `session_bootstrap/reports/big_little_overnight_handoff_20260318.md`
 - `session_bootstrap/runbooks/big_little_pipeline_runbook_2026-03-18.md`
 - `session_bootstrap/scripts/big_little_topology_probe.py`
 - `session_bootstrap/scripts/apply_big_little_topology_suggestion.py`
@@ -26,15 +33,17 @@
 - `session_bootstrap/reports/big_little_topology_suggestion_20260318_0136.json`
 
 补充说明：
-- 这条线已经从“明早可执行”推进到“首轮真机结果已落盘”；
-- `big_little_real_run_summary_20260318.md` 是当前最适合直接引用的一页摘要：收拢了首轮 compare、第二轮复跑和 profiling；
-- `big_little_compare_20260318_051326.md` 给出首轮真机对比：serial `2.886 images/s` -> pipeline `3.952 images/s`，吞吐提升 `36.937%`；
-- `big_little_compare_20260318_053619.md` 给出第二轮复跑：serial `2.879 images/s` -> pipeline `3.931 images/s`，吞吐提升 `36.54%`；
-- `big_little_pipeline_current_20260318_051520.md` 给出真机 pipeline 本体结果：`processed_count=300`、`artifact_sha256_match=true`、`big_cores=[2]`、`little_cores=[0,1]`；
-- `resource_profile_big_little_current_20260318_052922.md` 给出同一条真机 pipeline current 路径的板级资源证据：wall time `84s`、vmstat 平均 CPU `user/system/idle/wait = 53.812 / 2.706 / 43.435 / 0.129 %`、平均 runnable `2.165`、最小 free memory `217480 KB`；
+- 这条线已经从“明早可执行”推进到“首选 apples-to-apples 真机 compare 已落盘”；
+- `big_little_real_run_summary_20260318.md` 是当前最适合直接引用的一页摘要：它已经把“relative-vs-serial improvement”和“absolute-vs-historical-best status”拆开说清楚；
+- `big_little_compare_20260318_095615.md` 是当前默认引用的真机 apples-to-apples compare：same-run serial current `344.721 ms/image`，same-run pipeline current `254.791 ms/image`，相对同轮 serial current 吞吐提升 `35.298%`；
+- 这份 `095615` compare 仍然**慢于**历史最佳 current e2e `230.339 ms/image` 约 `10.62%`，所以它证明的是“big.LITTLE 对 serial current 有效”，不是“已经刷新绝对最快 current 记录”；
+- `big_little_pipeline_bestcurrent_snr10_current_20260318_095811.md` 是与这次 apples-to-apples compare 配套的 pipeline wrapper 报告：`processed_count=300`、`artifact_sha256_match=true`、`big_cores=[2]`、`little_cores=[0,1]`；
+- `big_little_compare_20260318_051326.md` 和 `big_little_compare_20260318_053619.md` 现保留为更早两轮同日复现证据：`36.937%` / `36.54%` uplift，可作为稳定性佐证，但不再是默认 headline；
+- `resource_profile_big_little_current_20260318_052922.md` 继续保留为同日 current pipeline 路径的板级资源证据：wall time `84s`、vmstat 平均 CPU `user/system/idle/wait = 53.812 / 2.706 / 43.435 / 0.129 %`、平均 runnable `2.165`、最小 free memory `217480 KB`；
 - `big_little_overnight_handoff_20260318.md` 现保留为这次首跑前的短交接，同时在顶部补了真机结果回链；
 - `run_big_little_first_real_attempt.sh` 现在会自动复制 runtime env、只读探测 topology、自动回填 BIG/LITTLE core 建议、再顺序跑 pipeline 与 compare；
-- 当前第一次只读拓扑建议为 `BIG_LITTLE_BIG_CORES=2`、`BIG_LITTLE_LITTLE_CORES=0,1`，且首轮真机 run 也按这组绑定完成；CPU 3 在 probe 时仍是 offline，后续复跑前依然建议先 re-check 一次。
+- `big_little_pipeline.current.bestcurrent_snr10.2026-03-18.phytium_pi.env` 明确固定了这次 apples-to-apples compare 的 best-current artifact lineage、`SNR=10` 和 `big=[2] / little=[0,1]` 绑定；
+- CPU 3 在 probe 时仍是 offline，后续复跑前依然建议先 re-check 一次。
 
 ## 1. OpenAMP 控制面答辩证据包（2026-03-15）
 
@@ -75,47 +84,46 @@
 ### 1.1 payload 级推理：current 已显著优于 baseline
 
 核心报告：
-- `session_bootstrap/reports/inference_compare_currentsafe_split_topup15_validate_20260313_0002.md`
+- `session_bootstrap/reports/inference_compare_currentsafe_chunk4_refresh_20260313_1758.md`
 - `session_bootstrap/reports/trusted_current_speedup_causal_chain_20260313.md`
 
 关键结果：
-- previous trusted current median: `153.778 ms`
-- new trusted current median: `131.343 ms`
-- delta vs previous trusted current: `-22.435 ms`（`14.59%` 更快）
-- baseline median in the new formal validation: `1853.7 ms`
-- improvement vs baseline in the new formal validation: `92.91%`
-- current artifact SHA256: `65747fb301851f27892666d28daefc856c0ff2f7f85d3702779be32dde4b6377`
+- baseline median in the fresh formal validation: `1846.9 ms`
+- current median in the fresh formal validation: `130.219 ms`
+- improvement vs baseline in the fresh formal validation: `92.95%`
+- delta vs previous trusted current payload median `131.343 ms`: `-1.124 ms`（约 `0.86%` 更快）
+- current artifact SHA256: `6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1`
 
 ### 1.2 真实端到端重建：current 已显著优于 baseline
 
 核心报告：
-- `session_bootstrap/reports/inference_real_reconstruction_compare_currentsafe_split_topup15_20260313_003633_retry_20260313_005140.md`
+- `session_bootstrap/reports/inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md`
 
 关键结果：
-- baseline median: `1834.1 ms/image`
-- current median: `234.219 ms/image`
-- improvement: `87.23%`
+- baseline median: `1850.0 ms/image`
+- current median: `230.339 ms/image`
+- improvement: `87.55%`
 - baseline/current count: `300`
-- current artifact SHA256: `65747fb301851f27892666d28daefc856c0ff2f7f85d3702779be32dde4b6377`
-- delta vs previous trusted current end-to-end median `255.931 ms/image`: `-21.712 ms/image`（约 `8.48%` 更快）
+- current artifact SHA256: `6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1`
+- delta vs previous trusted current end-to-end median `234.219 ms/image`: `-3.880 ms/image`（约 `1.66%` 更快）
 - 说明：
   - 这是当前仓库内最新、且已正式对齐当前 trusted current SHA 的真实端到端重建报告；
-  - `session_bootstrap/reports/inference_real_reconstruction_compare_run_20260311_212301.md` 现保留为上一 trusted current SHA `1946...c644` 的历史参照。
+  - `session_bootstrap/reports/inference_real_reconstruction_compare_currentsafe_split_topup15_20260313_003633_retry_20260313_005140.md` 现保留为上一代 trusted current SHA `65747fb3...b6377` 的历史参照；
+  - `session_bootstrap/reports/inference_real_reconstruction_compare_run_20260311_212301.md` 现保留为更早上一代 trusted current SHA `1946...c644` 的历史参照。
 
-### 1.3 hotspot -> topup -> 新 trusted current 的工程链路已经被验证
+### 1.3 hotspot -> topup -> chunk4 fresh current 的工程链路已经被验证
 
 核心报告：
-- `session_bootstrap/reports/profiling_trusted_current_20260312_153906.md`
-- `session_bootstrap/reports/hotspot_tasks_trusted_current_20260312_153906.md`
 - `session_bootstrap/reports/trusted_current_speedup_causal_chain_20260313.md`
+- `session_bootstrap/reports/phytium_speed_test_summary_20260313_162731.md`
+- `session_bootstrap/reports/inference_compare_currentsafe_chunk4_refresh_20260313_1758.md`
+- `session_bootstrap/reports/inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md`
 
 关键结果：
 - trusted current 热点前 8 个 task 覆盖 tuned-stage weight 的 `80.247%`
-- continuation env 明确从 `resume_from_1549` DB 继续，并把 topup 预算设为 `15` trials
-- `split_stageA_topup15` / `split_topup15` 两个输出目录都编译出同一个新 artifact SHA：
-  - `65747fb301851f27892666d28daefc856c0ff2f7f85d3702779be32dde4b6377`
-- 形式化 payload 验证把 trusted current median 从 `153.778 ms` 压到 `131.343 ms`
-- 同一新 SHA 的真实端到端 reconstruction 正式复跑也已把 current median 从 `255.931 ms/image` 压到 `234.219 ms/image`
+- `split_topup15` 先把 trusted current 推到 SHA `65747fb3...b6377`，payload / e2e 分别推进到 `131.343 ms` / `234.219 ms/image`
+- 随后的 fresh `chunk4` 继续把默认 trusted current 推到 SHA `6f236b07...6dc1`
+- 这代 fresh current 的正式结论现在是：payload `130.219 ms`、真实端到端 `230.339 ms/image`
 
 ---
 
@@ -124,13 +132,13 @@
 ### 2.1 本地产物（推荐基准 artifact）
 
 - local optimized model:
-  - `session_bootstrap/tmp/phytium_baseline_seeded_warm_start_current_incremental_split_topup15_20260312_2000/optimized_model.so`
+  - `session_bootstrap/tmp/phytium_baseline_seeded_warm_start_current_incremental_chunk4_20260313_131545/optimized_model.so`
 - SHA256:
-  - `65747fb301851f27892666d28daefc856c0ff2f7f85d3702779be32dde4b6377`
+  - `6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1`
 - 产物说明：
-  - 当前 trusted current 的规范入口使用 `split_topup15` 目录；
-  - `split_stageA_topup15` 目录编译出的 `.so` 与它是同一个 SHA，可视为同一个被提升的 MetaSchedule 搜索结果；
-  - 已完成：hotspot 提取 → `resume_from_1549` warm-start continuation → `15`-trial topup → 本地编译 → 远端上传 → safe runtime 正式验证。
+  - 当前默认 trusted current 的规范入口使用 `chunk4` fresh 目录；
+  - `chunk3` / `chunk4` 对应报告都落到了同一个 SHA `6f236b07...6dc1`，当前默认对外口径以 `chunk4` 正式验证报告为准；
+  - 已完成：hotspot 提取 → warm-start continuation / topup → fresh current 继续推进 → 本地编译 → 远端上传 → payload / e2e 正式验证。
 
 ### 2.2 远端部署产物（飞腾派）
 
@@ -151,7 +159,7 @@
 - `session_bootstrap/config/inference_tvm310_safe.2026-03-10.phytium_pi.env`
 
 其中应维护：
-- `INFERENCE_CURRENT_EXPECTED_SHA256=65747fb301851f27892666d28daefc856c0ff2f7f85d3702779be32dde4b6377`
+- `INFERENCE_CURRENT_EXPECTED_SHA256=6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1`
 
 原则：
 - 只要远端 `.so` 有更新，就必须同步更新 expected SHA；
@@ -257,9 +265,11 @@
 
 | 你想回答的问题 | 看哪个报告 |
 |---|---|
-| 新 trusted current 是否真的快过 baseline？ | `session_bootstrap/reports/inference_compare_currentsafe_split_topup15_validate_20260313_0002.md` |
+| 新 trusted current 是否真的快过 baseline？ | `session_bootstrap/reports/inference_compare_currentsafe_chunk4_refresh_20260313_1758.md` |
 | 为什么 2026-03-13 的 trusted current 比上一版更快？ | `session_bootstrap/reports/trusted_current_speedup_causal_chain_20260313.md` |
-| current 的真实端到端重建是否也更快？ | `session_bootstrap/reports/inference_real_reconstruction_compare_currentsafe_split_topup15_20260313_003633_retry_20260313_005140.md` |
+| current 的真实端到端重建是否也更快？ | `session_bootstrap/reports/inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md` |
+| big.LITTLE 在 best-current / `SNR=10` 真机设置下，是否比同轮 serial current 更好？ | `session_bootstrap/reports/big_little_compare_20260318_095615.md` |
+| big.LITTLE 现在是否已经超过 current 历史最佳绝对 e2e？ | `session_bootstrap/reports/big_little_real_run_summary_20260318.md` / `session_bootstrap/reports/inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md` |
 | 早先 incremental 是否已经优于 rebuild-only？ | `session_bootstrap/reports/current_scheme_b_compare_20260311_195303.md` |
 | 2026-03-11 的第一轮 current incremental 突破总结是什么？ | `session_bootstrap/reports/phytium_current_incremental_breakthrough_20260311.md` |
 | 当前 target 选择为什么倾向 cortex-a72 + neon？ | `session_bootstrap/reports/phytium_current_target_comparison_safe_runtime_20260310.md` |
@@ -281,8 +291,8 @@ bash session_bootstrap/scripts/run_inference_benchmark.sh \
 - `current_artifact_sha256_match`
 - `current_run_median_ms`
 - `current_run_variance_ms2`
-- 当前 trusted SHA 参考值：`65747fb301851f27892666d28daefc856c0ff2f7f85d3702779be32dde4b6377`
-- 当前 payload 中位时间参考带：`~131 ms`
+- 当前 trusted SHA 参考值：`6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1`
+- 当前 payload 中位时间参考带：`~130 ms`
 
 ### 6.2 从 rebuild-only 重新建立 current 基线
 
@@ -300,7 +310,7 @@ bash session_bootstrap/scripts/run_phytium_baseline_seeded_warm_start_current_in
 
 ```bash
 bash session_bootstrap/scripts/run_inference_benchmark.sh \
-  --env session_bootstrap/tmp/inference_real_reconstruction_compare_currentsafe_split_topup15_retry_20260313_005140.env
+  --env session_bootstrap/tmp/inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.env
 ```
 
 ---
@@ -335,10 +345,10 @@ bash session_bootstrap/scripts/run_inference_benchmark.sh \
 最值得继续投入的顺序：
 
 1. **先稳住当前 trusted SHA**
-   - 对 `65747...6377` 再做 2–3 次 payload benchmark 复跑
-   - 确认 `~131 ms` 延迟带稳定，不是偶然波动
+   - 对 `6f236...6dc1` 再做 2–3 次 payload benchmark 复跑
+   - 确认 `~130 ms` 延迟带稳定，不是偶然波动
 2. **把新的真实端到端正式结论同步到对外材料**
-   - 当前 latest real reconstruction 正式报告已更新为 `1834.1 -> 234.219 ms/image`
+   - 当前 latest real reconstruction 正式报告已更新为 `1850.0 -> 230.339 ms/image`
    - 后续若再复跑，应视为稳定性验证，而不是“补齐缺失 end-to-end 证据”
 3. **继续做 warm-start incremental**
    - 在同一条 DB 链上把预算从 `500 -> 1000 -> 2000`
@@ -347,8 +357,8 @@ bash session_bootstrap/scripts/run_inference_benchmark.sh \
    - 用 `extract_hotspot_tasks.py` 导出 task 权重
    - 如果总提升趋缓，就把预算从“全局均摊”转向“热点集中”
 5. **分离 payload 优化与端到端优化**
-   - payload 已经到 `131 ms` 量级
-   - 端到端最新正式结论已更新到 `234 ms/image` 量级，中间仍有前后处理、I/O、图片读写和 pipeline 开销可挖
+   - payload 已经到 `130 ms` 量级
+   - 端到端最新正式结论已更新到 `230 ms/image` 量级，中间仍有前后处理、I/O、图片读写和 pipeline 开销可挖
 6. **若 MetaSchedule 边际收益变平，再转 INT8 / 模型级优化**
    - 量化、算子融合、结构裁剪会比继续硬堆搜索预算更划算
 
