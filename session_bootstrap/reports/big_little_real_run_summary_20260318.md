@@ -2,62 +2,84 @@
 
 ## 一句话结论
 
-当前默认应引用的真机 apples-to-apples compare 是 `session_bootstrap/reports/big_little_compare_20260318_095615.md`：在与历史最佳 current 同 artifact lineage、同 `SNR=10`、同 300 张 latent、同 real-reconstruction 语义的同轮对照下，serial current 为 `344.721 ms/image`，big.LITTLE pipeline current 为 `254.791 ms/image`，相对同轮 serial current 吞吐提升 `35.298%`。但它仍慢于历史最佳 current 端到端 `230.339 ms/image` 约 `10.62%`，所以当前正确结论是“相对 serial 有显著收益”，不是“已经刷新 absolute best current record”。
+当前默认应引用的 big.LITTLE 真机 apples-to-apples compare 已切到 `session_bootstrap/reports/big_little_compare_20260318_123300.md`：在与历史最佳 current 同 artifact lineage、同 `SNR=10`、同 300 张 latent、同 real-reconstruction 语义、且板态恢复健康后的同轮对照下，serial current median 为 `231.522 ms/image`，pipeline current median 为 `134.617 ms/image`，相对同轮 serial current 吞吐提升 `56.077%`。与此同时，历史最佳直接 current e2e 参考仍是 `session_bootstrap/reports/inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md` 的 `230.339 ms/image`；同日 direct rerun 又出现了 `347.375 -> 295.255 -> 239.233 ms/image`、CPU online `0-2 -> 0-3` 的恢复序列，因此当前最新 validated 结论应固定为：**健康板态时 big.LITTLE 相对 serial current 有显著收益，而板态 / CPU online set 是 primary factor，不只是 artifact lineage。**
 
-## 0. 先把口径说清楚
+## 0. 先把三个 reference 分清楚
 
-这次默认应引用的 compare，比较的是：
-- **同一份 current artifact lineage**（历史最佳 current `230.339 ms/image` 所在的 `6f236b07...6dc1` 这一代）
-- **同一组 `SNR=10` / `batch=1` 设置**
-- **同一批 300 张 latent 输入**
-- **同一条 current real-reconstruction 语义**
-- 只比较 **same-run serial current** vs **same-run big.LITTLE pipeline current**
+当前这条线应同时保留三个不同用途的 reference：
+- **健康板态 big.LITTLE compare**：`session_bootstrap/reports/big_little_compare_20260318_123300.md`
+  - 回答“在健康板态、同轮对照下，big.LITTLE 是否比 serial current 更好？”
+- **历史最佳 direct current e2e**：`session_bootstrap/reports/inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md`
+  - 回答“current 这代 artifact 的 canonical 直接真机 e2e best reference 是多少？”
+- **板态漂移复盘**：`session_bootstrap/reports/big_little_board_state_drift_20260318.md`
+  - 回答“为什么同一代 artifact / 同 `SNR=10` 仍会出现 `347.375 -> 239.233 ms/image` 的明显漂移？”
 
-因此，这份 `095615` compare 适合回答两个问题中的第一个：
-- **big.LITTLE 在当前最强 current 这套设置上，是否比同轮 serial current 更好？**
-  - 是，`35.298%` 吞吐 uplift。
-- **big.LITTLE 是否已经超过 current 历史最佳绝对端到端结果？**
-  - 还没有；当前 pipeline `254.791 ms/image` 仍慢于历史最佳 `230.339 ms/image` 约 `10.62%`。
+这样后续引用时，就不会再把：
+- healthy-board same-run compare；
+- historical best direct serial current；
+- degraded-board drift evidence
 
-## 1. 首选 apples-to-apples compare
+混写成同一种结论。
+
+## 1. 首选 healthy-board apples-to-apples compare
 
 核心报告：
-- `session_bootstrap/reports/big_little_compare_20260318_095615.md`
+- `session_bootstrap/reports/big_little_compare_20260318_123300.md`
+- `session_bootstrap/reports/big_little_compare_20260318_123300.json`
 - `session_bootstrap/config/big_little_pipeline.current.bestcurrent_snr10.2026-03-18.phytium_pi.env`
 
 关键结果：
-- serial_total_wall_ms: `103416.354`
-- pipeline_total_wall_ms: `76437.341`
-- serial current: `103416.354 / 300 = 344.721 ms/image`
-- pipeline current: `76437.341 / 300 = 254.791 ms/image`
-- serial_images_per_sec: `2.901`
-- pipeline_images_per_sec: `3.925`
-- throughput_uplift_pct: `35.298`
+- serial current median: `231.522 ms/image`
+- pipeline current median: `134.617 ms/image`
+- serial_total_wall_ms: `69323.66`
+- pipeline_total_wall_ms: `44413.422`
+- serial_images_per_sec: `4.328`
+- pipeline_images_per_sec: `6.755`
+- throughput_uplift_pct: `56.077`
 
-为什么它是当前首选引用：
-- env 明确固定到历史最佳 current artifact lineage 和 `SNR=10` 设置；
-- compare 在同一轮里同时跑 serial current 和 pipeline current；
-- 这样“relative-vs-serial improvement”和“absolute-vs-historical-best status”可以分开说，不会混写。
+为什么它现在是默认 headline：
+- 仍然固定在历史最佳 current 所在的 `6f236b07...6dc1` artifact lineage 与 `SNR=10` 设置；
+- 仍然是同一轮里的 serial current vs pipeline current apples-to-apples compare；
+- 但这次引用的是**健康板态**结果，而不是 CPU online 集合受损后的较慢一轮；
+- 它与同日 post-reboot direct rerun `239.233 ms/image` 的恢复结果是相互一致的。
 
-## 2. 绝对速度状态：仍未超过历史最佳 current
+## 2. 历史最佳 direct current e2e 仍然保持不变
 
-历史最佳 current e2e 参考报告：
+canonical 直接 current e2e 参考报告：
 - `session_bootstrap/reports/inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md`
 
-当前应这样表述：
-- historical best current e2e: `230.339 ms/image`
-- preferred big.LITTLE pipeline current: `254.791 ms/image`
-- absolute gap: `24.452 ms/image`
-- slower than historical best by: `10.62%`
+应固定保留的口径：
+- current median: `230.339 ms/image`
+- trusted current SHA256: `6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1`
+- `SNR=10`
+- baseline/current count: `300 / 300`
 
-因此当前对外更稳妥的说法应固定为：
-- **big.LITTLE 相对同轮 serial current 明显有效**
-- **big.LITTLE 还没有刷新 current 的绝对最快端到端记录**
+因此当前最稳妥的对外说法是：
+- **big.LITTLE 默认比较入口**看 `123300` healthy-board compare；
+- **historical-best direct current e2e** 仍看 `1758` 这份正式报告。
 
-## 3. 配套 pipeline 本体证据
+## 3. 板态漂移现在必须显式写进结论
 
-匹配这次 apples-to-apples compare 的 pipeline wrapper 报告：
-- `session_bootstrap/reports/big_little_pipeline_bestcurrent_snr10_current_20260318_095811.md`
+集中复盘报告：
+- `session_bootstrap/reports/big_little_board_state_drift_20260318.md`
+
+这次 drift 调查应固定使用下面这组事实：
+- degraded-board direct rerun: `347.375 ms/image`
+- same-day intermediate recovery observation: `295.255 ms/image`
+- post-reboot direct rerun: `239.233 ms/image`
+- degraded-board CPU online: `0-2`（CPU3 offline）
+- post-reboot CPU online: `0-3`
+
+这组结果说明：
+- 同一代 trusted current artifact、同 `SNR=10`，真机 direct rerun 仍可随板态显著摆动；
+- 因此这轮 performance drift 的 primary factor 是**板态 / CPU online set**；
+- 旧的较慢 compare 不应再主要归因成“artifact lineage 退化”。
+
+## 4. 配套 pipeline 本体证据
+
+匹配健康板态 compare 的 pipeline wrapper 报告：
+- `session_bootstrap/reports/big_little_pipeline_bestcurrent_snr10_current_20260318_123421.md`
+- `session_bootstrap/reports/big_little_pipeline_bestcurrent_snr10_current_20260318_123421.json`
 
 关键结果：
 - status: `ok`
@@ -65,8 +87,8 @@
 - artifact_sha256_match: `true`
 - big_cores: `[2]`
 - little_cores: `[0,1]`
-- total_wall_ms: `76437.341`
-- images_per_sec: `3.925`
+- total_wall_ms: `44413.422`
+- images_per_sec: `6.755`
 
 阶段级 affinity 结论保持不变：
 - **preloader** → LITTLE `[0,1]`
@@ -74,33 +96,20 @@
 - **postprocessor** → LITTLE `[0,1]`
 - 当前证据支持的是**阶段 / worker 级 affinity + pipeline overlap**，不是逐个 TVM 算子级绑核。
 
-## 4. 更早两轮真机 compare 的地位
+## 5. 更早同日 compare / profiling 现在的地位
 
-更早两轮同日真机 compare 仍有价值，但现在应作为**支持性复现证据**，而不是默认 headline：
+这些材料仍有价值，但现在应降级为**支持性证据**：
+- `session_bootstrap/reports/big_little_compare_20260318_095615.md`
+  - serial current `344.721 ms/image`
+  - pipeline current `254.791 ms/image`
+  - throughput uplift `35.298%`
+  - 现应与板态漂移报告一起解读为 degraded-board 时代的 compare 证据，而不是默认 headline
 - `session_bootstrap/reports/big_little_compare_20260318_051326.md`
-  - throughput_uplift_pct: `36.937`
+  - throughput uplift: `36.937%`
 - `session_bootstrap/reports/big_little_compare_20260318_053619.md`
-  - throughput_uplift_pct: `36.54`
-
-它们说明：
-- 这条异构流水线相对 serial current 的 uplift 不是一次性偶然值；
-- 但如果要做最严谨、最容易 defend 的引用，优先用 `095615` 这份 best-current / `SNR=10` apples-to-apples compare。
-
-## 5. 资源 profiling（支持性证据）
-
-核心报告：
+  - throughput uplift: `36.54%`
 - `session_bootstrap/reports/resource_profile_big_little_current_20260318_052922.md`
-
-关键结果：
-- wall_time_seconds: `84`
-- vmstat interval samples: `85`
-- avg cpu user/system/idle/wait: `53.812 / 2.706 / 43.435 / 0.129 %`
-- avg/max runnable tasks: `2.165 / 6`
-- min free memory seen by vmstat: `217480 KB`
-
-解释边界：
-- 这份 profiling 是更早同日 current pipeline run 的 system-wide `free/top/vmstat` 证据；
-- 它仍然能说明 big.LITTLE current 路径在板上可稳定跑完，但它不是 `095615` apples-to-apples compare 本身的主结论来源。
+  - 继续保留为同日 current pipeline 路径的资源使用支持证据
 
 ## 6. 本轮真正修掉的 blocker
 
@@ -123,9 +132,9 @@
 
 如果后面只想快速引用这条线，推荐按下面顺序：
 1. 结论摘要：`session_bootstrap/reports/big_little_real_run_summary_20260318.md`
-2. 首选 apples-to-apples compare：`session_bootstrap/reports/big_little_compare_20260318_095615.md`
-3. 匹配 pipeline wrapper 报告：`session_bootstrap/reports/big_little_pipeline_bestcurrent_snr10_current_20260318_095811.md`
-4. 历史最佳 current e2e 参考：`session_bootstrap/reports/inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md`
-5. 更早两轮真机 compare：`session_bootstrap/reports/big_little_compare_20260318_051326.md` / `session_bootstrap/reports/big_little_compare_20260318_053619.md`
-6. 真机 profiling：`session_bootstrap/reports/resource_profile_big_little_current_20260318_052922.md`
-7. 详细操作背景：`session_bootstrap/runbooks/big_little_pipeline_runbook_2026-03-18.md`
+2. 首选 healthy-board compare：`session_bootstrap/reports/big_little_compare_20260318_123300.md`
+3. 匹配 pipeline wrapper 报告：`session_bootstrap/reports/big_little_pipeline_bestcurrent_snr10_current_20260318_123421.md`
+4. 历史最佳 direct current e2e 参考：`session_bootstrap/reports/inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md`
+5. 板态漂移复盘：`session_bootstrap/reports/big_little_board_state_drift_20260318.md`
+6. 更早同日 compare：`session_bootstrap/reports/big_little_compare_20260318_095615.md` / `session_bootstrap/reports/big_little_compare_20260318_051326.md` / `session_bootstrap/reports/big_little_compare_20260318_053619.md`
+7. 真机 profiling 与 runbook：`session_bootstrap/reports/resource_profile_big_little_current_20260318_052922.md` / `session_bootstrap/runbooks/big_little_pipeline_runbook_2026-03-18.md`
