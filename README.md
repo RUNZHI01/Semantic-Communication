@@ -85,6 +85,7 @@
 
 ### 飞腾杯冲奖救援文档（2026-03-19）
 
+- `session_bootstrap/reports/award_rescue_metric_truth_table_20260319.md`
 - `session_bootstrap/reports/award_rescue_execution_checklist_20260319.md`
 - `session_bootstrap/reports/defense_deck_outline_20260319.md`
 - `session_bootstrap/reports/project_reframing_for_feiteng_cup_20260319.md`

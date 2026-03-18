@@ -42,8 +42,9 @@
 
 ### 飞腾杯冲奖救援文档（2026-03-19）
 
-如果当前目标是把既有工程结果重构成答辩可用的飞腾系统叙事，优先看下面三份：
+如果当前目标是把既有工程结果重构成答辩可用的飞腾系统叙事，优先看下面这些：
 
+- `reports/award_rescue_metric_truth_table_20260319.md`
 - `reports/award_rescue_execution_checklist_20260319.md`
 - `reports/defense_deck_outline_20260319.md`
 - `reports/project_reframing_for_feiteng_cup_20260319.md`
