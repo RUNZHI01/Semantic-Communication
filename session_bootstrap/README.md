@@ -40,6 +40,14 @@
 | big.LITTLE 异构流水线 runbook | `runbooks/big_little_pipeline_runbook_2026-03-18.md` |
 | 后续性能优化路线 | `runbooks/optimization_roadmap.md` |
 
+### 飞腾杯冲奖救援文档（2026-03-19）
+
+如果当前目标是把既有工程结果重构成答辩可用的飞腾系统叙事，优先看下面三份：
+
+- `reports/award_rescue_execution_checklist_20260319.md`
+- `reports/defense_deck_outline_20260319.md`
+- `reports/project_reframing_for_feiteng_cup_20260319.md`
+
 ## OpenAMP 控制面证据入口（2026-03-15）
 
 如果当前目标是答辩 / 演示 OpenAMP 控制面，而不是继续做 TVM benchmark，优先看下面这些：
