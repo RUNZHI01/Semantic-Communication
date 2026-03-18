@@ -4,6 +4,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 PYTHON_HELPER_SOURCE="$SCRIPT_DIR/pytorch_reference_reconstruction.py"
+SSH_HELPER_SOURCE="$SCRIPT_DIR/ssh_with_password.sh"
+if [[ ! -f "$SSH_HELPER_SOURCE" ]]; then
+  SSH_HELPER_SOURCE="$REPO_ROOT/session_bootstrap/scripts/ssh_with_password.sh"
+fi
 DEFAULT_ENV_FILE="$REPO_ROOT/session_bootstrap/tmp/inference_real_reconstruction_compare_run_20260311_212301.env"
 DEFAULT_LOCAL_JSCC_ROOT="/home/tianxing/TVM_LAST/finalWork/服务端/jscc-test/jscc"
 
@@ -37,6 +41,10 @@ Options:
   --torch-num-threads <n>  If >0, call torch.set_num_threads(n) in the helper.
   --torch-num-interop-threads <n>
                            If >0, call torch.set_num_interop_threads(n) in the helper.
+  --local-experimental-subprocess-per-image
+                           Local-only experimental mode. Each image reconstruction
+                           runs in its own Python subprocess, and the parent
+                           helper only schedules work and aggregates results.
   --manifest-name <name>   Manifest filename. Default: pytorch_reference_manifest.json
   --expected-sha256 <sha>  Optional trusted generator checkpoint SHA-256.
   -h, --help               Show this help.
@@ -70,6 +78,7 @@ MAX_IMAGES="300"
 DEVICE="cpu"
 TORCH_NUM_THREADS="0"
 TORCH_NUM_INTEROP_THREADS="0"
+LOCAL_EXPERIMENTAL_SUBPROCESS_PER_IMAGE="0"
 MANIFEST_NAME="pytorch_reference_manifest.json"
 EXPECTED_SHA256=""
 
@@ -139,6 +148,10 @@ while [[ $# -gt 0 ]]; do
       TORCH_NUM_INTEROP_THREADS="${2:-}"
       shift 2
       ;;
+    --local-experimental-subprocess-per-image)
+      LOCAL_EXPERIMENTAL_SUBPROCESS_PER_IMAGE="1"
+      shift
+      ;;
     --manifest-name)
       MANIFEST_NAME="${2:-}"
       shift 2
@@ -161,6 +174,10 @@ done
 
 if [[ ! -f "$PYTHON_HELPER_SOURCE" ]]; then
   echo "ERROR: helper source not found: $PYTHON_HELPER_SOURCE" >&2
+  exit 1
+fi
+if [[ ! -f "$SSH_HELPER_SOURCE" ]]; then
+  echo "ERROR: ssh helper source not found: $SSH_HELPER_SOURCE" >&2
   exit 1
 fi
 
@@ -223,6 +240,11 @@ if ! [[ "$MAX_IMAGES" =~ ^[0-9]+$ ]]; then
   exit 1
 fi
 
+if [[ "$LOCAL_EXPERIMENTAL_SUBPROCESS_PER_IMAGE" != "0" && "$LOCAL_EXPERIMENTAL_SUBPROCESS_PER_IMAGE" != "1" ]]; then
+  echo "ERROR: internal flag LOCAL_EXPERIMENTAL_SUBPROCESS_PER_IMAGE must be 0 or 1." >&2
+  exit 1
+fi
+
 if [[ "$NOISE_MODE" != "awgn" && "$NOISE_MODE" != "none" ]]; then
   echo "ERROR: --noise-mode must be awgn or none (got: $NOISE_MODE)" >&2
   exit 1
@@ -238,17 +260,24 @@ if [[ "$MODE" == "ssh" ]]; then
   done
 fi
 
+VARIANT="baseline"
+DEFAULT_OUTPUT_PREFIX_STEM="pytorch_reference_reconstruction"
+if [[ "$LOCAL_EXPERIMENTAL_SUBPROCESS_PER_IMAGE" == "1" ]]; then
+  VARIANT="local_experimental_subprocess_per_image"
+  DEFAULT_OUTPUT_PREFIX_STEM="$VARIANT"
+fi
+
 if [[ "$MODE" == "ssh" ]]; then
   JSCC_ROOT="${JSCC_ROOT_OVERRIDE:-${REMOTE_JSCC_DIR:-/home/user/Downloads/jscc-test/jscc}}"
   INPUT_DIR="${INPUT_DIR_OVERRIDE:-${REMOTE_INPUT_DIR:-/home/user/Downloads/jscc-test/简化版latent}}"
   PYTHON_BIN="${PYTHON_BIN_OVERRIDE:-${PYTORCH_REF_REMOTE_PYTHON:-/home/user/anaconda3/envs/myenv/bin/python}}"
-  OUTPUT_PREFIX="${OUTPUT_PREFIX_OVERRIDE:-pytorch_reference_reconstruction_$(date +%Y%m%d_%H%M%S)}"
+  OUTPUT_PREFIX="${OUTPUT_PREFIX_OVERRIDE:-${DEFAULT_OUTPUT_PREFIX_STEM}_$(date +%Y%m%d_%H%M%S)}"
   OUTPUT_DIR="${OUTPUT_DIR_OVERRIDE:-${REMOTE_OUTPUT_BASE:-/home/user/Downloads/jscc-test/jscc/infer_outputs}/$OUTPUT_PREFIX}"
 else
   JSCC_ROOT="${JSCC_ROOT_OVERRIDE:-$DEFAULT_LOCAL_JSCC_ROOT}"
   INPUT_DIR="${INPUT_DIR_OVERRIDE:-$(dirname "$DEFAULT_LOCAL_JSCC_ROOT")/encoder_outputs}"
   PYTHON_BIN="${PYTHON_BIN_OVERRIDE:-python3}"
-  OUTPUT_PREFIX="${OUTPUT_PREFIX_OVERRIDE:-pytorch_reference_reconstruction_$(date +%Y%m%d_%H%M%S)}"
+  OUTPUT_PREFIX="${OUTPUT_PREFIX_OVERRIDE:-${DEFAULT_OUTPUT_PREFIX_STEM}_$(date +%Y%m%d_%H%M%S)}"
   OUTPUT_DIR="${OUTPUT_DIR_OVERRIDE:-$REPO_ROOT/session_bootstrap/tmp/$OUTPUT_PREFIX}"
 fi
 
@@ -271,15 +300,19 @@ run_helper_args=(
   --torch-num-threads "$TORCH_NUM_THREADS"
   --torch-num-interop-threads "$TORCH_NUM_INTEROP_THREADS"
   --manifest-name "$MANIFEST_NAME"
-  --variant baseline
+  --variant "$VARIANT"
 )
 if [[ -n "$EXPECTED_SHA256" ]]; then
   run_helper_args+=(--expected-sha256 "$EXPECTED_SHA256")
+fi
+if [[ "$LOCAL_EXPERIMENTAL_SUBPROCESS_PER_IMAGE" == "1" ]]; then
+  run_helper_args+=(--local-experimental-subprocess-per-image)
 fi
 
 echo "[pytorch-ref] mode=$MODE python=$PYTHON_BIN jscc_root=$JSCC_ROOT"
 echo "[pytorch-ref] input_dir=$INPUT_DIR output_dir=$OUTPUT_DIR snr=$SNR seed=$SEED max_images=$MAX_IMAGES"
 echo "[pytorch-ref] torch_num_threads=$TORCH_NUM_THREADS torch_num_interop_threads=$TORCH_NUM_INTEROP_THREADS"
+echo "[pytorch-ref] variant=$VARIANT local_experimental_subprocess_per_image=$LOCAL_EXPERIMENTAL_SUBPROCESS_PER_IMAGE"
 echo "[pytorch-ref] generator_ckpt=$GENERATOR_CKPT origin_ckpt=$ORIGIN_CKPT"
 if [[ -n "$ENV_FILE" ]]; then
   echo "[pytorch-ref] env_file=$ENV_FILE"
@@ -305,10 +338,20 @@ trap cleanup EXIT
 #!/usr/bin/env bash
 set -euo pipefail
 SH
-  declare -p PYTHON_BIN JSCC_ROOT GENERATOR_CKPT ORIGIN_CKPT INPUT_DIR OUTPUT_DIR SNR NOISE_MODE SEED MAX_IMAGES DEVICE TORCH_NUM_THREADS TORCH_NUM_INTEROP_THREADS MANIFEST_NAME EXPECTED_SHA256
+  declare -p PYTHON_BIN JSCC_ROOT GENERATOR_CKPT ORIGIN_CKPT INPUT_DIR OUTPUT_DIR SNR NOISE_MODE SEED MAX_IMAGES DEVICE TORCH_NUM_THREADS TORCH_NUM_INTEROP_THREADS MANIFEST_NAME EXPECTED_SHA256 LOCAL_EXPERIMENTAL_SUBPROCESS_PER_IMAGE VARIANT
   cat <<'SH'
+HELPER_PATH="$(mktemp "${TMPDIR:-/tmp}/pytorch_reference_local_XXXXXX.py")"
+cleanup_remote() {
+  rm -f "$HELPER_PATH"
+}
+trap cleanup_remote EXIT
+cat >"$HELPER_PATH" <<'PY'
+SH
+  cat "$PYTHON_HELPER_SOURCE"
+  cat <<'SH'
+PY
 mkdir -p "$OUTPUT_DIR"
-cmd=("$PYTHON_BIN" -)
+cmd=("$PYTHON_BIN" "$HELPER_PATH")
 cmd+=(
   --jscc-root "$JSCC_ROOT"
   --generator-ckpt "$GENERATOR_CKPT"
@@ -323,23 +366,22 @@ cmd+=(
   --torch-num-threads "$TORCH_NUM_THREADS"
   --torch-num-interop-threads "$TORCH_NUM_INTEROP_THREADS"
   --manifest-name "$MANIFEST_NAME"
-  --variant baseline
+  --variant "$VARIANT"
 )
 if [[ -n "$EXPECTED_SHA256" ]]; then
   cmd+=(--expected-sha256 "$EXPECTED_SHA256")
 fi
+if [[ "$LOCAL_EXPERIMENTAL_SUBPROCESS_PER_IMAGE" == "1" ]]; then
+  cmd+=(--local-experimental-subprocess-per-image)
+fi
 printf '[pytorch-ref-remote] running: %q' "${cmd[@]}"
 printf '\n'
-"${cmd[@]}" <<'PY'
-SH
-  cat "$PYTHON_HELPER_SOURCE"
-  cat <<'SH'
-PY
+"${cmd[@]}"
 SH
 } >"$remote_runner"
 chmod 700 "$remote_runner"
 
-bash "$SCRIPT_DIR/ssh_with_password.sh" \
+bash "$SSH_HELPER_SOURCE" \
   --host "$REMOTE_HOST" \
   --user "$REMOTE_USER" \
   --pass "$REMOTE_PASS" \

@@ -13,6 +13,7 @@ import os
 import random
 import re
 import statistics
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -32,6 +33,10 @@ except ModuleNotFoundError as exc:  # pragma: no cover - depends on runtime env.
 
 
 LOGGER = logging.getLogger("pytorch_reference_reconstruction")
+LOCAL_EXPERIMENTAL_SUBPROCESS_MODE = "local_experimental_subprocess_per_image"
+LOCAL_EXPERIMENTAL_SUBPROCESS_STAGE = (
+    "PyTorch reconstruction (local experimental subprocess-per-image)"
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -89,6 +94,15 @@ def parse_args() -> argparse.Namespace:
         help="If >0, call torch.set_num_interop_threads() before model load.",
     )
     parser.add_argument(
+        "--local-experimental-subprocess-per-image",
+        action="store_true",
+        help=(
+            "Local-only experimental mode: run each image reconstruction in its own "
+            "Python subprocess while the parent process only schedules work and "
+            "aggregates results."
+        ),
+    )
+    parser.add_argument(
         "--max-images",
         type=int,
         default=300,
@@ -114,6 +128,21 @@ def parse_args() -> argparse.Namespace:
         default="INFO",
         choices=("DEBUG", "INFO", "WARNING", "ERROR"),
         help="Logging verbosity.",
+    )
+    parser.add_argument(
+        "--local-experimental-subprocess-worker",
+        action="store_true",
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--local-experimental-subprocess-worker-input",
+        default="",
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--local-experimental-subprocess-worker-record",
+        default="",
+        help=argparse.SUPPRESS,
     )
     return parser.parse_args()
 
@@ -415,10 +444,110 @@ def configure_torch_threads(
     }
 
 
-def main() -> None:
-    args = parse_args()
-    configure_logging(args.log_level)
+def validate_common_paths(jscc_root: Path, generator_ckpt: Path, input_dir: Path) -> None:
+    if not jscc_root.is_dir():
+        raise SystemExit(f"ERROR: jscc root not found: {jscc_root}")
+    if not generator_ckpt.is_file():
+        raise SystemExit(f"ERROR: generator checkpoint not found: {generator_ckpt}")
+    if not input_dir.is_dir():
+        raise SystemExit(f"ERROR: input dir not found: {input_dir}")
 
+
+def resolve_expected_sha256(expected_sha256: str) -> str:
+    return str(expected_sha256 or "").strip().lower()
+
+
+def summarize_samples(samples: list[float]) -> dict[str, Any]:
+    if not samples:
+        return {
+            "count": 0,
+            "median_ms": None,
+            "mean_ms": None,
+            "min_ms": None,
+            "max_ms": None,
+            "variance_ms2": 0.0,
+        }
+    return {
+        "count": len(samples),
+        "median_ms": round(statistics.median(samples), 3),
+        "mean_ms": round(sum(samples) / len(samples), 3),
+        "min_ms": round(min(samples), 3),
+        "max_ms": round(max(samples), 3),
+        "variance_ms2": round(statistics.pvariance(samples), 6) if len(samples) > 1 else 0.0,
+    }
+
+
+def emit_progress(index: int, total: int, input_path: Path, save_path: Path, stage: str) -> None:
+    print(
+        json.dumps(
+            {
+                "openamp_demo_progress": {
+                    "completed_count": index,
+                    "expected_count": total,
+                    "remaining_count": max(total - index, 0),
+                    "completion_ratio": round(index / total, 4) if total else 0.0,
+                    "current_stage": stage,
+                    "sample": input_path.name,
+                    "output_path": str(save_path),
+                }
+            },
+            ensure_ascii=False,
+        ),
+        flush=True,
+    )
+
+
+def reconstruct_single_input(
+    model: Any,
+    device: torch.device,
+    input_path: Path,
+    reconstructions_dir: Path,
+    snr: float,
+    noise_mode: str,
+    seed: int,
+) -> dict[str, Any]:
+    base_name = input_path.stem.split("_latent")[0]
+    sample_seed = per_file_seed(seed, str(input_path.name))
+    started = time.perf_counter()
+    latent, latent_meta = load_latent(input_path)
+    if noise_mode == "awgn":
+        model_input = awgn_channel(latent, snr, sample_seed)
+    else:
+        model_input = latent
+    output = model(model_input.to(device))
+    output_cpu = output.detach().cpu()
+    save_path = reconstructions_dir / f"{base_name}_recon.png"
+    save_png(output_cpu, save_path)
+    elapsed_ms = (time.perf_counter() - started) * 1000.0
+    output_min = float(output_cpu.min().item())
+    output_max = float(output_cpu.max().item())
+    LOGGER.info(
+        "saved %s from %s in %.3f ms (seed=%s, output_range=[%.6f, %.6f])",
+        save_path,
+        input_path.name,
+        elapsed_ms,
+        sample_seed,
+        output_min,
+        output_max,
+    )
+    return {
+        "input_path": str(input_path),
+        "input_sha256": file_sha256(input_path),
+        "base_name": base_name,
+        "sample_seed": sample_seed,
+        "noise_mode": noise_mode,
+        "snr": snr,
+        "latent_shape": list(latent.shape),
+        "output_shape": list(output_cpu.shape),
+        "output_range": [output_min, output_max],
+        "elapsed_ms": round(elapsed_ms, 3),
+        "output_path": str(save_path),
+        "output_sha256": file_sha256(save_path),
+        "latent_metadata": json_ready(latent_meta),
+    }
+
+
+def run_single_process_reference(args: argparse.Namespace) -> None:
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -435,12 +564,7 @@ def main() -> None:
     reconstructions_dir = output_dir / "reconstructions"
     manifest_path = output_dir / args.manifest_name
 
-    if not jscc_root.is_dir():
-        raise SystemExit(f"ERROR: jscc root not found: {jscc_root}")
-    if not generator_ckpt.is_file():
-        raise SystemExit(f"ERROR: generator checkpoint not found: {generator_ckpt}")
-    if not input_dir.is_dir():
-        raise SystemExit(f"ERROR: input dir not found: {input_dir}")
+    validate_common_paths(jscc_root, generator_ckpt, input_dir)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     reconstructions_dir.mkdir(parents=True, exist_ok=True)
@@ -451,7 +575,7 @@ def main() -> None:
     input_files = all_input_files[: args.max_images] if args.max_images > 0 else all_input_files
 
     generator_ckpt_sha256 = file_sha256(generator_ckpt)
-    expected_sha256 = str(args.expected_sha256 or "").strip().lower()
+    expected_sha256 = resolve_expected_sha256(args.expected_sha256)
     if expected_sha256 and generator_ckpt_sha256 != expected_sha256:
         raise SystemExit(
             "ERROR: generator checkpoint sha256 mismatch "
@@ -474,75 +598,35 @@ def main() -> None:
     LOGGER.info("Inferred sub-generator spec: %s", spec)
 
     records: list[dict[str, Any]] = []
-    total_elapsed_ms = 0.0
     run_samples_ms: list[float] = []
 
     with torch.inference_mode():
         for index, input_path in enumerate(input_files, start=1):
-            base_name = input_path.stem.split("_latent")[0]
-            sample_seed = per_file_seed(args.seed, str(input_path.name))
-            started = time.perf_counter()
-            latent, latent_meta = load_latent(input_path)
-            if args.noise_mode == "awgn":
-                model_input = awgn_channel(latent, args.snr, sample_seed)
-            else:
-                model_input = latent
-            output = model(model_input.to(device))
-            output_cpu = output.detach().cpu()
-            save_path = reconstructions_dir / f"{base_name}_recon.png"
-            save_png(output_cpu, save_path)
-            elapsed_ms = (time.perf_counter() - started) * 1000.0
-            total_elapsed_ms += elapsed_ms
-            run_samples_ms.append(elapsed_ms)
-            output_min = float(output_cpu.min().item())
-            output_max = float(output_cpu.max().item())
-            LOGGER.info(
-                "saved %s from %s in %.3f ms (seed=%s, output_range=[%.6f, %.6f])",
-                save_path,
-                input_path.name,
-                elapsed_ms,
-                sample_seed,
-                output_min,
-                output_max,
+            record = reconstruct_single_input(
+                model=model,
+                device=device,
+                input_path=input_path,
+                reconstructions_dir=reconstructions_dir,
+                snr=args.snr,
+                noise_mode=args.noise_mode,
+                seed=args.seed,
             )
-            records.append(
-                {
-                    "input_path": str(input_path),
-                    "input_sha256": file_sha256(input_path),
-                    "base_name": base_name,
-                    "sample_seed": sample_seed,
-                    "noise_mode": args.noise_mode,
-                    "snr": args.snr,
-                    "latent_shape": list(latent.shape),
-                    "output_shape": list(output_cpu.shape),
-                    "output_range": [output_min, output_max],
-                    "elapsed_ms": round(elapsed_ms, 3),
-                    "output_path": str(save_path),
-                    "output_sha256": file_sha256(save_path),
-                    "latent_metadata": json_ready(latent_meta),
-                }
+            records.append(record)
+            run_samples_ms.append(float(record["elapsed_ms"]))
+            emit_progress(
+                index=index,
+                total=len(input_files),
+                input_path=input_path,
+                save_path=Path(record["output_path"]),
+                stage="PyTorch reconstruction",
             )
-            print(
-                json.dumps(
-                    {
-                        "openamp_demo_progress": {
-                            "completed_count": index,
-                            "expected_count": len(input_files),
-                            "remaining_count": max(len(input_files) - index, 0),
-                            "completion_ratio": round(index / len(input_files), 4) if input_files else 0.0,
-                            "current_stage": "PyTorch reconstruction",
-                            "sample": input_path.name,
-                            "output_path": str(save_path),
-                        }
-                    },
-                    ensure_ascii=False,
-                ),
-                flush=True,
-            )
+
+    run_summary = summarize_samples(run_samples_ms)
 
     completed_at = iso_timestamp()
     manifest = {
         "run_type": "pytorch_reference_reconstruction",
+        "execution_mode": "single_process",
         "started_at": started_at,
         "completed_at": completed_at,
         "jscc_root": str(jscc_root),
@@ -563,8 +647,8 @@ def main() -> None:
         **torch_thread_settings,
         "inferred_model": spec,
         "timing": {
-            "total_ms": round(total_elapsed_ms, 3),
-            "mean_ms": round(total_elapsed_ms / len(records), 3) if records else None,
+            "total_ms": round(sum(run_samples_ms), 3) if run_samples_ms else None,
+            "mean_ms": run_summary["mean_ms"],
         },
         "records": records,
     }
@@ -589,11 +673,11 @@ def main() -> None:
         "vm_init_ms": 0.0,
         "run_count": len(run_samples_ms),
         "run_samples_ms": [round(value, 3) for value in run_samples_ms],
-        "run_median_ms": round(statistics.median(run_samples_ms), 3) if run_samples_ms else None,
-        "run_mean_ms": round(sum(run_samples_ms) / len(run_samples_ms), 3) if run_samples_ms else None,
-        "run_min_ms": round(min(run_samples_ms), 3) if run_samples_ms else None,
-        "run_max_ms": round(max(run_samples_ms), 3) if run_samples_ms else None,
-        "run_variance_ms2": round(statistics.pvariance(run_samples_ms), 6) if len(run_samples_ms) > 1 else 0.0,
+        "run_median_ms": run_summary["median_ms"],
+        "run_mean_ms": run_summary["mean_ms"],
+        "run_min_ms": run_summary["min_ms"],
+        "run_max_ms": run_summary["max_ms"],
+        "run_variance_ms2": run_summary["variance_ms2"],
         "output_shape": records[-1]["output_shape"] if records else None,
         "output_dtype": "uint8" if records else None,
         "snr": args.snr,
@@ -608,6 +692,355 @@ def main() -> None:
         "origin_ckpt": None if origin_ckpt is None else str(origin_ckpt),
     }
     print(json.dumps(summary, ensure_ascii=False), flush=True)
+
+
+def run_local_experimental_subprocess_worker(args: argparse.Namespace) -> None:
+    if not args.local_experimental_subprocess_worker_input:
+        raise SystemExit("ERROR: worker mode requires --local-experimental-subprocess-worker-input.")
+    if not args.local_experimental_subprocess_worker_record:
+        raise SystemExit("ERROR: worker mode requires --local-experimental-subprocess-worker-record.")
+
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    torch_thread_settings = configure_torch_threads(
+        torch_num_threads=args.torch_num_threads,
+        torch_num_interop_threads=args.torch_num_interop_threads,
+    )
+
+    jscc_root = Path(args.jscc_root)
+    generator_ckpt = Path(args.generator_ckpt)
+    input_dir = Path(args.input_dir)
+    output_dir = Path(args.output_dir)
+    reconstructions_dir = output_dir / "reconstructions"
+    input_path = Path(args.local_experimental_subprocess_worker_input)
+    worker_record_path = Path(args.local_experimental_subprocess_worker_record)
+
+    validate_common_paths(jscc_root, generator_ckpt, input_dir)
+    if not input_path.is_file():
+        raise SystemExit(f"ERROR: worker input not found: {input_path}")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    reconstructions_dir.mkdir(parents=True, exist_ok=True)
+    worker_record_path.parent.mkdir(parents=True, exist_ok=True)
+
+    generator_ckpt_sha256 = file_sha256(generator_ckpt)
+    expected_sha256 = resolve_expected_sha256(args.expected_sha256)
+    if expected_sha256 and generator_ckpt_sha256 != expected_sha256:
+        raise SystemExit(
+            "ERROR: generator checkpoint sha256 mismatch "
+            f"path={generator_ckpt} expected={expected_sha256} actual={generator_ckpt_sha256}"
+        )
+
+    device = torch.device(args.device)
+    model_load_started = time.perf_counter()
+    model, spec = load_generator(jscc_root, generator_ckpt, device)
+    model_load_ms = (time.perf_counter() - model_load_started) * 1000.0
+
+    with torch.inference_mode():
+        record = reconstruct_single_input(
+            model=model,
+            device=device,
+            input_path=input_path,
+            reconstructions_dir=reconstructions_dir,
+            snr=args.snr,
+            noise_mode=args.noise_mode,
+            seed=args.seed,
+        )
+
+    payload = {
+        "status": "ok",
+        "generator_ckpt_sha256": generator_ckpt_sha256,
+        "worker_load_ms": round(model_load_ms, 3),
+        "worker_torch_thread_settings": torch_thread_settings,
+        "worker_device": str(device),
+        "worker_inferred_model": spec,
+        "record": record,
+    }
+    worker_record_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def build_local_experimental_worker_command(
+    args: argparse.Namespace,
+    input_path: Path,
+    worker_record_path: Path,
+) -> list[str]:
+    helper_path = Path(__file__)
+    if not helper_path.is_file():
+        raise SystemExit(
+            "ERROR: local experimental subprocess mode requires running this helper from a real file path."
+        )
+
+    command = [
+        sys.executable,
+        str(helper_path),
+        "--jscc-root",
+        args.jscc_root,
+        "--generator-ckpt",
+        args.generator_ckpt,
+        "--input-dir",
+        args.input_dir,
+        "--output-dir",
+        args.output_dir,
+        "--snr",
+        str(args.snr),
+        "--noise-mode",
+        args.noise_mode,
+        "--seed",
+        str(args.seed),
+        "--device",
+        args.device,
+        "--torch-num-threads",
+        str(args.torch_num_threads),
+        "--torch-num-interop-threads",
+        str(args.torch_num_interop_threads),
+        "--manifest-name",
+        args.manifest_name,
+        "--variant",
+        args.variant,
+        "--log-level",
+        args.log_level,
+        "--local-experimental-subprocess-worker",
+        "--local-experimental-subprocess-worker-input",
+        str(input_path),
+        "--local-experimental-subprocess-worker-record",
+        str(worker_record_path),
+    ]
+    if args.origin_ckpt:
+        command.extend(["--origin-ckpt", args.origin_ckpt])
+    if args.expected_sha256:
+        command.extend(["--expected-sha256", args.expected_sha256])
+    return command
+
+
+def run_local_experimental_subprocess_per_image(args: argparse.Namespace) -> None:
+    jscc_root = Path(args.jscc_root)
+    generator_ckpt = Path(args.generator_ckpt)
+    origin_ckpt = Path(args.origin_ckpt) if args.origin_ckpt else None
+    input_dir = Path(args.input_dir)
+    output_dir = Path(args.output_dir)
+    reconstructions_dir = output_dir / "reconstructions"
+    manifest_path = output_dir / args.manifest_name
+    worker_records_dir = output_dir / "local_experimental_subprocess_worker_records"
+
+    validate_common_paths(jscc_root, generator_ckpt, input_dir)
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    reconstructions_dir.mkdir(parents=True, exist_ok=True)
+    worker_records_dir.mkdir(parents=True, exist_ok=True)
+
+    all_input_files = collect_input_files(input_dir, 0)
+    if not all_input_files:
+        raise SystemExit(f"ERROR: no latent files found in {input_dir}")
+    input_files = all_input_files[: args.max_images] if args.max_images > 0 else all_input_files
+
+    generator_ckpt_sha256 = file_sha256(generator_ckpt)
+    expected_sha256 = resolve_expected_sha256(args.expected_sha256)
+    if expected_sha256 and generator_ckpt_sha256 != expected_sha256:
+        raise SystemExit(
+            "ERROR: generator checkpoint sha256 mismatch "
+            f"path={generator_ckpt} expected={expected_sha256} actual={generator_ckpt_sha256}"
+        )
+
+    started_at = iso_timestamp()
+    LOGGER.info(
+        "Local-only experimental subprocess-per-image PyTorch reference run started: "
+        "inputs=%s snr=%s noise_mode=%s output_dir=%s",
+        len(input_files),
+        args.snr,
+        args.noise_mode,
+        output_dir,
+    )
+
+    records: list[dict[str, Any]] = []
+    run_samples_ms: list[float] = []
+    worker_load_samples_ms: list[float] = []
+    worker_compute_samples_ms: list[float] = []
+    worker_metadata: dict[str, Any] | None = None
+
+    wall_started = time.perf_counter()
+    for index, input_path in enumerate(input_files, start=1):
+        worker_record_path = worker_records_dir / f"{input_path.name}.json"
+        if worker_record_path.exists():
+            worker_record_path.unlink()
+
+        command = build_local_experimental_worker_command(args, input_path, worker_record_path)
+        started = time.perf_counter()
+        completed = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
+
+        if completed.returncode != 0:
+            stdout_tail = "\n".join(completed.stdout.strip().splitlines()[-20:]) if completed.stdout else ""
+            stderr_tail = "\n".join(completed.stderr.strip().splitlines()[-20:]) if completed.stderr else ""
+            raise SystemExit(
+                "ERROR: local experimental subprocess worker failed "
+                f"input={input_path.name} exit_code={completed.returncode}\n"
+                f"STDOUT (tail):\n{stdout_tail}\nSTDERR (tail):\n{stderr_tail}"
+            )
+        if not worker_record_path.is_file():
+            raise SystemExit(
+                "ERROR: local experimental subprocess worker did not write its record file "
+                f"for {input_path.name}: {worker_record_path}"
+            )
+
+        payload = json.loads(worker_record_path.read_text(encoding="utf-8"))
+        if payload.get("status") != "ok":
+            raise SystemExit(
+                "ERROR: local experimental subprocess worker returned a non-ok payload "
+                f"for {input_path.name}: {payload!r}"
+            )
+
+        worker_record = dict(payload["record"])
+        worker_record["subprocess_elapsed_ms"] = round(elapsed_ms, 3)
+        worker_record["worker_load_ms"] = float(payload["worker_load_ms"])
+        worker_record["worker_record_path"] = str(worker_record_path)
+        records.append(worker_record)
+
+        run_samples_ms.append(elapsed_ms)
+        worker_load_samples_ms.append(float(payload["worker_load_ms"]))
+        worker_compute_samples_ms.append(float(worker_record["elapsed_ms"]))
+
+        if worker_metadata is None:
+            worker_metadata = {
+                "worker_torch_thread_settings": payload["worker_torch_thread_settings"],
+                "worker_device": payload["worker_device"],
+                "worker_inferred_model": payload["worker_inferred_model"],
+            }
+
+        emit_progress(
+            index=index,
+            total=len(input_files),
+            input_path=input_path,
+            save_path=Path(worker_record["output_path"]),
+            stage=LOCAL_EXPERIMENTAL_SUBPROCESS_STAGE,
+        )
+
+    total_wall_ms = (time.perf_counter() - wall_started) * 1000.0
+    run_summary = summarize_samples(run_samples_ms)
+    worker_load_summary = summarize_samples(worker_load_samples_ms)
+    worker_compute_summary = summarize_samples(worker_compute_samples_ms)
+
+    completed_at = iso_timestamp()
+    manifest = {
+        "run_type": "pytorch_reference_reconstruction",
+        "execution_mode": LOCAL_EXPERIMENTAL_SUBPROCESS_MODE,
+        "experimental_local_only": True,
+        "started_at": started_at,
+        "completed_at": completed_at,
+        "jscc_root": str(jscc_root),
+        "generator_ckpt": str(generator_ckpt),
+        "generator_ckpt_sha256": generator_ckpt_sha256,
+        "origin_ckpt": None if origin_ckpt is None else str(origin_ckpt),
+        "origin_ckpt_sha256": None if origin_ckpt is None or not origin_ckpt.is_file() else file_sha256(origin_ckpt),
+        "origin_ckpt_metadata": None if origin_ckpt is None else load_origin_checkpoint_metadata(origin_ckpt),
+        "input_dir": str(input_dir),
+        "input_count": len(input_files),
+        "output_dir": str(output_dir),
+        "reconstructions_dir": str(reconstructions_dir),
+        "worker_records_dir": str(worker_records_dir),
+        "output_count": len(records),
+        "snr": args.snr,
+        "noise_mode": args.noise_mode,
+        "seed": args.seed,
+        "device": worker_metadata["worker_device"] if worker_metadata else args.device,
+        "torch_num_threads": (
+            None
+            if worker_metadata is None
+            else worker_metadata["worker_torch_thread_settings"]["torch_num_threads"]
+        ),
+        "torch_num_interop_threads": (
+            None
+            if worker_metadata is None
+            else worker_metadata["worker_torch_thread_settings"]["torch_num_interop_threads"]
+        ),
+        "inferred_model": None if worker_metadata is None else worker_metadata["worker_inferred_model"],
+        "timing": {
+            "total_ms": round(total_wall_ms, 3),
+            "mean_ms": run_summary["mean_ms"],
+            "worker_load_summary": worker_load_summary,
+            "worker_compute_summary": worker_compute_summary,
+        },
+        "records": records,
+    }
+    manifest_path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    LOGGER.info("Manifest written to %s", manifest_path)
+    LOGGER.info("Completed %s/%s reference reconstructions", len(records), len(input_files))
+
+    summary = {
+        "variant": str(args.variant),
+        "runtime": f"pytorch_reference_{LOCAL_EXPERIMENTAL_SUBPROCESS_MODE}",
+        "execution_mode": LOCAL_EXPERIMENTAL_SUBPROCESS_MODE,
+        "experimental_local_only": True,
+        "artifact_path": str(generator_ckpt),
+        "artifact_sha256": generator_ckpt_sha256,
+        "artifact_sha256_expected": expected_sha256 or None,
+        "artifact_sha256_match": None if not expected_sha256 else generator_ckpt_sha256 == expected_sha256,
+        "input_dir": str(input_dir),
+        "output_dir": str(reconstructions_dir),
+        "manifest_path": str(manifest_path),
+        "worker_records_dir": str(worker_records_dir),
+        "output_count": len(records),
+        "processed_count": len(records),
+        "input_count": len(input_files),
+        "available_input_count": len(all_input_files),
+        "load_ms": 0.0,
+        "vm_init_ms": 0.0,
+        "run_count": len(run_samples_ms),
+        "run_samples_ms": [round(value, 3) for value in run_samples_ms],
+        "run_median_ms": run_summary["median_ms"],
+        "run_mean_ms": run_summary["mean_ms"],
+        "run_min_ms": run_summary["min_ms"],
+        "run_max_ms": run_summary["max_ms"],
+        "run_variance_ms2": run_summary["variance_ms2"],
+        "worker_load_median_ms": worker_load_summary["median_ms"],
+        "worker_load_mean_ms": worker_load_summary["mean_ms"],
+        "worker_load_min_ms": worker_load_summary["min_ms"],
+        "worker_load_max_ms": worker_load_summary["max_ms"],
+        "worker_compute_median_ms": worker_compute_summary["median_ms"],
+        "worker_compute_mean_ms": worker_compute_summary["mean_ms"],
+        "worker_compute_min_ms": worker_compute_summary["min_ms"],
+        "worker_compute_max_ms": worker_compute_summary["max_ms"],
+        "output_shape": records[-1]["output_shape"] if records else None,
+        "output_dtype": "uint8" if records else None,
+        "snr": args.snr,
+        "batch_size": 1,
+        "save_format": "png",
+        "seed": args.seed,
+        "max_inputs": args.max_images,
+        "noise_mode": args.noise_mode,
+        "device": worker_metadata["worker_device"] if worker_metadata else args.device,
+        "torch_num_threads": (
+            None
+            if worker_metadata is None
+            else worker_metadata["worker_torch_thread_settings"]["torch_num_threads"]
+        ),
+        "torch_num_interop_threads": (
+            None
+            if worker_metadata is None
+            else worker_metadata["worker_torch_thread_settings"]["torch_num_interop_threads"]
+        ),
+        "generator_ckpt": str(generator_ckpt),
+        "origin_ckpt": None if origin_ckpt is None else str(origin_ckpt),
+    }
+    print(json.dumps(summary, ensure_ascii=False), flush=True)
+
+
+def main() -> None:
+    args = parse_args()
+    configure_logging(args.log_level)
+
+    if args.local_experimental_subprocess_worker:
+        run_local_experimental_subprocess_worker(args)
+        return
+    if args.local_experimental_subprocess_per_image:
+        run_local_experimental_subprocess_per_image(args)
+        return
+    run_single_process_reference(args)
 
 
 if __name__ == "__main__":
