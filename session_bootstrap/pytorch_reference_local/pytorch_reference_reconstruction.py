@@ -94,6 +94,14 @@ def parse_args() -> argparse.Namespace:
         help="If >0, call torch.set_num_interop_threads() before model load.",
     )
     parser.add_argument(
+        "--local-disable-mkldnn",
+        action="store_true",
+        help=(
+            "Isolated local-workspace experimental switch: disable oneDNN/MKLDNN "
+            "for this PyTorch reference run before model load."
+        ),
+    )
+    parser.add_argument(
         "--local-experimental-subprocess-per-image",
         action="store_true",
         help=(
@@ -444,6 +452,38 @@ def configure_torch_threads(
     }
 
 
+def configure_mkldnn(local_disable_mkldnn: bool) -> dict[str, Any]:
+    mkldnn_backend = getattr(getattr(torch, "backends", None), "mkldnn", None)
+    backend_present = mkldnn_backend is not None and hasattr(mkldnn_backend, "enabled")
+    enabled_before = None
+    enabled_after = None
+    available = None
+
+    if backend_present:
+        enabled_before = bool(mkldnn_backend.enabled)
+        if local_disable_mkldnn:
+            mkldnn_backend.enabled = False
+        enabled_after = bool(mkldnn_backend.enabled)
+        is_available = getattr(mkldnn_backend, "is_available", None)
+        if callable(is_available):
+            try:
+                available = bool(is_available())
+            except Exception as err:  # pragma: no cover - backend-specific.
+                available = f"error:{err}"
+    elif local_disable_mkldnn:
+        LOGGER.warning(
+            "local_disable_mkldnn was requested, but torch.backends.mkldnn is unavailable in this build."
+        )
+
+    return {
+        "local_disable_mkldnn": bool(local_disable_mkldnn),
+        "mkldnn_backend_present": bool(backend_present),
+        "mkldnn_available": available,
+        "mkldnn_enabled_before": enabled_before,
+        "mkldnn_enabled": enabled_after if backend_present else None,
+    }
+
+
 def validate_common_paths(jscc_root: Path, generator_ckpt: Path, input_dir: Path) -> None:
     if not jscc_root.is_dir():
         raise SystemExit(f"ERROR: jscc root not found: {jscc_root}")
@@ -551,6 +591,7 @@ def run_single_process_reference(args: argparse.Namespace) -> None:
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
+    mkldnn_settings = configure_mkldnn(args.local_disable_mkldnn)
     torch_thread_settings = configure_torch_threads(
         torch_num_threads=args.torch_num_threads,
         torch_num_interop_threads=args.torch_num_interop_threads,
@@ -645,6 +686,7 @@ def run_single_process_reference(args: argparse.Namespace) -> None:
         "seed": args.seed,
         "device": str(device),
         **torch_thread_settings,
+        **mkldnn_settings,
         "inferred_model": spec,
         "timing": {
             "total_ms": round(sum(run_samples_ms), 3) if run_samples_ms else None,
@@ -688,6 +730,7 @@ def run_single_process_reference(args: argparse.Namespace) -> None:
         "noise_mode": args.noise_mode,
         "device": str(device),
         **torch_thread_settings,
+        **mkldnn_settings,
         "generator_ckpt": str(generator_ckpt),
         "origin_ckpt": None if origin_ckpt is None else str(origin_ckpt),
     }
@@ -703,6 +746,7 @@ def run_local_experimental_subprocess_worker(args: argparse.Namespace) -> None:
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
+    mkldnn_settings = configure_mkldnn(args.local_disable_mkldnn)
     torch_thread_settings = configure_torch_threads(
         torch_num_threads=args.torch_num_threads,
         torch_num_interop_threads=args.torch_num_interop_threads,
@@ -753,6 +797,7 @@ def run_local_experimental_subprocess_worker(args: argparse.Namespace) -> None:
         "generator_ckpt_sha256": generator_ckpt_sha256,
         "worker_load_ms": round(model_load_ms, 3),
         "worker_torch_thread_settings": torch_thread_settings,
+        "worker_mkldnn_settings": mkldnn_settings,
         "worker_device": str(device),
         "worker_inferred_model": spec,
         "record": record,
@@ -806,6 +851,8 @@ def build_local_experimental_worker_command(
         "--local-experimental-subprocess-worker-record",
         str(worker_record_path),
     ]
+    if args.local_disable_mkldnn:
+        command.append("--local-disable-mkldnn")
     if args.origin_ckpt:
         command.extend(["--origin-ckpt", args.origin_ckpt])
     if args.expected_sha256:
@@ -908,6 +955,7 @@ def run_local_experimental_subprocess_per_image(args: argparse.Namespace) -> Non
         if worker_metadata is None:
             worker_metadata = {
                 "worker_torch_thread_settings": payload["worker_torch_thread_settings"],
+                "worker_mkldnn_settings": payload["worker_mkldnn_settings"],
                 "worker_device": payload["worker_device"],
                 "worker_inferred_model": payload["worker_inferred_model"],
             }
@@ -957,6 +1005,31 @@ def run_local_experimental_subprocess_per_image(args: argparse.Namespace) -> Non
             None
             if worker_metadata is None
             else worker_metadata["worker_torch_thread_settings"]["torch_num_interop_threads"]
+        ),
+        "local_disable_mkldnn": (
+            None
+            if worker_metadata is None
+            else worker_metadata["worker_mkldnn_settings"]["local_disable_mkldnn"]
+        ),
+        "mkldnn_backend_present": (
+            None
+            if worker_metadata is None
+            else worker_metadata["worker_mkldnn_settings"]["mkldnn_backend_present"]
+        ),
+        "mkldnn_available": (
+            None
+            if worker_metadata is None
+            else worker_metadata["worker_mkldnn_settings"]["mkldnn_available"]
+        ),
+        "mkldnn_enabled_before": (
+            None
+            if worker_metadata is None
+            else worker_metadata["worker_mkldnn_settings"]["mkldnn_enabled_before"]
+        ),
+        "mkldnn_enabled": (
+            None
+            if worker_metadata is None
+            else worker_metadata["worker_mkldnn_settings"]["mkldnn_enabled"]
         ),
         "inferred_model": None if worker_metadata is None else worker_metadata["worker_inferred_model"],
         "timing": {
@@ -1023,6 +1096,31 @@ def run_local_experimental_subprocess_per_image(args: argparse.Namespace) -> Non
             None
             if worker_metadata is None
             else worker_metadata["worker_torch_thread_settings"]["torch_num_interop_threads"]
+        ),
+        "local_disable_mkldnn": (
+            None
+            if worker_metadata is None
+            else worker_metadata["worker_mkldnn_settings"]["local_disable_mkldnn"]
+        ),
+        "mkldnn_backend_present": (
+            None
+            if worker_metadata is None
+            else worker_metadata["worker_mkldnn_settings"]["mkldnn_backend_present"]
+        ),
+        "mkldnn_available": (
+            None
+            if worker_metadata is None
+            else worker_metadata["worker_mkldnn_settings"]["mkldnn_available"]
+        ),
+        "mkldnn_enabled_before": (
+            None
+            if worker_metadata is None
+            else worker_metadata["worker_mkldnn_settings"]["mkldnn_enabled_before"]
+        ),
+        "mkldnn_enabled": (
+            None
+            if worker_metadata is None
+            else worker_metadata["worker_mkldnn_settings"]["mkldnn_enabled"]
         ),
         "generator_ckpt": str(generator_ckpt),
         "origin_ckpt": None if origin_ckpt is None else str(origin_ckpt),

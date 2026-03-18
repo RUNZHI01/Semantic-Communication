@@ -41,6 +41,8 @@ Options:
   --torch-num-threads <n>  If >0, call torch.set_num_threads(n) in the helper.
   --torch-num-interop-threads <n>
                            If >0, call torch.set_num_interop_threads(n) in the helper.
+  --local-disable-mkldnn   Isolated local-workspace experimental switch: disable
+                           oneDNN/MKLDNN before model load for this run.
   --local-experimental-subprocess-per-image
                            Local-only experimental mode. Each image reconstruction
                            runs in its own Python subprocess, and the parent
@@ -78,6 +80,7 @@ MAX_IMAGES="300"
 DEVICE="cpu"
 TORCH_NUM_THREADS="0"
 TORCH_NUM_INTEROP_THREADS="0"
+LOCAL_DISABLE_MKLDNN="0"
 LOCAL_EXPERIMENTAL_SUBPROCESS_PER_IMAGE="0"
 MANIFEST_NAME="pytorch_reference_manifest.json"
 EXPECTED_SHA256=""
@@ -147,6 +150,10 @@ while [[ $# -gt 0 ]]; do
     --torch-num-interop-threads)
       TORCH_NUM_INTEROP_THREADS="${2:-}"
       shift 2
+      ;;
+    --local-disable-mkldnn)
+      LOCAL_DISABLE_MKLDNN="1"
+      shift
       ;;
     --local-experimental-subprocess-per-image)
       LOCAL_EXPERIMENTAL_SUBPROCESS_PER_IMAGE="1"
@@ -245,6 +252,11 @@ if [[ "$LOCAL_EXPERIMENTAL_SUBPROCESS_PER_IMAGE" != "0" && "$LOCAL_EXPERIMENTAL_
   exit 1
 fi
 
+if [[ "$LOCAL_DISABLE_MKLDNN" != "0" && "$LOCAL_DISABLE_MKLDNN" != "1" ]]; then
+  echo "ERROR: internal flag LOCAL_DISABLE_MKLDNN must be 0 or 1." >&2
+  exit 1
+fi
+
 if [[ "$NOISE_MODE" != "awgn" && "$NOISE_MODE" != "none" ]]; then
   echo "ERROR: --noise-mode must be awgn or none (got: $NOISE_MODE)" >&2
   exit 1
@@ -265,6 +277,14 @@ DEFAULT_OUTPUT_PREFIX_STEM="pytorch_reference_reconstruction"
 if [[ "$LOCAL_EXPERIMENTAL_SUBPROCESS_PER_IMAGE" == "1" ]]; then
   VARIANT="local_experimental_subprocess_per_image"
   DEFAULT_OUTPUT_PREFIX_STEM="$VARIANT"
+fi
+if [[ "$LOCAL_DISABLE_MKLDNN" == "1" ]]; then
+  if [[ "$VARIANT" == "baseline" ]]; then
+    VARIANT="baseline_mkldnn_disabled"
+  else
+    VARIANT="${VARIANT}_mkldnn_disabled"
+  fi
+  DEFAULT_OUTPUT_PREFIX_STEM="${DEFAULT_OUTPUT_PREFIX_STEM}_mkldnn_disabled"
 fi
 
 if [[ "$MODE" == "ssh" ]]; then
@@ -305,6 +325,9 @@ run_helper_args=(
 if [[ -n "$EXPECTED_SHA256" ]]; then
   run_helper_args+=(--expected-sha256 "$EXPECTED_SHA256")
 fi
+if [[ "$LOCAL_DISABLE_MKLDNN" == "1" ]]; then
+  run_helper_args+=(--local-disable-mkldnn)
+fi
 if [[ "$LOCAL_EXPERIMENTAL_SUBPROCESS_PER_IMAGE" == "1" ]]; then
   run_helper_args+=(--local-experimental-subprocess-per-image)
 fi
@@ -312,7 +335,7 @@ fi
 echo "[pytorch-ref] mode=$MODE python=$PYTHON_BIN jscc_root=$JSCC_ROOT"
 echo "[pytorch-ref] input_dir=$INPUT_DIR output_dir=$OUTPUT_DIR snr=$SNR seed=$SEED max_images=$MAX_IMAGES"
 echo "[pytorch-ref] torch_num_threads=$TORCH_NUM_THREADS torch_num_interop_threads=$TORCH_NUM_INTEROP_THREADS"
-echo "[pytorch-ref] variant=$VARIANT local_experimental_subprocess_per_image=$LOCAL_EXPERIMENTAL_SUBPROCESS_PER_IMAGE"
+echo "[pytorch-ref] variant=$VARIANT local_disable_mkldnn=$LOCAL_DISABLE_MKLDNN local_experimental_subprocess_per_image=$LOCAL_EXPERIMENTAL_SUBPROCESS_PER_IMAGE"
 echo "[pytorch-ref] generator_ckpt=$GENERATOR_CKPT origin_ckpt=$ORIGIN_CKPT"
 if [[ -n "$ENV_FILE" ]]; then
   echo "[pytorch-ref] env_file=$ENV_FILE"
@@ -338,7 +361,7 @@ trap cleanup EXIT
 #!/usr/bin/env bash
 set -euo pipefail
 SH
-  declare -p PYTHON_BIN JSCC_ROOT GENERATOR_CKPT ORIGIN_CKPT INPUT_DIR OUTPUT_DIR SNR NOISE_MODE SEED MAX_IMAGES DEVICE TORCH_NUM_THREADS TORCH_NUM_INTEROP_THREADS MANIFEST_NAME EXPECTED_SHA256 LOCAL_EXPERIMENTAL_SUBPROCESS_PER_IMAGE VARIANT
+  declare -p PYTHON_BIN JSCC_ROOT GENERATOR_CKPT ORIGIN_CKPT INPUT_DIR OUTPUT_DIR SNR NOISE_MODE SEED MAX_IMAGES DEVICE TORCH_NUM_THREADS TORCH_NUM_INTEROP_THREADS LOCAL_DISABLE_MKLDNN MANIFEST_NAME EXPECTED_SHA256 LOCAL_EXPERIMENTAL_SUBPROCESS_PER_IMAGE VARIANT
   cat <<'SH'
 HELPER_PATH="$(mktemp "${TMPDIR:-/tmp}/pytorch_reference_local_XXXXXX.py")"
 cleanup_remote() {
@@ -370,6 +393,9 @@ cmd+=(
 )
 if [[ -n "$EXPECTED_SHA256" ]]; then
   cmd+=(--expected-sha256 "$EXPECTED_SHA256")
+fi
+if [[ "$LOCAL_DISABLE_MKLDNN" == "1" ]]; then
+  cmd+=(--local-disable-mkldnn)
 fi
 if [[ "$LOCAL_EXPERIMENTAL_SUBPROCESS_PER_IMAGE" == "1" ]]; then
   cmd+=(--local-experimental-subprocess-per-image)
