@@ -34,6 +34,9 @@ Options:
   --seed <int>             Base seed for deterministic per-file AWGN. Default: 20260312
   --max-images <int>       Maximum latent files to process. Default: 300
   --device <device>        Torch device. Default: cpu
+  --torch-num-threads <n>  If >0, call torch.set_num_threads(n) in the helper.
+  --torch-num-interop-threads <n>
+                           If >0, call torch.set_num_interop_threads(n) in the helper.
   --manifest-name <name>   Manifest filename. Default: pytorch_reference_manifest.json
   --expected-sha256 <sha>  Optional trusted generator checkpoint SHA-256.
   -h, --help               Show this help.
@@ -65,6 +68,8 @@ NOISE_MODE="awgn"
 SEED="20260312"
 MAX_IMAGES="300"
 DEVICE="cpu"
+TORCH_NUM_THREADS="0"
+TORCH_NUM_INTEROP_THREADS="0"
 MANIFEST_NAME="pytorch_reference_manifest.json"
 EXPECTED_SHA256=""
 
@@ -124,6 +129,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --device)
       DEVICE="${2:-}"
+      shift 2
+      ;;
+    --torch-num-threads)
+      TORCH_NUM_THREADS="${2:-}"
+      shift 2
+      ;;
+    --torch-num-interop-threads)
+      TORCH_NUM_INTEROP_THREADS="${2:-}"
       shift 2
       ;;
     --manifest-name)
@@ -195,6 +208,16 @@ if [[ ! "$SEED" =~ ^-?[0-9]+$ ]]; then
   exit 1
 fi
 
+if ! [[ "$TORCH_NUM_THREADS" =~ ^[0-9]+$ ]]; then
+  echo "ERROR: --torch-num-threads must be a non-negative integer (got: $TORCH_NUM_THREADS)" >&2
+  exit 1
+fi
+
+if ! [[ "$TORCH_NUM_INTEROP_THREADS" =~ ^[0-9]+$ ]]; then
+  echo "ERROR: --torch-num-interop-threads must be a non-negative integer (got: $TORCH_NUM_INTEROP_THREADS)" >&2
+  exit 1
+fi
+
 if ! [[ "$MAX_IMAGES" =~ ^[0-9]+$ ]]; then
   echo "ERROR: --max-images must be a non-negative integer (got: $MAX_IMAGES)" >&2
   exit 1
@@ -245,6 +268,8 @@ run_helper_args=(
   --seed "$SEED"
   --max-images "$MAX_IMAGES"
   --device "$DEVICE"
+  --torch-num-threads "$TORCH_NUM_THREADS"
+  --torch-num-interop-threads "$TORCH_NUM_INTEROP_THREADS"
   --manifest-name "$MANIFEST_NAME"
   --variant baseline
 )
@@ -254,6 +279,7 @@ fi
 
 echo "[pytorch-ref] mode=$MODE python=$PYTHON_BIN jscc_root=$JSCC_ROOT"
 echo "[pytorch-ref] input_dir=$INPUT_DIR output_dir=$OUTPUT_DIR snr=$SNR seed=$SEED max_images=$MAX_IMAGES"
+echo "[pytorch-ref] torch_num_threads=$TORCH_NUM_THREADS torch_num_interop_threads=$TORCH_NUM_INTEROP_THREADS"
 echo "[pytorch-ref] generator_ckpt=$GENERATOR_CKPT origin_ckpt=$ORIGIN_CKPT"
 if [[ -n "$ENV_FILE" ]]; then
   echo "[pytorch-ref] env_file=$ENV_FILE"
@@ -279,7 +305,7 @@ trap cleanup EXIT
 #!/usr/bin/env bash
 set -euo pipefail
 SH
-  declare -p PYTHON_BIN JSCC_ROOT GENERATOR_CKPT ORIGIN_CKPT INPUT_DIR OUTPUT_DIR SNR NOISE_MODE SEED MAX_IMAGES DEVICE MANIFEST_NAME EXPECTED_SHA256
+  declare -p PYTHON_BIN JSCC_ROOT GENERATOR_CKPT ORIGIN_CKPT INPUT_DIR OUTPUT_DIR SNR NOISE_MODE SEED MAX_IMAGES DEVICE TORCH_NUM_THREADS TORCH_NUM_INTEROP_THREADS MANIFEST_NAME EXPECTED_SHA256
   cat <<'SH'
 mkdir -p "$OUTPUT_DIR"
 cmd=("$PYTHON_BIN" -)
@@ -294,6 +320,8 @@ cmd+=(
   --seed "$SEED"
   --max-images "$MAX_IMAGES"
   --device "$DEVICE"
+  --torch-num-threads "$TORCH_NUM_THREADS"
+  --torch-num-interop-threads "$TORCH_NUM_INTEROP_THREADS"
   --manifest-name "$MANIFEST_NAME"
   --variant baseline
 )

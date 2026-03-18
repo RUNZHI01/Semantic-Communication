@@ -77,6 +77,18 @@ def parse_args() -> argparse.Namespace:
         help="Torch device for inference. CPU is recommended on Phytium Pi.",
     )
     parser.add_argument(
+        "--torch-num-threads",
+        type=int,
+        default=0,
+        help="If >0, call torch.set_num_threads() before model load.",
+    )
+    parser.add_argument(
+        "--torch-num-interop-threads",
+        type=int,
+        default=0,
+        help="If >0, call torch.set_num_interop_threads() before model load.",
+    )
+    parser.add_argument(
         "--max-images",
         type=int,
         default=300,
@@ -370,6 +382,39 @@ def load_origin_checkpoint_metadata(origin_ckpt: Path) -> dict[str, Any] | None:
     }
 
 
+def configure_torch_threads(
+    torch_num_threads: int,
+    torch_num_interop_threads: int,
+) -> dict[str, int | None]:
+    if torch_num_interop_threads > 0:
+        set_num_interop_threads = getattr(torch, "set_num_interop_threads", None)
+        if set_num_interop_threads is None:
+            raise SystemExit("ERROR: this torch build does not support torch.set_num_interop_threads().")
+        try:
+            set_num_interop_threads(torch_num_interop_threads)
+        except RuntimeError as err:
+            raise SystemExit(
+                "ERROR: failed to set torch inter-op threads to "
+                f"{torch_num_interop_threads}: {err}"
+            ) from err
+
+    if torch_num_threads > 0:
+        try:
+            torch.set_num_threads(torch_num_threads)
+        except RuntimeError as err:
+            raise SystemExit(
+                f"ERROR: failed to set torch intra-op threads to {torch_num_threads}: {err}"
+            ) from err
+
+    get_num_interop_threads = getattr(torch, "get_num_interop_threads", None)
+    return {
+        "torch_num_threads": int(torch.get_num_threads()),
+        "torch_num_interop_threads": (
+            None if get_num_interop_threads is None else int(get_num_interop_threads())
+        ),
+    }
+
+
 def main() -> None:
     args = parse_args()
     configure_logging(args.log_level)
@@ -377,6 +422,10 @@ def main() -> None:
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
+    torch_thread_settings = configure_torch_threads(
+        torch_num_threads=args.torch_num_threads,
+        torch_num_interop_threads=args.torch_num_interop_threads,
+    )
 
     jscc_root = Path(args.jscc_root)
     generator_ckpt = Path(args.generator_ckpt)
@@ -511,6 +560,7 @@ def main() -> None:
         "noise_mode": args.noise_mode,
         "seed": args.seed,
         "device": str(device),
+        **torch_thread_settings,
         "inferred_model": spec,
         "timing": {
             "total_ms": round(total_elapsed_ms, 3),
@@ -553,6 +603,7 @@ def main() -> None:
         "max_inputs": args.max_images,
         "noise_mode": args.noise_mode,
         "device": str(device),
+        **torch_thread_settings,
         "generator_ckpt": str(generator_ckpt),
         "origin_ckpt": None if origin_ckpt is None else str(origin_ckpt),
     }
