@@ -2,7 +2,7 @@
 
 ## 一句话结论
 
-big.LITTLE 异构流水线已经在飞腾派真机上跑通，并且相对当前 trusted serial real-reconstruction 基线拿到了**稳定可复现的吞吐提升**：两轮 compare 分别为 **`+36.937%`** 和 **`+36.54%`**。
+big.LITTLE 异构流水线已经在飞腾派真机上跑通，并且相对**同轮 current serial real-reconstruction 基线**拿到了**稳定可复现的相对吞吐提升**：两轮 compare 分别为 **`+36.937%`** 和 **`+36.54%`**。但这**不等于**它已经超过历史最佳 current 端到端结果 `230.339 ms/image`。
 
 ## 0. 口径先说明白
 
@@ -15,6 +15,16 @@ big.LITTLE 异构流水线已经在飞腾派真机上跑通，并且相对当前
 
 所以这不是在和更早那份 `230.339 ms/image` 的 historical current 报告直接做横比。
 那份报告（`inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md`）是另一套历史 benchmark 记录，SNR 口径也不同；它可以证明 current 本身已经很强，但**不能直接当成这次 big.LITTLE compare 的对照组**。
+
+如果硬要和历史最佳 current 端到端结果对一下，只能得出下面这个更保守的结论：
+- historical best current e2e: `230.339 ms/image`
+- big.LITTLE pipeline first run: `75913.179 / 300 = 253.044 ms/image`
+- big.LITTLE pipeline second run: `76322.697 / 300 = 254.409 ms/image`
+- 也就是说，当前 big.LITTLE pipeline **仍比历史最佳 current e2e 慢约 `9.86% ~ 10.45%`**
+
+因此，当前这次 big.LITTLE 的正确结论应该表述为：
+- **它显著优于同轮 serial current 基线**
+- **但还没有刷新我们历史最佳 current 端到端绝对速度记录**
 
 ## 1. 真机 pipeline 本体
 
