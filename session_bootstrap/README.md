@@ -31,8 +31,9 @@
 | 下一轮性能优化执行清单 | `runbooks/next_round_optimization_checklist.md` |
 | big.LITTLE 首次真机一键入口 | `scripts/run_big_little_first_real_attempt.sh` |
 | big.LITTLE 真机结论摘要（推荐入口） | `reports/big_little_real_run_summary_20260318.md` |
-| big.LITTLE 首选 apples-to-apples compare | `reports/big_little_compare_20260318_095615.md` |
-| big.LITTLE 配套 pipeline wrapper 报告 | `reports/big_little_pipeline_bestcurrent_snr10_current_20260318_095811.md` |
+| big.LITTLE 首选 apples-to-apples compare | `reports/big_little_compare_20260318_123300.md` |
+| big.LITTLE 配套 pipeline wrapper 报告 | `reports/big_little_pipeline_bestcurrent_snr10_current_20260318_123421.md` |
+| big.LITTLE 板态漂移复盘 | `reports/big_little_board_state_drift_20260318.md` |
 | big.LITTLE 历史最佳 current e2e 参考 | `reports/inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md` |
 | big.LITTLE 首轮资源 profiling（支持性证据） | `reports/resource_profile_big_little_current_20260318_052922.md` |
 | big.LITTLE 首跑前交接（历史） | `reports/big_little_overnight_handoff_20260318.md` |
@@ -64,7 +65,8 @@
 - current trusted artifact：`tmp/phytium_baseline_seeded_warm_start_current_incremental_chunk4_20260313_131545/optimized_model.so`
 - trusted SHA256：`6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1`
 - current 历史最佳 e2e 参考：`reports/inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md`
-- big.LITTLE 首选 apples-to-apples compare：`reports/big_little_compare_20260318_095615.md`
+- big.LITTLE 首选 apples-to-apples compare：`reports/big_little_compare_20260318_123300.md`
+- big.LITTLE 板态漂移复盘：`reports/big_little_board_state_drift_20260318.md`
 - 推荐验证入口：`scripts/run_inference_benchmark.sh` + `config/inference_tvm310_safe.2026-03-10.phytium_pi.env`
 
 如果当前目标是直接演示 OpenAMP 控制面，优先执行：

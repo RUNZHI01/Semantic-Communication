@@ -12,15 +12,23 @@
 核心入口：
 - `session_bootstrap/scripts/run_big_little_first_real_attempt.sh`
 - `session_bootstrap/reports/big_little_real_run_summary_20260318.md`
+- `session_bootstrap/reports/big_little_compare_20260318_123300.md`
+- `session_bootstrap/reports/big_little_compare_20260318_123300.json`
+- `session_bootstrap/reports/big_little_compare_20260318_123300.serial.raw.log`
+- `session_bootstrap/reports/big_little_compare_20260318_123300.pipeline.raw.log`
+- `session_bootstrap/reports/big_little_pipeline_bestcurrent_snr10_current_20260318_123421.md`
+- `session_bootstrap/reports/big_little_pipeline_bestcurrent_snr10_current_20260318_123421.json`
+- `session_bootstrap/reports/big_little_pipeline_bestcurrent_snr10_current_20260318_123421.raw.log`
+- `session_bootstrap/reports/big_little_board_state_drift_20260318.md`
+- `session_bootstrap/reports/inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md`
+- `session_bootstrap/reports/resource_profile_big_little_current_20260318_052922.md`
+- `session_bootstrap/config/big_little_pipeline.current.bestcurrent_snr10.2026-03-18.phytium_pi.env`
 - `session_bootstrap/reports/big_little_compare_20260318_095615.md`
 - `session_bootstrap/reports/big_little_compare_20260318_095615.json`
 - `session_bootstrap/reports/big_little_compare_20260318_095615.serial.raw.log`
 - `session_bootstrap/reports/big_little_compare_20260318_095615.pipeline.raw.log`
 - `session_bootstrap/reports/big_little_pipeline_bestcurrent_snr10_current_20260318_095811.md`
 - `session_bootstrap/reports/big_little_pipeline_bestcurrent_snr10_current_20260318_095811.json`
-- `session_bootstrap/reports/inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md`
-- `session_bootstrap/reports/resource_profile_big_little_current_20260318_052922.md`
-- `session_bootstrap/config/big_little_pipeline.current.bestcurrent_snr10.2026-03-18.phytium_pi.env`
 - `session_bootstrap/reports/big_little_compare_20260318_051326.md`
 - `session_bootstrap/reports/big_little_compare_20260318_053619.md`
 - `session_bootstrap/reports/big_little_overnight_handoff_20260318.md`
@@ -33,17 +41,20 @@
 - `session_bootstrap/reports/big_little_topology_suggestion_20260318_0136.json`
 
 补充说明：
-- 这条线已经从“明早可执行”推进到“首选 apples-to-apples 真机 compare 已落盘”；
+- 这条线已经从“明早可执行”推进到“健康板态默认 apples-to-apples 真机 compare 已落盘”；
 - `big_little_real_run_summary_20260318.md` 是当前最适合直接引用的一页摘要：它已经把“relative-vs-serial improvement”和“absolute-vs-historical-best status”拆开说清楚；
-- `big_little_compare_20260318_095615.md` 是当前默认引用的真机 apples-to-apples compare：same-run serial current `344.721 ms/image`，same-run pipeline current `254.791 ms/image`，相对同轮 serial current 吞吐提升 `35.298%`；
-- 这份 `095615` compare 仍然**慢于**历史最佳 current e2e `230.339 ms/image` 约 `10.62%`，所以它证明的是“big.LITTLE 对 serial current 有效”，不是“已经刷新绝对最快 current 记录”；
-- `big_little_pipeline_bestcurrent_snr10_current_20260318_095811.md` 是与这次 apples-to-apples compare 配套的 pipeline wrapper 报告：`processed_count=300`、`artifact_sha256_match=true`、`big_cores=[2]`、`little_cores=[0,1]`；
+- `big_little_compare_20260318_123300.md` 是当前默认引用的健康板态 apples-to-apples compare：serial current median `231.522 ms/image`，pipeline current median `134.617 ms/image`，相对同轮 serial current 吞吐提升 `56.077%`；
+- `big_little_pipeline_bestcurrent_snr10_current_20260318_123421.md` 是与这次默认 compare 配套的 pipeline wrapper 报告：`processed_count=300`、`artifact_sha256_match=true`、`big_cores=[2]`、`little_cores=[0,1]`；
+- 历史最佳 direct current e2e 参考仍然是 `inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md`：current median `230.339 ms/image`、SHA `6f236b07...6dc1`、`SNR=10`；
+- `big_little_board_state_drift_20260318.md` 现在是必须连带引用的复盘页：它把 same-day direct rerun 的 `347.375 -> 295.255 -> 239.233 ms/image` 恢复序列，以及 CPU online `0-2 -> 0-3` 的板态变化固定下来；
+- 这意味着当前最重要的新结论是：**板态 / CPU online set 是 primary factor，不只是 artifact lineage**；
+- `big_little_compare_20260318_095615.md` 与 `big_little_pipeline_bestcurrent_snr10_current_20260318_095811.md` 现保留为 degraded-board 时代的 apples-to-apples 证据：serial `344.721 ms/image`、pipeline `254.791 ms/image`、throughput uplift `35.298%`，但不再是默认 headline；
 - `big_little_compare_20260318_051326.md` 和 `big_little_compare_20260318_053619.md` 现保留为更早两轮同日复现证据：`36.937%` / `36.54%` uplift，可作为稳定性佐证，但不再是默认 headline；
 - `resource_profile_big_little_current_20260318_052922.md` 继续保留为同日 current pipeline 路径的板级资源证据：wall time `84s`、vmstat 平均 CPU `user/system/idle/wait = 53.812 / 2.706 / 43.435 / 0.129 %`、平均 runnable `2.165`、最小 free memory `217480 KB`；
 - `big_little_overnight_handoff_20260318.md` 现保留为这次首跑前的短交接，同时在顶部补了真机结果回链；
 - `run_big_little_first_real_attempt.sh` 现在会自动复制 runtime env、只读探测 topology、自动回填 BIG/LITTLE core 建议、再顺序跑 pipeline 与 compare；
 - `big_little_pipeline.current.bestcurrent_snr10.2026-03-18.phytium_pi.env` 明确固定了这次 apples-to-apples compare 的 best-current artifact lineage、`SNR=10` 和 `big=[2] / little=[0,1]` 绑定；
-- CPU 3 在 probe 时仍是 offline，后续复跑前依然建议先 re-check 一次。
+- `big_little_topology_capture_20260318_0136.txt` / `big_little_topology_suggestion_20260318_0136.json` 现在主要用于保留 degraded-board 当时 `On-line CPU(s) list = 0-2` 的证据，而不是继续当默认板态假设。
 
 ## 1. OpenAMP 控制面答辩证据包（2026-03-15）
 
@@ -268,8 +279,9 @@
 | 新 trusted current 是否真的快过 baseline？ | `session_bootstrap/reports/inference_compare_currentsafe_chunk4_refresh_20260313_1758.md` |
 | 为什么 2026-03-13 的 trusted current 比上一版更快？ | `session_bootstrap/reports/trusted_current_speedup_causal_chain_20260313.md` |
 | current 的真实端到端重建是否也更快？ | `session_bootstrap/reports/inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md` |
-| big.LITTLE 在 best-current / `SNR=10` 真机设置下，是否比同轮 serial current 更好？ | `session_bootstrap/reports/big_little_compare_20260318_095615.md` |
+| big.LITTLE 在健康板态、best-current / `SNR=10` 真机设置下，是否比同轮 serial current 更好？ | `session_bootstrap/reports/big_little_compare_20260318_123300.md` |
 | big.LITTLE 现在是否已经超过 current 历史最佳绝对 e2e？ | `session_bootstrap/reports/big_little_real_run_summary_20260318.md` / `session_bootstrap/reports/inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md` |
+| 为什么同 artifact lineage / 同 `SNR=10` 的真机结果会从 `347.375` 恢复到 `239.233 ms/image`？ | `session_bootstrap/reports/big_little_board_state_drift_20260318.md` |
 | 早先 incremental 是否已经优于 rebuild-only？ | `session_bootstrap/reports/current_scheme_b_compare_20260311_195303.md` |
 | 2026-03-11 的第一轮 current incremental 突破总结是什么？ | `session_bootstrap/reports/phytium_current_incremental_breakthrough_20260311.md` |
 | 当前 target 选择为什么倾向 cortex-a72 + neon？ | `session_bootstrap/reports/phytium_current_target_comparison_safe_runtime_20260310.md` |

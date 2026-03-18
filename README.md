@@ -12,7 +12,7 @@
 |---|---|---|
 | TVM 真实端到端重建 | baseline → current | 1850.0 → 230.339 ms/image（**87.55% 提升**） |
 | TVM payload 级推理 | baseline → current | 1846.9 → 130.219 ms（**92.95% 提升**） |
-| big.LITTLE 真机 apples-to-apples compare | serial current → pipeline current | 344.721 → 254.791 ms/image（同轮吞吐 **+35.298%**，但仍比 `230.339 ms/image` 慢约 `10.62%`） |
+| big.LITTLE 真机 apples-to-apples compare | serial current → pipeline current | 231.522 → 134.617 ms/image（健康板态默认引用，同轮吞吐 **+56.077%**） |
 | TVM 增量调优加速比 | rebuild-only → incremental | **16.272x** |
 | MNN 动态形状推理 | 加速比 | 1.85x（300 张不同尺寸图片） |
 
@@ -59,8 +59,9 @@
 | 下一轮性能优化执行清单 | `session_bootstrap/runbooks/next_round_optimization_checklist.md` |
 | big.LITTLE 首次真机一键入口 | `bash session_bootstrap/scripts/run_big_little_first_real_attempt.sh` |
 | big.LITTLE 真机结论摘要（推荐入口） | `session_bootstrap/reports/big_little_real_run_summary_20260318.md` |
-| big.LITTLE 首选 apples-to-apples compare | `session_bootstrap/reports/big_little_compare_20260318_095615.md` |
-| big.LITTLE 配套 pipeline wrapper 报告 | `session_bootstrap/reports/big_little_pipeline_bestcurrent_snr10_current_20260318_095811.md` |
+| big.LITTLE 首选 apples-to-apples compare | `session_bootstrap/reports/big_little_compare_20260318_123300.md` |
+| big.LITTLE 配套 pipeline wrapper 报告 | `session_bootstrap/reports/big_little_pipeline_bestcurrent_snr10_current_20260318_123421.md` |
+| big.LITTLE 板态漂移复盘 | `session_bootstrap/reports/big_little_board_state_drift_20260318.md` |
 | big.LITTLE 历史最佳 current e2e 参考 | `session_bootstrap/reports/inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md` |
 | big.LITTLE 首轮资源 profiling（支持性证据） | `session_bootstrap/reports/resource_profile_big_little_current_20260318_052922.md` |
 | big.LITTLE 首跑前交接（历史） | `session_bootstrap/reports/big_little_overnight_handoff_20260318.md` |
@@ -77,8 +78,9 @@
 | trusted current 本地产物 | `session_bootstrap/tmp/phytium_baseline_seeded_warm_start_current_incremental_chunk4_20260313_131545/optimized_model.so` |
 | trusted current SHA256 | `6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1` |
 | payload 基准结论 | `session_bootstrap/reports/inference_compare_currentsafe_chunk4_refresh_20260313_1758.md`（`1846.9 → 130.219 ms`，`92.95%` 提升） |
-| 最新真实端到端重建结论 | `session_bootstrap/reports/inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md`（`1850.0 → 230.339 ms/image`，`87.55%` 提升） |
-| big.LITTLE 首选 apples-to-apples compare | `session_bootstrap/reports/big_little_compare_20260318_095615.md`（same-run serial current `344.721 ms/image` → pipeline current `254.791 ms/image`，吞吐 `+35.298%`；但仍比历史最佳 current `230.339 ms/image` 慢约 `10.62%`） |
+| 历史最佳 direct current e2e 参考 | `session_bootstrap/reports/inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md`（`1850.0 → 230.339 ms/image`，`87.55%` 提升） |
+| big.LITTLE 首选 apples-to-apples compare | `session_bootstrap/reports/big_little_compare_20260318_123300.md`（健康板态下 serial current `231.522 ms/image` → pipeline current `134.617 ms/image`，吞吐 `+56.077%`） |
+| big.LITTLE 板态漂移结论 | `session_bootstrap/reports/big_little_board_state_drift_20260318.md`（same-day direct rerun `347.375 → 295.255 → 239.233 ms/image`，CPU online `0-2 → 0-3`，说明板态是 primary factor） |
 | 详细产物 / 脚本 / 路径说明 | `session_bootstrap/runbooks/artifact_registry.md` |
 
 ## 技术架构
