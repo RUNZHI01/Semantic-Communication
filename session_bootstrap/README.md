@@ -19,22 +19,23 @@
 - `runbooks/optimization_roadmap.md`：优化路线图（当前状态、下一轮重点、止损与转向）。  
 - `tasks/backlog.md`：待办池与优先级列表。
 
-## 当前可信成果入口（2026-03-12）
+## 当前可信成果入口（2026-03-18）
 
 优先看下面这些：
 
 | 目的 | 路径 |
 |---|---|
 | 当前成果 / 脚本 / 路径总索引 | `runbooks/artifact_registry.md` |
-| trusted current 突破总结 | `reports/phytium_current_incremental_breakthrough_20260311.md` |
-| payload 基准正式结论 | `reports/inference_compare_baseline_vs_currentsafe_rerun_20260311_114828.md` |
-| 真实端到端重建正式结论 | `reports/inference_real_reconstruction_compare_run_20260311_212301.md` |
+| trusted current payload 正式结论 | `reports/inference_compare_currentsafe_chunk4_refresh_20260313_1758.md` |
+| trusted current 真实端到端重建正式结论 | `reports/inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md` |
 | 下一轮性能优化执行清单 | `runbooks/next_round_optimization_checklist.md` |
 | big.LITTLE 首次真机一键入口 | `scripts/run_big_little_first_real_attempt.sh` |
+| big.LITTLE 真机结论摘要（推荐入口） | `reports/big_little_real_run_summary_20260318.md` |
+| big.LITTLE 首选 apples-to-apples compare | `reports/big_little_compare_20260318_095615.md` |
+| big.LITTLE 配套 pipeline wrapper 报告 | `reports/big_little_pipeline_bestcurrent_snr10_current_20260318_095811.md` |
+| big.LITTLE 历史最佳 current e2e 参考 | `reports/inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md` |
+| big.LITTLE 首轮资源 profiling（支持性证据） | `reports/resource_profile_big_little_current_20260318_052922.md` |
 | big.LITTLE 首跑前交接（历史） | `reports/big_little_overnight_handoff_20260318.md` |
-| big.LITTLE 真机结论摘要 | `reports/big_little_real_run_summary_20260318.md` |
-| big.LITTLE 首轮真机对比结果 | `reports/big_little_compare_20260318_051326.md` |
-| big.LITTLE 首轮资源 profiling | `reports/resource_profile_big_little_current_20260318_052922.md` |
 | big.LITTLE 异构流水线 runbook | `runbooks/big_little_pipeline_runbook_2026-03-18.md` |
 | 后续性能优化路线 | `runbooks/optimization_roadmap.md` |
 
@@ -60,8 +61,10 @@
 | 历史时间线真相源 | `PROGRESS_LOG.md` |
 
 如果你只想知道“现在应该复现哪条线”，默认优先：
-- current trusted artifact：`tmp/phytium_baseline_seeded_warm_start_current_incremental_20260311_094548/optimized_model.so`
-- trusted SHA256：`1946b08e6cf20a1259fa43f9e849a06f50ae1230c08d4df7081fba1edae4c644`
+- current trusted artifact：`tmp/phytium_baseline_seeded_warm_start_current_incremental_chunk4_20260313_131545/optimized_model.so`
+- trusted SHA256：`6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1`
+- current 历史最佳 e2e 参考：`reports/inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md`
+- big.LITTLE 首选 apples-to-apples compare：`reports/big_little_compare_20260318_095615.md`
 - 推荐验证入口：`scripts/run_inference_benchmark.sh` + `config/inference_tvm310_safe.2026-03-10.phytium_pi.env`
 
 如果当前目标是直接演示 OpenAMP 控制面，优先执行：
