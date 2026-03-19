@@ -1,0 +1,507 @@
+\documentclass[lang=cn,a4paper,newtx,citestyle=gb7714-2015,bibstyle=gb7714-2015]{elegantpaper}
+
+\title{基于 TVM、MNN 框架优化的 cGAN 模型轻量级图像语义通信系统}
+\author{逃离荒岛队 \\ 中山大学}
+\institute{第八届全国大学生集成电路创新创业大赛\enspace·\enspace 飞腾杯}
+\date{2025 年 5 月}
+
+\usepackage{tikz}
+\usepackage{pgfplots}
+\usepackage{multirow}
+\usepackage{tcolorbox}
+\pgfplotsset{compat=1.18}
+\usetikzlibrary{
+  arrows.meta,positioning,shapes.geometric,calc,
+  backgrounds,fit,decorations.pathreplacing,patterns
+}
+
+\definecolor{themeblue}{RGB}{30,80,160}
+\definecolor{themedark}{RGB}{20,50,100}
+\definecolor{themelight}{RGB}{230,238,250}
+\definecolor{themegray}{RGB}{100,100,100}
+\definecolor{codebg}{RGB}{248,248,248}
+\definecolor{rowalt}{RGB}{243,246,252}
+
+\hypersetup{linkcolor=black, citecolor=black, urlcolor=black}
+
+\addbibresource[location=local]{reference.bib}
+
+\begin{document}
+
+% ===================== 封面 =====================
+\begin{titlepage}
+\centering
+\vspace*{1.5cm}
+
+{\LARGE\bfseries 第八届全国大学生集成电路创新创业大赛}\\[0.8cm]
+{\Large 设计报告\enspace|\enspace 飞腾杯}\\[2.0cm]
+
+{\huge\bfseries 基于 TVM、MNN 框架优化的 cGAN 模型\\[0.4cm]
+轻量级图像语义通信系统}\\[1.5cm]
+
+\begin{flushleft}
+\large
+\hspace{3cm}\textbf{队伍编号：} CICC0903540\\[0.35cm]
+\hspace{3cm}\textbf{团队名称：} 逃离荒岛队\\[0.35cm]
+\hspace{3cm}\textbf{参赛学校：} 中山大学\\[0.35cm]
+\hspace{3cm}\textbf{指导老师：} （请填写）\\[0.35cm]
+\end{flushleft}
+
+\vfill
+{\large 2025 年 5 月}
+\end{titlepage}
+
+% ===================== 目录 =====================
+\tableofcontents
+\newpage
+
+% ===================== 正文标题 =====================
+\begin{center}
+{\Large\bfseries 基于 TVM、MNN 框架优化的 cGAN 模型轻量级图像语义通信系统}\\[0.6cm]
+{\large 逃离荒岛队}\\[0.2cm]
+{\normalsize 中山大学\quad 队伍编号 CICC0903540}\\[0.5cm]
+\end{center}
+
+\begin{abstract}
+\noindent 本项目面向 6G 时代边缘智能通信需求，在飞腾派 ARMv8 开发板上部署并优化了基于条件生成对抗网络（cGAN）的轻量级图像语义通信系统。系统采用客户端--信道--服务端分离架构：上位机完成图像编码与语义特征提取，飞腾派完成语义解码与图像重建，两端通过 OpenSSH 安全通道传输压缩后的语义张量。
+
+\noindent 针对飞腾派算力有限的瓶颈，本项目分别采用 TVM MetaSchedule 和 MNN 两种推理优化框架进行加速。TVM 通过自动调优搜索最优算子调度，使静态形状模型推理速度提升至原始方案的 \textbf{2.82 倍}；MNN 通过几何计算机制与半自动搜索，在支持动态尺寸输入的同时将推理速度提升至 \textbf{1.85 倍}。两种方案互补覆盖了静态与动态两种部署场景。
+
+\keywords{语义通信；TVM MetaSchedule；MNN；cGAN；边缘推理优化；飞腾派}
+\end{abstract}
+
+% ================================================================
+\section{系统介绍}
+% ================================================================
+
+\subsection{系统概述}
+
+本项目构建了一套端到端的图像语义通信系统。与传统通信中逐比特传输原始数据不同，语义通信仅提取并传输图像的核心语义特征，在接收端根据语义信息重建图像内容，从而大幅降低通信开销\cite{semcom}。
+
+系统采用\textbf{编码--传输--重建}三段式架构（图~\ref{fig:system_arch}）：上位机（联想拯救者 Y7000P，i7-13700H + RTX 4060 8GB）运行 Encoder 网络提取图像的语义特征向量并进行量化压缩；压缩后的张量通过 OpenSSH 加密通道发送至飞腾派开发板（ARMv8，2$\times$1.8\,GHz 大核 + 2$\times$1.5\,GHz 小核）；飞腾派运行经 TVM 或 MNN 优化的 Generator 网络完成图像解码与重建。
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  node distance=0.7cm and 1.0cm,
+  block/.style={rectangle, draw=themeblue, fill=themelight,
+    minimum width=2.6cm, minimum height=1.0cm,
+    font=\small\sffamily, align=center, rounded corners=3pt, line width=0.6pt},
+  hw/.style={rectangle, draw=themegray, fill=white,
+    minimum width=3.0cm, minimum height=0.6cm,
+    font=\footnotesize\sffamily, align=center, rounded corners=2pt,
+    dashed, line width=0.5pt},
+  arr/.style={-{Stealth[length=6pt]}, thick, color=themeblue!70},
+]
+  \node[block] (enc) {Encoder\\{\scriptsize 语义特征提取}};
+  \node[block, below=0.4cm of enc] (quant) {量化压缩};
+  \node[hw, below=0.4cm of quant] (pc) {上位机 (i7 + RTX 4060)};
+
+  \node[block, right=2.2cm of enc] (ch) {OpenSSH\\{\scriptsize 安全传输通道}};
+
+  \node[block, right=2.2cm of ch] (gen) {Generator\\{\scriptsize 图像重建}};
+  \node[block, below=0.4cm of gen] (opt) {TVM / MNN\\{\scriptsize 推理加速}};
+  \node[hw, below=0.4cm of opt] (ft) {飞腾派 (ARMv8, 4 核)};
+
+  \draw[arr] (enc) -- (quant);
+  \draw[arr] (quant.east) -- ++(0.5,0) |- (ch.west)
+    node[pos=0.3, above, font=\scriptsize\color{themegray}] {语义张量};
+  \draw[arr] (ch.east) -- ++(0.5,0) |- (gen.west)
+    node[pos=0.3, above, font=\scriptsize\color{themegray}] {$\hat{\mathbf{y}}$};
+  \draw[arr] (gen) -- (opt);
+
+  \begin{scope}[on background layer]
+    \node[fit=(enc)(quant)(pc), fill=blue!3, draw=themeblue!15,
+      rounded corners=5pt, inner sep=5pt] {};
+    \node[fit=(gen)(opt)(ft), fill=blue!3, draw=themeblue!15,
+      rounded corners=5pt, inner sep=5pt] {};
+  \end{scope}
+
+  \node[above=0.1cm of enc, font=\small\bfseries\sffamily\color{themedark}] {发送端};
+  \node[above=0.1cm of gen, font=\small\bfseries\sffamily\color{themedark}] {接收端};
+  \node[above=0.1cm of ch, font=\small\bfseries\sffamily\color{themedark}] {传输信道};
+\end{tikzpicture}
+\caption{系统整体架构。发送端提取语义特征并量化压缩，通过 OpenSSH 安全通道传输至接收端，由经 TVM/MNN 优化的 Generator 完成图像重建。}
+\label{fig:system_arch}
+\end{figure}
+
+\subsection{关键技术}
+
+本系统涉及四项关键技术：\textbf{（1）语义通信}——传输语义特征而非原始比特流，适用于 6G 网络与边缘计算场景\cite{dang6g}；\textbf{（2）TVM MetaSchedule}——针对飞腾派 ARMv8 CPU 自动搜索最优算子调度，实现静态形状模型的高效推理；\textbf{（3）MNN 动态推理}——通过几何计算机制和半自动搜索支持动态尺寸输入\cite{mnn_walle}；\textbf{（4）OpenSSH 安全传输}——在上位机与飞腾派之间建立加密通信通道，支持局域网与跨网络两种组网模式。
+
+% ================================================================
+\section{模型原理}
+% ================================================================
+
+\subsection{背景与语义通信}
+
+全球互联网用户已达 58.1 亿\cite{datareportal}，数据总量预计将从 2010 年的 2\,ZB 增长至 2028 年的 394\,ZB\cite{statista}，其中视频与图像内容占流量的 76\% 以上。传统通信技术已接近香农容量极限，而语义通信通过提取和传输信息的\textbf{语义特征}而非原始比特，显著减少冗余传输\cite{semcom,popovski}。这种"理解后再传输"的范式特别适用于带宽受限的边缘计算和物联网场景，是 6G 时代极具前景的技术方向\cite{dang6g}。
+
+然而，端侧设备算力有限，无法直接部署复杂的深度神经网络。本项目正是在此背景下，将压缩后的语义通信模型部署到飞腾派开发板，并通过 TVM 和 MNN 两种框架进行推理加速。
+
+\subsection{GAN-based JSCC 模型}
+
+本项目使用的模型来自 IEEE SPAWC 2023 论文\cite{lgjscc}，已获第一作者授权。该模型综合 DeepJSCC 与 cGAN 思想，构建了基于条件生成对抗网络的图像语义通信方案。图~\ref{fig:gan_jscc} 展示了模型的整体结构。
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  node distance=0.5cm and 0.7cm,
+  block/.style={rectangle, draw=themeblue, fill=themelight,
+    minimum width=1.9cm, minimum height=0.85cm,
+    font=\small\sffamily, align=center, rounded corners=2pt, line width=0.5pt},
+  io/.style={rectangle, draw=themegray, fill=white,
+    minimum width=1.4cm, minimum height=0.7cm,
+    font=\small\sffamily, align=center, rounded corners=2pt, line width=0.4pt},
+  ch/.style={rectangle, draw=red!60, fill=red!6,
+    minimum width=1.7cm, minimum height=0.85cm,
+    font=\small\sffamily, align=center, rounded corners=2pt, line width=0.5pt},
+  disc/.style={rectangle, draw=orange!70, fill=orange!8,
+    minimum width=2.0cm, minimum height=0.85cm,
+    font=\small\sffamily, align=center, rounded corners=2pt,
+    line width=0.5pt, dashed},
+  arr/.style={-{Stealth[length=5pt]}, thick, color=themeblue!70},
+  darr/.style={-{Stealth[length=5pt]}, thick, color=orange!60, dashed},
+]
+  \node[io] (img) {$\mathbf{x}$};
+  \node[block, right=0.6cm of img] (enc) {Encoder};
+  \node[block, right=0.6cm of enc] (pwr) {功率控制};
+  \node[ch, right=0.6cm of pwr] (awgn) {AWGN};
+  \node[block, right=0.6cm of awgn] (gen) {Generator};
+  \node[io, right=0.6cm of gen] (out) {$\hat{\mathbf{x}}$};
+  \node[disc, below=1.0cm of awgn] (disc) {Discriminator\\{\scriptsize (仅训练阶段)}};
+
+  \draw[arr] (img) -- (enc);
+  \draw[arr] (enc) -- (pwr) node[midway, above, font=\scriptsize\color{themegray}] {$\mathbf{y}$};
+  \draw[arr] (pwr) -- (awgn);
+  \draw[arr] (awgn) -- (gen) node[midway, above, font=\scriptsize\color{themegray}] {$\hat{\mathbf{y}}$};
+  \draw[arr] (gen) -- (out);
+  \draw[darr] (out.south) -- ++(0,-0.35) -| (disc.east);
+  \draw[darr] (awgn.south) -- (disc.north);
+
+  \begin{scope}[on background layer]
+    \node[fit=(img)(enc)(pwr), fill=blue!3, draw=themeblue!15,
+      rounded corners=4pt, inner sep=4pt,
+      label={[font=\scriptsize\sffamily\color{themedark}]above:发送端}] {};
+    \node[fit=(gen)(out), fill=blue!3, draw=themeblue!15,
+      rounded corners=4pt, inner sep=4pt,
+      label={[font=\scriptsize\sffamily\color{themedark}]above:接收端}] {};
+  \end{scope}
+\end{tikzpicture}
+\caption{GAN-based JSCC 模型结构。编码器提取语义特征 $\mathbf{y}$，经功率控制与 AWGN 信道后，生成器根据 $\hat{\mathbf{y}}$ 重建图像。判别器仅在训练阶段参与对抗训练。}
+\label{fig:gan_jscc}
+\end{figure}
+
+\subsubsection{编码与生成}
+
+编码器将输入图像 $\mathbf{x}$ 映射为语义特征向量 $\mathbf{y}$，经功率控制后通过 AWGN 信道传输。接收端的生成器根据受噪声干扰的特征 $\hat{\mathbf{y}}$ 重建图像：
+\begin{equation}
+  \hat{\mathbf{x}} = G_{\theta_G}(\hat{\mathbf{y}}) \in \mathbb{R}^{H \times W \times C}
+\end{equation}
+其中 $\theta_G$ 为生成器参数，$H, W, C$ 分别为图像高度、宽度和通道数。
+
+\subsubsection{多目标损失函数}
+
+为避免纯 MSE 损失导致的图像模糊，模型引入 LPIPS 感知损失与对抗损失。生成器损失为：
+\begin{equation}
+  \mathcal{L}_G = \mathbb{E}_{\mathbf{x}} \bigl[\log\bigl(1 - D(G(\mathbf{x}))\bigr)\bigr]
+\end{equation}
+
+判别器损失为：
+\begin{equation}
+  \mathcal{L}_D = -\mathbb{E}_{\mathbf{x} \sim p_{\text{data}}} [\log D(\mathbf{x})]
+         - \mathbb{E}_{\mathbf{x}} [\log(1 - D(G(\mathbf{x})))]
+\end{equation}
+
+LPIPS 感知距离通过预训练 AlexNet 提取多层特征计算：
+\begin{equation}
+  d_{\text{LPIPS}}(\hat{\mathbf{z}}, \mathbf{z})
+  = \sum_{l} \frac{1}{H_l W_l} \sum_{h,w}
+    \bigl\| w_l \odot (\hat{\mathbf{z}}^l_{hw} - \mathbf{z}^l_{hw}) \bigr\|_2^2
+\end{equation}
+
+编码器与生成器的联合训练目标为：
+\begin{equation}
+  \mathcal{L}_t = \lambda\,\mathcal{L}_G + \alpha\,\mathcal{L}_{\text{MSE}} + \beta\,\mathcal{L}_{\text{LPIPS}}
+\end{equation}
+
+\subsubsection{LGJSCC 轻量化压缩}
+
+为适配边缘设备，模型通过知识蒸馏训练轻量级学生生成器。蒸馏损失为：
+\begin{equation}
+  \mathcal{L}_{\text{distill}} = \sum_{t=1}^{T}
+    \bigl\| f_t^{\theta'}(\hat{\mathbf{y}}) - f_t^{\theta}(\hat{\mathbf{y}}) \bigr\|_2
+\end{equation}
+
+学生模型的完整训练损失为 $\mathcal{L}_s = \delta\,\mathcal{L}_{\text{distill}} + \lambda\,\mathcal{L}_{\text{GAN}} + \alpha\,\mathcal{L}_{\text{MSE}} + \beta\,\mathcal{L}_{\text{LPIPS}}$。模型使用 Open Images V7 数据集（900 万+ 图像）训练，信道模型为 AWGN，超参数设置为 $\alpha{=}0.15$, $\beta{=}0.0023$, $\lambda{=}1.0$。本系统采用 LGJSCC-c3 压缩配置，兼顾飞腾派算力与重建质量。
+
+% ================================================================
+\section{系统运行}
+% ================================================================
+
+系统的端到端执行分为三个阶段：上位机编码、安全传输和端侧解码。
+
+\subsection{上位机编码}
+
+上位机执行以下流程：（1）在 \texttt{test\_sub.py} 中加载 Encoder 网络并设置为评估模式；（2）读取指定目录的图片，通过 Encoder 推理提取语义特征向量 $\mathbf{y}$；（3）对特征向量进行量化，计算 scale 和 zero\_point 参数，将浮点张量压缩为整型表示；（4）将量化后的张量及参数打包为 \texttt{.pt} 文件。
+
+\subsection{OpenSSH 安全传输}
+
+系统通过 \texttt{paramiko} 库建立 SSH 安全通道。为提升传输效率，采用了多项优化措施：选择 \texttt{aes128-ctr}/\texttt{aes256-ctr} 加密算法利用 CPU 硬件加速；扩大 TCP 窗口至 1\,GB 提升吞吐量；创建 SFTP 连接池实现复用；根据文件大小动态选择 16--64\,MB 分块传输；通过 \texttt{mmap} 内存映射和 \texttt{BytesIO} 缓冲减少磁盘 I/O 开销。
+
+\subsection{端侧解码与重建}
+
+飞腾派接收语义张量后，执行经 TVM 或 MNN 优化的 Generator 推理代码：去量化恢复浮点张量，添加 AWGN 信道噪声模拟，通过 Generator 网络重建图像，最终使用 torchvision 保存为 PNG 文件。
+
+% ================================================================
+\section{模型优化}
+% ================================================================
+
+\subsection{TVM 编译框架}
+
+TVM（Tensor Virtual Machine）是一个开源的深度学习编译器，提供端到端的编译栈，将高级模型转换为针对特定硬件优化的高效机器码。图~\ref{fig:tvm_pipeline} 展示了 TVM 的多级编译流水线。
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  stage/.style={rectangle, draw=themeblue, fill=themelight,
+    minimum width=2.2cm, minimum height=0.9cm,
+    font=\small\sffamily, align=center, rounded corners=2pt, line width=0.5pt},
+  arr/.style={-{Stealth[length=5pt]}, thick, color=themeblue!60},
+  desc/.style={font=\scriptsize\color{themegray}, align=center, text width=2.2cm},
+]
+  \node[stage] (s1) {模型导入\\{\scriptsize PyTorch/ONNX}};
+  \node[stage, right=0.5cm of s1] (s2) {Relay/Relax\\{\scriptsize 高层次 IR}};
+  \node[stage, right=0.5cm of s2] (s3) {TE\\{\scriptsize 张量表达式}};
+  \node[stage, right=0.5cm of s3] (s4) {Auto-tuning\\{\scriptsize MetaSchedule}};
+  \node[stage, right=0.5cm of s4] (s5) {TIR\\{\scriptsize 底层 IR}};
+  \node[stage, right=0.5cm of s5] (s6) {机器码\\{\scriptsize .so}};
+
+  \draw[arr] (s1) -- (s2);
+  \draw[arr] (s2) -- (s3);
+  \draw[arr] (s3) -- (s4);
+  \draw[arr] (s4) -- (s5);
+  \draw[arr] (s5) -- (s6);
+
+  \node[desc, below=0.3cm of s1] {从训练框架\\提取计算图};
+  \node[desc, below=0.3cm of s2] {图级优化\\算子融合};
+  \node[desc, below=0.3cm of s3] {循环切分\\矢量化};
+  \node[desc, below=0.3cm of s4] {搜索最优\\schedule};
+  \node[desc, below=0.3cm of s5] {底层优化\\内存重排};
+  \node[desc, below=0.3cm of s6] {LLVM 后端\\AArch64};
+
+  \draw[decorate, decoration={brace, amplitude=4pt, raise=2pt}]
+    (s1.north west) -- (s6.north east)
+    node[midway, above=7pt, font=\small\sffamily\bfseries\color{themedark}]
+    {TVM 端到端编译流水线};
+\end{tikzpicture}
+\caption{TVM 多级编译流水线。模型经六级降级，从高层次 IR 逐步优化为目标硬件的机器码。}
+\label{fig:tvm_pipeline}
+\end{figure}
+
+TVM 提供三种自动调优模块：AutoTVM（基于模板搜索）、AutoScheduler/Ansor（无模板自动生成搜索空间）和 MetaSchedule（结合两者优点，采用贝叶斯优化策略）。本项目选用 \textbf{MetaSchedule}，其灵活的模板系统和改进的成本模型特别适合飞腾派这类非主流 ARM 硬件的优化。
+
+\subsection{静态 TVM 优化}
+
+\subsubsection{优化流程}
+
+图~\ref{fig:tvm_opt_flow} 展示了本项目的 TVM 优化具体流程。
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  flowstep/.style={rectangle, draw=themeblue, fill=themelight,
+    minimum width=1.8cm, minimum height=0.8cm,
+    font=\small\sffamily, align=center, rounded corners=2pt, line width=0.5pt},
+  flowtool/.style={rectangle, draw=themegray!60, fill=white,
+    minimum height=0.5cm,
+    font=\scriptsize\sffamily\color{themegray}, align=center,
+    rounded corners=1pt, line width=0.3pt},
+  arr/.style={-{Stealth[length=5pt]}, thick, color=themeblue!60},
+]
+  \node[flowstep] (pt) {\texttt{.pt}};
+  \node[flowtool, below=0.1cm of pt] {torch.onnx.export};
+  \node[flowstep, right=1.0cm of pt] (onnx) {ONNX};
+  \node[flowtool, below=0.1cm of onnx] {onnxsim};
+  \node[flowstep, right=1.0cm of onnx] (simp) {简化 ONNX};
+  \node[flowtool, below=0.1cm of simp] {from\_onnx};
+  \node[flowstep, right=1.0cm of simp] (relax) {Relax IR};
+  \node[flowtool, below=0.1cm of relax] {MetaSchedule};
+  \node[flowstep, right=1.0cm of relax] (so) {\texttt{.so}};
+  \node[flowtool, below=0.1cm of so] {export\_library};
+
+  \draw[arr] (pt) -- (onnx);
+  \draw[arr] (onnx) -- (simp);
+  \draw[arr] (simp) -- (relax);
+  \draw[arr] (relax) -- (so);
+\end{tikzpicture}
+\caption{本项目 TVM 优化流程：从 PyTorch 模型到部署级 \texttt{.so} 文件。}
+\label{fig:tvm_opt_flow}
+\end{figure}
+
+首先通过 \texttt{torch.onnx.export} 将 PyTorch 模型导出为 ONNX 格式，再使用 \texttt{onnxsim} 进行常量折叠和算子融合简化。随后使用 \texttt{tvm.relax.frontend.onnx.from\_onnx} 转换为 Relax IR。
+
+由于飞腾派兼容 ARM v8.0 指令集但不支持 v8.2 扩展的 FP16/BF16，需通过环境变量禁用半精度运算（\texttt{TVM\_DISABLE\_FP16=1}、\texttt{TVM\_BF16\_MODE=disable}）并设置线程绑定策略（\texttt{OMP\_PROC\_BIND=close}）以提高缓存局部性。
+
+目标设备配置为 AArch64 LLVM 后端，启用 NEON 指令集，4 核心。MetaSchedule 参数：每任务最多 8000 次试验，每迭代 8 种候选，贝叶斯搜索策略。使用 \texttt{relax.get\_pipeline("static\_shape\_tuning")} 获取优化管道，最终编译并导出为 \texttt{optimized\_model.so}。
+
+\subsubsection{优化效果}
+
+采用 Places365 数据集（$256 \times 256$）测试 300 张图片，结果如表~\ref{tab:tvm_perf} 所示。
+
+\begin{table}[htbp]
+\centering
+\caption{TVM 优化前后性能对比（300 张 $256 \times 256$ 图片）}
+\label{tab:tvm_perf}
+\begin{tabular}{lccc}
+  \toprule
+  \textbf{方案} & \textbf{总耗时} & \textbf{单张耗时} & \textbf{加速比} \\
+  \midrule
+  原始模型（进程池并行） & 180\,s & 0.600\,s & 1.00$\times$ \\
+  \textbf{TVM MetaSchedule} & \textbf{64\,s} & \textbf{0.213\,s} & \textbf{2.82$\times$} \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{MNN 推理框架}
+
+MNN（Mobile Neural Network）是阿里巴巴开源的轻量级推理引擎\cite{mnn_walle}，专为移动和嵌入式设备设计。图~\ref{fig:mnn_arch} 展示了其分层架构。
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+  box/.style={rectangle, draw=themeblue, fill=themelight,
+    minimum height=0.8cm, font=\small\sffamily, align=center,
+    rounded corners=2pt, line width=0.5pt},
+  subbox/.style={rectangle, draw=themeblue!50, fill=white,
+    minimum height=0.6cm, font=\scriptsize\sffamily, align=center,
+    rounded corners=1pt, line width=0.4pt},
+  arr/.style={-{Stealth[length=5pt]}, thick, color=themeblue!60},
+  lbl/.style={font=\footnotesize\sffamily\bfseries\color{themedark}},
+]
+  \node[box, minimum width=11cm] (input) {输入模型（TensorFlow / ONNX / Caffe / PyTorch）};
+
+  \node[lbl, below=0.7cm of input.west, anchor=west] (cvt) {Converter};
+  \node[subbox, minimum width=4.5cm, below=0.2cm of cvt.south west, anchor=north west] (fe) {Frontend（格式解析）};
+  \node[subbox, minimum width=4.5cm, right=0.4cm of fe] (go) {Graph Optimizer（算子融合）};
+
+  \node[lbl, below=0.7cm of fe.south west, anchor=west] (int) {Interpreter};
+  \node[subbox, minimum width=4.5cm, below=0.2cm of int.south west, anchor=north west] (eng) {Engine（调度/内存管理）};
+  \node[subbox, minimum width=4.5cm, right=0.4cm of eng] (be) {Backend（CPU/GPU/NPU）};
+
+  \node[subbox, minimum width=3.2cm, below=0.5cm of eng] (geo) {几何计算\\{\scriptsize 光栅算子分解}};
+  \node[subbox, minimum width=3.2cm, right=0.4cm of geo] (semi) {半自动搜索\\{\scriptsize 最优后端选择}};
+  \node[subbox, minimum width=2.5cm, right=0.4cm of semi] (neon) {NEON/汇编\\{\scriptsize 底层加速}};
+
+  \draw[arr] (input.south) -- ++(0,-0.2) -| (fe.north);
+  \draw[arr] (fe) -- (go);
+  \draw[arr] (go.south) -- ++(0,-0.2) -| (eng.north);
+  \draw[arr] (eng) -- (be);
+  \draw[arr] (eng.south) -- ++(0,-0.1) -| (geo.north);
+  \draw[arr] (geo) -- (semi);
+  \draw[arr] (semi) -- (neon);
+
+  \begin{scope}[on background layer]
+    \node[fit=(cvt)(fe)(go), fill=blue!3, draw=themeblue!15,
+      rounded corners=4pt, inner xsep=6pt, inner ysep=4pt] {};
+    \node[fit=(int)(eng)(be)(geo)(semi)(neon), fill=blue!3, draw=themeblue!15,
+      rounded corners=4pt, inner xsep=6pt, inner ysep=4pt] {};
+  \end{scope}
+\end{tikzpicture}
+\caption{MNN 分层架构。Converter 负责模型格式转换与图优化，Interpreter 负责运行时调度与后端执行。}
+\label{fig:mnn_arch}
+\end{figure}
+
+MNN 引入光栅算子（raster operator），通过几何计算机制将转换和复合算子分解为光栅算子与原子算子的组合，使后端优化工作量减少约 46\%。原子算子从算法（Winograd/Strassen）、指令集（ARM NEON SIMD）、内存（tiling + memory reordering）和汇编（手写汇编 + 软件流水线）四个层面进行优化。
+
+\subsection{MNN 动态优化}
+
+MNN 不直接支持 PyTorch，需先转换为 ONNX 格式。为支持动态尺寸输入，在导出时设置高度和宽度维度为动态轴。推理时通过 \texttt{resizeTensor} 更新维度，再调用 \texttt{resizeSession} 完成内存重分配\cite{mnn_session}。
+
+飞腾派 CPU 包含 2 个 1.8\,GHz 大核和 2 个 1.5\,GHz 小核。基于实验，创建 2 个 Interpreter 各绑定 1 个 Session，并采用预加载机制将 \texttt{.pt} 文件提前写入内存，减少推理时的 I/O 开销。处理 300 张不同尺寸图片，MNN 优化后耗时 123\,s，相比原始并行版本加速 \textbf{1.85$\times$}。
+
+\subsection{综合性能对比}
+
+图~\ref{fig:perf_bar} 和表~\ref{tab:perf_summary} 汇总了三种方案的性能表现。
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+  ybar, width=10cm, height=6cm,
+  bar width=16pt, ymin=0, ymax=210,
+  ylabel={总耗时 (s)}, ylabel style={font=\small\sffamily},
+  symbolic x coords={原始并行, TVM优化, MNN优化},
+  xtick=data, xticklabel style={font=\small\sffamily},
+  yticklabel style={font=\small},
+  nodes near coords, nodes near coords style={font=\small\bfseries, color=themedark},
+  every node near coord/.append style={above=2pt},
+  axis lines*=left, enlarge x limits=0.3,
+  grid=major, major grid style={line width=0.2pt, draw=gray!20},
+]
+  \addplot[fill=themeblue!25, draw=themeblue!60] coordinates
+    {(原始并行,180) (TVM优化,64) (MNN优化,123)};
+\end{axis}
+\begin{axis}[
+  width=10cm, height=6cm,
+  ymin=0, ymax=3.5,
+  ylabel={加速比 ($\times$)}, ylabel style={font=\small\sffamily, color=red!60!black},
+  axis y line*=right, axis x line=none,
+  symbolic x coords={原始并行, TVM优化, MNN优化},
+  xtick=\empty, yticklabel style={font=\small, color=red!60!black},
+  enlarge x limits=0.3,
+]
+  \addplot[mark=diamond*, mark size=4pt, thick, color=red!60!black, line width=1.2pt]
+    coordinates {(原始并行,1.00) (TVM优化,2.82) (MNN优化,1.85)};
+  \addlegendentry{加速比}
+\end{axis}
+\end{tikzpicture}
+\caption{三种方案性能对比（300 张图片，Places365 数据集）。柱状图为总耗时（左轴），折线为加速比（右轴）。}
+\label{fig:perf_bar}
+\end{figure}
+
+\begin{table}[htbp]
+\centering
+\caption{性能汇总}
+\label{tab:perf_summary}
+\begin{tabular}{lcccc}
+  \toprule
+  \textbf{方案} & \textbf{输入形状} & \textbf{总耗时} & \textbf{单张耗时} & \textbf{加速比} \\
+  \midrule
+  原始模型（进程池并行） & 静态 $256{\times}256$ & 180\,s & 0.600\,s & 1.00$\times$ \\
+  TVM MetaSchedule & 静态 $256{\times}256$ & 64\,s & 0.213\,s & \textbf{2.82$\times$} \\
+  MNN 动态推理 & 动态尺寸 & 123\,s & 0.410\,s & 1.85$\times$ \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+TVM 在静态形状场景下优势显著（2.82$\times$），得益于 MetaSchedule 对固定搜索空间的充分探索；MNN 虽加速比略低（1.85$\times$），但支持动态尺寸输入，适用范围更广。两者互补，共同覆盖了静态和动态两种部署需求。
+
+% ================================================================
+\section{总结与展望}
+% ================================================================
+
+\subsection{项目成果}
+
+本项目构建了基于语义通信技术的端到端图像传输系统，在飞腾派 ARMv8 开发板上完成了 LGJSCC 模型的部署与优化。核心成果如下：
+
+\begin{itemize}
+  \item 静态形状模型通过 TVM MetaSchedule 优化，推理速度提升至 \textbf{2.82 倍}，单张图片处理时间从 0.600\,s 降至 0.213\,s。
+  \item 动态形状模型通过 MNN 优化，推理速度提升至 \textbf{1.85 倍}，同时支持任意尺寸图片输入。
+  \item 建立了上位机与飞腾派之间基于 OpenSSH 的安全通信链路，支持局域网与跨网络两种组网模式。
+  \item 实现了从图像编码、语义传输到端侧重建的完整闭环流程。
+\end{itemize}
+
+\subsection{不足与展望}
+
+\begin{enumerate}
+  \item \textbf{物理信道}——目前使用 OpenSSH 模拟传输，尚未接入真实物理信道。后续计划引入短波信道（3--30\,MHz），实现远距离语义通信验证。
+  \item \textbf{动态 TVM 优化}——当前 TVM 仅支持静态形状。随着 TVM Relax 对动态形状支持的成熟，计划将动态模型也纳入 TVM 优化链路。
+  \item \textbf{RPC 远程调优}——当前调优在飞腾派本机进行，受限于其算力。计划利用笔记本作为 builder/tracker，飞腾派仅做 RPC runner 测量，大幅加速调优过程。
+  \item \textbf{更多压缩配置}——目前仅部署了 LGJSCC-c3，后续可尝试其他压缩比配置，在速度与重建质量之间寻找更优平衡点。
+\end{enumerate}
+
+% ================================================================
+\printbibliography[heading=bibintoc, title=参考文献]
+
+\end{document}
