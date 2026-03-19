@@ -89,6 +89,7 @@
 - `session_bootstrap/reports/award_rescue_metric_truth_table_20260319.md`
 - `session_bootstrap/reports/award_rescue_execution_checklist_20260319.md`
 - `session_bootstrap/reports/defense_deck_outline_20260319.md`
+- `session_bootstrap/reports/defense_ppt_pages_1_8_cn_20260319.md`
 - `session_bootstrap/reports/defense_talk_track_5min_20260320.md`
 - `session_bootstrap/reports/defense_talk_track_2min_20260320.md`
 - `session_bootstrap/reports/defense_demo_operator_card_20260320.md`
