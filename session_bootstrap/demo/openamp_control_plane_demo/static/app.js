@@ -141,6 +141,37 @@ function shortSha(value) {
   return text ? text.slice(0, 12) : "NA";
 }
 
+function compactModeBoundary(note) {
+  const text = String(note || "").trim();
+  if (!text) {
+    return "4-core headline performance 只保留在正式证据口径；当前页面如实展示 3-core Linux + RTOS OpenAMP demo。";
+  }
+  const normalized = text.toLowerCase();
+  if (normalized.includes("4-core") && normalized.includes("3-core")) {
+    return "4-core headline performance 只保留在正式证据口径；当前页面如实展示 3-core Linux + RTOS OpenAMP demo。";
+  }
+  return text;
+}
+
+function compactManualNote(note) {
+  const text = String(note || "").trim();
+  if (!text) {
+    return "Operator assist only：探板、预检、运行、故障注入与 SAFE_STOP 仍由操作员手动触发。";
+  }
+  const normalized = text.toLowerCase();
+  if (normalized.includes("operator-assist") || normalized.includes("manual")) {
+    return "Operator assist only：探板、预检、运行、故障注入与 SAFE_STOP 仍由操作员手动触发。";
+  }
+  return text;
+}
+
+function compactSentence(text, limit = 140) {
+  const value = String(text || "").trim().replace(/\s+/g, " ");
+  if (!value) return "";
+  if (value.length <= limit) return value;
+  return `${value.slice(0, Math.max(limit - 1, 0)).trimEnd()}...`;
+}
+
 function setStatusBadge(id, label, tone) {
   const element = document.getElementById(id);
   element.className = `status-pill ${toneClass(tone)}`;
@@ -257,8 +288,11 @@ function commandRollupCard(item) {
 }
 
 function commandSceneCard(scene) {
-  const checks = Array.isArray(scene.checks) ? scene.checks : [];
   const readyLabel = scene.total_checks ? `${scene.ready_count || 0} / ${scene.total_checks} ready` : "";
+  const metaItems = [...(scene.meta || [])];
+  if (readyLabel) {
+    metaItems.unshift(readyLabel);
+  }
   return `
     <article class="command-scene-card" data-tone="${escapeHtml(scene.tone || "neutral")}">
       <div class="command-scene-top">
@@ -269,16 +303,15 @@ function commandSceneCard(scene) {
         <div class="label">${escapeHtml(scene.eyebrow || "场景")}</div>
         <h3>${escapeHtml(scene.title || "")}</h3>
       </div>
-      <p class="command-scene-note">${escapeHtml(scene.note || "")}</p>
-      ${scene.cue_line ? `<p class="command-scene-cue">${escapeHtml(scene.cue_line)}</p>` : ""}
-      ${checks.length ? `<div class="command-scene-checks">${checks.map((check) => cueCheckChip(check)).join("")}</div>` : ""}
-      <div class="command-scene-meta">
-        ${(scene.meta || []).map((item) => `<span>${escapeHtml(item)}</span>`).join("")}
-        ${readyLabel ? `<span>${escapeHtml(readyLabel)}</span>` : ""}
-      </div>
+      <p class="command-scene-note">${escapeHtml(compactSentence(scene.cue_line || scene.note || "", 120) || "等待操作员切换到本幕。")}</p>
+      ${metaItems.length ? `
+        <div class="command-scene-meta">
+          ${metaItems.slice(0, 3).map((item) => `<span>${escapeHtml(item)}</span>`).join("")}
+        </div>
+      ` : ""}
       <div class="command-scene-actions">
         ${commandJumpButton(scene.jump, scene.jump?.primary)}
-        <span class="status-inline">${escapeHtml(scene.jump_hint || "")}</span>
+        ${scene.jump_hint ? `<span class="status-inline">${escapeHtml(scene.jump_hint)}</span>` : ""}
       </div>
     </article>
   `;
@@ -322,7 +355,7 @@ function archiveCommandSummary(systemStatus) {
 
 function operatorCueSceneCard(scene, currentSceneId) {
   const recommended = scene.recommended || scene.scene_id === currentSceneId;
-  const checks = Array.isArray(scene.checks) ? scene.checks : [];
+  const readyLabel = scene.total_checks ? `${scene.ready_count || 0} / ${scene.total_checks} ready` : (scene.jump_hint || "");
   return `
     <article class="operator-cue-scene-card" data-tone="${escapeHtml(scene.tone || "neutral")}" ${recommended ? 'data-current="true"' : ""}>
       <div class="operator-cue-scene-top">
@@ -332,14 +365,8 @@ function operatorCueSceneCard(scene, currentSceneId) {
         </div>
         <div class="status-pill ${toneClass(scene.tone || "neutral")}">${escapeHtml(scene.status || "待命")}</div>
       </div>
-      <p class="compact-copy">${escapeHtml(scene.cue_line || scene.note || "")}</p>
-      <div class="operator-cue-check-grid">
-        ${checks.map((check) => cueCheckChip(check)).join("")}
-      </div>
-      <div class="command-scene-actions">
-        ${commandJumpButton(scene.jump, false)}
-        <span class="status-inline">${escapeHtml(scene.total_checks ? `${scene.ready_count || 0} / ${scene.total_checks} ready` : scene.jump_hint || "")}</span>
-      </div>
+      <p class="compact-copy">${escapeHtml(compactSentence(scene.note || scene.cue_line || "", 88) || "等待操作员推进。")}</p>
+      ${readyLabel ? `<div class="status-inline">${escapeHtml(readyLabel)}</div>` : ""}
     </article>
   `;
 }
@@ -353,6 +380,14 @@ function renderOperatorCue(cue) {
     `;
     return;
   }
+  const currentScene =
+    cue.scenes.find((scene) => scene.scene_id === cue.currentSceneId)
+    || cue.scenes.find((scene) => scene.recommended)
+    || cue.scenes[0]
+    || null;
+  const currentChecks = Array.isArray(currentScene?.checks) ? currentScene.checks : [];
+  const nextStep = cue.nextStepLabel || cue.nextStepNote || compactManualNote(cue.manualBoundaryNote);
+  const presenterLine = cue.presenterLine || cue.nextStepNote || "";
   shell.innerHTML = `
     <div class="operator-cue-top">
       <div>
@@ -361,18 +396,28 @@ function renderOperatorCue(cue) {
       </div>
       <div class="status-pill ${toneClass(cue.currentSceneTone || cue.statusTone || "neutral")}">${escapeHtml(cue.statusLabel || cue.currentSceneLabel)}</div>
     </div>
-    <p class="operator-cue-line">${escapeHtml(cue.presenterLine || cue.nextStepNote || "")}</p>
+    ${presenterLine ? `<p class="operator-cue-line">${escapeHtml(presenterLine)}</p>` : ""}
     <div class="operator-cue-actions">
       <div class="operator-cue-copy">
         <div class="label">Next Manual Step</div>
-        <div class="compact-copy">${escapeHtml(cue.nextStepNote || cue.manualBoundaryNote || "")}</div>
+        <div class="compact-copy">${escapeHtml(compactSentence(nextStep, 160))}</div>
       </div>
       ${commandJumpButton(cue.nextAction, true)}
     </div>
-    <div class="status-meta">
-      <span>${escapeHtml(cue.boundaryNote || "")}</span>
-      <span>${escapeHtml(cue.manualBoundaryNote || "")}</span>
-    </div>
+    ${currentScene ? `
+      <div class="operator-cue-focus">
+        <div class="operator-cue-focus-head">
+          <div>
+            <div class="label">Current Scene</div>
+            <strong>${escapeHtml(currentScene.title || cue.currentSceneLabel)}</strong>
+          </div>
+          <div class="status-pill ${toneClass(currentScene.tone || cue.currentSceneTone || "neutral")}">${escapeHtml(currentScene.status || cue.statusLabel || "待命")}</div>
+        </div>
+        <p class="compact-copy">${escapeHtml(compactSentence(currentScene.cue_line || currentScene.note || cue.nextStepNote || "", 160))}</p>
+        ${currentChecks.length ? `<div class="operator-cue-check-grid">${currentChecks.map((check) => cueCheckChip(check)).join("")}</div>` : ""}
+      </div>
+    ` : ""}
+    <p class="compact-copy operator-cue-subnote">${escapeHtml(compactManualNote(cue.manualBoundaryNote))}</p>
     <div class="operator-cue-scene-grid">
       ${cue.scenes.map((scene) => operatorCueSceneCard(scene, cue.currentSceneId)).join("")}
     </div>
@@ -407,7 +452,7 @@ function buildCommandCenterModel(snapshot, systemStatus) {
   let summaryLabel = operatorCue.currentSceneLabel || "指挥席就绪";
   let summaryTone = operatorCue.currentSceneTone || "online";
   let summaryText = operatorCue.nextStepNote
-    || "当前页面已经把链路预案、任务票、Current / PyTorch 对照、安全收口和 archive timeline 放进同一个 operator seat；动作仍由操作员逐步触发。";
+    || "把会话、Current / Compare、安全与 archive 收在同一操作层；所有推进仍由操作员手动触发。";
   let primaryJump = operatorCue.nextAction || { label: "跳到第三幕 Compare", actId: "act3", targetId: "compareViewerShell", primary: true };
 
   if (!operatorCue.currentSceneLabel && faultLatched) {
@@ -442,7 +487,7 @@ function buildCommandCenterModel(snapshot, systemStatus) {
     summaryLabel = "先看任务票闸机";
     summaryTone = gate.tone || "degraded";
     summaryText =
-      gate.message || "当前 ticket 仍处于草案或保守阻断态；M6 只把这个 verdict 提到顶层，不伪造已放行。";
+      gate.message || "当前 ticket 仍处于草案或保守阻断态；页面不会把它包装成已放行。";
     primaryJump = { label: "跳到任务票闸机", actId: "act1", targetId: "jobManifestGateShell", primary: true };
   } else if (!operatorCue.currentSceneLabel && !state.currentResult) {
     summaryLabel = "推进第二幕 Current live";
@@ -454,7 +499,7 @@ function buildCommandCenterModel(snapshot, systemStatus) {
     summaryLabel = "当前仍是归档展示";
     summaryTone = "degraded";
     summaryText =
-      "本场 Current 结果仍在归档/回退态。M6 会如实把这一点抬到顶层，而不是伪装成 72 秒自动闭环。";
+      "本场 Current 结果仍在归档/回退态。页面会如实保留 archive provenance，不伪装为本轮 live 已完成。";
     primaryJump = { label: "回到第二幕 Current", actId: "act2", targetId: "act2Panel", primary: true };
   } else if (!operatorCue.currentSceneLabel && !currentLiveDone) {
     summaryLabel = "等待第二幕推进";
@@ -470,49 +515,51 @@ function buildCommandCenterModel(snapshot, systemStatus) {
     primaryJump = { label: "跳到第四幕 SAFE_STOP", actId: "act4", targetId: "act4Panel", primary: true };
   }
 
+  const sessionTarget = boardAccess.host
+    ? `${boardAccess.user || "user"}@${boardAccess.host}:${boardAccess.port || 22}`
+    : "未录入本场会话";
+  const currentCompareTone =
+    active.running && active.variant === "current"
+      ? activeProgress.tone || "online"
+      : currentFallback
+        ? "degraded"
+        : currentPane?.badgeTone === "online" || baselinePane?.badgeTone === "online"
+          ? "online"
+          : currentPane?.badgeTone || baselinePane?.badgeTone || "neutral";
   const rollups = [
     {
-      label: "Link Director",
-      title: "链路预案",
-      status: linkDirector.selected_profile_label || "正常链路",
-      value: selectedLinkProfile.label || linkDirector.selected_profile_label || "正常链路",
-      note: `${linkDirector.backend_binding || "ui_scaffold_only"} ｜ ${selectedLinkProfile.summary || linkDirector.summary || "当前只更新导演台态势。"}`,
-      tone: linkDirector.tone || "neutral",
+      label: "Launch Readiness",
+      title: "会话与 Gate",
+      status: boardAccess.connection_ready ? (gate.verdict_label || "待预检") : "待会话",
+      value: boardAccess.connection_ready ? sessionTarget : "补录 SSH / env",
+      note: boardAccess.connection_ready
+        ? `${gate.label || "Job Manifest Gate"} ｜ ${gate.message || gate.admission_label || "等待预检"}`
+        : `仍缺 ${summarizeMissing(boardAccess.missing_connection_fields || [])}`,
+      tone: !boardAccess.connection_ready ? "degraded" : gate.tone || "neutral",
     },
     {
-      label: "Manifest Gate",
-      title: "任务票 verdict",
-      status: gate.verdict_label || "待补全",
-      value: gate.label || gate.verdict_label || "待补全",
-      note: `${gate.admission_label || "admission 未设置"} ｜ ${gate.message || "当前无额外 gate 信息。"}`,
-      tone: gate.tone || "neutral",
+      label: "Current / Compare",
+      title: "第二幕到第三幕",
+      status: active.running && active.variant === "current"
+        ? activeProgress.label || "推进中"
+        : currentFallback
+          ? "archive fallback"
+          : currentLiveDone
+            ? state.currentResult?.source_label || "Current ready"
+            : compareSample?.sample?.label || "待选样例",
+      value: compareSample?.sample?.label || currentLiveProgress.count_label || "等待样例",
+      note: `${currentPane?.badgeLabel || "current pending"} ｜ ${baselinePane?.badgeLabel || "baseline pending"} ｜ ${selectedLinkProfile.label || linkDirector.selected_profile_label || "normal link"}`,
+      tone: currentCompareTone,
     },
     {
-      label: "Compare Sample",
-      title: "对照样例",
-      status: compareSample?.sample?.label || "未选样例",
-      value: compareSample?.sample?.label || "未选样例",
-      note: `Current=${currentPane?.badgeLabel || "pending"} ｜ Baseline=${baselinePane?.badgeLabel || "pending"}`,
-      tone:
-        currentPane?.badgeTone === "online" || baselinePane?.badgeTone === "online"
-          ? "online"
-          : currentPane?.badgeTone || baselinePane?.badgeTone || "neutral",
-    },
-    {
-      label: "SAFE_STOP",
-      title: "安全镜像",
+      label: "Safety / Archive",
+      title: "SAFE_STOP 与 Blackbox",
       status: safetyPanel.panel_label || "安全态",
-      value: safetyPanel.safe_stop_state || safetyPanel.panel_label || "UNKNOWN",
-      note: `fault=${safetyPanel.last_fault_code || "UNKNOWN"} ｜ ${safetyPanel.status_source || "unknown"}`,
-      tone: safetyPanel.panel_tone || "neutral",
-    },
-    {
-      label: "Archive Session",
-      title: "Blackbox timeline",
-      status: archive.eventCount > 0 ? `${archive.eventCount} events` : "等待写盘",
-      value: archive.sessionId,
-      note: archive.note,
-      tone: archive.tone,
+      value: archive.eventCount > 0 ? `${archive.eventCount} events` : (safetyPanel.safe_stop_state || "archive pending"),
+      note: archive.eventCount > 0
+        ? `${archive.sessionId} ｜ ${archive.lastEvent}`
+        : `fault=${safetyPanel.last_fault_code || "UNKNOWN"} ｜ ${safetyPanel.status_source || "unknown"}`,
+      tone: faultLatched ? (safetyPanel.panel_tone || "offline") : archive.tone || safetyPanel.panel_tone || "neutral",
     },
   ];
 
@@ -627,17 +674,14 @@ function buildCommandCenterModel(snapshot, systemStatus) {
     summaryText,
     primaryJump,
     rollups,
-    quickJumps: operatorCue.quickJumps.length ? operatorCue.quickJumps : [
-      { label: "Mission 总览", targetId: "missionPanel" },
+    quickJumps: operatorCue.quickJumps.length ? operatorCue.quickJumps.slice(0, 5) : [
       { label: "会话接入", targetId: "credentialPanel" },
-      { label: "任务票闸机", actId: "act1", targetId: "jobManifestGateShell" },
+      { label: "第一幕可信状态", actId: "act1", targetId: "act1Panel" },
       { label: "第二幕 Current", actId: "act2", targetId: "act2Panel" },
       { label: "第三幕 Compare", actId: "act3", targetId: "compareViewerShell" },
       { label: "第四幕 SAFE_STOP", actId: "act4", targetId: "act4Panel" },
-      { label: "Blackbox Timeline", targetId: "archiveTimelineCard" },
     ],
-    manualNote: operatorCue.manualBoundaryNote
-      || "M6 只提供 operator-assist sequencing、摘要和页内跳转。探板、票据预检、Current/PyTorch 运行、故障注入和 SAFE_STOP 仍由操作员手动触发。",
+    manualNote: compactManualNote(operatorCue.manualBoundaryNote),
     scenes: operatorCue.scenes.length ? operatorCue.scenes : defaultScenes,
     operatorCue,
   };
@@ -646,17 +690,17 @@ function buildCommandCenterModel(snapshot, systemStatus) {
 function renderCommandCenter(snapshot, systemStatus) {
   const model = buildCommandCenterModel(snapshot, systemStatus);
   document.getElementById("commandCenterBoundaryNote").textContent =
-    `${model.boundaryNote} 所有推进仍保持 operator-driven/manual。`.trim();
+    compactModeBoundary(model.boundaryNote || snapshot.mission?.mode_split_note || "");
   renderOperatorCue(model.operatorCue);
   document.getElementById("commandStripCard").innerHTML = `
     <div class="command-strip-head">
       <div>
-        <div class="label">Command Strip</div>
+        <div class="label">Operator Summary</div>
         <h3>${escapeHtml(model.summaryLabel)}</h3>
       </div>
       <div class="status-pill ${toneClass(model.summaryTone || "neutral")}">${escapeHtml(model.summaryLabel)}</div>
     </div>
-    <p class="command-strip-summary">${escapeHtml(model.summaryText)}</p>
+    <p class="command-strip-summary">${escapeHtml(compactSentence(model.summaryText, 200))}</p>
     <div class="command-primary-row">
       <div class="command-primary-copy">
         <div class="label">Recommended Jump</div>
@@ -756,16 +800,21 @@ function renderSafetyFrontPanel(safetyPanel) {
   const lastResult = safetyPanel.last_fault_result || {};
   const recoverAction = safetyPanel.recover_action || {};
   const lastResultVisible = Boolean(lastResult.status || lastResult.message || lastResult.source_label || lastResult.log_tail);
+  const footerBits = [
+    `${recoverAction.label || "SAFE_STOP 收口"} ${recoverAction.method || "POST"} ${recoverAction.api_path || "/api/recover"}`.trim(),
+    safetyPanel.ownership_note || "",
+    safetyPanel.status_note || "",
+  ].filter(Boolean);
+  const headlineNote = [safetyPanel.panel_label || "", safetyPanel.safe_stop_note || ""].filter(Boolean).join(" ｜ ");
   return `
     <div class="safety-front-panel" data-tone="${escapeHtml(safetyPanel.panel_tone || "neutral")}">
       <div class="safety-front-top">
         <div class="safety-big-readout">
           <span>SAFE_STOP mirror</span>
           <strong>${escapeHtml(safetyPanel.safe_stop_state || "UNKNOWN")}</strong>
-          <small>${escapeHtml(safetyPanel.safe_stop_note || "")}</small>
+          <small>${escapeHtml(headlineNote)}</small>
         </div>
         <div class="safety-indicator-grid">
-          ${safetyIndicator("SAFE_STOP", safetyPanel.safe_stop_state || "UNKNOWN", safetyPanel.safe_stop_tone || "neutral", "Linux UI mirror")}
           ${safetyIndicator("LATCH", safetyPanel.latch_state || "UNKNOWN", safetyPanel.latch_tone || "neutral", "fault latch")}
           ${safetyIndicator("BOARD", safetyPanel.board_online ? "ONLINE" : "OFFLINE", safetyPanel.board_online ? "online" : "degraded", safetyPanel.status_source || "status source")}
           ${safetyIndicator("SOURCE", safetyPanel.status_source || "unknown", safetyPanel.panel_tone || "neutral", "live / evidence")}
@@ -775,7 +824,6 @@ function renderSafetyFrontPanel(safetyPanel) {
         ${safetyReadout("guard_state", safetyPanel.guard_state || "UNKNOWN", "控制面 guard_state")}
         ${safetyReadout("fault code", safetyPanel.last_fault_code || "UNKNOWN", "保留原始 last_fault_code")}
         ${safetyReadout("fault count", String(safetyPanel.total_fault_count ?? 0), safetyPanel.latch_note || "control plane 计数")}
-        ${safetyReadout("status source", safetyPanel.status_source || "unknown", safetyPanel.status_note || "")}
       </div>
       ${lastResultVisible ? `
         <div class="safety-trace">
@@ -790,13 +838,7 @@ function renderSafetyFrontPanel(safetyPanel) {
           </div>
         </div>
       ` : ""}
-      <div class="safety-readout-grid">
-        ${safetyReadout("recover action", recoverAction.label || "SAFE_STOP 收口", `${recoverAction.method || "POST"} ${recoverAction.api_path || "/api/recover"}`)}
-        ${safetyReadout("ownership", "Linux UI mirror only", safetyPanel.ownership_note || "")}
-      </div>
-      ${missionNote(recoverAction.note || "")}
-      ${missionNote(safetyPanel.ownership_note || "")}
-      ${missionNote(safetyPanel.status_note || "SAFE_STOP / alarm 继续沿用当前控制面语义，不改协议。")}
+      <p class="compact-copy safety-footer">${escapeHtml(footerBits.join(" ｜ "))}</p>
     </div>
   `;
 }
@@ -984,53 +1026,63 @@ function renderArchiveTimelineModule(snapshot, systemStatus) {
   const sessions = state.archiveSessions || [];
   const archiveSession = state.archiveSession;
   const summary = archiveSession?.summary || null;
-  const snapshotMeta = archiveSession?.snapshot || {};
   const selectedSessionId = state.selectedArchiveSessionId || "";
   const hasArchiveData = Boolean(summary);
   const timelineItems = archiveTimelineItems(snapshot, systemStatus);
-  const selectorOptions = sessions.length
-    ? sessions
-      .map(
-        (session) => `
-          <option value="${escapeHtml(session.session_id)}" ${session.session_id === selectedSessionId ? "selected" : ""}>
-            ${escapeHtml(archiveSessionOptionLabel(session))}
-          </option>
-        `
-      )
-      .join("")
-    : `<option value="">暂无已写入的 archive session</option>`;
+  const selector = sessions.length
+    ? `
+      <label class="sample-picker archive-picker">
+        <span>Archive Session</span>
+        <select id="archiveSessionSelect">
+          ${sessions
+            .map(
+              (session) => `
+                <option value="${escapeHtml(session.session_id)}" ${session.session_id === selectedSessionId ? "selected" : ""}>
+                  ${escapeHtml(archiveSessionOptionLabel(session))}
+                </option>
+              `
+            )
+            .join("")}
+        </select>
+      </label>
+    `
+    : `<div class="status-pill tone-neutral">Archive pending</div>`;
   const summaryMetrics = hasArchiveData
     ? `
       <div class="mission-metrics">
         ${missionMetric("Archive Session", summary.session_id || "NA", summary.last_event_at || "等待事件写入")}
         ${missionMetric("事件计数", String(summary.event_count ?? 0), summary.last_event_type || "尚无 recent event")}
         ${missionMetric("最近快照", summary.last_snapshot_reason || "尚未写入", summary.last_snapshot_at || "等待快照")}
-        ${missionMetric("最后 job", summary.last_job_id || "NA", snapshotMeta.generated_at ? `snapshot=${snapshotMeta.generated_at}` : "仅本地只读 replay")}
       </div>
-      <div class="archive-path-grid">
-        ${archivePathRow("session_dir", archiveSession.paths?.session_dir)}
-        ${archivePathRow("events.jsonl", archiveSession.paths?.events_jsonl)}
-        ${archivePathRow("state_snapshot.json", archiveSession.paths?.state_snapshot_json)}
-      </div>
+      <details class="archive-path-details">
+        <summary>查看 archive 路径</summary>
+        <div class="archive-path-grid">
+          ${archivePathRow("session_dir", archiveSession.paths?.session_dir)}
+          ${archivePathRow("events.jsonl", archiveSession.paths?.events_jsonl)}
+          ${archivePathRow("state_snapshot.json", archiveSession.paths?.state_snapshot_json)}
+        </div>
+      </details>
     `
     : `
-      <p class="compact-copy">
-        当前 session_id=${escapeHtml(state.currentArchiveSessionId || systemStatus.event_spine?.session_id || "unknown")}
-        还没有在本地 archive 目录里发现已写入的 JSONL/snapshot 会话。待第一次事件或快照落盘后，这里会切到真实 blackbox timeline。
-      </p>
+      <div class="archive-empty-state">
+        <strong>Archive pending</strong>
+        <p class="compact-copy">
+          当前 session_id=${escapeHtml(state.currentArchiveSessionId || systemStatus.event_spine?.session_id || "unknown")}。
+          一旦 JSONL / snapshot 落盘，这里会自动切到真实 blackbox timeline；现在保留 fallback timeline 只做态势参考。
+        </p>
+      </div>
     `;
   return `
     <div class="archive-toolbar">
-      <label class="sample-picker archive-picker">
-        <span>Archive Session</span>
-        <select id="archiveSessionSelect">${selectorOptions}</select>
-      </label>
-      <div class="status-inline">local-only / read-only / JSONL + snapshot / non-rrweb</div>
+      ${selector}
+      <div class="status-inline">${escapeHtml(hasArchiveData ? "local-only / read-only replay" : "fallback timeline only")}</div>
     </div>
-    ${summaryMetrics}
-    <p class="compact-copy">${escapeHtml(
-      (summary?.mode_boundary_note || archiveSession?.mode_boundary_note || snapshotMeta.mode_boundary_note || snapshot.mission?.mode_split_note || "").trim()
+    <p class="compact-copy archive-summary-note">${escapeHtml(
+      hasArchiveData
+        ? `${summary.session_id} ｜ ${summary.event_count ?? 0} events ｜ ${summary.last_event_type || summary.last_snapshot_reason || "等待事件"}`
+        : "尚无本地 archive session；当前仍显示 live / snapshot fallback timeline。"
     )}</p>
+    ${summaryMetrics}
     <div class="event-list">
       ${timelineItems
         .map(
@@ -1053,13 +1105,6 @@ function renderArchiveTimelineModule(snapshot, systemStatus) {
         )
         .join("")}
     </div>
-    <p class="compact-copy">
-      ${escapeHtml(
-        hasArchiveData
-          ? `last snapshot reason=${summary.last_snapshot_reason || "NA"} ｜ snapshot extra fields stay read-only from state_snapshot.json`
-          : "下方若仍显示 mission fallback timeline，仅代表当前尚无 archive session 可回放。"
-      )}
-    </p>
   `;
 }
 
@@ -1082,25 +1127,23 @@ function renderTop(snapshot, systemStatus) {
   const baselineSupport = systemStatus.live?.variant_support?.baseline || {};
   const latestLive = snapshot.latest_live_status || {};
   const currentSummary = currentSupport.note
-    ? ` 第二幕使用 ${currentSupport.label || "Current live"}。${currentSupport.note}`
-    : " 第二幕展示 Current live。";
+    ? `${currentSupport.label || "Current live"}：${currentSupport.note}`
+    : "第二幕展示 Current live。";
   const baselineSummary = baselineSupport.note
-    ? ` 第三幕基线：${baselineSupport.note}`
-    : " 第三幕展示 formal baseline 对比。";
+    ? `第三幕基线：${baselineSupport.note}`
+    : "第三幕展示 formal baseline 对比。";
   const admissionSuffix = admission.mode === "signed_manifest_v1"
     ? ` 当前 live 预检已切到 signed manifest，key_id=${admission.key_id || "unknown"}.`
     : "";
   document.getElementById("heroSummary").textContent =
-    `${snapshot.project.focus || ""}。${latestLive.hero_summary || ""} trusted current SHA ${snapshot.project.trusted_current_sha.slice(0, 12)} 已与当前演示材料对齐。` +
-    ` 第一幕展示板卡状态。${currentSummary}${baselineSummary} OpenAMP 负责控制面 / 安全边界；Current 与 PyTorch 重建继续走既有数据面。` +
-    ` headline 性能引用 4-core Linux performance mode，本场 live 明确属于 3-core Linux + RTOS demo mode。第四幕保留 FIT-01 / FIT-02 / FIT-03 证据。` +
-    admissionSuffix;
+    `${snapshot.project.focus || "飞腾多核弱网安全语义视觉回传系统"}。${compactSentence(latestLive.hero_summary || latestLive.summary || "先看操作指挥席，再按四幕推进。", 160)} ` +
+    `${currentSummary} ${baselineSummary}${admissionSuffix}`;
 
   const modePill = document.getElementById("modePill");
   modePill.className = `mode-pill ${toneClass(systemStatus.execution_mode.tone)}`;
   modePill.textContent = systemStatus.execution_mode.label;
   document.getElementById("modeSummary").textContent = systemStatus.execution_mode.summary;
-  document.getElementById("generatedAt").textContent = `快照时间 ${snapshot.generated_at}`;
+  document.getElementById("generatedAt").textContent = `快照更新 ${snapshot.generated_at}`;
   document.getElementById("topStats").innerHTML = [
     statCard("P0 里程碑", String(snapshot.stats.p0_milestones_verified), "演示系统保留的板级证据项"),
     statCard("FIT 最终通过", String(snapshot.stats.fit_final_pass_count), "正式收口后的通过项"),
@@ -1113,29 +1156,21 @@ function renderLatestLiveStatus(snapshot) {
   const latest = snapshot.latest_live_status;
   if (!latest) return;
   const links = latest.links || [latest.report, latest.probe].filter(Boolean);
+  const facts = Array.isArray(latest.facts) ? latest.facts.slice(0, 3) : [];
   document.getElementById("latestLiveStatusCard").innerHTML = `
-    <div class="label">最新 demo 结论</div>
-    <div class="inline-actions">
+    <div class="label">本场主结论</div>
+    <div class="inline-actions latest-live-top">
       <div class="mini-title">${escapeHtml(latest.headline)}</div>
       <div class="status-pill tone-online">${escapeHtml(latest.status_label)}</div>
     </div>
     <p class="compact-copy">${escapeHtml(latest.summary)}</p>
-    <div class="status-meta">
-      <span>收口时间=${escapeHtml(latest.as_of)}</span>
-      <span>唯一实例=${escapeHtml(latest.valid_instance)}</span>
-      <span>${escapeHtml(latest.current.label)}=${escapeHtml(latest.current.completed)}</span>
-      <span>${escapeHtml(latest.baseline.label)}=${escapeHtml(latest.baseline.completed)}</span>
-    </div>
     <div class="metric-strip">
-      ${statCard("有效实例", latest.valid_instance, "当前唯一有效 live demo 实例")}
       ${statCard(latest.current.label, latest.current.completed, latest.current.note)}
       ${statCard(latest.baseline.label, latest.baseline.completed, latest.baseline.note)}
       ${statCard(latest.board.label, latest.board.value, latest.board.note)}
+      ${statCard("有效实例", latest.valid_instance, `收口 ${latest.as_of}`)}
     </div>
-    <ul class="list-plain">
-      ${latest.facts.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
-    </ul>
-    <p class="compact-copy">${escapeHtml(latest.boundary_note)}</p>
+    ${facts.length ? `<ul class="list-plain latest-live-facts">${facts.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : ""}
     ${renderLinks(links)}
   `;
 }
@@ -1219,7 +1254,7 @@ function renderMissionDashboard(snapshot, systemStatus) {
     "样例 208";
 
   document.getElementById("missionSummary").textContent =
-    `${mission.summary || ""} ${mission.mode_split_note || ""}`.trim();
+    mission.summary || "把任务、设备、链路、安全与 archive 收在同一页。";
 
   setStatusBadge(
     "taskQueueBadge",
@@ -1302,10 +1337,8 @@ function renderMissionDashboard(snapshot, systemStatus) {
         )
         .join("")}
     </div>
-    ${missionNote(linkDirector.status_message || linkDirector.last_operator_action || linkDirector.summary || "")}
-    ${missionNote(
-      `${mission.control_plane_note || ""} ${mission.data_plane_note || ""} ${linkDirector.truth_note || ""} ${linkDirector.plane_split_note || ""} ${linkDirector.mode_boundary_note || mission.mode_split_note || ""}`.trim()
-    )}
+    ${missionNote(linkDirector.status_message || linkDirector.last_operator_action || selectedLinkProfile.summary || linkDirector.summary || "导演台当前只做 operator cue 与预案切换。")}
+    ${missionNote(linkDirector.truth_note || "导演台是 operator scaffold；board telemetry 继续保持只读。")}
   `;
 
   const currentCountLabel =
@@ -1420,6 +1453,10 @@ function renderJobManifestGate(snapshot, systemStatus) {
   const wireFields = gate.wire_fields || [];
   const contextFields = gate.context_fields || [];
   const evidence = gate.evidence || contract.evidence || [];
+  const gateFootnote = [
+    gate.protocol_boundary_note || contract.protocol_boundary_note || "",
+    gate.demo_only_note || "当前页面仅做 operator-side 闸机可视化，不宣称协议或板端执行已变更。",
+  ].filter(Boolean).join(" ");
   const reasonItems = reasons.length
     ? reasons.map((item) => `<li>${escapeHtml(item)}</li>`).join("")
     : `<li>${escapeHtml(gate.message || contract.summary || "当前暂无额外 gate 原因说明。")}</li>`;
@@ -1449,8 +1486,7 @@ function renderJobManifestGate(snapshot, systemStatus) {
         .map((field) => renderFieldChip(field.label, field.value, field.source))
         .join("")}
     </div>
-    <p class="compact-copy">${escapeHtml(gate.protocol_boundary_note || contract.protocol_boundary_note || "")}</p>
-    <p class="compact-copy">${escapeHtml(gate.demo_only_note || "当前页面仅做 operator-side 闸机可视化，不宣称协议或板端执行已变更。")}</p>
+    <p class="compact-copy">${escapeHtml(gateFootnote)}</p>
     ${renderLinks(evidence)}
   `;
 }
@@ -1805,25 +1841,26 @@ function compareViewerPane(pane) {
         </div>
         <div class="status-pill ${toneClass(pane.badgeTone)}">${escapeHtml(pane.badgeLabel)}</div>
       </div>
-      <div class="compare-viewer-source">${escapeHtml(pane.sourceLabel)}</div>
+      <div class="compare-viewer-source" title="${escapeHtml(pane.sourceLabel || "")}">${escapeHtml(pane.sourceLabel)}</div>
       <img src="${pane.imageSrc}" alt="${escapeHtml(pane.title)}">
       ${compareViewerMetrics(pane)}
-      <figcaption class="compact-copy">${escapeHtml(pane.note)}</figcaption>
-      <div class="compare-viewer-path">${escapeHtml(pane.imagePath)}</div>
+      <figcaption class="compact-copy">${escapeHtml(compactSentence(pane.note, 130))}</figcaption>
+      ${pane.imagePath ? `<div class="compare-viewer-path" title="${escapeHtml(pane.imagePath)}">${escapeHtml(truncateMiddle(pane.imagePath, 22, 20))}</div>` : ""}
     </figure>
   `;
 }
 
 function renderCompareViewer(snapshot) {
-  const viewer = snapshot?.guided_demo?.compare_viewer || {};
   const compareSample = selectedCompareViewerSample(snapshot);
+  const currentPane = compareViewerPaneState(snapshot, "current");
+  const baselinePane = compareViewerPaneState(snapshot, "baseline");
   const sampleLabel = compareSample?.sample?.label || "等待样例";
   const sampleTitle = compareSample?.sample?.title || "";
   document.getElementById("compareViewerSampleLabel").textContent = sampleTitle
     ? `${sampleLabel} | ${sampleTitle}`
     : sampleLabel;
   document.getElementById("compareViewerModeNote").textContent =
-    `${viewer.mode_note || ""} ${viewer.fallback_note || ""}`.trim() || "等待 compare viewer 数据。";
+    "性能卡片沿用 4-core 正式口径；下方样例只展示 Current / PyTorch 的 live 或 archive provenance。";
 
   if (!compareSample) {
     document.getElementById("compareViewerContext").innerHTML = "";
@@ -1841,16 +1878,16 @@ function renderCompareViewer(snapshot) {
     `,
     `
       <div class="compare-context-card">
-        <span>selected image_index</span>
-        <strong>${escapeHtml(String(compareSample.index))}</strong>
-        <small>${escapeHtml(compareSample.reference?.image_path || "")}</small>
+        <span>viewer provenance</span>
+        <strong>${escapeHtml(`${currentPane?.badgeLabel || "current pending"} ｜ ${baselinePane?.badgeLabel || "baseline pending"}`)}</strong>
+        <small>${escapeHtml(`image_index=${compareSample.index}`)}</small>
       </div>
     `,
   ].join("");
 
   document.getElementById("compareViewerBoard").innerHTML = [
-    compareViewerPane(compareViewerPaneState(snapshot, "current")),
-    compareViewerPane(compareViewerPaneState(snapshot, "baseline")),
+    compareViewerPane(currentPane),
+    compareViewerPane(baselinePane),
   ].join("");
 }
 
@@ -1890,25 +1927,25 @@ function renderComparison(snapshot) {
 
   const notes = [];
   if (compareSample?.sample?.label) {
-    notes.push(`当前 compare viewer 样例：${compareSample.sample.label}，左侧显示 Current，右侧显示 PyTorch reference。`);
+    notes.push(`当前样例=${compareSample.sample.label}`);
   }
   if (state.baselineResult) {
-    notes.push(`基线：${state.baselineResult.source_label}，${state.baselineResult.message}`);
+    notes.push(`PyTorch=${state.baselineResult.source_label}`);
   }
   if (state.currentResult) {
-    notes.push(`Current：${state.currentResult.source_label}，${state.currentResult.message}`);
+    notes.push(`Current=${state.currentResult.source_label}`);
   }
   if (!state.baselineResult && baselineSupport.note) {
-    notes.push(`基线：${baselineSupport.note}`);
+    notes.push(`PyTorch=${baselineSupport.note}`);
   }
   if (!state.currentResult && currentSupport.note) {
-    notes.push(`Current：${currentSupport.note}`);
+    notes.push(`Current=${currentSupport.note}`);
   }
   if (boardBusy) {
-    notes.push("板端当前 guard_state=JOB_ACTIVE；demo 会保守阻断新的 live launch，不自动 SAFE_STOP。");
+    notes.push("guard_state=JOB_ACTIVE；新的 live launch 继续保守阻断，不自动 SAFE_STOP。");
   }
   document.getElementById("comparisonRunNote").textContent =
-    notes.join(" ") || "Current 数据面可在线推进；第三幕默认展示 PyTorch 参考归档，并把数据面结果与 OpenAMP 控制面边界分开标注。";
+    notes.join(" ｜ ") || "Current 与 PyTorch 仍由操作员手动触发；若无新结果，则继续显示已标注 provenance 的 archive 画面。";
 }
 
 function renderFault(snapshot) {
