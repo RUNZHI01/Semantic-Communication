@@ -65,9 +65,9 @@ body {
 .shell {
   max-width: 1440px;
   margin: 0 auto;
-  padding: 1.25rem;
+  padding: 1.2rem;
   display: grid;
-  gap: 1.1rem;
+  gap: 1.2rem;
 }
 
 .panel,
@@ -79,7 +79,7 @@ body {
 
 .panel {
   background: var(--panel);
-  padding: 1.4rem;
+  padding: 1.3rem;
 }
 
 .panel-lite {
@@ -89,9 +89,16 @@ body {
 
 .hero {
   display: grid;
-  grid-template-columns: 1.7fr 1fr;
-  gap: 1rem;
+  grid-template-columns: 1.55fr 0.95fr;
+  gap: 1.15rem;
   align-items: start;
+}
+
+.hero-copy,
+.status-card,
+#latestLiveStatusCard {
+  display: grid;
+  gap: 0.75rem;
 }
 
 .hero-copy h1,
@@ -128,6 +135,7 @@ body {
 
 .lede {
   margin: 0.85rem 0 0;
+  max-width: 62rem;
 }
 
 .compact-copy {
@@ -145,7 +153,7 @@ body {
 }
 
 .hero-actions {
-  margin-top: 1.1rem;
+  margin-top: 0.25rem;
 }
 
 .button {
@@ -186,7 +194,7 @@ body {
 
 .hero-side {
   display: grid;
-  gap: 1rem;
+  gap: 0.85rem;
 }
 
 .mode-pill,
@@ -233,13 +241,14 @@ body {
 
 .command-center-panel {
   display: grid;
-  gap: 1rem;
+  gap: 0.85rem;
 }
 
 .command-strip {
+  order: 1;
   display: grid;
-  gap: 0.95rem;
-  padding: 1.05rem;
+  gap: 0.85rem;
+  padding: 1.15rem;
   border-radius: 24px;
   border: 1px solid rgba(19, 44, 61, 0.12);
   background:
@@ -249,9 +258,10 @@ body {
 }
 
 .operator-cue-shell {
+  order: 2;
   display: grid;
-  gap: 0.9rem;
-  padding: 1rem;
+  gap: 0.75rem;
+  padding: 0.95rem;
   border-radius: 22px;
   border: 1px solid rgba(19, 44, 61, 0.12);
   background:
@@ -303,19 +313,44 @@ body {
   gap: 0.25rem;
 }
 
+.operator-cue-focus {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.85rem 0.9rem;
+  border-radius: 18px;
+  background: rgba(19, 44, 61, 0.04);
+  border: 1px solid rgba(19, 44, 61, 0.08);
+}
+
+.operator-cue-focus-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: start;
+}
+
+.operator-cue-focus-head strong {
+  display: block;
+  font-size: 1rem;
+}
+
+.operator-cue-subnote {
+  margin: 0;
+}
+
 .operator-cue-scene-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.75rem;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.6rem;
 }
 
 .operator-cue-scene-card {
   display: grid;
-  gap: 0.7rem;
-  padding: 0.9rem;
+  gap: 0.45rem;
+  padding: 0.8rem;
   border-radius: 20px;
   border: 1px solid rgba(19, 44, 61, 0.1);
-  background: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.78);
 }
 
 .operator-cue-scene-card[data-current="true"] {
@@ -340,12 +375,16 @@ body {
   gap: 0.5rem;
 }
 
+.operator-cue-check-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .cue-check-chip {
   display: grid;
   grid-template-columns: auto 1fr;
   gap: 0.55rem;
   align-items: start;
-  padding: 0.65rem 0.75rem;
+  padding: 0.55rem 0.7rem;
   border-radius: 16px;
   background: rgba(19, 44, 61, 0.05);
 }
@@ -373,8 +412,9 @@ body {
 
 .command-strip-summary {
   margin: 0;
-  max-width: 64rem;
+  max-width: 52rem;
   color: rgba(247, 239, 229, 0.95);
+  font-size: 1rem;
 }
 
 .command-primary-copy {
@@ -384,15 +424,15 @@ body {
 
 .command-rollup-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.75rem;
 }
 
 .command-rollup,
 .command-scene-card {
   display: grid;
-  gap: 0.65rem;
-  padding: 0.95rem;
+  gap: 0.55rem;
+  padding: 0.9rem;
   border-radius: 20px;
   border: 1px solid rgba(19, 44, 61, 0.1);
   background: rgba(255, 255, 255, 0.86);
@@ -424,7 +464,7 @@ body {
 }
 
 .command-rollup-value {
-  font-size: 1.28rem;
+  font-size: 1.15rem;
   font-weight: 900;
   color: var(--ink);
 }
@@ -440,28 +480,23 @@ body {
 .command-jump-row {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.75rem;
+  gap: 0.55rem;
 }
 
 .command-jump-row .button,
 .command-scene-actions .button {
   box-shadow: none;
+  padding: 0.62rem 0.95rem;
 }
 
 .command-scene-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.85rem;
 }
 
 .command-scene-card {
-  min-height: 16rem;
-}
-
-.command-scene-cue {
-  padding: 0.7rem 0.8rem;
-  border-radius: 16px;
-  background: rgba(19, 44, 61, 0.05);
+  min-height: 12.8rem;
 }
 
 .command-scene-number {
@@ -484,6 +519,14 @@ body {
   gap: 0.55rem;
 }
 
+.command-scene-meta span {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.18rem 0.52rem;
+  border-radius: 999px;
+  background: rgba(19, 44, 61, 0.05);
+}
+
 .command-scene-actions {
   margin-top: auto;
   align-items: center;
@@ -499,10 +542,15 @@ body {
   border: 1px solid var(--line);
   border-radius: 22px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 244, 236, 0.92));
-  padding: 1rem;
+  padding: 0.95rem;
   display: grid;
-  gap: 0.85rem;
-  min-height: 18rem;
+  gap: 0.75rem;
+  min-height: 15rem;
+}
+
+.mission-card-archive {
+  grid-column: 1 / -1;
+  min-height: 0;
 }
 
 .mission-card-head {
@@ -514,7 +562,7 @@ body {
 
 .mission-card-head h3 {
   margin: 0;
-  font-size: 1.1rem;
+  font-size: 1.04rem;
   font-family: "Noto Serif SC", "Source Han Serif SC", "STSong", "SimSun", serif;
 }
 
@@ -560,7 +608,7 @@ body {
 }
 
 .mission-note {
-  margin-top: auto;
+  margin: 0;
 }
 
 .safety-front-panel {
@@ -587,8 +635,12 @@ body {
 .safety-front-top,
 .safety-readout-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.6rem;
+}
+
+.safety-front-top {
+  grid-template-columns: 1.1fr 1fr;
 }
 
 .safety-big-readout,
@@ -617,7 +669,7 @@ body {
 }
 
 .safety-big-readout strong {
-  font-size: 1.45rem;
+  font-size: 1.34rem;
   letter-spacing: 0.08em;
 }
 
@@ -631,7 +683,7 @@ body {
 
 .safety-indicator-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.55rem;
 }
 
@@ -665,6 +717,11 @@ body {
 
 .safety-readout small,
 .safety-trace .compact-copy {
+  color: var(--muted);
+}
+
+.safety-footer {
+  margin: 0;
   color: var(--muted);
 }
 
@@ -705,7 +762,7 @@ body {
 .event-list {
   display: grid;
   gap: 0.7rem;
-  max-height: 22rem;
+  max-height: 18rem;
   overflow: auto;
   padding-right: 0.2rem;
 }
@@ -715,7 +772,7 @@ body {
   flex-wrap: wrap;
   justify-content: space-between;
   gap: 0.75rem;
-  align-items: end;
+  align-items: center;
 }
 
 .archive-picker {
@@ -725,6 +782,37 @@ body {
 .archive-path-grid {
   display: grid;
   gap: 0.45rem;
+}
+
+.archive-summary-note {
+  margin: 0;
+}
+
+.archive-empty-state {
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.8rem 0.9rem;
+  border-radius: 18px;
+  background: rgba(19, 44, 61, 0.05);
+  border: 1px dashed rgba(19, 44, 61, 0.16);
+}
+
+.archive-empty-state strong {
+  font-size: 0.94rem;
+}
+
+.archive-path-details {
+  border: 1px solid rgba(19, 44, 61, 0.1);
+  border-radius: 18px;
+  background: rgba(19, 44, 61, 0.03);
+  padding: 0.15rem 0.8rem 0.75rem;
+}
+
+.archive-path-details summary {
+  cursor: pointer;
+  padding: 0.65rem 0;
+  font-weight: 800;
+  color: var(--ink);
 }
 
 .archive-path-row {
@@ -802,6 +890,14 @@ body {
   border: 1px solid var(--line);
   border-radius: 18px;
   padding: 0.95rem;
+}
+
+.latest-live-top {
+  align-items: start;
+}
+
+.latest-live-facts {
+  margin-top: 0;
 }
 
 .mini-metric .value {
@@ -989,7 +1085,7 @@ select:focus {
 
 .status-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.8rem;
 }
 
@@ -998,7 +1094,7 @@ select:focus {
   border: 1px solid var(--line);
   border-radius: 20px;
   padding: 1rem;
-  min-height: 9.5rem;
+  min-height: 8.8rem;
 }
 
 .status-kpi .value {
@@ -1125,6 +1221,10 @@ select:focus {
   display: grid;
   gap: 0.75rem;
   margin-top: 1rem;
+}
+
+.comparison-board {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .live-progress-shell {
@@ -1376,7 +1476,7 @@ select:focus {
 .compare-viewer-shell {
   margin-top: 1rem;
   display: grid;
-  gap: 0.9rem;
+  gap: 0.75rem;
 }
 
 .compare-viewer-head,
@@ -1405,12 +1505,12 @@ select:focus {
   border: 1px solid var(--line);
   border-radius: 20px;
   background: rgba(255, 255, 255, 0.86);
-  padding: 0.95rem;
+  padding: 0.85rem;
 }
 
 .compare-context-card {
   display: grid;
-  gap: 0.18rem;
+  gap: 0.12rem;
 }
 
 .compare-context-card span,
@@ -1434,7 +1534,7 @@ select:focus {
 .compare-viewer-pane {
   margin: 0;
   display: grid;
-  gap: 0.7rem;
+  gap: 0.55rem;
 }
 
 .compare-viewer-pane img {
@@ -1556,6 +1656,7 @@ select:focus {
 
   .mission-metrics,
   .flow-strip,
+  .operator-cue-check-grid,
   .safety-front-top,
   .safety-indicator-grid,
   .safety-readout-grid {
