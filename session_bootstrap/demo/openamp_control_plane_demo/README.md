@@ -1,16 +1,24 @@
-# OpenAMP Control Plane Demo
+# 飞腾多核弱网安全语义视觉回传系统 Demo
 
-This package ships a real local dashboard for the current repo state. It is not a disconnected mock: the backend reads the existing OpenAMP evidence package, raw probe JSON, FIT summaries, wrapper evidence, the latest live dual-path status snapshot (`session_bootstrap/reports/openamp_demo_live_dualpath_status_20260317.md`), and the trusted-current performance reports that already live under `session_bootstrap/reports/`.
+This package ships the operator-facing local dashboard for the current repo state. It is not a disconnected mock: the backend reads the existing OpenAMP evidence package, raw probe JSON, FIT summaries, wrapper evidence, the latest live dual-path status snapshot (`session_bootstrap/reports/openamp_demo_live_dualpath_status_20260317.md`), and the trusted-current performance reports that already live under `session_bootstrap/reports/`.
+
+The UI keeps the system story explicit:
+
+- Current / PyTorch reconstruction remains the existing semantic-visual-return data plane
+- OpenAMP is the control plane for admission, heartbeat, SAFE_STOP, and fault evidence
+- headline performance quotes `4-core Linux performance mode`
+- OpenAMP live cues are presented as `3-core Linux + RTOS demo mode`, not as a speedup path
 
 ## What it shows
 
-- four-act Chinese-first demo flow: trusted boot -> one-click reconstruction -> formal baseline comparison -> fault injection / recovery
+- four-act Chinese-first operator flow: trusted state -> Current semantic visual return live -> formal comparison / performance positioning -> fault injection / recovery
 - web-side board credential entry for `host / user / password / port / env_file`, stored only in the current demo-server process and reused for later actions
 - board/control-plane status with explicit evidence-backed vs live-probe mode
 - key OpenAMP milestones across cold boot, `STATUS_REQ/RESP`, `JOB_REQ/JOB_ACK`, heartbeat, wrapper-backed board smoke, `SAFE_STOP`, and `JOB_DONE`
 - final `FIT-01`, `FIT-02`, `FIT-03` state, including `FIT-03` pre-fix FAIL -> post-fix PASS history
-- performance positioning for the trusted current SHA aligned to the OpenAMP FIT package
-- latest 2026-03-17 live board status for the demo line: 8115 is the only valid live instance, current has passed on-board, and baseline has also entered real-board execution through signed sideband with both sides completing `300/300`
+- trusted-current performance positioning with the data-plane/control-plane boundary called out explicitly
+- default third-act baseline = `2026-03-12` archived PyTorch reference; the `2026-03-17` dual-path live status remains linked as historical evidence
+- explicit mode split for the operator: `4-core Linux performance mode` vs `3-core Linux + RTOS demo mode`
 - operator launch commands and source-of-truth document links
 
 ## Launch
@@ -23,6 +31,8 @@ bash ./session_bootstrap/scripts/run_openamp_demo.sh
 
 Open it at `http://127.0.0.1:8079`.
 If that port is still held by an older instance of this same OpenAMP demo server, the launcher will stop it and restart cleanly. If some other service owns the port, the launcher exits with a targeted error instead of killing it.
+
+This launches the app-layer dashboard for the Feiteng semantic visual return system. The launcher does not change the runtime split: performance headline numbers still come from `4-core Linux performance mode` reports, while OpenAMP live actions remain `3-core Linux + RTOS demo mode`.
 
 Optional live board probe wiring:
 
@@ -87,9 +97,9 @@ The password is kept only in memory inside the current demo server process. It i
 If the startup defaults above were found, the UI prelabels which fields were preloaded and which one is still missing. In the normal repo state, `host / user / port / env_file` are already filled, so only the password must be entered before Current / Baseline attempt live execution.
 Later board-facing actions reuse the same in-process session automatically:
 
-- Act 1 board probe
-- Act 2 remote reconstruction timing attempt
-- Act 3 baseline/current run attempt
+- Act 1 trusted-state probe
+- Act 2 Current semantic visual return live attempt
+- Act 3 formal comparison / optional PyTorch live cue
 - Act 4 RPMsg fault injection / SAFE_STOP recovery
 
 If the board is unreachable or the env file is incomplete for inference, the UI falls back to prerecorded evidence and labels that downgrade explicitly.
@@ -129,12 +139,20 @@ Host side inputs:
 - `session_bootstrap/scripts/openamp_rpmsg_bridge.py`
 - trusted-current performance reports for SHA `6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1`
 
+App-layer interpretation boundary:
+
+- Current / PyTorch reconstruction is the data plane shown to the evaluator
+- OpenAMP evidence is the control/safety plane shown alongside it
+- `remoteproc0=running` live cues must be explained as `3-core Linux + RTOS demo mode`
+- performance headline numbers stay attached to the separate `4-core Linux performance mode` reports
+
 Slave/OpenAMP side assumptions:
 
 - the board remains on the already prepared OpenAMP path
 - RPMsg transport and remoteproc state are the ones validated in the existing evidence package
 - the final post-fix firmware SHA in the dashboard comes from the board-backed `FIT-03` PASS bundle
 - live control actions first try the SSH user's direct `/dev/rpmsg*` access, then `sudo -n` if the board already grants passwordless sudo; otherwise the demo reports an explicit board-side permission gate instead of pretending the control path ran
+- if `remoteproc` has claimed one Linux CPU, the operator explains the board as `3-core Linux + RTOS demo mode`, not as a 4-core performance run
 
 ## Local verification
 

@@ -18,6 +18,9 @@
 1. 默认把这套材料当作**证据驱动的答辩包**，而不是现场重新做一轮板级实验。
 2. `Act 1` 和 `Act 2` 可以在**板已在线且状态稳定**时做低扰动 live cue；`Act 3` 默认只展示既有 FIT 证据，不做现场 fault injection。
 3. 不主张任何超出证据包边界的能力：`FIT-04/05`、`RESET_REQ/ACK`、deadline enforcement、sticky fault reset 仍是 out of scope。
+4. 对外统一定位为**飞腾多核弱网安全语义视觉回传系统**，不要把 demo 讲回 generic TVM/MNN optimization project。
+5. headline performance 只引用 `4-core Linux performance mode`；OpenAMP live cue 一律解释为 `3-core Linux + RTOS demo mode`。
+6. OpenAMP 当前负责的是 control plane / safety / admission / heartbeat / SAFE_STOP，不宣称它直接带来数据面 speedup。
 
 ## 主文档分工
 
