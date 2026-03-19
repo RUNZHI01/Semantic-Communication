@@ -122,6 +122,96 @@ PRERECORDED_SAMPLE_FIXTURES = (
 )
 QUALITY_CURRENT_REPORT = REPORTS_ROOT / "quality_metrics_20260312_pytorch_vs_tvm_current.json"
 QUALITY_BASELINE_REPORT = REPORTS_ROOT / "quality_metrics_20260312_pytorch_vs_tvm_baseline.json"
+DEFAULT_DEMO_DEADLINE_MS = 300000
+DEFAULT_DEMO_EXPECTED_OUTPUTS = 300
+DEFAULT_DEMO_JOB_FLAGS = "reconstruction"
+LINK_PROFILE_PRESETS = (
+    {
+        "profile_id": "normal",
+        "label": "正常链路",
+        "tone": "online",
+        "summary": "不额外施加弱网扰动，保留现场当前控制面 / 数据面实况。",
+        "operator_goal": "默认演示口径，适合讲解控制面与数据面正常联动。",
+        "future_binding": {
+            "netem": "delay 20ms 2ms loss 0.1%",
+            "physical": "直连或无附加衰减",
+        },
+        "simulated_metrics": {
+            "rtt_ms": 20,
+            "jitter_ms": 2,
+            "loss_pct": 0.1,
+            "outage": "无",
+        },
+    },
+    {
+        "profile_id": "jitter",
+        "label": "抖动",
+        "tone": "degraded",
+        "summary": "保留链路连通，但放大时延抖动，便于讲解控制与回传的不稳定观感。",
+        "operator_goal": "演示弱网抖动下的操作员观察位。",
+        "future_binding": {
+            "netem": "delay 120ms 60ms distribution normal",
+            "physical": "通道模拟仪抖动档位",
+        },
+        "simulated_metrics": {
+            "rtt_ms": 120,
+            "jitter_ms": 60,
+            "loss_pct": 1.0,
+            "outage": "无",
+        },
+    },
+    {
+        "profile_id": "lossy",
+        "label": "高丢包",
+        "tone": "degraded",
+        "summary": "强调丢包场景，适合为后续 tc/netem loss / reorder 绑定预留导演位。",
+        "operator_goal": "突出回传质量下降与重试讨论。",
+        "future_binding": {
+            "netem": "loss 12% 25% reorder 3% 50%",
+            "physical": "可调衰减或差链路交换口",
+        },
+        "simulated_metrics": {
+            "rtt_ms": 150,
+            "jitter_ms": 35,
+            "loss_pct": 12.0,
+            "outage": "无",
+        },
+    },
+    {
+        "profile_id": "flaky",
+        "label": "间歇断连",
+        "tone": "offline",
+        "summary": "预演短时断连 / 恢复的导演台口径，但当前不伪造 live 读数。",
+        "operator_goal": "为未来物理断链或 netem 丢包脉冲控制做 UI 预案。",
+        "future_binding": {
+            "netem": "loss 35% 60% gemodel + scheduled qdisc toggle",
+            "physical": "射频衰减器或交换机端口脉冲断续",
+        },
+        "simulated_metrics": {
+            "rtt_ms": 300,
+            "jitter_ms": 120,
+            "loss_pct": 35.0,
+            "outage": "5s on / 3s off",
+        },
+    },
+    {
+        "profile_id": "recover",
+        "label": "恢复",
+        "tone": "online",
+        "summary": "撤销弱网预案，面向 future backend 执行 clear qdisc / 恢复物理链路。",
+        "operator_goal": "快速回到 nominal 演示口径。",
+        "future_binding": {
+            "netem": "tc qdisc del dev <iface> root",
+            "physical": "切回直连或旁路档位",
+        },
+        "simulated_metrics": {
+            "rtt_ms": 25,
+            "jitter_ms": 3,
+            "loss_pct": 0.0,
+            "outage": "清除弱网预案",
+        },
+    },
+)
 
 
 def now_iso() -> str:
@@ -214,6 +304,66 @@ def build_pytorch_reference_baseline_snapshot() -> dict[str, Any]:
         "origin_ckpt_sha256": str(payload.get("origin_ckpt_sha256") or ""),
         "device": str(payload.get("device") or ""),
         "snr": float(payload.get("snr") or 0.0),
+    }
+
+
+def build_link_director_catalog() -> dict[str, Any]:
+    return {
+        "title": "弱网导演台 / Link Director",
+        "summary": (
+            "导演台预设只改变操作员可见的链路预案与后续绑定目标；本 pass 不执行 tc/netem，也不伪造板卡 live 读数。"
+        ),
+        "backend_status": "ui_scaffold_only",
+        "plane_split_note": (
+            "控制面探板、SAFE_STOP 与 guard_state 继续显示真实 live/evidence；"
+            "导演台预设主要面向未来数据面链路和物理弱网控制绑定。"
+        ),
+        "profiles": list(LINK_PROFILE_PRESETS),
+    }
+
+
+@lru_cache(maxsize=1)
+def build_job_manifest_contract_snapshot() -> dict[str, Any]:
+    payload_report = parse_markdown_key_values(REPORTS_ROOT / "inference_compare_currentsafe_chunk4_refresh_20260313_1758.md")
+    e2e_report = parse_markdown_key_values(
+        REPORTS_ROOT / "inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md"
+    )
+    reference = pytorch_reference_manifest()
+    first_record = reference.get("records", [{}])[0] if reference.get("records") else {}
+    latent_shape = first_record.get("latent_shape") if isinstance(first_record, dict) else None
+    output_shape = first_record.get("output_shape") if isinstance(first_record, dict) else None
+    return {
+        "title": "任务票 / Job Manifest Gate",
+        "summary": (
+            "把 operator ticket 映射到既有 launch 参数和 admission 证据上，不改现有 JOB_REQ / signed-manifest 协议。"
+        ),
+        "protocol_boundary_note": (
+            "当前 live wrapper 继续沿用 job_id、expected_sha256、expected_outputs、deadline_ms、job_flags；"
+            "input_shape / output_shape 在本页作为操作员上下文展示，不宣称本 pass 已扩展 wire schema。"
+        ),
+        "defaults": {
+            "deadline_ms": DEFAULT_DEMO_DEADLINE_MS,
+            "expected_outputs": DEFAULT_DEMO_EXPECTED_OUTPUTS,
+            "job_flags": DEFAULT_DEMO_JOB_FLAGS,
+            "input_shape": str(payload_report.get("input_shape") or "1,32,32,32"),
+            "shape_buckets": str(payload_report.get("shape_buckets") or ""),
+            "input_dtype": str(payload_report.get("input_dtype") or "float32"),
+            "output_shape": str(e2e_report.get("current_output_shape") or output_shape or "[1, 3, 256, 256]"),
+            "output_dtype": str(e2e_report.get("current_output_dtype") or "float32"),
+            "latent_shape": latent_shape or [1, 32, 32, 32],
+            "reference_output_shape": output_shape or [1, 3, 256, 256],
+        },
+        "evidence": [
+            link_entry(
+                REPORTS_ROOT / "inference_compare_currentsafe_chunk4_refresh_20260313_1758.md",
+                "Current payload 报告",
+            ),
+            link_entry(
+                REPORTS_ROOT / "inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md",
+                "Current 端到端报告",
+            ),
+            link_entry(PYTORCH_REFERENCE_MANIFEST, "PyTorch 参考 manifest"),
+        ],
     }
 
 
