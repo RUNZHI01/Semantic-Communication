@@ -18,14 +18,18 @@ from board_probe import DEFAULT_LIVE_PROBE_OUTPUT, is_successful_probe, load_pro
 from demo_data import (
     PROJECT_ROOT,
     build_fault_replay,
+    build_job_manifest_contract_snapshot,
+    build_link_director_catalog,
     build_prerecorded_inference_result,
     build_recover_replay,
     build_snapshot,
+    now_iso,
     read_text,
     repo_relative,
     resolve_repo_path,
 )
 from fault_injector import query_live_status, run_fault_action, run_recover_action
+from event_spine import CONTROL_MODE_SCOPE, DATA_MODE_SCOPE, DemoEventSpine, default_event_archive_root
 from inference_runner import (
     DEFAULT_MAX_INPUTS,
     DEMO_ADMISSION_MODE_ENV,
@@ -38,6 +42,7 @@ from inference_runner import (
     describe_demo_variant_support,
     expected_sha_for_variant,
     launch_remote_reconstruction_job,
+    load_signed_manifest_summary,
 )
 
 
@@ -121,6 +126,28 @@ def recover_message(guard_state: str, last_fault_code: str) -> str:
     return "已使用当前会话凭据执行 SAFE_STOP，请以当前 guard_state / last_fault_code 为准。"
 
 
+def link_profile_catalog() -> dict[str, Any]:
+    return build_link_director_catalog()
+
+
+def link_profile_by_id(profile_id: str) -> dict[str, Any]:
+    for profile in link_profile_catalog()["profiles"]:
+        if str(profile.get("profile_id") or "") == profile_id:
+            return dict(profile)
+    raise KeyError(profile_id)
+
+
+def default_link_director_state() -> dict[str, Any]:
+    profile = link_profile_by_id("normal")
+    return {
+        "selected_profile_id": profile["profile_id"],
+        "last_applied_at": "",
+        "last_operator_action": "导演台尚未切换预案；当前默认按正常链路展示。",
+        "apply_status": "idle",
+        "backend_binding": "ui_scaffold_only",
+    }
+
+
 class DashboardState:
     def __init__(
         self,
@@ -128,6 +155,7 @@ class DashboardState:
         probe_timeout_sec: float,
         probe_cache_path: str | Path | None = DEFAULT_LIVE_PROBE_OUTPUT,
         demo_startup_env_overrides: dict[str, str] | None = None,
+        event_archive_root: str | Path | None = None,
     ) -> None:
         self._probe_env = probe_env or None
         self._probe_timeout_sec = probe_timeout_sec
@@ -141,6 +169,8 @@ class DashboardState:
         self._last_inference_result: dict[str, Any] | None = None
         self._last_fault_result: dict[str, Any] | None = None
         self._inference_jobs: dict[str, dict[str, Any]] = {}
+        self._link_director = default_link_director_state()
+        self._event_spine = DemoEventSpine(event_archive_root)
 
         cached_probe = load_probe_output(probe_cache_path) if probe_cache_path else None
         if is_successful_probe(cached_probe):
@@ -165,6 +195,29 @@ class DashboardState:
         with self._lock:
             self._board_access = config
         return config.to_public_dict()
+
+    def set_link_director_profile(self, payload: dict[str, Any]) -> dict[str, Any]:
+        profile_id = str(payload.get("profile_id") or "").strip().lower()
+        if not profile_id:
+            raise ValueError("missing profile_id")
+        try:
+            profile = link_profile_by_id(profile_id)
+        except KeyError as exc:
+            raise ValueError("unsupported profile_id") from exc
+
+        action = (
+            f"导演台已切到 {profile['label']} 预案；当前仅更新操作员态势与后续绑定目标，"
+            "未执行 tc/netem 或物理弱网控制。"
+        )
+        with self._lock:
+            self._link_director = {
+                "selected_profile_id": profile["profile_id"],
+                "last_applied_at": now_iso(),
+                "last_operator_action": action,
+                "apply_status": "staged",
+                "backend_binding": "ui_scaffold_only",
+            }
+        return self.current_link_director_status()
 
     def current_snapshot(self) -> dict[str, Any]:
         with self._lock:
@@ -259,6 +312,224 @@ class DashboardState:
             },
         }
 
+    def current_link_director_status(self) -> dict[str, Any]:
+        catalog = link_profile_catalog()
+        with self._lock:
+            stored = dict(self._link_director)
+        selected_id = str(stored.get("selected_profile_id") or "normal")
+        try:
+            selected = link_profile_by_id(selected_id)
+        except KeyError:
+            selected = link_profile_by_id("normal")
+            selected_id = "normal"
+        status = str(stored.get("apply_status") or "idle")
+        tone = selected.get("tone", "neutral") if status != "idle" else "neutral"
+        label = "导演台待命" if status == "idle" else f"{selected['label']} 预案已设定"
+        profiles = [{**profile, "active": profile["profile_id"] == selected_id} for profile in catalog["profiles"]]
+        return {
+            "status": status,
+            "label": label,
+            "tone": tone,
+            "backend_binding": str(stored.get("backend_binding") or catalog.get("backend_status") or "ui_scaffold_only"),
+            "backend_status": catalog["backend_status"],
+            "summary": catalog["summary"],
+            "plane_split_note": catalog["plane_split_note"],
+            "truth_note": "当前仅记录导演台预案；live 控制面与证据读数继续如实显示。",
+            "selected_profile_id": selected_id,
+            "selected_profile_label": selected["label"],
+            "selected_profile": selected,
+            "profiles": profiles,
+            "last_applied_at": str(stored.get("last_applied_at") or ""),
+            "last_operator_action": str(stored.get("last_operator_action") or catalog["summary"]),
+        }
+
+    def _signed_manifest_gate_details(self, access: BoardAccessConfig, *, variant: str) -> dict[str, Any]:
+        try:
+            return load_signed_manifest_summary(access.build_env(), variant=variant, require_public_key=False)
+        except ValueError:
+            return {}
+
+    def _job_manifest_gate_status(
+        self,
+        *,
+        board_access: BoardAccessConfig,
+        admissions: dict[str, dict[str, Any]],
+        variant_support: dict[str, dict[str, Any]],
+        active_inference: dict[str, Any],
+        control_status: dict[str, Any] | None,
+        trusted_sha: str,
+    ) -> dict[str, Any]:
+        contract = build_job_manifest_contract_snapshot()
+        defaults = contract["defaults"]
+        active_variant = str(active_inference.get("variant") or "")
+        variant = active_variant if active_variant in {"current", "baseline"} else "current"
+        variant_access = self._live_board_access_for_variant(board_access, variant=variant)
+        admission = admissions.get(variant) or admissions.get("current") or {}
+        support = variant_support.get(variant) or variant_support.get("current") or {}
+        signed_summary = (
+            self._signed_manifest_gate_details(variant_access, variant=variant)
+            if admission.get("mode") == "signed_manifest_v1"
+            else {}
+        )
+        expected_sha = str(admission.get("artifact_sha256") or expected_sha_for_variant(variant_access, variant) or "")
+        if variant == "current" and not expected_sha:
+            expected_sha = trusted_sha
+
+        expected_outputs = int(signed_summary.get("expected_outputs") or defaults["expected_outputs"])
+        deadline_ms = int(signed_summary.get("deadline_ms") or defaults["deadline_ms"])
+        job_flags = str(signed_summary.get("job_flags") or defaults["job_flags"])
+
+        job_id = ""
+        job_id_source = "launch_generated"
+        guard_state = str((control_status or {}).get("guard_state") or "").upper()
+        active_job_id = int((control_status or {}).get("active_job_id") or 0)
+        if active_inference.get("running") and active_variant == variant and active_inference.get("job_id"):
+            job_id = str(active_inference.get("job_id") or "")
+            job_id_source = "active_job"
+        elif guard_state == "JOB_ACTIVE" and active_job_id > 0:
+            job_id = str(active_job_id)
+            job_id_source = "board_status"
+        elif self._last_inference_result and self._last_inference_result.get("variant") == variant:
+            last_job_id = str(self._last_inference_result.get("job_id") or "")
+            if last_job_id:
+                job_id = last_job_id
+                job_id_source = "last_launch"
+
+        if active_inference.get("running") and active_variant == variant:
+            status = "running"
+            label = "任务票已下发"
+            tone = "online"
+            message = (
+                f"{'PyTorch' if variant == 'baseline' else 'Current'} 任务票已进入 live launch；"
+                "控制面继续沿用现有 admission / wrapper，数据面 runner 不变。"
+            )
+        elif guard_state == "JOB_ACTIVE":
+            status = "blocked"
+            label = "票据阻断"
+            tone = "degraded"
+            message = "板端当前 guard_state=JOB_ACTIVE；manifest gate 保守阻断新票，不自动 SAFE_STOP。"
+        elif support.get("launch_allowed") and admission.get("status") == "ready" and board_access.connection_ready:
+            status = "ready"
+            label = "可签发"
+            tone = "online"
+            message = (
+                f"{'PyTorch' if variant == 'baseline' else 'Current'} 票面参数已齐；launch 时继续沿用现有 "
+                f"{admission.get('label') or 'admission'}，不改 JOB_REQ / signed-manifest 协议。"
+            )
+        else:
+            status = "draft"
+            label = "待补全"
+            tone = "degraded"
+            message = "当前仅展示任务票草案；会话、expected_sha 或 signed-manifest 条件未全部就绪，不宣称可放行。"
+
+        field_map = {
+            "job_id": job_id,
+            "expected_sha256": expected_sha,
+            "expected_outputs": expected_outputs,
+            "deadline_ms": deadline_ms,
+            "job_flags": job_flags,
+            "input_shape": str(defaults["input_shape"]),
+            "input_dtype": str(defaults["input_dtype"]),
+            "output_shape": str(defaults["output_shape"]),
+            "output_dtype": str(defaults["output_dtype"]),
+            "shape_buckets": str(defaults["shape_buckets"]),
+            "manifest_sha256": str(admission.get("manifest_sha256") or ""),
+            "key_id": str(admission.get("key_id") or ""),
+        }
+        wire_fields = [
+            {
+                "key": "job_id",
+                "label": "job_id",
+                "value": job_id or "launch 时由 wrapper 分配 uint32",
+                "source": job_id_source,
+            },
+            {
+                "key": "expected_sha256",
+                "label": "expected_sha256",
+                "value": expected_sha or "未就绪",
+                "source": "admission",
+            },
+            {
+                "key": "expected_outputs",
+                "label": "expected_outputs",
+                "value": str(expected_outputs),
+                "source": "signed_manifest" if signed_summary else "wrapper_default",
+            },
+            {
+                "key": "deadline_ms",
+                "label": "deadline_ms",
+                "value": str(deadline_ms),
+                "source": "signed_manifest" if signed_summary else "wrapper_default",
+            },
+            {
+                "key": "job_flags",
+                "label": "job_flags",
+                "value": job_flags,
+                "source": "signed_manifest" if signed_summary else "wrapper_default",
+            },
+            {
+                "key": "manifest_sha256",
+                "label": "manifest_sha256",
+                "value": str(admission.get("manifest_sha256") or "legacy / none"),
+                "source": "signed_manifest" if signed_summary else "legacy",
+            },
+            {
+                "key": "key_id",
+                "label": "key_id",
+                "value": str(admission.get("key_id") or "legacy / none"),
+                "source": "signed_manifest" if signed_summary else "legacy",
+            },
+        ]
+        context_fields = [
+            {
+                "key": "input_shape",
+                "label": "input_shape",
+                "value": str(defaults["input_shape"]),
+                "source": "archive_report",
+            },
+            {
+                "key": "shape_buckets",
+                "label": "shape_buckets",
+                "value": str(defaults["shape_buckets"]),
+                "source": "archive_report",
+            },
+            {
+                "key": "output_shape",
+                "label": "output_shape",
+                "value": str(defaults["output_shape"]),
+                "source": "archive_report",
+            },
+            {
+                "key": "input_dtype",
+                "label": "input_dtype",
+                "value": str(defaults["input_dtype"]),
+                "source": "archive_report",
+            },
+            {
+                "key": "output_dtype",
+                "label": "output_dtype",
+                "value": str(defaults["output_dtype"]),
+                "source": "archive_report",
+            },
+        ]
+        return {
+            "status": status,
+            "label": label,
+            "tone": tone,
+            "variant": variant,
+            "variant_label": "PyTorch" if variant == "baseline" else "Current",
+            "admission_mode": str(admission.get("mode") or "legacy_sha"),
+            "admission_label": str(admission.get("label") or ""),
+            "admission_note": str(admission.get("note") or ""),
+            "summary": contract["summary"],
+            "protocol_boundary_note": contract["protocol_boundary_note"],
+            "message": message,
+            "field_map": field_map,
+            "wire_fields": wire_fields,
+            "context_fields": context_fields,
+            "evidence": contract["evidence"],
+        }
+
     def current_system_status(self) -> dict[str, Any]:
         with self._lock:
             live_probe = self._last_live_probe
@@ -268,6 +539,7 @@ class DashboardState:
             last_fault = self._last_fault_result
 
         snapshot = build_snapshot(live_probe=live_probe)
+        event_spine = self._event_spine.summary(limit=1)
         active_inference = self._active_inference_summary()
         current_board_access = self._live_board_access_for_variant(board_access, variant="current")
         baseline_board_access = self._live_board_access_for_variant(board_access, variant="baseline")
@@ -361,7 +633,233 @@ class DashboardState:
             "active_inference": active_inference,
             "last_inference": last_inference or {},
             "last_fault": last_fault or {},
+            "event_spine": {
+                "api_path": "/api/event-spine",
+                "session_id": event_spine["session_id"],
+                "event_count": event_spine["aggregate"]["event_count"],
+                "last_event_at": event_spine["aggregate"]["last_event_at"],
+                "archive_enabled": event_spine["aggregate"]["archive"]["enabled"],
+            },
         }
+
+    def current_event_spine(self, *, limit: int = 25) -> dict[str, Any]:
+        return self._event_spine.summary(limit=limit)
+
+    def _archive_event_snapshot(self, *, reason: str, job_id: str = "", extra: dict[str, Any] | None = None) -> None:
+        self._event_spine.write_snapshot(reason=reason, job_id=job_id, extra=extra)
+
+    def _emit_status_observation_events(self, payload: dict[str, Any], *, source: str, job_id: str = "") -> None:
+        if payload.get("status") != "success":
+            return
+        heartbeat_ok = self._safe_int(payload.get("heartbeat_ok"), default=0)
+        last_fault_code = str(payload.get("last_fault_code") or "").upper()
+        if heartbeat_ok > 0:
+            self._event_spine.publish(
+                "HEARTBEAT_OK",
+                job_id=job_id,
+                source=source,
+                plane="control",
+                mode_scope=CONTROL_MODE_SCOPE,
+                message="Heartbeat acknowledgement is healthy on the demo control path.",
+                data={
+                    "heartbeat_ok": heartbeat_ok,
+                    "guard_state": str(payload.get("guard_state") or ""),
+                    "last_fault_code": last_fault_code,
+                },
+            )
+        if last_fault_code == "HEARTBEAT_TIMEOUT":
+            self._event_spine.publish(
+                "HEARTBEAT_LOST",
+                job_id=job_id,
+                source=source,
+                plane="control",
+                mode_scope=CONTROL_MODE_SCOPE,
+                message="Heartbeat watchdog reported HEARTBEAT_TIMEOUT on the demo control path.",
+                data={
+                    "guard_state": str(payload.get("guard_state") or ""),
+                    "last_fault_code": last_fault_code,
+                },
+            )
+
+    def _emit_inference_rejection_events(
+        self,
+        *,
+        variant: str,
+        image_index: int,
+        status_category: str,
+        message: str,
+        diagnostics: dict[str, Any],
+    ) -> None:
+        self._event_spine.publish(
+            "JOB_SUBMITTED",
+            source="inference",
+            plane="control",
+            mode_scope=CONTROL_MODE_SCOPE,
+            message=f"{variant} demo launch requested by the operator.",
+            data={
+                "variant": variant,
+                "image_index": image_index,
+                "status_category": status_category,
+            },
+        )
+        self._event_spine.publish(
+            "JOB_REJECTED",
+            source="inference",
+            plane="control",
+            mode_scope=CONTROL_MODE_SCOPE,
+            message=message,
+            data={
+                "variant": variant,
+                "image_index": image_index,
+                "status_category": status_category,
+                "diagnostics": diagnostics,
+            },
+        )
+        self._archive_event_snapshot(
+            reason="job_rejected",
+            extra={
+                "variant": variant,
+                "image_index": image_index,
+                "status_category": status_category,
+            },
+        )
+
+    def _emit_job_event_once(
+        self,
+        record: dict[str, Any],
+        event_type: str,
+        *,
+        source: str,
+        plane: str,
+        mode_scope: str,
+        message: str,
+        data: dict[str, Any],
+    ) -> bool:
+        event_marks = record.setdefault("event_marks", set())
+        if event_type in event_marks:
+            return False
+        self._event_spine.publish(
+            event_type,
+            job_id=str(record.get("job_id") or ""),
+            source=source,
+            plane=plane,
+            mode_scope=mode_scope,
+            message=message,
+            data=data,
+        )
+        event_marks.add(event_type)
+        return True
+
+    def _emit_inference_record_events(self, record: dict[str, Any], payload: dict[str, Any]) -> None:
+        variant = str(record.get("variant") or "")
+        job_id = str(record.get("job_id") or "")
+        image_index = self._safe_int(record.get("image_index"), default=0)
+        live_attempt = payload.get("live_attempt") if isinstance(payload.get("live_attempt"), dict) else {}
+        control_transport = str(live_attempt.get("control_transport") or "hook").strip().lower()
+        common_data = {
+            "variant": variant,
+            "image_index": image_index,
+            "status": str(payload.get("status") or ""),
+            "request_state": str(payload.get("request_state") or ""),
+            "status_category": str(payload.get("status_category") or ""),
+            "control_transport": control_transport or "hook",
+        }
+        self._emit_job_event_once(
+            record,
+            "JOB_SUBMITTED",
+            source="inference",
+            plane="control",
+            mode_scope=CONTROL_MODE_SCOPE,
+            message=f"Live job {job_id} entered the demo submission spine.",
+            data=common_data,
+        )
+        if payload.get("execution_mode") == "live" and control_transport != "none":
+            self._emit_job_event_once(
+                record,
+                "JOB_ADMITTED",
+                source="inference",
+                plane="control",
+                mode_scope=CONTROL_MODE_SCOPE,
+                message=f"OpenAMP admitted live job {job_id}.",
+                data=common_data,
+            )
+        if payload.get("execution_mode") == "live":
+            self._emit_job_event_once(
+                record,
+                "JOB_STARTED",
+                source="inference",
+                plane="data",
+                mode_scope=DATA_MODE_SCOPE,
+                message=f"Reconstruction execution started for job {job_id}.",
+                data=common_data,
+            )
+        if payload.get("request_state") != "completed":
+            return
+        if payload.get("status") == "success":
+            self._emit_job_event_once(
+                record,
+                "FRAME_RECON_READY",
+                source="inference",
+                plane="data",
+                mode_scope=DATA_MODE_SCOPE,
+                message=f"Reconstruction output is ready for job {job_id}.",
+                data={
+                    **common_data,
+                    "sample_label": str(payload.get("sample", {}).get("label") or ""),
+                    "artifact_sha": str(payload.get("artifact_sha") or ""),
+                },
+            )
+            done_emitted = self._emit_job_event_once(
+                record,
+                "JOB_DONE",
+                source="inference",
+                plane="data",
+                mode_scope=DATA_MODE_SCOPE,
+                message=f"Reconstruction job {job_id} completed.",
+                data={
+                    **common_data,
+                    "artifact_sha": str(payload.get("artifact_sha") or ""),
+                    "total_ms": payload.get("timings", {}).get("total_ms"),
+                },
+            )
+            if done_emitted:
+                self._archive_event_snapshot(
+                    reason="job_done",
+                    job_id=job_id,
+                    extra={
+                        "variant": variant,
+                        "image_index": image_index,
+                    },
+                )
+            return
+        rejected_emitted = self._emit_job_event_once(
+            record,
+            "JOB_REJECTED",
+            source="inference",
+            plane="control",
+            mode_scope=CONTROL_MODE_SCOPE,
+            message=str(payload.get("message") or "Live job fallback captured in the demo spine."),
+            data={
+                **common_data,
+                "execution_mode": str(payload.get("execution_mode") or ""),
+            },
+        )
+        if rejected_emitted:
+            self._archive_event_snapshot(
+                reason="job_fallback",
+                job_id=job_id,
+                extra={
+                    "variant": variant,
+                    "image_index": image_index,
+                    "status_category": str(payload.get("status_category") or ""),
+                },
+            )
+
+    def _safe_int(self, value: Any, default: int = 0) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
 
     def refresh_live_probe(self) -> dict[str, Any]:
         with self._lock:
@@ -386,7 +884,12 @@ class DashboardState:
                 if status_payload.get("status") == "success":
                     with self._lock:
                         self._last_control_status = status_payload
+                    self._emit_status_observation_events(status_payload, source="probe_status")
                 result["control_status"] = status_payload
+            self._archive_event_snapshot(
+                reason="probe_refresh",
+                extra={"requested_at": str(result.get("requested_at") or "")},
+            )
         return result
 
     def _can_launch_runner_only_fallback(
@@ -612,6 +1115,7 @@ class DashboardState:
 
     def run_demo_inference(self, *, variant: str, image_index: int) -> dict[str, Any]:
         payload = build_prerecorded_inference_result(image_index, variant)
+        event_record: dict[str, Any] | None = None
         with self._lock:
             board_access = self._board_access
             last_live_probe = self._last_live_probe
@@ -646,6 +1150,7 @@ class DashboardState:
                 if status_payload.get("status") == "success":
                     with self._lock:
                         self._last_control_status = status_payload
+                    self._emit_status_observation_events(status_payload, source="status_preflight")
                     guard_state = str(status_payload.get("guard_state") or "UNKNOWN").upper()
                     if guard_state == "JOB_ACTIVE":
                         active_job_id = int(status_payload.get("active_job_id") or 0)
@@ -715,6 +1220,7 @@ class DashboardState:
                         }
                         with self._lock:
                             self._inference_jobs[live_job.job_id] = record
+                        event_record = record
                         payload = self._build_inference_response(record, live_result)
                     else:
                         if detail not in event_log:
@@ -741,6 +1247,7 @@ class DashboardState:
                     }
                     with self._lock:
                         self._inference_jobs[live_job.job_id] = record
+                    event_record = record
                     payload = self._build_inference_response(record, live_result)
             else:
                 live_job = launch_remote_reconstruction_job(live_board_access, variant=variant)
@@ -754,6 +1261,7 @@ class DashboardState:
                 }
                 with self._lock:
                     self._inference_jobs[live_job.job_id] = record
+                event_record = record
                 payload = self._build_inference_response(record, live_result)
         else:
             payload.update(
@@ -791,6 +1299,16 @@ class DashboardState:
         with self._lock:
             if payload.get("request_state") == "completed":
                 self._update_last_inference_summary(payload, variant)
+        if event_record is not None:
+            self._emit_inference_record_events(event_record, payload)
+        elif payload.get("request_state") == "completed":
+            self._emit_inference_rejection_events(
+                variant=variant,
+                image_index=image_index,
+                status_category=str(payload.get("status_category") or "fallback"),
+                message=str(payload.get("message") or "Live job request rejected in demo spine."),
+                diagnostics=dict(payload.get("live_attempt", {}).get("diagnostics") or {}),
+            )
         return payload
 
     def get_inference_progress(self, job_id: str) -> dict[str, Any]:
@@ -805,6 +1323,7 @@ class DashboardState:
         with self._lock:
             if payload.get("request_state") == "completed":
                 self._update_last_inference_summary(payload, record["variant"])
+        self._emit_inference_record_events(record, payload)
         return payload
 
     def run_fault_demo(self, fault_type: str) -> dict[str, Any]:
@@ -843,6 +1362,68 @@ class DashboardState:
                         "guard_state": response["guard_state"],
                         "last_fault_code": response["last_fault_code"],
                     }
+                self._event_spine.publish(
+                    "JOB_SUBMITTED",
+                    source="fault",
+                    plane="control",
+                    mode_scope=CONTROL_MODE_SCOPE,
+                    message=f"{fault_type} fault demo submitted a control-plane job request.",
+                    data={"fault_type": fault_type},
+                )
+                if fault_type == "heartbeat_timeout":
+                    self._event_spine.publish(
+                        "JOB_ADMITTED",
+                        source="fault",
+                        plane="control",
+                        mode_scope=CONTROL_MODE_SCOPE,
+                        message="Heartbeat timeout FIT received an ALLOW admission before watchdog expiry.",
+                        data={"fault_type": fault_type},
+                    )
+                    self._event_spine.publish(
+                        "HEARTBEAT_OK",
+                        source="fault",
+                        plane="control",
+                        mode_scope=CONTROL_MODE_SCOPE,
+                        message="Heartbeat ACK observed before watchdog timeout during FIT-03.",
+                        data={"fault_type": fault_type},
+                    )
+                    self._event_spine.publish(
+                        "HEARTBEAT_LOST",
+                        source="fault",
+                        plane="control",
+                        mode_scope=CONTROL_MODE_SCOPE,
+                        message="Heartbeat watchdog timeout observed during FIT-03.",
+                        data={"fault_type": fault_type, "last_fault_code": response["last_fault_code"]},
+                    )
+                    self._event_spine.publish(
+                        "SAFE_STOP_TRIGGERED",
+                        source="fault",
+                        plane="control",
+                        mode_scope=CONTROL_MODE_SCOPE,
+                        message="SAFE_STOP cleanup triggered after heartbeat timeout FIT.",
+                        data={"fault_type": fault_type, "reason": "heartbeat_timeout_cleanup"},
+                    )
+                    self._event_spine.publish(
+                        "SAFE_STOP_CLEARED",
+                        source="fault",
+                        plane="control",
+                        mode_scope=CONTROL_MODE_SCOPE,
+                        message="SAFE_STOP cleanup returned the board to READY after heartbeat timeout FIT.",
+                        data={"fault_type": fault_type, "reason": "heartbeat_timeout_cleanup"},
+                    )
+                else:
+                    self._event_spine.publish(
+                        "JOB_REJECTED",
+                        source="fault",
+                        plane="control",
+                        mode_scope=CONTROL_MODE_SCOPE,
+                        message=f"{fault_type} fault demo ended in the expected rejection state.",
+                        data={"fault_type": fault_type, "last_fault_code": response["last_fault_code"]},
+                    )
+                self._archive_event_snapshot(
+                    reason=f"fault_{fault_type}",
+                    extra={"fault_type": fault_type, "execution_mode": response["execution_mode"]},
+                )
                 return response
             replay = build_fault_replay(fault_type)
             replay["status_category"] = live_result.get("status_category", "fallback")
@@ -904,6 +1485,26 @@ class DashboardState:
                         "guard_state": response["guard_state"],
                         "last_fault_code": response["last_fault_code"],
                     }
+                self._event_spine.publish(
+                    "SAFE_STOP_TRIGGERED",
+                    source="recover",
+                    plane="control",
+                    mode_scope=CONTROL_MODE_SCOPE,
+                    message="Operator-triggered SAFE_STOP entered the demo event spine.",
+                    data={"reason": "manual_recover", "last_fault_code": last_fault_code},
+                )
+                self._event_spine.publish(
+                    "SAFE_STOP_CLEARED",
+                    source="recover",
+                    plane="control",
+                    mode_scope=CONTROL_MODE_SCOPE,
+                    message="SAFE_STOP returned the board to READY.",
+                    data={"reason": "manual_recover", "last_fault_code": last_fault_code},
+                )
+                self._archive_event_snapshot(
+                    reason="recover_safe_stop",
+                    extra={"guard_state": guard_state, "last_fault_code": last_fault_code},
+                )
                 return response
             replay = build_recover_replay(retained_fault_code)
             replay["status_category"] = live_result.get("status_category", "fallback")
@@ -969,6 +1570,11 @@ class DemoRequestHandler(SimpleHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path == "/api/snapshot":
             self.respond_json(HTTPStatus.OK, self.server.app_state.current_snapshot())
+            return
+        if parsed.path == "/api/event-spine":
+            params = parse_qs(parsed.query)
+            limit = max(1, min(100, self.coerce_int(params.get("limit", ["25"])[0], default=25)))
+            self.respond_json(HTTPStatus.OK, self.server.app_state.current_event_spine(limit=limit))
             return
         if parsed.path == "/api/system-status":
             self.respond_json(HTTPStatus.OK, self.server.app_state.current_system_status())
@@ -1163,6 +1769,7 @@ def main() -> int:
         args.probe_env,
         args.probe_timeout_sec,
         demo_startup_env_overrides=demo_startup_env_overrides(args),
+        event_archive_root=default_event_archive_root(),
     )
     if args.probe_startup:
         app_state.refresh_live_probe()

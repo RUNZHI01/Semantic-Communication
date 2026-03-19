@@ -249,11 +249,13 @@ class ServerMainTest(unittest.TestCase):
             probe_env: str,
             probe_timeout_sec: float,
             demo_startup_env_overrides: dict[str, str] | None = None,
+            event_archive_root: str | Path | None = None,
         ) -> Mock:
             events.append("state_init")
             self.assertEqual(probe_env, args.probe_env)
             self.assertEqual(probe_timeout_sec, args.probe_timeout_sec)
             self.assertEqual(demo_startup_env_overrides, {})
+            self.assertEqual(event_archive_root, server.default_event_archive_root())
             return fake_app_state
 
         def build_server(server_address: tuple[str, int], handler: type[DemoRequestHandler], app_state: Mock) -> Mock:
@@ -277,6 +279,7 @@ class ServerMainTest(unittest.TestCase):
             args.probe_env,
             args.probe_timeout_sec,
             demo_startup_env_overrides={},
+            event_archive_root=server.default_event_archive_root(),
         )
         server_cls.assert_called_once_with((args.host, args.port), DemoRequestHandler, fake_app_state)
         fake_app_state.refresh_live_probe.assert_not_called()
@@ -313,11 +316,13 @@ class ServerMainTest(unittest.TestCase):
             probe_env: str,
             probe_timeout_sec: float,
             demo_startup_env_overrides: dict[str, str] | None = None,
+            event_archive_root: str | Path | None = None,
         ) -> Mock:
             events.append("state_init")
             self.assertEqual(probe_env, args.probe_env)
             self.assertEqual(probe_timeout_sec, args.probe_timeout_sec)
             self.assertEqual(demo_startup_env_overrides, {})
+            self.assertEqual(event_archive_root, server.default_event_archive_root())
             return fake_app_state
 
         def build_server(server_address: tuple[str, int], handler: type[DemoRequestHandler], app_state: Mock) -> Mock:
@@ -342,6 +347,7 @@ class ServerMainTest(unittest.TestCase):
             args.probe_env,
             args.probe_timeout_sec,
             demo_startup_env_overrides={},
+            event_archive_root=server.default_event_archive_root(),
         )
         server_cls.assert_called_once_with((args.host, args.port), DemoRequestHandler, fake_app_state)
         fake_app_state.refresh_live_probe.assert_called_once_with()
@@ -374,6 +380,188 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(headers["content-type"], "application/json; charset=utf-8")
         self.assertEqual(headers["cache-control"], "no-store")
         self.assertEqual(payload, {"status": "ok"})
+
+    def test_event_spine_endpoint_tracks_live_inference_completion_and_archive(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state = DashboardState(None, 30.0, probe_cache_path=None, event_archive_root=temp_dir)
+            request_json(
+                state,
+                "POST",
+                "/api/session/board-access",
+                body=json.dumps({"password": "demo-pass"}).encode("utf-8"),
+            )
+            live_job = FakeInferenceJob(
+                [
+                    {
+                        "status": "running",
+                        "request_state": "running",
+                        "status_category": "running",
+                        "execution_mode": "live",
+                        "variant": "current",
+                        "message": "OpenAMP 控制面已接管本次演示，界面正在同步板端阶段。",
+                        "runner_summary": {},
+                        "wrapper_summary": {},
+                        "diagnostics": {},
+                        "progress": live_progress_payload("真实在线推进", "running", 76, "板端执行中"),
+                        "artifacts": {},
+                    },
+                    {
+                        "status": "success",
+                        "request_state": "completed",
+                        "status_category": "success",
+                        "execution_mode": "live",
+                        "variant": "current",
+                        "message": "OpenAMP 控制面已完成作业下发、板端执行与结果回收。",
+                        "runner_summary": {
+                            "load_ms": 3.2,
+                            "vm_init_ms": 0.8,
+                            "run_median_ms": 128.4,
+                            "artifact_sha256": "abcd" * 16,
+                        },
+                        "wrapper_summary": {"result": "success"},
+                        "diagnostics": {},
+                        "progress": live_progress_payload("真实在线推进", "completed", 100, "已返回结果"),
+                        "artifacts": {},
+                    },
+                ],
+                job_id="m0-event-job-001",
+            )
+
+            with (
+                patch(
+                    "server.query_live_status",
+                    return_value={
+                        "status": "success",
+                        "guard_state": "READY",
+                        "active_job_id": 0,
+                        "last_fault_code": "NONE",
+                        "total_fault_count": 0,
+                        "heartbeat_ok": 1,
+                        "logs": [],
+                    },
+                ),
+                patch("server.launch_remote_reconstruction_job", return_value=live_job),
+            ):
+                start_status, start_headers, start_payload = request_json(
+                    state,
+                    "POST",
+                    "/api/run-inference",
+                    body=json.dumps({"image_index": 0, "mode": "current"}).encode("utf-8"),
+                )
+                progress_status, _, progress_payload = request_json(
+                    state,
+                    "GET",
+                    f"/api/inference-progress?job_id={live_job.job_id}",
+                )
+                event_status, event_headers, event_payload = request_json(state, "GET", "/api/event-spine?limit=20")
+
+                archive = event_payload["aggregate"]["archive"]
+                events_path = Path(archive["events_jsonl"])
+                snapshot_path = Path(archive["state_snapshot_json"])
+                archived_types = [
+                    json.loads(line)["type"]
+                    for line in events_path.read_text(encoding="utf-8").splitlines()
+                    if line.strip()
+                ]
+
+            self.assertEqual(start_status, 200)
+            self.assertEqual(start_headers["content-type"], "application/json; charset=utf-8")
+            self.assertEqual(start_payload["request_state"], "running")
+            self.assertEqual(progress_status, 200)
+            self.assertEqual(progress_payload["request_state"], "completed")
+            self.assertEqual(event_status, 200)
+            self.assertEqual(event_headers["cache-control"], "no-store")
+            self.assertEqual(event_payload["status"], "ok")
+            self.assertEqual(event_payload["aggregate"]["jobs"]["done_count"], 1)
+            self.assertEqual(event_payload["aggregate"]["frames"]["ready_count"], 1)
+            self.assertEqual(event_payload["aggregate"]["heartbeat"]["status"], "ok")
+            self.assertTrue(archive["enabled"])
+            self.assertTrue(events_path.is_file())
+            self.assertTrue(snapshot_path.is_file())
+            event_types = [item["type"] for item in event_payload["recent_events"]]
+            for expected_type in (
+                "JOB_SUBMITTED",
+                "JOB_ADMITTED",
+                "HEARTBEAT_OK",
+                "JOB_STARTED",
+                "FRAME_RECON_READY",
+                "JOB_DONE",
+                "ARCHIVE_SNAPSHOT_WRITTEN",
+            ):
+                with self.subTest(expected_type=expected_type):
+                    self.assertIn(expected_type, event_types)
+                    self.assertIn(expected_type, archived_types)
+
+    def test_event_spine_endpoint_tracks_rejected_inference(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state = DashboardState(None, 30.0, probe_cache_path=None, event_archive_root=temp_dir)
+
+            run_status, _, run_payload = request_json(
+                state,
+                "POST",
+                "/api/run-inference",
+                body=json.dumps({"image_index": 0, "mode": "current"}).encode("utf-8"),
+            )
+            event_status, _, event_payload = request_json(state, "GET", "/api/event-spine?limit=10")
+
+            self.assertEqual(run_status, 200)
+            self.assertEqual(run_payload["status"], "fallback")
+            self.assertEqual(event_status, 200)
+            self.assertEqual(event_payload["aggregate"]["jobs"]["rejected_count"], 1)
+            event_types = [item["type"] for item in event_payload["recent_events"]]
+            self.assertIn("JOB_SUBMITTED", event_types)
+            self.assertIn("JOB_REJECTED", event_types)
+            self.assertIn("ARCHIVE_SNAPSHOT_WRITTEN", event_types)
+
+    def test_event_spine_endpoint_tracks_heartbeat_timeout_fault(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state = DashboardState(None, 30.0, probe_cache_path=None, event_archive_root=temp_dir)
+            request_json(
+                state,
+                "POST",
+                "/api/session/board-access",
+                body=json.dumps({"password": "demo-pass"}).encode("utf-8"),
+            )
+
+            with patch(
+                "server.run_fault_action",
+                return_value={
+                    "status": "success",
+                    "guard_state": "READY",
+                    "last_fault_code": "HEARTBEAT_TIMEOUT",
+                    "board_response": {
+                        "decision": "ALLOW",
+                        "fault_code": "HEARTBEAT_TIMEOUT",
+                        "guard_state": "READY",
+                    },
+                    "logs": ["[02:36:22] heartbeat timeout live success"],
+                },
+            ):
+                fault_status, _, fault_payload = request_json(
+                    state,
+                    "POST",
+                    "/api/inject-fault",
+                    body=json.dumps({"fault_type": "heartbeat_timeout"}).encode("utf-8"),
+                )
+                event_status, _, event_payload = request_json(state, "GET", "/api/event-spine?limit=20")
+
+            self.assertEqual(fault_status, 200)
+            self.assertEqual(fault_payload["status"], "injected")
+            self.assertEqual(event_status, 200)
+            self.assertEqual(event_payload["aggregate"]["heartbeat"]["status"], "lost")
+            self.assertFalse(event_payload["aggregate"]["safe_stop"]["active"])
+            event_types = [item["type"] for item in event_payload["recent_events"]]
+            for expected_type in (
+                "JOB_SUBMITTED",
+                "JOB_ADMITTED",
+                "HEARTBEAT_OK",
+                "HEARTBEAT_LOST",
+                "SAFE_STOP_TRIGGERED",
+                "SAFE_STOP_CLEARED",
+                "ARCHIVE_SNAPSHOT_WRITTEN",
+            ):
+                with self.subTest(expected_type=expected_type):
+                    self.assertIn(expected_type, event_types)
 
     def test_system_status_endpoint_preloads_repo_defaults_without_password(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
