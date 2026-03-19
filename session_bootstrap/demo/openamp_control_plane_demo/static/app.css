@@ -347,6 +347,47 @@ body {
   padding-right: 0.2rem;
 }
 
+.archive-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: end;
+}
+
+.archive-picker {
+  min-width: min(100%, 22rem);
+}
+
+.archive-path-grid {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.archive-path-row {
+  display: grid;
+  gap: 0.18rem;
+  padding: 0.72rem 0.8rem;
+  border-radius: 16px;
+  background: rgba(19, 44, 61, 0.05);
+  border: 1px solid rgba(19, 44, 61, 0.08);
+}
+
+.archive-path-row span {
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.archive-path-row code {
+  font-family: "SFMono-Regular", "Consolas", "Liberation Mono", monospace;
+  font-size: 0.86rem;
+  color: var(--ink);
+  word-break: break-all;
+}
+
 .event-item {
   border: 1px solid var(--line);
   border-radius: 18px;

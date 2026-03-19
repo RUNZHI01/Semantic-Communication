@@ -179,6 +179,56 @@ def request_text(
     return status, headers, response_body.decode("utf-8")
 
 
+def archive_event(
+    *,
+    session_id: str,
+    sequence: int,
+    timestamp: str,
+    event_type: str,
+    message: str,
+    plane: str = "control",
+    source: str = "archive_test",
+    job_id: str = "",
+    mode_scope: str = server.CONTROL_MODE_SCOPE,
+    data: dict[str, object] | None = None,
+) -> dict[str, object]:
+    return {
+        "event_id": f"{session_id}:{sequence:06d}",
+        "sequence": sequence,
+        "session_id": session_id,
+        "timestamp": timestamp,
+        "type": event_type,
+        "job_id": job_id,
+        "source": source,
+        "plane": plane,
+        "mode_scope": mode_scope,
+        "message": message,
+        "data": data or {},
+    }
+
+
+def write_archive_session(
+    archive_root: str | Path,
+    *,
+    session_id: str,
+    events: list[dict[str, object]] | None = None,
+    snapshot: dict[str, object] | None = None,
+) -> Path:
+    session_dir = Path(archive_root) / session_id
+    session_dir.mkdir(parents=True, exist_ok=True)
+    if events is not None:
+        (session_dir / "events.jsonl").write_text(
+            "".join(json.dumps(item, ensure_ascii=False, sort_keys=True) + "\n" for item in events),
+            encoding="utf-8",
+        )
+    if snapshot is not None:
+        (session_dir / "state_snapshot.json").write_text(
+            json.dumps(snapshot, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    return session_dir
+
+
 class DashboardStateTest(unittest.TestCase):
     def test_startup_uses_saved_successful_probe(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -470,6 +520,214 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertEqual(headers["content-type"], "application/json; charset=utf-8")
         self.assertEqual(payload, {"status": "error", "message": "unsupported profile_id"})
+
+    def test_archive_sessions_endpoint_lists_local_archive_sessions(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            write_archive_session(
+                temp_dir,
+                session_id="session_archive_old",
+                events=[
+                    archive_event(
+                        session_id="session_archive_old",
+                        sequence=1,
+                        timestamp="2026-03-19T09:00:00+08:00",
+                        event_type="JOB_SUBMITTED",
+                        message="Old archive session submitted a demo job.",
+                    ),
+                    archive_event(
+                        session_id="session_archive_old",
+                        sequence=2,
+                        timestamp="2026-03-19T09:00:02+08:00",
+                        event_type="ARCHIVE_SNAPSHOT_WRITTEN",
+                        plane="archive",
+                        mode_scope="demo archive / local event evidence",
+                        message="Event spine snapshot written (job_done).",
+                        data={"reason": "job_done", "path": f"{temp_dir}/session_archive_old/state_snapshot.json"},
+                    ),
+                ],
+                snapshot={
+                    "generated_at": "2026-03-19T09:00:02+08:00",
+                    "session_id": "session_archive_old",
+                    "reason": "job_done",
+                    "mode_boundary_note": server.MODE_BOUNDARY_NOTE,
+                    "aggregate": {"session_id": "session_archive_old", "started_at": "2026-03-19T09:00:00+08:00"},
+                    "recent_events": [],
+                    "extra": {"variant": "current"},
+                },
+            )
+            write_archive_session(
+                temp_dir,
+                session_id="session_archive_new",
+                events=[
+                    archive_event(
+                        session_id="session_archive_new",
+                        sequence=1,
+                        timestamp="2026-03-19T11:15:00+08:00",
+                        event_type="SAFE_STOP_TRIGGERED",
+                        message="Heartbeat timeout triggered SAFE_STOP cleanup.",
+                        data={"reason": "heartbeat_timeout_cleanup"},
+                    ),
+                    archive_event(
+                        session_id="session_archive_new",
+                        sequence=2,
+                        timestamp="2026-03-19T11:15:03+08:00",
+                        event_type="ARCHIVE_SNAPSHOT_WRITTEN",
+                        plane="archive",
+                        mode_scope="demo archive / local event evidence",
+                        message="Event spine snapshot written (fault_heartbeat_timeout).",
+                        data={"reason": "fault_heartbeat_timeout", "path": f"{temp_dir}/session_archive_new/state_snapshot.json"},
+                    ),
+                ],
+                snapshot={
+                    "generated_at": "2026-03-19T11:15:03+08:00",
+                    "session_id": "session_archive_new",
+                    "reason": "fault_heartbeat_timeout",
+                    "mode_boundary_note": server.MODE_BOUNDARY_NOTE,
+                    "aggregate": {"session_id": "session_archive_new", "started_at": "2026-03-19T11:15:00+08:00"},
+                    "recent_events": [],
+                    "extra": {"fault_type": "heartbeat_timeout"},
+                },
+            )
+            state = DashboardState(None, 30.0, probe_cache_path=None, event_archive_root=temp_dir)
+
+            status, headers, payload = request_json(state, "GET", "/api/archive/sessions?limit=10")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["content-type"], "application/json; charset=utf-8")
+        self.assertEqual(payload["session_count"], 2)
+        self.assertEqual(
+            [item["session_id"] for item in payload["sessions"]],
+            ["session_archive_new", "session_archive_old"],
+        )
+        self.assertEqual(payload["sessions"][0]["last_snapshot_reason"], "fault_heartbeat_timeout")
+        self.assertTrue(payload["sessions"][0]["has_events"])
+        self.assertTrue(payload["sessions"][0]["has_snapshot"])
+        self.assertTrue(payload["sessions"][0]["paths"]["events_jsonl"].endswith("session_archive_new/events.jsonl"))
+
+    def test_archive_session_endpoint_replays_recent_events_and_snapshot_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            session_id = "session_archive_job_done"
+            events = [
+                archive_event(
+                    session_id=session_id,
+                    sequence=1,
+                    timestamp="2026-03-19T10:00:00+08:00",
+                    event_type="JOB_SUBMITTED",
+                    message="Current live launch entered the archive session.",
+                    job_id="job-42",
+                    data={"variant": "current"},
+                ),
+                archive_event(
+                    session_id=session_id,
+                    sequence=2,
+                    timestamp="2026-03-19T10:00:01+08:00",
+                    event_type="JOB_ADMITTED",
+                    message="OpenAMP admitted job-42.",
+                    job_id="job-42",
+                    data={"variant": "current"},
+                ),
+                archive_event(
+                    session_id=session_id,
+                    sequence=3,
+                    timestamp="2026-03-19T10:00:02+08:00",
+                    event_type="JOB_STARTED",
+                    plane="data",
+                    mode_scope=server.DATA_MODE_SCOPE,
+                    message="Reconstruction execution started for job-42.",
+                    job_id="job-42",
+                    data={"variant": "current"},
+                ),
+                archive_event(
+                    session_id=session_id,
+                    sequence=4,
+                    timestamp="2026-03-19T10:00:04+08:00",
+                    event_type="FRAME_RECON_READY",
+                    plane="data",
+                    mode_scope=server.DATA_MODE_SCOPE,
+                    message="Reconstruction output is ready for job-42.",
+                    job_id="job-42",
+                    data={"variant": "current"},
+                ),
+                archive_event(
+                    session_id=session_id,
+                    sequence=5,
+                    timestamp="2026-03-19T10:00:05+08:00",
+                    event_type="JOB_DONE",
+                    plane="data",
+                    mode_scope=server.DATA_MODE_SCOPE,
+                    message="Reconstruction job job-42 completed.",
+                    job_id="job-42",
+                    data={"variant": "current", "total_ms": 128.4},
+                ),
+                archive_event(
+                    session_id=session_id,
+                    sequence=6,
+                    timestamp="2026-03-19T10:00:06+08:00",
+                    event_type="ARCHIVE_SNAPSHOT_WRITTEN",
+                    plane="archive",
+                    mode_scope="demo archive / local event evidence",
+                    message="Event spine snapshot written (job_done).",
+                    job_id="job-42",
+                    data={"reason": "job_done", "path": f"{temp_dir}/{session_id}/state_snapshot.json"},
+                ),
+            ]
+            write_archive_session(
+                temp_dir,
+                session_id=session_id,
+                events=events,
+                snapshot={
+                    "generated_at": "2026-03-19T10:00:06+08:00",
+                    "session_id": session_id,
+                    "reason": "job_done",
+                    "mode_boundary_note": server.MODE_BOUNDARY_NOTE,
+                    "aggregate": {
+                        "session_id": session_id,
+                        "started_at": "2026-03-19T10:00:00+08:00",
+                        "event_count": 5,
+                    },
+                    "recent_events": events[-3:],
+                    "extra": {"variant": "current", "image_index": 12},
+                },
+            )
+            state = DashboardState(None, 30.0, probe_cache_path=None, event_archive_root=temp_dir)
+
+            status, headers, payload = request_json(
+                state,
+                "GET",
+                f"/api/archive/session?session_id={session_id}&limit=3",
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["content-type"], "application/json; charset=utf-8")
+        self.assertEqual(payload["summary"]["session_id"], session_id)
+        self.assertEqual(payload["summary"]["event_count"], 6)
+        self.assertEqual(payload["summary"]["last_snapshot_reason"], "job_done")
+        self.assertEqual(payload["aggregate"]["jobs"]["done_count"], 1)
+        self.assertEqual(payload["aggregate"]["frames"]["ready_count"], 1)
+        self.assertEqual(payload["snapshot"]["reason"], "job_done")
+        self.assertEqual(payload["snapshot"]["extra"]["image_index"], 12)
+        self.assertEqual(
+            [item["type"] for item in payload["recent_events"]],
+            ["ARCHIVE_SNAPSHOT_WRITTEN", "JOB_DONE", "FRAME_RECON_READY"],
+        )
+        self.assertEqual(payload["timeline"][0]["title"], "ARCHIVE_SNAPSHOT_WRITTEN")
+        self.assertEqual(payload["timeline"][1]["lane"], "data")
+        self.assertEqual(payload["timeline"][1]["job_id"], "job-42")
+        self.assertTrue(payload["paths"]["state_snapshot_json"].endswith(f"{session_id}/state_snapshot.json"))
+
+    def test_archive_session_endpoint_returns_404_for_missing_session(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state = DashboardState(None, 30.0, probe_cache_path=None, event_archive_root=temp_dir)
+
+            status, headers, payload = request_json(
+                state,
+                "GET",
+                "/api/archive/session?session_id=missing-session",
+            )
+
+        self.assertEqual(status, 404)
+        self.assertEqual(headers["content-type"], "application/json; charset=utf-8")
+        self.assertEqual(payload, {"status": "error", "message": "archive session not found: missing-session"})
 
     def test_event_spine_endpoint_tracks_live_inference_completion_and_archive(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -1831,6 +2089,8 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertIn('fetchJSON("/api/snapshot")', body)
         self.assertIn('fetchJSON("/api/system-status")', body)
         self.assertIn('fetchJSON("/api/link-director")', body)
+        self.assertIn('fetchJSON("/api/archive/sessions?limit=25")', body)
+        self.assertIn('fetchJSON(`/api/archive/session?session_id=${encodeURIComponent(nextArchiveSessionId)}&limit=25`)', body)
         self.assertIn('fetchJSON("/api/link-director/profile"', body)
 
     def test_app_css_serves_dashboard_stylesheet(self) -> None:

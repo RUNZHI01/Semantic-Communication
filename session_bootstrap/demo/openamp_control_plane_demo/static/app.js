@@ -11,6 +11,10 @@ const state = {
   activeInferenceJobId: null,
   activeInferenceVariant: "",
   jobManifestGatePending: false,
+  archiveSessions: [],
+  archiveSession: null,
+  selectedArchiveSessionId: "",
+  currentArchiveSessionId: "",
 };
 
 function docHref(path) {
@@ -284,6 +288,127 @@ function buildMissionTimeline(snapshot, systemStatus) {
   }
 
   return items.concat(snapshot.mission?.archive_timeline || []).slice(0, 6);
+}
+
+function truncateMiddle(text, prefix = 32, suffix = 24) {
+  const value = String(text || "");
+  if (!value || value.length <= prefix + suffix + 3) return value || "未写入";
+  return `${value.slice(0, prefix)}...${value.slice(-suffix)}`;
+}
+
+function archiveSessionOptionLabel(session) {
+  const sessionId = session?.session_id || "archive session";
+  const lastEvent = session?.last_event_type || session?.last_snapshot_reason || "pending";
+  const currentSuffix = session?.is_current_session ? " / current" : "";
+  return `${sessionId}${currentSuffix} / ${lastEvent}`;
+}
+
+function archivePathRow(label, value) {
+  const text = String(value || "");
+  return `
+    <div class="archive-path-row">
+      <span>${escapeHtml(label)}</span>
+      <code title="${escapeHtml(text || "未写入")}">${escapeHtml(truncateMiddle(text))}</code>
+    </div>
+  `;
+}
+
+function archiveTimelineItems(snapshot, systemStatus) {
+  const archiveSession = state.archiveSession;
+  if (archiveSession?.timeline?.length) return archiveSession.timeline;
+  return buildMissionTimeline(snapshot, systemStatus).map((item) => ({
+    timestamp: item.stamp,
+    lane: item.lane,
+    title: item.title,
+    summary: item.summary,
+    tone: item.tone,
+    source: "mission_snapshot",
+    mode_scope: snapshot.mission?.mode_split_note || "",
+    links: item.links || [],
+  }));
+}
+
+function renderArchiveTimelineModule(snapshot, systemStatus) {
+  const sessions = state.archiveSessions || [];
+  const archiveSession = state.archiveSession;
+  const summary = archiveSession?.summary || null;
+  const snapshotMeta = archiveSession?.snapshot || {};
+  const selectedSessionId = state.selectedArchiveSessionId || "";
+  const hasArchiveData = Boolean(summary);
+  const timelineItems = archiveTimelineItems(snapshot, systemStatus);
+  const selectorOptions = sessions.length
+    ? sessions
+      .map(
+        (session) => `
+          <option value="${escapeHtml(session.session_id)}" ${session.session_id === selectedSessionId ? "selected" : ""}>
+            ${escapeHtml(archiveSessionOptionLabel(session))}
+          </option>
+        `
+      )
+      .join("")
+    : `<option value="">暂无已写入的 archive session</option>`;
+  const summaryMetrics = hasArchiveData
+    ? `
+      <div class="mission-metrics">
+        ${missionMetric("Archive Session", summary.session_id || "NA", summary.last_event_at || "等待事件写入")}
+        ${missionMetric("事件计数", String(summary.event_count ?? 0), summary.last_event_type || "尚无 recent event")}
+        ${missionMetric("最近快照", summary.last_snapshot_reason || "尚未写入", summary.last_snapshot_at || "等待快照")}
+        ${missionMetric("最后 job", summary.last_job_id || "NA", snapshotMeta.generated_at ? `snapshot=${snapshotMeta.generated_at}` : "仅本地只读 replay")}
+      </div>
+      <div class="archive-path-grid">
+        ${archivePathRow("session_dir", archiveSession.paths?.session_dir)}
+        ${archivePathRow("events.jsonl", archiveSession.paths?.events_jsonl)}
+        ${archivePathRow("state_snapshot.json", archiveSession.paths?.state_snapshot_json)}
+      </div>
+    `
+    : `
+      <p class="compact-copy">
+        当前 session_id=${escapeHtml(state.currentArchiveSessionId || systemStatus.event_spine?.session_id || "unknown")}
+        还没有在本地 archive 目录里发现已写入的 JSONL/snapshot 会话。待第一次事件或快照落盘后，这里会切到真实 blackbox timeline。
+      </p>
+    `;
+  return `
+    <div class="archive-toolbar">
+      <label class="sample-picker archive-picker">
+        <span>Archive Session</span>
+        <select id="archiveSessionSelect">${selectorOptions}</select>
+      </label>
+      <div class="status-inline">local-only / read-only / JSONL + snapshot / non-rrweb</div>
+    </div>
+    ${summaryMetrics}
+    <p class="compact-copy">${escapeHtml(
+      (summary?.mode_boundary_note || archiveSession?.mode_boundary_note || snapshotMeta.mode_boundary_note || snapshot.mission?.mode_split_note || "").trim()
+    )}</p>
+    <div class="event-list">
+      ${timelineItems
+        .map(
+          (item) => `
+            <article class="event-item" data-tone="${escapeHtml(item.tone || "neutral")}">
+              <div class="event-head">
+                <span class="event-stamp">${escapeHtml(item.timestamp || item.stamp || "NA")}</span>
+                <span class="event-lane">${escapeHtml(item.lane || "event")}</span>
+              </div>
+              <strong>${escapeHtml(item.title || item.type || "事件")}</strong>
+              <p class="compact-copy">${escapeHtml(item.summary || "")}</p>
+              <div class="status-meta">
+                ${item.source ? `<span>source=${escapeHtml(item.source)}</span>` : ""}
+                ${item.job_id ? `<span>job_id=${escapeHtml(item.job_id)}</span>` : ""}
+                ${item.mode_scope ? `<span>${escapeHtml(item.mode_scope)}</span>` : ""}
+              </div>
+              ${renderLinks(item.links || [])}
+            </article>
+          `
+        )
+        .join("")}
+    </div>
+    <p class="compact-copy">
+      ${escapeHtml(
+        hasArchiveData
+          ? `last snapshot reason=${summary.last_snapshot_reason || "NA"} ｜ snapshot extra fields stay read-only from state_snapshot.json`
+          : "下方若仍显示 mission fallback timeline，仅代表当前尚无 archive session 可回放。"
+      )}
+    </p>
+  `;
 }
 
 function setFeedback(message, tone) {
@@ -583,32 +708,13 @@ function renderMissionDashboard(snapshot, systemStatus) {
     ${missionNote(lastFault.message || live.status_note || "SAFE_STOP / alarm 继续沿用当前控制面语义，不改协议。")}
   `;
 
-  const timelineItems = buildMissionTimeline(snapshot, systemStatus);
+  const archiveHasTimeline = Boolean(state.archiveSession?.timeline?.length);
   setStatusBadge(
     "timelineStatusBadge",
-    active.running ? "Live + Archive" : "Archive + Recent State",
-    active.running ? activeProgress.tone || "degraded" : "neutral"
+    archiveHasTimeline ? "Blackbox Timeline" : (active.running ? "Live + Archive" : "Archive Pending"),
+    archiveHasTimeline ? (state.archiveSession?.read_errors?.length ? "degraded" : "online") : (active.running ? activeProgress.tone || "degraded" : "neutral")
   );
-  document.getElementById("eventTimelineModule").innerHTML = `
-    <div class="event-list">
-      ${timelineItems
-        .map(
-          (item) => `
-            <article class="event-item" data-tone="${escapeHtml(item.tone || "neutral")}">
-              <div class="event-head">
-                <span class="event-stamp">${escapeHtml(item.stamp || "NA")}</span>
-                <span class="event-lane">${escapeHtml(item.lane || "event")}</span>
-              </div>
-              <strong>${escapeHtml(item.title || "事件")}</strong>
-              <p class="compact-copy">${escapeHtml(item.summary || "")}</p>
-              ${renderLinks(item.links || [])}
-            </article>
-          `
-        )
-        .join("")}
-    </div>
-    ${missionNote(mission.mode_split_note || "")}
-  `;
+  document.getElementById("eventTimelineModule").innerHTML = renderArchiveTimelineModule(snapshot, systemStatus);
 }
 
 function renderAct1(snapshot, systemStatus) {
@@ -1188,15 +1294,53 @@ function switchAct(actId) {
   });
 }
 
+function preferredArchiveSessionId(archiveSessionsPayload) {
+  const sessions = archiveSessionsPayload?.sessions || [];
+  if (!sessions.length) return "";
+  const selected = String(state.selectedArchiveSessionId || "");
+  if (selected && sessions.some((session) => session.session_id === selected)) {
+    return selected;
+  }
+  const currentSessionId = String(archiveSessionsPayload?.current_session_id || "");
+  if (currentSessionId && sessions.some((session) => session.session_id === currentSessionId)) {
+    return currentSessionId;
+  }
+  return String(sessions[0]?.session_id || "");
+}
+
+async function loadArchiveSession(sessionId) {
+  const selectedSessionId = String(sessionId || "").trim();
+  state.selectedArchiveSessionId = selectedSessionId;
+  if (!selectedSessionId) {
+    state.archiveSession = null;
+    renderAll();
+    return null;
+  }
+  const payload = await fetchJSON(`/api/archive/session?session_id=${encodeURIComponent(selectedSessionId)}&limit=25`);
+  state.archiveSession = payload;
+  renderAll();
+  return payload;
+}
+
 async function refreshAll() {
-  const [snapshot, systemStatus, linkDirectorStatus] = await Promise.all([
+  const [snapshot, systemStatus, linkDirectorStatus, archiveSessionsPayload] = await Promise.all([
     fetchJSON("/api/snapshot"),
     fetchJSON("/api/system-status"),
     fetchJSON("/api/link-director"),
+    fetchJSON("/api/archive/sessions?limit=25"),
   ]);
+  const nextArchiveSessionId = preferredArchiveSessionId(archiveSessionsPayload);
+  let archiveSession = null;
+  if (nextArchiveSessionId) {
+    archiveSession = await fetchJSON(`/api/archive/session?session_id=${encodeURIComponent(nextArchiveSessionId)}&limit=25`);
+  }
   state.snapshot = snapshot;
   state.systemStatus = systemStatus;
   state.linkDirectorStatus = linkDirectorStatus;
+  state.archiveSessions = archiveSessionsPayload.sessions || [];
+  state.currentArchiveSessionId = archiveSessionsPayload.current_session_id || "";
+  state.selectedArchiveSessionId = nextArchiveSessionId;
+  state.archiveSession = archiveSession;
   renderAll();
 }
 
@@ -1448,6 +1592,10 @@ function bindEvents() {
     const button = event.target.closest("[data-link-profile-id]");
     if (!button) return;
     switchLinkDirectorProfile(button.dataset.linkProfileId);
+  });
+  document.addEventListener("change", (event) => {
+    if (event.target.id !== "archiveSessionSelect") return;
+    loadArchiveSession(event.target.value).catch((error) => setFeedback(error.message, "error"));
   });
 }
 

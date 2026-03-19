@@ -13,6 +13,7 @@ from threading import Lock
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
+from archive_replay import ArchiveSessionNotFoundError, list_archive_sessions, load_archive_session
 from board_access import BoardAccessConfig, build_board_access_config, build_demo_default_board_access
 from board_probe import DEFAULT_LIVE_PROBE_OUTPUT, is_successful_probe, load_probe_output, run_live_probe, write_probe_output
 from demo_data import (
@@ -160,6 +161,7 @@ class DashboardState:
         self._probe_env = probe_env or None
         self._probe_timeout_sec = probe_timeout_sec
         self._probe_cache_path = probe_cache_path
+        self._event_archive_root = Path(event_archive_root).resolve() if event_archive_root is not None else None
         self._lock = Lock()
         self._board_access = build_demo_default_board_access(
             self._probe_env,
@@ -897,6 +899,34 @@ class DashboardState:
 
     def current_event_spine(self, *, limit: int = 25) -> dict[str, Any]:
         return self._event_spine.summary(limit=limit)
+
+    def list_archive_sessions(self, *, limit: int = 25) -> dict[str, Any]:
+        return list_archive_sessions(
+            self._event_archive_root,
+            current_session_id=self._event_spine.session_id,
+            limit=limit,
+        )
+
+    def current_archive_session(self, *, session_id: str = "", recent_limit: int = 25) -> dict[str, Any]:
+        selected_session_id = str(session_id or "").strip()
+        if not selected_session_id:
+            sessions_payload = self.list_archive_sessions(limit=max(1, recent_limit))
+            sessions = sessions_payload.get("sessions") if isinstance(sessions_payload.get("sessions"), list) else []
+            if not sessions:
+                raise ArchiveSessionNotFoundError("no archived sessions found")
+            current_session_id = self._event_spine.session_id
+            matching_current = next(
+                (item for item in sessions if str(item.get("session_id") or "") == current_session_id),
+                None,
+            )
+            selected_session_id = str(
+                (matching_current or sessions[0]).get("session_id") or ""
+            ).strip()
+        return load_archive_session(
+            self._event_archive_root,
+            session_id=selected_session_id,
+            recent_limit=recent_limit,
+        )
 
     def _archive_event_snapshot(self, *, reason: str, job_id: str = "", extra: dict[str, Any] | None = None) -> None:
         self._event_spine.write_snapshot(reason=reason, job_id=job_id, extra=extra)
@@ -1843,6 +1873,22 @@ class DemoRequestHandler(SimpleHTTPRequestHandler):
             params = parse_qs(parsed.query)
             limit = max(1, min(100, self.coerce_int(params.get("limit", ["25"])[0], default=25)))
             self.respond_json(HTTPStatus.OK, self.server.app_state.current_event_spine(limit=limit))
+            return
+        if parsed.path == "/api/archive/sessions":
+            params = parse_qs(parsed.query)
+            limit = max(1, min(100, self.coerce_int(params.get("limit", ["25"])[0], default=25)))
+            self.respond_json(HTTPStatus.OK, self.server.app_state.list_archive_sessions(limit=limit))
+            return
+        if parsed.path == "/api/archive/session":
+            params = parse_qs(parsed.query)
+            session_id = str(params.get("session_id", [""])[0]).strip()
+            limit = max(1, min(100, self.coerce_int(params.get("limit", ["25"])[0], default=25)))
+            try:
+                payload = self.server.app_state.current_archive_session(session_id=session_id, recent_limit=limit)
+            except ArchiveSessionNotFoundError as exc:
+                self.respond_json(HTTPStatus.NOT_FOUND, {"status": "error", "message": str(exc)})
+                return
+            self.respond_json(HTTPStatus.OK, payload)
             return
         if parsed.path == "/api/system-status":
             self.respond_json(HTTPStatus.OK, self.server.app_state.current_system_status())
