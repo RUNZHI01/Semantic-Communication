@@ -64,6 +64,7 @@
 | OpenAMP demo dashboard 本地启动验收（2026-03-17） | `reports/openamp_demo_dashboard_local_acceptance_20260317.md` |
 | OpenAMP demo 最终交付快照（2026-03-17） | `reports/openamp_demo_live_delivery_snapshot_20260317.md` |
 | OpenAMP demo 交接清单 / handoff manifest（M10） | `reports/openamp_demo_handoff_manifest_m10_20260319.md` |
+| OpenAMP demo 最终交付索引（M11） | `reports/openamp_demo_delivery_index_m11_20260319.md` |
 | 集成 OpenAMP demo dashboard 启动器 | `scripts/run_openamp_demo.sh` |
 | OpenAMP demo 软件说明 | `demo/openamp_control_plane_demo/README.md` |
 | 只读板级状态探针 | `scripts/probe_openamp_board_status.py` |
