@@ -148,6 +148,9 @@ class EventStateStore:
                 "submitted_count": 0,
                 "admitted_count": 0,
                 "rejected_count": 0,
+                "preview_submitted_count": 0,
+                "preview_admitted_count": 0,
+                "preview_rejected_count": 0,
                 "started_count": 0,
                 "done_count": 0,
                 "active_job_id": "",
@@ -167,6 +170,7 @@ class EventStateStore:
         job_id = str(event.get("job_id") or "")
         message = str(event.get("message") or "")
         data = event.get("data") if isinstance(event.get("data"), dict) else {}
+        preview_only = bool(data.get("preview_only"))
 
         self._recent_events.append(sanitize_json(event))
         self._aggregate["event_count"] += 1
@@ -203,19 +207,34 @@ class EventStateStore:
             return
 
         if event_type == "JOB_SUBMITTED":
-            self._aggregate["jobs"]["submitted_count"] += 1
+            if preview_only:
+                self._aggregate["jobs"]["preview_submitted_count"] += 1
+                if job_record is not None:
+                    job_record["status"] = "preview_submitted"
+            else:
+                self._aggregate["jobs"]["submitted_count"] += 1
             return
 
         if event_type == "JOB_ADMITTED":
-            self._aggregate["jobs"]["admitted_count"] += 1
-            if job_record is not None:
-                job_record["status"] = "admitted"
+            if preview_only:
+                self._aggregate["jobs"]["preview_admitted_count"] += 1
+                if job_record is not None:
+                    job_record["status"] = "preview_admitted"
+            else:
+                self._aggregate["jobs"]["admitted_count"] += 1
+                if job_record is not None:
+                    job_record["status"] = "admitted"
             return
 
         if event_type == "JOB_REJECTED":
-            self._aggregate["jobs"]["rejected_count"] += 1
-            if job_record is not None:
-                job_record["status"] = "rejected"
+            if preview_only:
+                self._aggregate["jobs"]["preview_rejected_count"] += 1
+                if job_record is not None:
+                    job_record["status"] = "preview_rejected"
+            else:
+                self._aggregate["jobs"]["rejected_count"] += 1
+                if job_record is not None:
+                    job_record["status"] = "rejected"
             return
 
         if event_type == "JOB_STARTED":

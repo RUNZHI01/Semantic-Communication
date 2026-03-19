@@ -169,6 +169,7 @@ class DashboardState:
         self._last_inference_result: dict[str, Any] | None = None
         self._last_fault_result: dict[str, Any] | None = None
         self._inference_jobs: dict[str, dict[str, Any]] = {}
+        self._manifest_preview_count = 0
         self._link_director = default_link_director_state()
         self._event_spine = DemoEventSpine(event_archive_root)
 
@@ -402,28 +403,36 @@ class DashboardState:
         except ValueError:
             return {}
 
+    def _next_manifest_preview_job_id(self, *, variant: str) -> str:
+        with self._lock:
+            self._manifest_preview_count += 1
+            sequence = self._manifest_preview_count
+        return f"manifest-preview-{variant}-{sequence:04d}"
+
     def _job_manifest_gate_status(
         self,
         *,
         board_access: BoardAccessConfig,
-        admissions: dict[str, dict[str, Any]],
-        variant_support: dict[str, dict[str, Any]],
+        admission: dict[str, Any],
+        support: dict[str, Any],
         active_inference: dict[str, Any],
         control_status: dict[str, Any] | None,
         trusted_sha: str,
+        variant: str,
+        status_probe: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         contract = build_job_manifest_contract_snapshot()
         defaults = contract["defaults"]
-        active_variant = str(active_inference.get("variant") or "")
-        variant = active_variant if active_variant in {"current", "baseline"} else "current"
         variant_access = self._live_board_access_for_variant(board_access, variant=variant)
-        admission = admissions.get(variant) or admissions.get("current") or {}
-        support = variant_support.get(variant) or variant_support.get("current") or {}
         signed_summary = (
             self._signed_manifest_gate_details(variant_access, variant=variant)
             if admission.get("mode") == "signed_manifest_v1"
             else {}
         )
+        variant_label = "PyTorch" if variant == "baseline" else "Current"
+        active_variant = str(active_inference.get("variant") or "")
+        active_job_running = bool(active_inference.get("running"))
+        active_job_id = str(active_inference.get("job_id") or "")
         expected_sha = str(admission.get("artifact_sha256") or expected_sha_for_variant(variant_access, variant) or "")
         if variant == "current" and not expected_sha:
             expected_sha = trusted_sha
@@ -435,12 +444,12 @@ class DashboardState:
         job_id = ""
         job_id_source = "launch_generated"
         guard_state = str((control_status or {}).get("guard_state") or "").upper()
-        active_job_id = int((control_status or {}).get("active_job_id") or 0)
-        if active_inference.get("running") and active_variant == variant and active_inference.get("job_id"):
-            job_id = str(active_inference.get("job_id") or "")
+        board_active_job_id = int((control_status or {}).get("active_job_id") or 0)
+        if active_job_running and active_job_id:
+            job_id = active_job_id
             job_id_source = "active_job"
-        elif guard_state == "JOB_ACTIVE" and active_job_id > 0:
-            job_id = str(active_job_id)
+        elif guard_state == "JOB_ACTIVE" and board_active_job_id > 0:
+            job_id = str(board_active_job_id)
             job_id_source = "board_status"
         elif self._last_inference_result and self._last_inference_result.get("variant") == variant:
             last_job_id = str(self._last_inference_result.get("job_id") or "")
@@ -448,25 +457,93 @@ class DashboardState:
                 job_id = last_job_id
                 job_id_source = "last_launch"
 
-        if active_inference.get("running") and active_variant == variant:
+        preview_probe_failed = bool(status_probe) and str(status_probe.get("status") or "") != "success"
+        ready_for_launch = bool(support.get("launch_allowed")) and admission.get("status") == "ready" and board_access.connection_ready
+        verdict = "hold"
+        verdict_label = "待补全"
+        if active_job_running or guard_state == "JOB_ACTIVE":
+            verdict = "deny"
+            verdict_label = "暂不放行"
+        elif preview_probe_failed:
+            verdict = "hold"
+            verdict_label = "待复核"
+        elif ready_for_launch:
+            verdict = "allow"
+            verdict_label = "可放行"
+
+        reasons: list[str] = []
+
+        def append_reason(text: str) -> None:
+            value = str(text or "").strip()
+            if value and value not in reasons:
+                reasons.append(value)
+
+        if active_job_running and active_job_id:
+            if active_variant == variant:
+                append_reason(
+                    f"{variant_label} live job {active_job_id} is already running in the demo process; a new ticket stays blocked."
+                )
+            else:
+                append_reason(
+                    f"Demo process already has active {active_variant or 'other'} live job {active_job_id}; "
+                    "the gate conservatively blocks another ticket."
+                )
+        if guard_state == "JOB_ACTIVE":
+            active_suffix = f" active_job_id={board_active_job_id}." if board_active_job_id else ""
+            append_reason(f"STATUS_RESP reports guard_state=JOB_ACTIVE; the demo will not auto SAFE_STOP.{active_suffix}")
+        if preview_probe_failed:
+            probe_message = str(status_probe.get("message") or "").strip()
+            if probe_message:
+                append_reason(f"Preview STATUS_REQ did not return a usable STATUS_RESP: {probe_message}")
+            else:
+                append_reason("Preview STATUS_REQ did not return a usable STATUS_RESP; the gate remains conservative.")
+        if not board_access.connection_ready:
+            missing = ", ".join(board_access.missing_connection_fields()) or "host, user, password"
+            append_reason(f"Board session is incomplete: missing {missing}.")
+        support_note = str(support.get("note") or "")
+        if not support.get("launch_allowed"):
+            append_reason(support_note or f"{variant_label} live path is not launchable yet.")
+        admission_note = str(admission.get("note") or "")
+        if admission_note:
+            append_reason(admission_note)
+        if ready_for_launch and not status_probe:
+            append_reason("This view reflects cached control/demo state; use the preview action to re-check admitability only.")
+
+        if active_job_running and active_variant == variant:
             status = "running"
-            label = "任务票已下发"
+            label = "任务票已在推进"
             tone = "online"
             message = (
-                f"{'PyTorch' if variant == 'baseline' else 'Current'} 任务票已进入 live launch；"
-                "控制面继续沿用现有 admission / wrapper，数据面 runner 不变。"
+                f"{variant_label} 任务票已进入 live launch；若再提交新票，demo 会保守阻断，"
+                "避免把预检和真实 live 路径混写。"
+            )
+        elif active_job_running:
+            status = "blocked"
+            label = "票据阻断"
+            tone = "degraded"
+            message = (
+                f"当前 demo 进程已有 {active_variant or 'other'} live 作业占用；"
+                f"{variant_label} 新票只做 gate 预检，不会越过现有控制面边界。"
             )
         elif guard_state == "JOB_ACTIVE":
             status = "blocked"
             label = "票据阻断"
             tone = "degraded"
             message = "板端当前 guard_state=JOB_ACTIVE；manifest gate 保守阻断新票，不自动 SAFE_STOP。"
+        elif preview_probe_failed:
+            status = "draft"
+            label = "待复核"
+            tone = "degraded"
+            message = (
+                f"{variant_label} 票据预检未拿到可用 STATUS_RESP；当前不会宣称可放行，"
+                "也不会启动 board execution。"
+            )
         elif support.get("launch_allowed") and admission.get("status") == "ready" and board_access.connection_ready:
             status = "ready"
             label = "可签发"
             tone = "online"
             message = (
-                f"{'PyTorch' if variant == 'baseline' else 'Current'} 票面参数已齐；launch 时继续沿用现有 "
+                f"{variant_label} 票面参数已齐；launch 时继续沿用现有 "
                 f"{admission.get('label') or 'admission'}，不改 JOB_REQ / signed-manifest 协议。"
             )
         else:
@@ -569,18 +646,132 @@ class DashboardState:
             "status": status,
             "label": label,
             "tone": tone,
+            "verdict": verdict,
+            "verdict_label": verdict_label,
             "variant": variant,
-            "variant_label": "PyTorch" if variant == "baseline" else "Current",
+            "variant_label": variant_label,
             "admission_mode": str(admission.get("mode") or "legacy_sha"),
             "admission_label": str(admission.get("label") or ""),
             "admission_note": str(admission.get("note") or ""),
             "summary": contract["summary"],
             "protocol_boundary_note": contract["protocol_boundary_note"],
+            "demo_only_note": (
+                "Preview action is demo/operator-side only: it re-checks admitability and emits preview-only JOB_* events, "
+                "but it does not send JOB_REQ or mutate board execution."
+            ),
             "message": message,
+            "reasons": reasons,
+            "status_source": (
+                "preview_status"
+                if status_probe and str(status_probe.get("status") or "") == "success"
+                else "preview_status_error"
+                if preview_probe_failed
+                else "cached_control_status"
+                if control_status
+                else "demo_snapshot"
+            ),
             "field_map": field_map,
             "wire_fields": wire_fields,
             "context_fields": context_fields,
             "evidence": contract["evidence"],
+        }
+
+    def current_job_manifest_gate_status(
+        self,
+        *,
+        variant: str = "current",
+        status_probe: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        with self._lock:
+            board_access = self._board_access
+            control_status = dict(self._last_control_status or {}) if self._last_control_status else None
+        active_inference = self._active_inference_summary()
+        variant_access = self._live_board_access_for_variant(board_access, variant=variant)
+        admission = describe_demo_admission(variant_access, variant=variant)
+        support = describe_demo_variant_support(variant_access, variant=variant)
+        effective_control_status = control_status
+        if status_probe and str(status_probe.get("status") or "") == "success":
+            effective_control_status = status_probe
+        return self._job_manifest_gate_status(
+            board_access=board_access,
+            admission=admission,
+            support=support,
+            active_inference=active_inference,
+            control_status=effective_control_status,
+            trusted_sha=self._trusted_current_sha,
+            variant=variant,
+            status_probe=status_probe,
+        )
+
+    def preview_job_manifest_gate(self, *, variant: str = "current") -> dict[str, Any]:
+        with self._lock:
+            board_access = self._board_access
+
+        variant_access = self._live_board_access_for_variant(board_access, variant=variant)
+        status_probe: dict[str, Any] | None = None
+        trusted_sha = expected_sha_for_variant(variant_access, variant) or self._trusted_current_sha
+        if board_access.probe_ready:
+            status_probe = query_live_status(board_access, trusted_sha=trusted_sha)
+            if status_probe.get("status") == "success":
+                with self._lock:
+                    self._last_control_status = status_probe
+
+        gate = self.current_job_manifest_gate_status(variant=variant, status_probe=status_probe)
+        preview_job_id = self._next_manifest_preview_job_id(variant=variant)
+        common_data = {
+            "variant": variant,
+            "preview_only": True,
+            "preview_action": "job_manifest_gate_preview",
+            "verdict": gate["verdict"],
+            "status_category": gate["status"],
+            "admission_mode": gate["admission_mode"],
+            "status_source": gate["status_source"],
+        }
+        self._event_spine.publish(
+            "JOB_SUBMITTED",
+            job_id=preview_job_id,
+            source="manifest_gate_preview",
+            plane="control",
+            mode_scope=CONTROL_MODE_SCOPE,
+            message=f"{gate['variant_label']} manifest gate preview requested by the operator.",
+            data=common_data,
+        )
+        preview_event_type = "JOB_ADMITTED" if gate["verdict"] == "allow" else "JOB_REJECTED"
+        preview_message = (
+            f"{gate['variant_label']} 任务票 demo-only 预检判定为可放行；未发送 JOB_REQ，也未启动板端执行。"
+            if gate["verdict"] == "allow"
+            else f"{gate['variant_label']} 任务票 demo-only 预检未放行；未发送 JOB_REQ，也未启动板端执行。"
+        )
+        self._event_spine.publish(
+            preview_event_type,
+            job_id=preview_job_id,
+            source="manifest_gate_preview",
+            plane="control",
+            mode_scope=CONTROL_MODE_SCOPE,
+            message=preview_message,
+            data={
+                **common_data,
+                "reasons": list(gate["reasons"]),
+            },
+        )
+        self._archive_event_snapshot(
+            reason="job_manifest_gate_preview",
+            job_id=preview_job_id,
+            extra={
+                "variant": variant,
+                "preview_only": True,
+                "verdict": gate["verdict"],
+            },
+        )
+        return {
+            "status": "ok",
+            "action": "preview",
+            "preview_only": True,
+            "job_id": preview_job_id,
+            "event_type": preview_event_type,
+            "message": preview_message,
+            "checked_at": now_iso(),
+            "gate": gate,
         }
 
     def current_system_status(self) -> dict[str, Any]:
@@ -686,6 +877,15 @@ class DashboardState:
             "active_inference": active_inference,
             "last_inference": last_inference or {},
             "last_fault": last_fault or {},
+            "job_manifest_gate": self._job_manifest_gate_status(
+                board_access=current_board_access,
+                admission=admission,
+                support=current_support,
+                active_inference=active_inference,
+                control_status=control_status,
+                trusted_sha=self._trusted_current_sha,
+                variant="current",
+            ),
             "event_spine": {
                 "api_path": "/api/event-spine",
                 "session_id": event_spine["session_id"],
@@ -1624,6 +1824,18 @@ class DemoRequestHandler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/snapshot":
             self.respond_json(HTTPStatus.OK, self.server.app_state.current_snapshot())
             return
+        if parsed.path == "/api/job-manifest-gate":
+            params = parse_qs(parsed.query)
+            try:
+                variant = self.coerce_variant(params.get("variant", ["current"])[0])
+            except ValueError as exc:
+                self.respond_json(HTTPStatus.BAD_REQUEST, {"status": "error", "message": str(exc)})
+                return
+            self.respond_json(
+                HTTPStatus.OK,
+                {"status": "ok", "gate": self.server.app_state.current_job_manifest_gate_status(variant=variant)},
+            )
+            return
         if parsed.path == "/api/link-director":
             self.respond_json(HTTPStatus.OK, self.server.app_state.current_link_director_status())
             return
@@ -1683,6 +1895,15 @@ class DemoRequestHandler(SimpleHTTPRequestHandler):
             payload = self.server.app_state.refresh_live_probe()
             self.respond_json(HTTPStatus.OK, payload)
             return
+        if parsed.path == "/api/job-manifest-gate/preview":
+            try:
+                variant = self.coerce_variant(body.get("variant"), default="current")
+            except ValueError as exc:
+                self.respond_json(HTTPStatus.BAD_REQUEST, {"status": "error", "message": str(exc)})
+                return
+            payload = self.server.app_state.preview_job_manifest_gate(variant=variant)
+            self.respond_json(HTTPStatus.OK, payload)
+            return
         if parsed.path == "/api/run-inference":
             image_index = self.coerce_int(body.get("image_index"), default=0)
             variant = str(body.get("mode") or "current").strip().lower() or "current"
@@ -1730,6 +1951,12 @@ class DemoRequestHandler(SimpleHTTPRequestHandler):
             return int(value)
         except (TypeError, ValueError):
             return default
+
+    def coerce_variant(self, value: Any, default: str = "current") -> str:
+        variant = str(value or default).strip().lower() or default
+        if variant not in {"current", "baseline"}:
+            raise ValueError("unsupported variant")
+        return variant
 
     def respond_json(self, status: HTTPStatus, payload: dict[str, Any]) -> None:
         body = json_bytes(payload)
