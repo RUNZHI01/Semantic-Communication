@@ -1107,6 +1107,12 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertFalse(payload["active_inference"]["running"])
         self.assertEqual(payload["active_inference"]["queue_depth"], 0)
         self.assertEqual(payload["active_inference"]["progress"]["count_label"], "0 active / 0 queued")
+        self.assertEqual(payload["operator_cue"]["mode"], "operator_assist_only")
+        self.assertEqual(payload["operator_cue"]["current_scene_id"], "scene1")
+        self.assertEqual(payload["operator_cue"]["next_action"]["target_id"], "credentialPanel")
+        self.assertIn("Operator-assist only", payload["operator_cue"]["manual_boundary_note"])
+        self.assertEqual(payload["operator_cue"]["scenes"][0]["checks"][0]["label"], "会话已录入")
+        self.assertFalse(payload["operator_cue"]["scenes"][0]["checks"][0]["ready"])
 
     def test_system_status_endpoint_exposes_redacted_board_access(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
@@ -1208,6 +1214,70 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(payload["safety_panel"]["last_fault_result"], {})
         self.assertEqual(payload["safety_panel"]["recover_action"]["label"], "SAFE_STOP 收口")
         self.assertIn("不会自动 SAFE_STOP", payload["safety_panel"]["status_note"])
+
+    def test_system_status_endpoint_advances_operator_cue_to_compare_after_current_live_result(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        request_json(
+            state,
+            "POST",
+            "/api/session/board-access",
+            body=json.dumps({"password": "demo-pass"}).encode("utf-8"),
+        )
+        state._last_live_probe = live_probe_payload("2026-03-19T19:10:00+0800", "board reachable")
+        state._last_control_status = {
+            "status": "success",
+            "guard_state": "READY",
+            "last_fault_code": "NONE",
+            "active_job_id": 0,
+            "total_fault_count": 0,
+        }
+        state._last_inference_result = {
+            "variant": "current",
+            "request_state": "completed",
+            "status": "success",
+            "execution_mode": "live",
+            "source_label": "Current live 数据面",
+            "message": "Current live 结果已经回到页面。",
+            "job_id": "demo-job-compare",
+        }
+
+        status, _, payload = request_json(state, "GET", "/api/system-status")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["job_manifest_gate"]["verdict"], "allow")
+        self.assertEqual(payload["operator_cue"]["current_scene_id"], "scene3")
+        self.assertEqual(payload["operator_cue"]["status_label"], "第三幕 / Compare 与性能口径")
+        self.assertEqual(payload["operator_cue"]["next_action"]["target_id"], "compareViewerShell")
+        self.assertEqual(payload["operator_cue"]["next_action"]["act_id"], "act3")
+        self.assertIn("4-core", payload["operator_cue"]["boundary_note"])
+        self.assertTrue(payload["operator_cue"]["scenes"][2]["checks"][0]["ready"])
+        self.assertTrue(payload["operator_cue"]["scenes"][2]["checks"][1]["ready"])
+
+    def test_system_status_endpoint_prioritizes_operator_cue_scene4_when_fault_is_latched(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        request_json(
+            state,
+            "POST",
+            "/api/session/board-access",
+            body=json.dumps({"password": "demo-pass"}).encode("utf-8"),
+        )
+        state._last_live_probe = live_probe_payload("2026-03-19T19:15:00+0800", "board reachable")
+        state._last_control_status = {
+            "status": "success",
+            "guard_state": "READY",
+            "last_fault_code": "HEARTBEAT_TIMEOUT",
+            "active_job_id": 0,
+            "total_fault_count": 1,
+        }
+
+        status, _, payload = request_json(state, "GET", "/api/system-status")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["operator_cue"]["current_scene_id"], "scene4")
+        self.assertEqual(payload["operator_cue"]["next_action"]["target_id"], "act4Panel")
+        self.assertEqual(payload["operator_cue"]["next_action"]["act_id"], "act4")
+        self.assertIn("SAFE_STOP", payload["operator_cue"]["presenter_line"])
+        self.assertEqual(payload["operator_cue"]["scenes"][3]["checks"][1]["label"], "Blackbox timeline")
 
     def test_system_status_endpoint_includes_demo_admission_summary(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
@@ -2149,6 +2219,7 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertIn("<title>飞腾多核弱网安全语义视觉回传演示系统</title>", body)
         self.assertIn("飞腾多核弱网安全语义视觉回传系统", body)
         self.assertIn('id="commandCenterPanel"', body)
+        self.assertIn('id="operatorCueShell"', body)
         self.assertIn('id="commandStripCard"', body)
         self.assertIn('id="commandSceneGrid"', body)
         self.assertIn('id="compareViewerBoard"', body)
@@ -2170,6 +2241,10 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertIn('fetchJSON("/api/archive/sessions?limit=25")', body)
         self.assertIn('fetchJSON(`/api/archive/session?session_id=${encodeURIComponent(nextArchiveSessionId)}&limit=25`)', body)
         self.assertIn('fetchJSON("/api/link-director/profile"', body)
+        self.assertIn("normalizeOperatorCue", body)
+        self.assertIn("renderOperatorCue", body)
+        self.assertIn('document.getElementById("operatorCueShell")', body)
+        self.assertIn("systemStatus.operator_cue", body)
         self.assertIn("buildCommandCenterModel", body)
         self.assertIn("renderCommandCenter", body)
         self.assertIn("jumpToTarget", body)
@@ -2193,6 +2268,9 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(headers["cache-control"], "no-store")
         self.assertIn(":root {", body)
         self.assertIn("--accent: #c95d12;", body)
+        self.assertIn(".operator-cue-shell", body)
+        self.assertIn(".operator-cue-scene-grid", body)
+        self.assertIn(".cue-check-chip", body)
         self.assertIn(".command-center-panel", body)
         self.assertIn(".command-strip", body)
 

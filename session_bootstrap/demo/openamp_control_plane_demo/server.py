@@ -284,6 +284,433 @@ def build_safety_panel(
     }
 
 
+def cue_jump(label: str, *, target_id: str, act_id: str = "", primary: bool = False) -> dict[str, Any]:
+    return {
+        "label": label,
+        "target_id": target_id,
+        "act_id": act_id,
+        "primary": primary,
+    }
+
+
+def cue_check(label: str, ready: bool, note: str, *, tone: str = "") -> dict[str, Any]:
+    return {
+        "label": label,
+        "ready": ready,
+        "tone": tone or ("online" if ready else "degraded"),
+        "note": note,
+    }
+
+
+def cue_scene(
+    *,
+    scene_id: str,
+    number: str,
+    eyebrow: str,
+    title: str,
+    status: str,
+    tone: str,
+    note: str,
+    cue_line: str,
+    jump: dict[str, Any],
+    jump_hint: str,
+    checks: list[dict[str, Any]],
+    meta: list[str],
+) -> dict[str, Any]:
+    ready_count = sum(1 for item in checks if item.get("ready"))
+    return {
+        "scene_id": scene_id,
+        "number": number,
+        "eyebrow": eyebrow,
+        "title": title,
+        "status": status,
+        "tone": tone,
+        "note": note,
+        "cue_line": cue_line,
+        "jump": jump,
+        "jump_hint": jump_hint,
+        "checks": checks,
+        "ready_count": ready_count,
+        "total_checks": len(checks),
+        "meta": meta + [f"{ready_count}/{len(checks)} ready"],
+    }
+
+
+def build_operator_cue(
+    *,
+    snapshot: dict[str, Any],
+    board_access: dict[str, Any],
+    live: dict[str, Any],
+    active_inference: dict[str, Any],
+    last_inference: dict[str, Any],
+    safety_panel: dict[str, Any],
+    gate: dict[str, Any],
+    link_director: dict[str, Any],
+    event_spine: dict[str, Any],
+) -> dict[str, Any]:
+    mission = snapshot.get("mission", {}) if isinstance(snapshot.get("mission"), dict) else {}
+    guided_demo = snapshot.get("guided_demo", {}) if isinstance(snapshot.get("guided_demo"), dict) else {}
+    compare_viewer = guided_demo.get("compare_viewer", {}) if isinstance(guided_demo.get("compare_viewer"), dict) else {}
+    performance = snapshot.get("performance", {}) if isinstance(snapshot.get("performance"), dict) else {}
+
+    access_ready = bool(board_access.get("connection_ready"))
+    board_online = bool(live.get("board_online"))
+    gate_allow = str(gate.get("verdict") or "").lower() == "allow"
+    board_busy = str(live.get("guard_state") or "").upper() == "JOB_ACTIVE"
+    current_running = bool(active_inference.get("running")) and str(active_inference.get("variant") or "") == "current"
+    active_progress = active_inference.get("progress", {}) if isinstance(active_inference.get("progress"), dict) else {}
+    current_count_label = str(active_progress.get("count_label") or "")
+    current_stage = str(active_progress.get("current_stage") or "")
+    last_variant = str(last_inference.get("variant") or "")
+    current_result_visible = last_variant == "current"
+    current_request_state = str(last_inference.get("request_state") or "")
+    current_execution_mode = str(last_inference.get("execution_mode") or "")
+    current_live_done = current_result_visible and current_request_state != "running" and current_execution_mode == "live"
+    current_archive_only = current_result_visible and (
+        str(last_inference.get("status") or "") == "fallback" or current_execution_mode == "prerecorded"
+    )
+    compare_ready = bool(compare_viewer.get("samples"))
+    performance_ready = bool(performance.get("metrics"))
+    archive_event_count = int(event_spine.get("event_count") or 0)
+    archive_ready = archive_event_count > 0
+    safety_recovered = str(safety_panel.get("safe_stop_state") or "").upper() == "RECOVERED"
+    fault_latched = str(safety_panel.get("latch_state") or "").upper() == "LATCHED"
+    recover_ready = bool((safety_panel.get("recover_action") or {}).get("api_path"))
+    link_profile = str(link_director.get("selected_profile_label") or "正常链路")
+    mode_boundary_note = str(mission.get("mode_split_note") or MODE_BOUNDARY_NOTE)
+    operator_boundary_note = (
+        "Operator-assist only: this cue layer recommends scene order, presenter copy, and page jumps. "
+        "Probe, manifest preview, Current/PyTorch launch, fault injection, and SAFE_STOP remain manual operator actions."
+    )
+
+    if not access_ready:
+        scene1_status = "待补全会话"
+        scene1_tone = "degraded"
+        scene1_note = "先补齐本场 SSH / 推理会话；页面只保存会话，不会自动推进后续动作。"
+        scene1_cue = "先把第一幕立住：当前仍是 operator-assist，先补齐会话，再做探板和 gate 预检。"
+        scene1_jump = cue_jump("跳到会话接入", target_id="credentialPanel")
+    elif not board_online:
+        scene1_status = "待探板"
+        scene1_tone = "degraded"
+        scene1_note = "会话已就绪，但还没有新的 live 探板；第一幕继续如实显示证据态。"
+        scene1_cue = "先展示可信状态，再由操作员手动执行探板确认板端 READY。"
+        scene1_jump = cue_jump("跳到第一幕探板", target_id="act1Panel", act_id="act1")
+    elif not gate_allow:
+        scene1_status = gate.get("verdict_label") or "待预检"
+        scene1_tone = str(gate.get("tone") or "degraded")
+        scene1_note = str(gate.get("message") or "当前 ticket 仍是草案或保守阻断态，不宣称已放行。")
+        scene1_cue = "把 gate verdict 讲清楚：当前只展示预检结果，不伪造已放行。"
+        scene1_jump = cue_jump("跳到任务票闸机", target_id="jobManifestGateShell", act_id="act1")
+    else:
+        scene1_status = "可信状态就绪"
+        scene1_tone = "online"
+        scene1_note = (
+            f"会话、探板和 gate 已齐；当前 link director={link_profile}，"
+            "但 live 控制面与证据读数仍保持如实显示。"
+        )
+        scene1_cue = "第一幕已经就绪：当前展示的是可信状态、gate verdict 和 live 控制面，不是自动化编排。"
+        scene1_jump = cue_jump("跳到第一幕", target_id="jobManifestGateShell", act_id="act1")
+
+    scene1_checks = [
+        cue_check(
+            "会话已录入",
+            access_ready,
+            "当前 demo 进程内已有可复用的板卡会话。" if access_ready else "仍需补齐 host/user/password 或推理 env。",
+        ),
+        cue_check(
+            "只读探板可见",
+            board_online,
+            f"remoteproc={live.get('remoteproc_state') or 'unknown'} / guard={live.get('guard_state') or 'UNKNOWN'}"
+            if board_online
+            else "当前没有新的 live 探板，仍以证据态显示。",
+        ),
+        cue_check(
+            "任务票 verdict",
+            gate_allow,
+            str(gate.get("verdict_label") or "待补全"),
+            tone=str(gate.get("tone") or ("online" if gate_allow else "degraded")),
+        ),
+    ]
+
+    current_launch_ready = access_ready and board_online and gate_allow and not board_busy and not fault_latched
+    if current_running:
+        scene2_status = str(active_progress.get("label") or "推进中")
+        scene2_tone = str(active_progress.get("tone") or "online")
+        scene2_note = (
+            f"Current live 当前 {current_count_label or '进行中'}；"
+            f"{current_stage or '界面正在跟随板端阶段。'}"
+        )
+        scene2_cue = "第二幕现在只做监看：Current 在线推进仍由操作员手动触发，页面不自动 SAFE_STOP 或重跑。"
+    elif current_live_done:
+        scene2_status = "Current live 已完成"
+        scene2_tone = "online"
+        scene2_note = str(
+            last_inference.get("message")
+            or "Current live 结果已经回到页面，接下来可以切第三幕做正式对照。"
+        )
+        scene2_cue = "第二幕已经完成：现在可以把同一轮 Current 结果带到第三幕做正式对照。"
+    elif current_archive_only:
+        scene2_status = "Current 仍是归档展示"
+        scene2_tone = "degraded"
+        scene2_note = str(
+            last_inference.get("message")
+            or "当前画面仍在归档 / fallback 态，不能把它说成刚刚完成的 live run。"
+        )
+        scene2_cue = "第二幕仍在归档态：要么保持诚实展示，要么由操作员重新手动发起 Current live。"
+    elif current_launch_ready:
+        scene2_status = "可手动启动"
+        scene2_tone = "online"
+        scene2_note = "第二幕已具备条件，但 Current 300 张图在线推进仍由操作员手动触发。"
+        scene2_cue = "这里开始第二幕：由操作员手动启动 Current 300 张图，页面只负责显示进度和证据。"
+    else:
+        scene2_status = "等待第一幕条件"
+        scene2_tone = "neutral" if not access_ready and not board_online else "degraded"
+        scene2_note = "当前还不能进入 live run，先完成会话、探板、gate 和空闲态条件。"
+        scene2_cue = "第二幕还没开始：先完成第一幕条件，不把等待态包装成已自动运行。"
+
+    scene2_checks = [
+        cue_check(
+            "Current 允许启动",
+            access_ready and board_online and gate_allow and not fault_latched,
+            "会话、探板、gate 与安全镜像已经就绪。"
+            if access_ready and board_online and gate_allow and not fault_latched
+            else "仍需先完成会话 / 探板 / gate，且不能带着 fault latch 进入 live。",
+        ),
+        cue_check(
+            "板端空闲",
+            not board_busy,
+            "guard_state=READY，可手动发起 Current live。" if not board_busy else "guard_state=JOB_ACTIVE，demo 保守阻断新的 live launch。",
+            tone="online" if not board_busy else "degraded",
+        ),
+        cue_check(
+            "Current 结果可讲",
+            current_running or current_result_visible,
+            current_count_label if current_running else (str(last_inference.get("source_label") or "等待本轮 Current 结果")),
+            tone="online" if current_live_done or current_running else ("degraded" if current_archive_only else "neutral"),
+        ),
+    ]
+
+    if current_live_done:
+        scene3_status = "正式对照可讲"
+        scene3_tone = "online"
+        scene3_note = "同一样例已可直接讲 Current vs PyTorch reference，并把 headline performance / demo mode 边界分开。"
+        scene3_cue = "第三幕要点是口径：Current 与 PyTorch 用同一样例对照，4-core headline 与 3-core demo 边界必须分开说。"
+    elif compare_ready:
+        scene3_status = "归档对照已备"
+        scene3_tone = "degraded"
+        scene3_note = "Compare viewer 与性能材料都已就位，但本轮 Current live 结果未必已经更新到本场页面。"
+        scene3_cue = "第三幕可以先讲正式口径和归档 compare viewer，再明确说明本场 Current live 是否已经完成。"
+    else:
+        scene3_status = "等待样例上下文"
+        scene3_tone = "neutral"
+        scene3_note = "当前还没有可用 compare viewer 样例。"
+        scene3_cue = "第三幕暂不建议展开，先保证样例和性能口径都可见。"
+
+    scene3_checks = [
+        cue_check(
+            "Compare viewer 样例",
+            compare_ready,
+            "当前 compare viewer 已有归档样例与 provenance。" if compare_ready else "当前没有 compare viewer 样例。",
+        ),
+        cue_check(
+            "Current 来源已标注",
+            current_live_done or current_archive_only,
+            str(last_inference.get("source_label") or "当前仍将沿用归档样例或等待 live 结果。"),
+            tone="online" if current_live_done else ("degraded" if current_archive_only else "neutral"),
+        ),
+        cue_check(
+            "4-core vs 3-core 边界",
+            performance_ready and bool(mode_boundary_note),
+            mode_boundary_note or "保持 4-core headline 与 3-core demo mode 的边界标注。",
+        ),
+    ]
+
+    if fault_latched:
+        scene4_status = "告警锁存"
+        scene4_tone = str(safety_panel.get("panel_tone") or "offline")
+        scene4_note = (
+            f"last_fault_code={safety_panel.get('last_fault_code') or 'UNKNOWN'} 仍锁存在控制面镜像中；"
+            "是否 SAFE_STOP 收口仍由操作员决定。"
+        )
+        scene4_cue = "第四幕现在应该展开：SAFE_STOP / fault latch 仍在，Linux UI 只显示镜像与 recover 入口，不宣称自动收口。"
+    elif safety_recovered:
+        scene4_status = "SAFE_STOP 已收口"
+        scene4_tone = str(safety_panel.get("panel_tone") or "degraded")
+        scene4_note = "SAFE_STOP 收口结果已经回写到面板镜像，但 Linux UI 不拥有物理 SAFE_STOP / GPIO 所有权。"
+        scene4_cue = "第四幕可说明 SAFE_STOP 已收口，但这仍是 operator-driven 的恢复动作，不是假自动化。"
+    elif archive_ready or recover_ready:
+        scene4_status = "收口页待命"
+        scene4_tone = "online" if archive_ready else "degraded"
+        scene4_note = (
+            f"archive session={event_spine.get('session_id') or 'pending'} / "
+            f"{archive_event_count} events；当前页面可展示 blackbox timeline 与 recover 入口。"
+        )
+        scene4_cue = "第四幕保持待命：安全镜像、recover 入口和 blackbox timeline 已在页内，但动作仍需操作员手动触发。"
+    else:
+        scene4_status = "等待事件"
+        scene4_tone = "neutral"
+        scene4_note = "当前还没有 archive 事件写入，但安全镜像和 FIT 证据仍可展示。"
+        scene4_cue = "第四幕暂以证据页为主，blackbox timeline 会在有事件写盘后补齐。"
+
+    scene4_checks = [
+        cue_check(
+            "SAFE_STOP 镜像",
+            bool(safety_panel.get("safe_stop_state")),
+            f"safe_stop={safety_panel.get('safe_stop_state') or 'UNKNOWN'} / fault={safety_panel.get('last_fault_code') or 'UNKNOWN'}",
+            tone=str(safety_panel.get("panel_tone") or "neutral"),
+        ),
+        cue_check(
+            "Blackbox timeline",
+            archive_ready,
+            f"{archive_event_count} events / {event_spine.get('last_event_at') or '等待首次写盘'}"
+            if archive_ready
+            else "当前尚无 archive 事件，会先显示 mission fallback timeline。",
+            tone="online" if archive_ready else "neutral",
+        ),
+        cue_check(
+            "Recover 入口",
+            recover_ready,
+            f"{(safety_panel.get('recover_action') or {}).get('method') or 'POST'} {(safety_panel.get('recover_action') or {}).get('api_path') or '/api/recover'}"
+            if recover_ready
+            else "当前没有 recover action 绑定。",
+            tone="online" if recover_ready else "neutral",
+        ),
+    ]
+
+    scenes = [
+        cue_scene(
+            scene_id="scene1",
+            number="01",
+            eyebrow="可信状态",
+            title="第一幕 / 板卡接入与 gate",
+            status=scene1_status,
+            tone=scene1_tone,
+            note=scene1_note,
+            cue_line=scene1_cue,
+            jump=scene1_jump,
+            jump_hint="会话 / 探板 / gate",
+            checks=scene1_checks,
+            meta=[
+                f"link={link_profile}",
+                f"admission={gate.get('admission_label') or '未设置'}",
+            ],
+        ),
+        cue_scene(
+            scene_id="scene2",
+            number="02",
+            eyebrow="语义回传",
+            title="第二幕 / Current live",
+            status=scene2_status,
+            tone=scene2_tone,
+            note=scene2_note,
+            cue_line=scene2_cue,
+            jump=cue_jump("跳到第二幕", target_id="act2Panel", act_id="act2"),
+            jump_hint="Current 进度与样例画面",
+            checks=scene2_checks,
+            meta=[
+                f"count={current_count_label or '0 / 300'}",
+                f"mode={current_execution_mode or 'pending'}",
+            ],
+        ),
+        cue_scene(
+            scene_id="scene3",
+            number="03",
+            eyebrow="正式对照",
+            title="第三幕 / Compare 与性能口径",
+            status=scene3_status,
+            tone=scene3_tone,
+            note=scene3_note,
+            cue_line=scene3_cue,
+            jump=cue_jump("跳到第三幕", target_id="compareViewerShell", act_id="act3"),
+            jump_hint="Compare viewer 与 performance",
+            checks=scene3_checks,
+            meta=[
+                "同一样例 compare viewer",
+                "4-core headline / 3-core demo",
+            ],
+        ),
+        cue_scene(
+            scene_id="scene4",
+            number="04",
+            eyebrow="故障收口",
+            title="第四幕 / SAFE_STOP 与 archive",
+            status=scene4_status,
+            tone=scene4_tone,
+            note=scene4_note,
+            cue_line=scene4_cue,
+            jump=cue_jump("跳到第四幕", target_id="act4Panel", act_id="act4"),
+            jump_hint="fault / recover / blackbox timeline",
+            checks=scene4_checks,
+            meta=[
+                f"SAFE_STOP={safety_panel.get('safe_stop_state') or 'UNKNOWN'}",
+                f"archive={archive_event_count} events",
+            ],
+        ),
+    ]
+
+    if not access_ready:
+        current_scene = scenes[0]
+        next_action = cue_jump("跳到会话接入", target_id="credentialPanel", primary=True)
+        next_step_note = "先补齐本场会话；之后再由操作员执行探板与 gate 预检。"
+    elif not board_online:
+        current_scene = scenes[0]
+        next_action = cue_jump("跳到第一幕探板", target_id="act1Panel", act_id="act1", primary=True)
+        next_step_note = "先做只读探板确认板端在线；页面不会自动刷新成真机状态。"
+    elif fault_latched or safety_recovered:
+        current_scene = scenes[3]
+        next_action = cue_jump("跳到第四幕 SAFE_STOP", target_id="act4Panel", act_id="act4", primary=True)
+        next_step_note = scene4_note
+    elif not gate_allow:
+        current_scene = scenes[0]
+        next_action = cue_jump("跳到任务票闸机", target_id="jobManifestGateShell", act_id="act1", primary=True)
+        next_step_note = str(gate.get("message") or "先看 gate verdict，再决定是否推进 live。")
+    elif current_running or not current_live_done or current_archive_only:
+        current_scene = scenes[1]
+        next_action = cue_jump("跳到第二幕 Current", target_id="act2Panel", act_id="act2", primary=True)
+        next_step_note = (
+            "由操作员手动启动或继续监看 Current 300 张图在线推进；页面只做进度和证据展示。"
+            if not current_live_done
+            else scene2_note
+        )
+    elif compare_ready:
+        current_scene = scenes[2]
+        next_action = cue_jump("跳到第三幕 Compare", target_id="compareViewerShell", act_id="act3", primary=True)
+        next_step_note = "用同一样例讲 Current / PyTorch 对照，并明确 4-core headline 与 3-core demo 边界。"
+    else:
+        current_scene = scenes[3]
+        next_action = cue_jump("跳到第四幕 SAFE_STOP", target_id="act4Panel", act_id="act4", primary=True)
+        next_step_note = scene4_note
+
+    for item in scenes:
+        item["recommended"] = item["scene_id"] == current_scene["scene_id"]
+
+    return {
+        "mode": "operator_assist_only",
+        "status_label": current_scene["title"],
+        "status_tone": current_scene["tone"],
+        "current_scene_id": current_scene["scene_id"],
+        "current_scene_label": current_scene["title"],
+        "current_scene_tone": current_scene["tone"],
+        "presenter_line": current_scene["cue_line"],
+        "next_step_label": next_action["label"],
+        "next_step_note": next_step_note,
+        "next_action": next_action,
+        "manual_boundary_note": operator_boundary_note,
+        "boundary_note": mode_boundary_note,
+        "quick_jumps": [
+            cue_jump("Mission 总览", target_id="missionPanel"),
+            cue_jump("会话接入", target_id="credentialPanel"),
+            cue_jump("任务票闸机", target_id="jobManifestGateShell", act_id="act1"),
+            cue_jump("第二幕 Current", target_id="act2Panel", act_id="act2"),
+            cue_jump("第三幕 Compare", target_id="compareViewerShell", act_id="act3"),
+            cue_jump("性能口径", target_id="performanceGrid"),
+            cue_jump("第四幕 SAFE_STOP", target_id="act4Panel", act_id="act4"),
+            cue_jump("Blackbox Timeline", target_id="archiveTimelineCard"),
+        ],
+        "scenes": scenes,
+    }
+
+
 def link_profile_catalog() -> dict[str, Any]:
     return build_link_director_catalog()
 
@@ -1014,54 +1441,73 @@ class DashboardState:
             mode_tone = "offline"
             mode_summary = "尚未配置板卡会话，当前只展示证据与预录结果；headline 性能仍引用 4-core Linux performance mode 报告。"
 
+        board_access_public = board_access.to_public_dict()
+        live_payload = {
+            "board_online": board_online,
+            "remoteproc_state": remoteproc_state,
+            "rpmsg_device": rpmsg_device,
+            "guard_state": guard_state,
+            "last_fault_code": last_fault_code,
+            "active_job_id": active_job_id,
+            "total_fault_count": total_fault_count,
+            "trusted_sha": snapshot["project"]["trusted_current_sha"],
+            "target": self._target_label,
+            "runtime": self._runtime_label,
+            "admission": admission,
+            "variant_support": {
+                "current": current_support,
+                "baseline": baseline_support,
+            },
+            "last_probe_at": live_probe.get("requested_at", "") if live_probe else "",
+            "status_source": status_source,
+            "status_note": status_note,
+        }
+        event_spine_payload = {
+            "api_path": "/api/event-spine",
+            "session_id": event_spine["session_id"],
+            "event_count": event_spine["aggregate"]["event_count"],
+            "last_event_at": event_spine["aggregate"]["last_event_at"],
+            "archive_enabled": event_spine["aggregate"]["archive"]["enabled"],
+        }
+        link_director = self.current_link_director_status()
+        job_manifest_gate = self._job_manifest_gate_status(
+            board_access=current_board_access,
+            admission=admission,
+            support=current_support,
+            active_inference=active_inference,
+            control_status=control_status,
+            trusted_sha=self._trusted_current_sha,
+            variant="current",
+        )
+        operator_cue = build_operator_cue(
+            snapshot=snapshot,
+            board_access=board_access_public,
+            live=live_payload,
+            active_inference=active_inference,
+            last_inference=last_inference or {},
+            safety_panel=safety_panel,
+            gate=job_manifest_gate,
+            link_director=link_director,
+            event_spine=event_spine_payload,
+        )
+
         return {
             "generated_at": snapshot["generated_at"],
-            "board_access": board_access.to_public_dict(),
+            "board_access": board_access_public,
             "execution_mode": {
                 "label": mode_label,
                 "tone": mode_tone,
                 "summary": mode_summary,
             },
-            "live": {
-                "board_online": board_online,
-                "remoteproc_state": remoteproc_state,
-                "rpmsg_device": rpmsg_device,
-                "guard_state": guard_state,
-                "last_fault_code": last_fault_code,
-                "active_job_id": active_job_id,
-                "total_fault_count": total_fault_count,
-                "trusted_sha": snapshot["project"]["trusted_current_sha"],
-                "target": self._target_label,
-                "runtime": self._runtime_label,
-                "admission": admission,
-                "variant_support": {
-                    "current": current_support,
-                    "baseline": baseline_support,
-                },
-                "last_probe_at": live_probe.get("requested_at", "") if live_probe else "",
-                "status_source": status_source,
-                "status_note": status_note,
-            },
+            "live": live_payload,
             "active_inference": active_inference,
             "last_inference": last_inference or {},
             "last_fault": last_fault or {},
             "safety_panel": safety_panel,
-            "job_manifest_gate": self._job_manifest_gate_status(
-                board_access=current_board_access,
-                admission=admission,
-                support=current_support,
-                active_inference=active_inference,
-                control_status=control_status,
-                trusted_sha=self._trusted_current_sha,
-                variant="current",
-            ),
-            "event_spine": {
-                "api_path": "/api/event-spine",
-                "session_id": event_spine["session_id"],
-                "event_count": event_spine["aggregate"]["event_count"],
-                "last_event_at": event_spine["aggregate"]["last_event_at"],
-                "archive_enabled": event_spine["aggregate"]["archive"]["enabled"],
-            },
+            "job_manifest_gate": job_manifest_gate,
+            "link_director": link_director,
+            "operator_cue": operator_cue,
+            "event_spine": event_spine_payload,
         }
 
     def current_event_spine(self, *, limit: int = 25) -> dict[str, Any]:

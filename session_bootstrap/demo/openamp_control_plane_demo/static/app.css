@@ -248,6 +248,17 @@ body {
   color: #f7efe5;
 }
 
+.operator-cue-shell {
+  display: grid;
+  gap: 0.9rem;
+  padding: 1rem;
+  border-radius: 22px;
+  border: 1px solid rgba(19, 44, 61, 0.12);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(247, 241, 232, 0.92)),
+    radial-gradient(circle at top right, rgba(13, 122, 105, 0.08), transparent 32%);
+}
+
 .command-strip-head,
 .command-primary-row,
 .command-rollup-head,
@@ -261,13 +272,98 @@ body {
 
 .command-strip-head h3,
 .command-rollup h4,
-.command-scene-card h3 {
+.command-scene-card h3,
+.operator-cue-shell h3,
+.operator-cue-scene-card h4 {
   margin: 0;
   font-family: "Noto Serif SC", "Source Han Serif SC", "STSong", "SimSun", serif;
 }
 
 .command-strip-head h3 {
   font-size: clamp(1.2rem, 2vw, 1.55rem);
+}
+
+.operator-cue-top,
+.operator-cue-actions,
+.operator-cue-scene-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8rem;
+  align-items: start;
+}
+
+.operator-cue-line {
+  margin: 0;
+  font-size: 1rem;
+  color: var(--ink);
+}
+
+.operator-cue-copy {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.operator-cue-scene-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.operator-cue-scene-card {
+  display: grid;
+  gap: 0.7rem;
+  padding: 0.9rem;
+  border-radius: 20px;
+  border: 1px solid rgba(19, 44, 61, 0.1);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.operator-cue-scene-card[data-current="true"] {
+  box-shadow: inset 0 0 0 1px rgba(19, 44, 61, 0.08);
+}
+
+.operator-cue-scene-card[data-tone="online"] {
+  border-color: rgba(13, 122, 105, 0.24);
+}
+
+.operator-cue-scene-card[data-tone="degraded"] {
+  border-color: rgba(163, 106, 8, 0.24);
+}
+
+.operator-cue-scene-card[data-tone="offline"] {
+  border-color: rgba(176, 59, 45, 0.24);
+}
+
+.operator-cue-check-grid,
+.command-scene-checks {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.cue-check-chip {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.55rem;
+  align-items: start;
+  padding: 0.65rem 0.75rem;
+  border-radius: 16px;
+  background: rgba(19, 44, 61, 0.05);
+}
+
+.cue-check-chip strong,
+.cue-check-chip small {
+  display: block;
+}
+
+.cue-check-chip strong {
+  font-size: 0.9rem;
+  color: var(--ink);
+}
+
+.cue-check-chip small {
+  margin-top: 0.15rem;
+  color: var(--muted);
+  line-height: 1.45;
 }
 
 .command-strip .label,
@@ -335,7 +431,8 @@ body {
 
 .command-rollup-note,
 .command-scene-note,
-.command-scene-meta {
+.command-scene-meta,
+.command-scene-cue {
   color: var(--muted);
   font-size: 0.92rem;
 }
@@ -359,6 +456,12 @@ body {
 
 .command-scene-card {
   min-height: 16rem;
+}
+
+.command-scene-cue {
+  padding: 0.7rem 0.8rem;
+  border-radius: 16px;
+  background: rgba(19, 44, 61, 0.05);
 }
 
 .command-scene-number {
@@ -1388,6 +1491,7 @@ select:focus {
 
 @media (max-width: 1080px) {
   .hero,
+  .operator-cue-scene-grid,
   .command-rollup-grid,
   .command-scene-grid,
   .mission-grid,
@@ -1429,6 +1533,7 @@ select:focus {
 
   .hero,
   .act-nav,
+  .operator-cue-scene-grid,
   .command-rollup-grid,
   .command-scene-grid,
   .mission-grid,
@@ -1463,6 +1568,9 @@ select:focus {
   }
 
   .command-strip-head,
+  .operator-cue-top,
+  .operator-cue-actions,
+  .operator-cue-scene-top,
   .command-primary-row,
   .command-rollup-head,
   .command-scene-top,
