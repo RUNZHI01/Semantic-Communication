@@ -127,6 +127,163 @@ def recover_message(guard_state: str, last_fault_code: str) -> str:
     return "已使用当前会话凭据执行 SAFE_STOP，请以当前 guard_state / last_fault_code 为准。"
 
 
+def last_log_entry(entries: Any) -> str:
+    if not isinstance(entries, list):
+        return ""
+    for item in reversed(entries):
+        text = str(item or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def derive_safe_stop_state(
+    *,
+    guard_state: str,
+    last_fault_code: str,
+    last_fault: dict[str, Any] | None,
+) -> tuple[str, str, str]:
+    guard = str(guard_state or "").upper()
+    fault = str(last_fault_code or "").upper()
+    last_status = str((last_fault or {}).get("status") or "").lower()
+    if last_status == "recovered":
+        tone = "online" if fault == "NONE" else "degraded"
+        return (
+            "RECOVERED",
+            tone,
+            "最近一次 SAFE_STOP 收口结果已记录到当前面板镜像；物理 SAFE_STOP 仍由 RTOS/Bare Metal 执行。",
+        )
+    if fault not in {"", "NONE", "UNKNOWN"}:
+        return (
+            "FAULT",
+            "offline",
+            "当前 fault code 仍锁存在面板镜像；Linux UI 不宣称已清除 RTOS/Bare Metal 侧 SAFE_STOP/GPIO。",
+        )
+    if guard == "JOB_ACTIVE":
+        return (
+            "STANDBY",
+            "degraded",
+            "板端当前仍在 JOB_ACTIVE；面板只显示 SAFE_STOP 控制面镜像，不自动触发收口。",
+        )
+    if guard == "READY":
+        return (
+            "IDLE",
+            "online",
+            "当前 guard_state=READY，且没有新的 fault latch；面板显示 SAFE_STOP 待命镜像。",
+        )
+    return (
+        "UNKNOWN",
+        "neutral",
+        "当前 SAFE_STOP 镜像态未知；请以 guard_state / last_fault_code 与正式证据为准。",
+    )
+
+
+def derive_latch_state(*, last_fault_code: str, total_fault_count: int) -> tuple[str, str, str]:
+    fault = str(last_fault_code or "").upper()
+    if fault in {"", "UNKNOWN"}:
+        return (
+            "UNKNOWN",
+            "neutral",
+            "当前没有足够的锁存信息；请以 status_source / status_note 为准。",
+        )
+    if fault != "NONE":
+        return (
+            "LATCHED",
+            "offline",
+            f"last_fault_code={fault} 仍保留在控制面镜像中；fault_count={total_fault_count}。",
+        )
+    if total_fault_count > 0:
+        return (
+            "CLEAR",
+            "degraded",
+            f"当前 last_fault_code 已回到 NONE，但 fault history 计数保留为 {total_fault_count}。",
+        )
+    return (
+        "CLEAR",
+        "online",
+        "当前 last_fault_code=NONE，且没有额外 fault history 计数。",
+    )
+
+
+def build_safety_panel(
+    *,
+    guard_state: str,
+    last_fault_code: str,
+    total_fault_count: int,
+    board_online: bool,
+    status_source: str,
+    status_note: str,
+    last_fault: dict[str, Any] | None,
+) -> dict[str, Any]:
+    safe_stop_state, safe_stop_tone, safe_stop_note = derive_safe_stop_state(
+        guard_state=guard_state,
+        last_fault_code=last_fault_code,
+        last_fault=last_fault,
+    )
+    latch_state, latch_tone, latch_note = derive_latch_state(
+        last_fault_code=last_fault_code,
+        total_fault_count=total_fault_count,
+    )
+    if safe_stop_state == "RECOVERED":
+        panel_label = "SAFE_STOP 已执行"
+        panel_tone = safe_stop_tone
+    elif latch_state == "LATCHED":
+        panel_label = "告警锁存"
+        panel_tone = latch_tone
+    elif board_online:
+        panel_label = "无告警"
+        panel_tone = "online"
+    else:
+        panel_label = "证据镜像"
+        panel_tone = "degraded"
+
+    last_fault_result: dict[str, Any] = {}
+    if last_fault:
+        fault_guard_state = str(last_fault.get("guard_state") or guard_state or "")
+        fault_code = str(last_fault.get("last_fault_code") or last_fault_code or "")
+        last_fault_result = {
+            "status": str(last_fault.get("status") or ""),
+            "execution_mode": str(last_fault.get("execution_mode") or ""),
+            "source_label": str(last_fault.get("source_label") or ""),
+            "message": str(last_fault.get("message") or ""),
+            "guard_state": fault_guard_state,
+            "last_fault_code": fault_code,
+            "status_lamp": str(
+                last_fault.get("status_lamp") or recover_status_lamp(fault_guard_state, fault_code)
+            ),
+            "log_tail": last_log_entry(last_fault.get("log_entries")),
+        }
+
+    ownership_note = (
+        "RTOS/Bare Metal owns physical SAFE_STOP/GPIO; Linux UI is mirror/control surface only."
+    )
+    return {
+        "panel_label": panel_label,
+        "panel_tone": panel_tone,
+        "safe_stop_state": safe_stop_state,
+        "safe_stop_tone": safe_stop_tone,
+        "safe_stop_note": safe_stop_note,
+        "latch_state": latch_state,
+        "latch_tone": latch_tone,
+        "latch_note": latch_note,
+        "guard_state": guard_state,
+        "last_fault_code": last_fault_code,
+        "total_fault_count": total_fault_count,
+        "board_online": board_online,
+        "status_source": status_source,
+        "status_note": status_note,
+        "last_fault_result": last_fault_result,
+        "recover_action": {
+            "action_id": "recover_safe_stop",
+            "label": "SAFE_STOP 收口",
+            "api_path": "/api/recover",
+            "method": "POST",
+            "note": "沿用现有 recover action，不新增 destructive 操作；Linux 只发起控制面 recover。",
+        },
+        "ownership_note": ownership_note,
+    }
+
+
 def link_profile_catalog() -> dict[str, Any]:
     return build_link_director_catalog()
 
@@ -827,6 +984,15 @@ class DashboardState:
             )
 
         board_online = bool(live_probe and live_probe.get("reachable"))
+        safety_panel = build_safety_panel(
+            guard_state=str(guard_state or "UNKNOWN"),
+            last_fault_code=str(last_fault_code or "UNKNOWN"),
+            total_fault_count=self._safe_int(total_fault_count, default=0),
+            board_online=board_online,
+            status_source=status_source,
+            status_note=status_note,
+            last_fault=last_fault or None,
+        )
         if board_online:
             mode_label = "在线模式"
             mode_tone = "online"
@@ -879,6 +1045,7 @@ class DashboardState:
             "active_inference": active_inference,
             "last_inference": last_inference or {},
             "last_fault": last_fault or {},
+            "safety_panel": safety_panel,
             "job_manifest_gate": self._job_manifest_gate_status(
                 board_access=current_board_access,
                 admission=admission,

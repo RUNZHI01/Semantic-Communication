@@ -161,6 +161,131 @@ function missionNote(text) {
   return `<p class="compact-copy mission-note">${escapeHtml(text)}</p>`;
 }
 
+function effectiveSafetyPanel(systemStatus) {
+  const live = systemStatus.live || {};
+  const lastFault = state.faultResult || systemStatus.last_fault || {};
+  const panel = systemStatus.safety_panel || {};
+  if (panel.safe_stop_state) {
+    return {
+      ...panel,
+      last_fault_result: panel.last_fault_result || {},
+      recover_action: panel.recover_action || {},
+    };
+  }
+
+  const lastFaultCode = lastFault.last_fault_code || live.last_fault_code || "UNKNOWN";
+  const recovered = lastFault.status === "recovered";
+  const latched = !["", "NONE", "UNKNOWN"].includes(String(lastFaultCode).toUpperCase());
+  return {
+    panel_label: recovered ? "SAFE_STOP 已执行" : (latched ? "告警锁存" : "无告警"),
+    panel_tone: recovered ? (lastFaultCode === "NONE" ? "online" : "degraded") : (latched ? "offline" : "online"),
+    safe_stop_state: recovered ? "RECOVERED" : (latched ? "FAULT" : "IDLE"),
+    safe_stop_tone: recovered ? (lastFaultCode === "NONE" ? "online" : "degraded") : (latched ? "offline" : "online"),
+    safe_stop_note: recovered
+      ? "最近一次 recover 已记录到当前面板镜像。"
+      : "当前 SAFE_STOP 继续沿用现有控制面语义，不扩展物理 GPIO 所有权。",
+    latch_state: latched ? "LATCHED" : "CLEAR",
+    latch_tone: latched ? "offline" : "online",
+    latch_note: latched ? `last_fault_code=${lastFaultCode}` : "当前没有新的 fault latch。",
+    guard_state: lastFault.guard_state || live.guard_state || "UNKNOWN",
+    last_fault_code: lastFaultCode,
+    total_fault_count: live.total_fault_count ?? 0,
+    board_online: Boolean(live.board_online),
+    status_source: live.status_source || "unknown",
+    status_note: lastFault.message || live.status_note || "",
+    last_fault_result: {
+      status: lastFault.status || "",
+      execution_mode: lastFault.execution_mode || "",
+      source_label: lastFault.source_label || "",
+      message: lastFault.message || "",
+      guard_state: lastFault.guard_state || live.guard_state || "UNKNOWN",
+      last_fault_code: lastFaultCode,
+      status_lamp: lastFault.status_lamp || "",
+      log_tail: lastLogLine(lastFault.log_entries),
+    },
+    recover_action: {
+      action_id: "recover_safe_stop",
+      label: "SAFE_STOP 收口",
+      api_path: "/api/recover",
+      method: "POST",
+      note: "沿用现有 recover action，不新增 destructive 操作。",
+    },
+    ownership_note: "RTOS/Bare Metal owns physical SAFE_STOP/GPIO; Linux UI is mirror/control surface only.",
+  };
+}
+
+function safetyIndicator(label, value, tone = "neutral", note = "") {
+  return `
+    <div class="safety-indicator" data-tone="${escapeHtml(tone)}">
+      <div class="status-dot ${lampClass(tone)}"></div>
+      <div>
+        <span>${escapeHtml(label)}</span>
+        <strong>${escapeHtml(value)}</strong>
+        ${note ? `<small>${escapeHtml(note)}</small>` : ""}
+      </div>
+    </div>
+  `;
+}
+
+function safetyReadout(label, value, note = "") {
+  return `
+    <div class="safety-readout">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+      ${note ? `<small>${escapeHtml(note)}</small>` : ""}
+    </div>
+  `;
+}
+
+function renderSafetyFrontPanel(safetyPanel) {
+  const lastResult = safetyPanel.last_fault_result || {};
+  const recoverAction = safetyPanel.recover_action || {};
+  const lastResultVisible = Boolean(lastResult.status || lastResult.message || lastResult.source_label || lastResult.log_tail);
+  return `
+    <div class="safety-front-panel" data-tone="${escapeHtml(safetyPanel.panel_tone || "neutral")}">
+      <div class="safety-front-top">
+        <div class="safety-big-readout">
+          <span>SAFE_STOP mirror</span>
+          <strong>${escapeHtml(safetyPanel.safe_stop_state || "UNKNOWN")}</strong>
+          <small>${escapeHtml(safetyPanel.safe_stop_note || "")}</small>
+        </div>
+        <div class="safety-indicator-grid">
+          ${safetyIndicator("SAFE_STOP", safetyPanel.safe_stop_state || "UNKNOWN", safetyPanel.safe_stop_tone || "neutral", "Linux UI mirror")}
+          ${safetyIndicator("LATCH", safetyPanel.latch_state || "UNKNOWN", safetyPanel.latch_tone || "neutral", "fault latch")}
+          ${safetyIndicator("BOARD", safetyPanel.board_online ? "ONLINE" : "OFFLINE", safetyPanel.board_online ? "online" : "degraded", safetyPanel.status_source || "status source")}
+          ${safetyIndicator("SOURCE", safetyPanel.status_source || "unknown", safetyPanel.panel_tone || "neutral", "live / evidence")}
+        </div>
+      </div>
+      <div class="safety-readout-grid">
+        ${safetyReadout("guard_state", safetyPanel.guard_state || "UNKNOWN", "控制面 guard_state")}
+        ${safetyReadout("fault code", safetyPanel.last_fault_code || "UNKNOWN", "保留原始 last_fault_code")}
+        ${safetyReadout("fault count", String(safetyPanel.total_fault_count ?? 0), safetyPanel.latch_note || "control plane 计数")}
+        ${safetyReadout("status source", safetyPanel.status_source || "unknown", safetyPanel.status_note || "")}
+      </div>
+      ${lastResultVisible ? `
+        <div class="safety-trace">
+          <div class="label">最近 replay / live 结果</div>
+          <strong>${escapeHtml(lastResult.source_label || lastResult.status || "最近结果")}</strong>
+          <p class="compact-copy">${escapeHtml(lastResult.message || lastResult.log_tail || "当前没有额外 last_fault 结果。")}</p>
+          <div class="status-meta">
+            <span>mode=${escapeHtml(lastResult.execution_mode || "NA")}</span>
+            <span>status=${escapeHtml(lastResult.status || "NA")}</span>
+            <span>guard=${escapeHtml(lastResult.guard_state || safetyPanel.guard_state || "UNKNOWN")}</span>
+            <span>fault=${escapeHtml(lastResult.last_fault_code || safetyPanel.last_fault_code || "UNKNOWN")}</span>
+          </div>
+        </div>
+      ` : ""}
+      <div class="safety-readout-grid">
+        ${safetyReadout("recover action", recoverAction.label || "SAFE_STOP 收口", `${recoverAction.method || "POST"} ${recoverAction.api_path || "/api/recover"}`)}
+        ${safetyReadout("ownership", "Linux UI mirror only", safetyPanel.ownership_note || "")}
+      </div>
+      ${missionNote(recoverAction.note || "")}
+      ${missionNote(safetyPanel.ownership_note || "")}
+      ${missionNote(safetyPanel.status_note || "SAFE_STOP / alarm 继续沿用当前控制面语义，不改协议。")}
+    </div>
+  `;
+}
+
 function renderFlowStrip(stages) {
   if (!stages || !stages.length) return "";
   return `
@@ -558,8 +683,7 @@ function renderMissionDashboard(snapshot, systemStatus) {
     ? activeProgress
     : normalizeProgress(currentResult?.live_progress || null);
   const baselineLiveProgress = normalizeProgress(baselineResult?.live_progress || null);
-  const lastFault = state.faultResult || systemStatus.last_fault || {};
-  const lastFaultCode = lastFault.last_fault_code || live.last_fault_code || "UNKNOWN";
+  const safetyPanel = effectiveSafetyPanel(systemStatus);
   const queueStages = active.running ? activeProgress.stages : (currentResult?.live_progress?.stages || []);
   const currentSampleLabel =
     currentResult?.sample?.label ||
@@ -688,25 +812,8 @@ function renderMissionDashboard(snapshot, systemStatus) {
     ${missionNote(currentResult?.message || baselineResult?.message || snapshot.latest_live_status?.summary || "等待 operator 触发回传 / 重建任务。")}
   `;
 
-  let safetyLabel = "无告警";
-  let safetyTone = "online";
-  if (lastFault.status === "recovered") {
-    safetyLabel = "SAFE_STOP 已执行";
-    safetyTone = lastFault.last_fault_code === "NONE" ? "online" : "degraded";
-  } else if (String(lastFaultCode).toUpperCase() !== "NONE") {
-    safetyLabel = "告警锁存";
-    safetyTone = "offline";
-  }
-  setStatusBadge("safetyStatusBadge", safetyLabel, safetyTone);
-  document.getElementById("safetyStatusModule").innerHTML = `
-    <div class="mission-metrics">
-      ${missionMetric("guard_state", lastFault.guard_state || live.guard_state || "UNKNOWN", "当前板端安全态")}
-      ${missionMetric("last_fault_code", lastFaultCode, lastFault.source_label || live.status_source || "formal evidence / live status")}
-      ${missionMetric("fault_count", String(live.total_fault_count ?? 0), "control plane 统计值")}
-      ${missionMetric("SAFE_STOP", lastFault.status === "recovered" ? "已执行" : "待命 / 手动触发", lastFault.execution_mode || "live / replay")}
-    </div>
-    ${missionNote(lastFault.message || live.status_note || "SAFE_STOP / alarm 继续沿用当前控制面语义，不改协议。")}
-  `;
+  setStatusBadge("safetyStatusBadge", safetyPanel.panel_label || "安全面板", safetyPanel.panel_tone || "neutral");
+  document.getElementById("safetyStatusModule").innerHTML = renderSafetyFrontPanel(safetyPanel);
 
   const archiveHasTimeline = Boolean(state.archiveSession?.timeline?.length);
   setStatusBadge(
