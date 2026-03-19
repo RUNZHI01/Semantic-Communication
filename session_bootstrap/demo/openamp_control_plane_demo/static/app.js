@@ -10,6 +10,7 @@ const state = {
   faultResult: null,
   activeInferenceJobId: null,
   activeInferenceVariant: "",
+  jobManifestGatePending: false,
 };
 
 function docHref(path) {
@@ -668,6 +669,52 @@ function renderAct1(snapshot, systemStatus) {
     .join("");
 }
 
+function renderJobManifestGate(snapshot, systemStatus) {
+  const gate = systemStatus.job_manifest_gate || {};
+  const contract = snapshot.mission?.job_manifest_gate || {};
+  const button = document.getElementById("previewManifestGateButton");
+  button.disabled = state.jobManifestGatePending;
+  button.textContent = state.jobManifestGatePending ? "正在执行 demo-only 票据预检..." : "demo-only 票据预检";
+
+  const reasons = gate.reasons || [];
+  const wireFields = gate.wire_fields || [];
+  const contextFields = gate.context_fields || [];
+  const evidence = gate.evidence || contract.evidence || [];
+  const reasonItems = reasons.length
+    ? reasons.map((item) => `<li>${escapeHtml(item)}</li>`).join("")
+    : `<li>${escapeHtml(gate.message || contract.summary || "当前暂无额外 gate 原因说明。")}</li>`;
+
+  document.getElementById("jobManifestGateCard").innerHTML = `
+    <div class="inline-actions">
+      <div class="status-pill ${toneClass(gate.verdict || gate.tone || "neutral")}">${escapeHtml(gate.verdict_label || "等待状态")}</div>
+      <span class="status-inline">${escapeHtml(gate.label || contract.title || "Job Manifest Gate")}</span>
+    </div>
+    <p class="compact-copy">${escapeHtml(gate.message || contract.summary || "")}</p>
+    <div class="status-meta">
+      <span>variant=${escapeHtml(gate.variant_label || "Current")}</span>
+      <span>admission=${escapeHtml(gate.admission_label || "未设置")}</span>
+      <span>status_source=${escapeHtml(gate.status_source || "demo_snapshot")}</span>
+      <span>wire verdict=${escapeHtml(gate.status || "draft")}</span>
+    </div>
+    <ul class="list-plain">${reasonItems}</ul>
+    <div class="credential-chip-row">
+      ${wireFields
+        .slice(0, 5)
+        .map((field) => renderFieldChip(field.label, field.value, field.source))
+        .join("")}
+    </div>
+    <div class="credential-chip-row">
+      ${contextFields
+        .slice(0, 3)
+        .map((field) => renderFieldChip(field.label, field.value, field.source))
+        .join("")}
+    </div>
+    <p class="compact-copy">${escapeHtml(gate.protocol_boundary_note || contract.protocol_boundary_note || "")}</p>
+    <p class="compact-copy">${escapeHtml(gate.demo_only_note || "当前页面仅做 operator-side 闸机可视化，不宣称协议或板端执行已变更。")}</p>
+    ${renderLinks(evidence)}
+  `;
+}
+
 function renderSampleOptions(snapshot) {
   const select = document.getElementById("imageSelect");
   if (select.options.length) return;
@@ -1120,6 +1167,7 @@ function renderAll() {
   renderMissionDashboard(state.snapshot, state.systemStatus);
   renderBoardAccess(state.systemStatus);
   renderAct1(state.snapshot, state.systemStatus);
+  renderJobManifestGate(state.snapshot, state.systemStatus);
   renderSampleOptions(state.snapshot);
   renderInference(state.currentResult);
   renderComparison(state.snapshot);
@@ -1222,6 +1270,27 @@ async function switchLinkDirectorProfile(profileId) {
     setFeedback(error.message, "error");
   } finally {
     state.linkDirectorPending = false;
+    renderAll();
+  }
+}
+
+async function previewJobManifestGate() {
+  if (state.jobManifestGatePending) return;
+  try {
+    state.jobManifestGatePending = true;
+    renderAll();
+    setFeedback("正在执行 demo-only 任务票闸机预检...", "warning");
+    const result = await fetchJSON("/api/job-manifest-gate/preview", {
+      method: "POST",
+      body: JSON.stringify({ variant: "current" }),
+    });
+    await refreshAll();
+    setFeedback(result.message, result.gate?.verdict === "allow" ? "success" : "warning");
+    switchAct("act1");
+  } catch (error) {
+    setFeedback(error.message, "error");
+  } finally {
+    state.jobManifestGatePending = false;
     renderAll();
   }
 }
@@ -1346,6 +1415,9 @@ function bindEvents() {
   });
   document.getElementById("saveAccessButton").addEventListener("click", () => {
     saveBoardAccess();
+  });
+  document.getElementById("previewManifestGateButton").addEventListener("click", () => {
+    previewJobManifestGate();
   });
   document.getElementById("runCurrentButton").addEventListener("click", () => {
     runCurrentInference();

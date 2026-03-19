@@ -653,6 +653,163 @@ class DemoHTTPServerTest(unittest.TestCase):
                 with self.subTest(expected_type=expected_type):
                     self.assertIn(expected_type, event_types)
 
+    def test_job_manifest_gate_preview_endpoint_tracks_preview_only_allow_events(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state = DashboardState(None, 30.0, probe_cache_path=None, event_archive_root=temp_dir)
+            request_json(
+                state,
+                "POST",
+                "/api/session/board-access",
+                body=json.dumps({"password": "demo-pass"}).encode("utf-8"),
+            )
+
+            with (
+                patch(
+                    "server.describe_demo_admission",
+                    return_value={
+                        "status": "ready",
+                        "mode": "signed_manifest_v1",
+                        "label": "Signed manifest v1",
+                        "tone": "online",
+                        "bundle_path": "/tmp/openamp_demo_signed_admission/current.bundle.json",
+                        "public_key_path": "/tmp/openamp_demo_signed_admission/current.public.pem",
+                        "manifest_sha256": "a" * 64,
+                        "artifact_sha256": "b" * 64,
+                        "key_id": "demo-live-20260316",
+                        "verified_locally": True,
+                        "artifact_match": True,
+                        "note": "key_id=demo-live-20260316 | bundle=current.bundle.json",
+                    },
+                ),
+                patch(
+                    "server.describe_demo_variant_support",
+                    return_value={
+                        "variant": "current",
+                        "status": "ready",
+                        "mode": "signed_manifest_v1",
+                        "label": "Current signed live 已支持",
+                        "tone": "online",
+                        "note": "Current signed-admission live path is supported.",
+                        "supported": True,
+                        "launch_allowed": True,
+                    },
+                ),
+                patch(
+                    "server.query_live_status",
+                    return_value={
+                        "status": "success",
+                        "guard_state": "READY",
+                        "active_job_id": 0,
+                        "last_fault_code": "NONE",
+                        "total_fault_count": 0,
+                        "logs": ["[12:00:00] STATUS_RESP: guard=READY / fault=NONE"],
+                    },
+                ),
+            ):
+                preview_status, _, preview_payload = request_json(
+                    state,
+                    "POST",
+                    "/api/job-manifest-gate/preview",
+                    body=json.dumps({"variant": "current"}).encode("utf-8"),
+                )
+                event_status, _, event_payload = request_json(state, "GET", "/api/event-spine?limit=10")
+
+        self.assertEqual(preview_status, 200)
+        self.assertEqual(preview_payload["status"], "ok")
+        self.assertTrue(preview_payload["preview_only"])
+        self.assertEqual(preview_payload["gate"]["verdict"], "allow")
+        self.assertIn("未发送 JOB_REQ", preview_payload["message"])
+        self.assertEqual(event_status, 200)
+        self.assertEqual(event_payload["aggregate"]["jobs"]["submitted_count"], 0)
+        self.assertEqual(event_payload["aggregate"]["jobs"]["admitted_count"], 0)
+        self.assertEqual(event_payload["aggregate"]["jobs"]["preview_submitted_count"], 1)
+        self.assertEqual(event_payload["aggregate"]["jobs"]["preview_admitted_count"], 1)
+        self.assertEqual(event_payload["aggregate"]["jobs"]["preview_rejected_count"], 0)
+        self.assertEqual(event_payload["aggregate"]["heartbeat"]["status"], "unknown")
+        event_types = [item["type"] for item in event_payload["recent_events"]]
+        self.assertIn("JOB_SUBMITTED", event_types)
+        self.assertIn("JOB_ADMITTED", event_types)
+        self.assertIn("ARCHIVE_SNAPSHOT_WRITTEN", event_types)
+        self.assertNotIn("JOB_STARTED", event_types)
+        self.assertNotIn("HEARTBEAT_OK", event_types)
+
+    def test_job_manifest_gate_preview_endpoint_tracks_preview_only_rejection_when_board_busy(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state = DashboardState(None, 30.0, probe_cache_path=None, event_archive_root=temp_dir)
+            request_json(
+                state,
+                "POST",
+                "/api/session/board-access",
+                body=json.dumps({"password": "demo-pass"}).encode("utf-8"),
+            )
+
+            with (
+                patch(
+                    "server.describe_demo_admission",
+                    return_value={
+                        "status": "ready",
+                        "mode": "signed_manifest_v1",
+                        "label": "Signed manifest v1",
+                        "tone": "online",
+                        "bundle_path": "/tmp/openamp_demo_signed_admission/current.bundle.json",
+                        "public_key_path": "/tmp/openamp_demo_signed_admission/current.public.pem",
+                        "manifest_sha256": "a" * 64,
+                        "artifact_sha256": "b" * 64,
+                        "key_id": "demo-live-20260316",
+                        "verified_locally": True,
+                        "artifact_match": True,
+                        "note": "key_id=demo-live-20260316 | bundle=current.bundle.json",
+                    },
+                ),
+                patch(
+                    "server.describe_demo_variant_support",
+                    return_value={
+                        "variant": "current",
+                        "status": "ready",
+                        "mode": "signed_manifest_v1",
+                        "label": "Current signed live 已支持",
+                        "tone": "online",
+                        "note": "Current signed-admission live path is supported.",
+                        "supported": True,
+                        "launch_allowed": True,
+                    },
+                ),
+                patch(
+                    "server.query_live_status",
+                    return_value={
+                        "status": "success",
+                        "guard_state": "JOB_ACTIVE",
+                        "active_job_id": 8093,
+                        "last_fault_code": "DUPLICATE_JOB_ID",
+                        "total_fault_count": 1,
+                        "logs": ["[12:00:00] STATUS_RESP: guard=JOB_ACTIVE"],
+                    },
+                ),
+            ):
+                preview_status, _, preview_payload = request_json(
+                    state,
+                    "POST",
+                    "/api/job-manifest-gate/preview",
+                    body=json.dumps({"variant": "current"}).encode("utf-8"),
+                )
+                event_status, _, event_payload = request_json(state, "GET", "/api/event-spine?limit=10")
+
+        self.assertEqual(preview_status, 200)
+        self.assertEqual(preview_payload["status"], "ok")
+        self.assertEqual(preview_payload["gate"]["verdict"], "deny")
+        self.assertIn("guard_state=JOB_ACTIVE", " ".join(preview_payload["gate"]["reasons"]))
+        self.assertIn("未放行", preview_payload["message"])
+        self.assertEqual(event_status, 200)
+        self.assertEqual(event_payload["aggregate"]["jobs"]["submitted_count"], 0)
+        self.assertEqual(event_payload["aggregate"]["jobs"]["rejected_count"], 0)
+        self.assertEqual(event_payload["aggregate"]["jobs"]["preview_submitted_count"], 1)
+        self.assertEqual(event_payload["aggregate"]["jobs"]["preview_admitted_count"], 0)
+        self.assertEqual(event_payload["aggregate"]["jobs"]["preview_rejected_count"], 1)
+        event_types = [item["type"] for item in event_payload["recent_events"]]
+        self.assertIn("JOB_SUBMITTED", event_types)
+        self.assertIn("JOB_REJECTED", event_types)
+        self.assertNotIn("JOB_ADMITTED", event_types)
+
     def test_system_status_endpoint_preloads_repo_defaults_without_password(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
         expected_env_file = state._board_access.env_file.relative_to(REPO_ROOT).as_posix()
@@ -777,6 +934,53 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(payload["live"]["variant_support"]["current"]["label"], "Current signed live 已支持")
         self.assertEqual(payload["live"]["variant_support"]["baseline"]["label"], "PyTorch legacy live")
         self.assertTrue(payload["live"]["variant_support"]["baseline"]["launch_allowed"])
+        self.assertEqual(payload["job_manifest_gate"]["admission_mode"], "signed_manifest_v1")
+        self.assertEqual(payload["job_manifest_gate"]["variant"], "current")
+
+    def test_job_manifest_gate_endpoint_returns_current_gate_details(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+
+        with (
+            patch(
+                "server.describe_demo_admission",
+                return_value={
+                    "status": "ready",
+                    "mode": "signed_manifest_v1",
+                    "label": "Signed manifest v1",
+                    "tone": "online",
+                    "bundle_path": "/tmp/openamp_demo_signed_admission/current.bundle.json",
+                    "public_key_path": "/tmp/openamp_demo_signed_admission/current.public.pem",
+                    "manifest_sha256": "a" * 64,
+                    "artifact_sha256": "b" * 64,
+                    "key_id": "demo-live-20260316",
+                    "verified_locally": True,
+                    "artifact_match": True,
+                    "note": "key_id=demo-live-20260316 | bundle=current.bundle.json",
+                },
+            ),
+            patch(
+                "server.describe_demo_variant_support",
+                return_value={
+                    "variant": "current",
+                    "status": "ready",
+                    "mode": "signed_manifest_v1",
+                    "label": "Current signed live 已支持",
+                    "tone": "online",
+                    "note": "Current signed-admission live path is supported.",
+                    "supported": True,
+                    "launch_allowed": True,
+                },
+            ),
+        ):
+            status, _, payload = request_json(state, "GET", "/api/job-manifest-gate")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["gate"]["variant"], "current")
+        self.assertEqual(payload["gate"]["admission_mode"], "signed_manifest_v1")
+        self.assertEqual(payload["gate"]["verdict"], "hold")
+        self.assertTrue(any("missing password" in reason for reason in payload["gate"]["reasons"]))
+        self.assertIn("wire schema", payload["gate"]["protocol_boundary_note"])
 
     def test_system_status_endpoint_surfaces_running_active_inference(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
