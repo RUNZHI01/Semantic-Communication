@@ -1136,6 +1136,79 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertTrue(payload["board_access"]["has_password"])
         self.assertNotIn("password", payload["board_access"])
 
+    def test_system_status_endpoint_derives_safety_panel_from_live_recover_result(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        state._last_live_probe = live_probe_payload("2026-03-19T18:42:00+0800", "board reachable")
+        state._last_control_status = {
+            "status": "success",
+            "guard_state": "READY",
+            "last_fault_code": "HEARTBEAT_TIMEOUT",
+            "active_job_id": 0,
+            "total_fault_count": 3,
+        }
+        state._last_fault_result = {
+            "fault_type": "recover",
+            "status": "recovered",
+            "status_category": "success",
+            "execution_mode": "live",
+            "source_label": "真机 SAFE_STOP 收口",
+            "message": "板端已回到 READY；last_fault_code 保留最近故障证据。",
+            "guard_state": "READY",
+            "last_fault_code": "HEARTBEAT_TIMEOUT",
+            "status_lamp": "yellow",
+            "log_entries": ["[02:36:22] ◀ STATUS_RESP: READY，last_fault=HEARTBEAT_TIMEOUT"],
+        }
+
+        status, _, payload = request_json(state, "GET", "/api/system-status")
+
+        self.assertEqual(status, 200)
+        self.assertIn("safety_panel", payload)
+        self.assertEqual(payload["safety_panel"]["panel_label"], "SAFE_STOP 已执行")
+        self.assertEqual(payload["safety_panel"]["safe_stop_state"], "RECOVERED")
+        self.assertEqual(payload["safety_panel"]["latch_state"], "LATCHED")
+        self.assertEqual(payload["safety_panel"]["guard_state"], "READY")
+        self.assertEqual(payload["safety_panel"]["last_fault_code"], "HEARTBEAT_TIMEOUT")
+        self.assertEqual(payload["safety_panel"]["total_fault_count"], 3)
+        self.assertTrue(payload["safety_panel"]["board_online"])
+        self.assertEqual(payload["safety_panel"]["status_source"], "live_control")
+        self.assertEqual(payload["safety_panel"]["status_note"], "已缓存最近一次 RPMsg 控制面读数。")
+        self.assertEqual(payload["safety_panel"]["last_fault_result"]["execution_mode"], "live")
+        self.assertEqual(payload["safety_panel"]["last_fault_result"]["source_label"], "真机 SAFE_STOP 收口")
+        self.assertEqual(
+            payload["safety_panel"]["last_fault_result"]["log_tail"],
+            "[02:36:22] ◀ STATUS_RESP: READY，last_fault=HEARTBEAT_TIMEOUT",
+        )
+        self.assertEqual(payload["safety_panel"]["recover_action"]["api_path"], "/api/recover")
+        self.assertEqual(payload["safety_panel"]["recover_action"]["method"], "POST")
+        self.assertIn(
+            "RTOS/Bare Metal owns physical SAFE_STOP/GPIO; Linux UI is mirror/control surface only.",
+            payload["safety_panel"]["ownership_note"],
+        )
+
+    def test_system_status_endpoint_derives_safety_panel_from_live_status_without_last_fault_result(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        state._last_live_probe = live_probe_payload("2026-03-19T18:45:00+0800", "board reachable")
+        state._last_control_status = {
+            "status": "success",
+            "guard_state": "JOB_ACTIVE",
+            "last_fault_code": "NONE",
+            "active_job_id": 8093,
+            "total_fault_count": 0,
+        }
+
+        status, _, payload = request_json(state, "GET", "/api/system-status")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["safety_panel"]["panel_label"], "无告警")
+        self.assertEqual(payload["safety_panel"]["safe_stop_state"], "STANDBY")
+        self.assertEqual(payload["safety_panel"]["latch_state"], "CLEAR")
+        self.assertEqual(payload["safety_panel"]["guard_state"], "JOB_ACTIVE")
+        self.assertEqual(payload["safety_panel"]["last_fault_code"], "NONE")
+        self.assertEqual(payload["safety_panel"]["total_fault_count"], 0)
+        self.assertEqual(payload["safety_panel"]["last_fault_result"], {})
+        self.assertEqual(payload["safety_panel"]["recover_action"]["label"], "SAFE_STOP 收口")
+        self.assertIn("不会自动 SAFE_STOP", payload["safety_panel"]["status_note"])
+
     def test_system_status_endpoint_includes_demo_admission_summary(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
 
@@ -2094,6 +2167,10 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertIn('fetchJSON("/api/archive/sessions?limit=25")', body)
         self.assertIn('fetchJSON(`/api/archive/session?session_id=${encodeURIComponent(nextArchiveSessionId)}&limit=25`)', body)
         self.assertIn('fetchJSON("/api/link-director/profile"', body)
+        self.assertIn("effectiveSafetyPanel", body)
+        self.assertIn("renderSafetyFrontPanel", body)
+        self.assertIn("systemStatus.safety_panel", body)
+        self.assertIn('"/api/recover"', body)
         self.assertIn("selectedCompareViewerSample", body)
         self.assertIn('document.getElementById("compareViewerBoard")', body)
 
