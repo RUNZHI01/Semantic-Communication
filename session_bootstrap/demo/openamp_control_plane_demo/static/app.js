@@ -1,6 +1,8 @@
 const state = {
   snapshot: null,
   systemStatus: null,
+  linkDirectorStatus: null,
+  linkDirectorPending: false,
   activeAct: "act1",
   selectedImageIndex: 0,
   currentResult: null,
@@ -180,6 +182,39 @@ function latestResultForVariant(variant) {
   }
   const lastInference = state.systemStatus?.last_inference || {};
   return lastInference.variant === variant ? lastInference : null;
+}
+
+function effectiveLinkDirectorStatus(snapshot) {
+  const missionDirector = snapshot?.mission?.link_director || {};
+  const fallbackSelectedId = state.linkDirectorStatus?.selected_profile_id || "normal";
+  const profiles = (state.linkDirectorStatus?.profiles || missionDirector.profiles || []).map((profile) => ({
+    ...profile,
+    active: profile.active !== undefined ? profile.active : profile.profile_id === fallbackSelectedId,
+  }));
+  const selectedProfile = state.linkDirectorStatus?.selected_profile
+    || profiles.find((profile) => profile.active)
+    || profiles.find((profile) => profile.profile_id === fallbackSelectedId)
+    || profiles[0]
+    || {};
+  return {
+    status: state.linkDirectorStatus?.status || "idle",
+    label: state.linkDirectorStatus?.label || "导演台待命",
+    tone: state.linkDirectorStatus?.tone || selectedProfile.tone || "neutral",
+    backend_binding: state.linkDirectorStatus?.backend_binding || missionDirector.backend_status || "ui_scaffold_only",
+    backend_status: state.linkDirectorStatus?.backend_status || missionDirector.backend_status || "ui_scaffold_only",
+    summary: state.linkDirectorStatus?.summary || missionDirector.summary || "",
+    plane_split_note: state.linkDirectorStatus?.plane_split_note || missionDirector.plane_split_note || "",
+    mode_boundary_note: state.linkDirectorStatus?.mode_boundary_note || snapshot?.mission?.mode_split_note || "",
+    truth_note: state.linkDirectorStatus?.truth_note || "当前仅记录导演台预案；live 控制面与证据读数继续如实显示。",
+    selected_profile_id: state.linkDirectorStatus?.selected_profile_id || selectedProfile.profile_id || "normal",
+    selected_profile_label: state.linkDirectorStatus?.selected_profile_label || selectedProfile.label || "正常链路",
+    selected_profile: selectedProfile,
+    profiles,
+    last_applied_at: state.linkDirectorStatus?.last_applied_at || "",
+    last_operator_action: state.linkDirectorStatus?.last_operator_action || missionDirector.summary || "",
+    change_applied: state.linkDirectorStatus?.change_applied,
+    status_message: state.linkDirectorStatus?.status_message || "",
+  };
 }
 
 function lastLogLine(entries) {
@@ -385,6 +420,10 @@ function renderBoardAccess(systemStatus) {
 function renderMissionDashboard(snapshot, systemStatus) {
   const mission = snapshot.mission || {};
   const live = systemStatus.live || {};
+  const linkDirector = effectiveLinkDirectorStatus(snapshot);
+  const selectedLinkProfile = linkDirector.selected_profile || {};
+  const simulatedMetrics = selectedLinkProfile.simulated_metrics || {};
+  const futureBinding = selectedLinkProfile.future_binding || {};
   const active = systemStatus.active_inference || {};
   const activeProgress = normalizeProgress(active.progress || null);
   const currentResult = latestResultForVariant("current");
@@ -450,15 +489,46 @@ function renderMissionDashboard(snapshot, systemStatus) {
     currentPathTone = "degraded";
   }
 
-  setStatusBadge("linkStatusBadge", currentPathLabel, currentPathTone);
+  setStatusBadge(
+    "linkStatusBadge",
+    `导演台 ${linkDirector.selected_profile_label || "正常链路"}`,
+    linkDirector.tone || currentPathTone
+  );
   document.getElementById("linkStatusModule").innerHTML = `
+    <div class="inline-actions">
+      <div class="status-pill ${toneClass(linkDirector.tone || currentPathTone)}">${escapeHtml(linkDirector.selected_profile_label || "正常链路")}</div>
+      <span class="status-inline">${escapeHtml(linkDirector.label || "导演台待命")}</span>
+    </div>
     <div class="mission-metrics">
       ${missionMetric("控制面", live.board_online ? "OpenAMP / RPMsg 在线" : "证据 / 降级态", live.status_note || "当前不会改写 lower layer 协议")}
       ${missionMetric("Current 数据面", currentPathLabel, currentResult?.source_label || "等待本轮 live 或归档展示")}
-      ${missionMetric("PyTorch 参考", snapshot.latest_live_status?.baseline?.completed || "archive", snapshot.latest_live_status?.baseline?.note || "reference archive")}
-      ${missionMetric("口径分层", "4-core headline / 3-core demo", "headline performance vs operator live mode")}
+      ${missionMetric("导演台预案", linkDirector.selected_profile_label || "正常链路", selectedLinkProfile.summary || linkDirector.summary || "当前仅更新导演台态势")}
+      ${missionMetric("预留绑定", futureBinding.netem || "未绑定 tc/netem", `RTT ${simulatedMetrics.rtt_ms ?? "NA"} ms / jitter ${simulatedMetrics.jitter_ms ?? "NA"} ms / loss ${simulatedMetrics.loss_pct ?? "NA"}%`)}
     </div>
-    ${missionNote(`${mission.control_plane_note || ""} ${mission.data_plane_note || ""}`.trim())}
+    <div class="status-meta">
+      <span>绑定状态=${escapeHtml(linkDirector.backend_binding || "ui_scaffold_only")}</span>
+      <span>物理预案=${escapeHtml(futureBinding.physical || "未绑定物理弱网设备")}</span>
+      <span>模拟断续=${escapeHtml(simulatedMetrics.outage || "无")}</span>
+      <span>${escapeHtml(linkDirector.last_applied_at ? `最近切换=${linkDirector.last_applied_at}` : "最近切换=尚未切换")}</span>
+    </div>
+    <div class="inline-actions">
+      ${(linkDirector.profiles || [])
+        .map(
+          (profile) => `
+            <button
+              class="button ${profile.active ? "button-primary" : "button-secondary"}"
+              type="button"
+              data-link-profile-id="${escapeHtml(profile.profile_id)}"
+              ${(state.linkDirectorPending || profile.active) ? "disabled" : ""}
+            >${escapeHtml(profile.label)}</button>
+          `
+        )
+        .join("")}
+    </div>
+    ${missionNote(linkDirector.status_message || linkDirector.last_operator_action || linkDirector.summary || "")}
+    ${missionNote(
+      `${mission.control_plane_note || ""} ${mission.data_plane_note || ""} ${linkDirector.truth_note || ""} ${linkDirector.plane_split_note || ""} ${linkDirector.mode_boundary_note || mission.mode_split_note || ""}`.trim()
+    )}
   `;
 
   const currentCountLabel =
@@ -1071,12 +1141,14 @@ function switchAct(actId) {
 }
 
 async function refreshAll() {
-  const [snapshot, systemStatus] = await Promise.all([
+  const [snapshot, systemStatus, linkDirectorStatus] = await Promise.all([
     fetchJSON("/api/snapshot"),
     fetchJSON("/api/system-status"),
+    fetchJSON("/api/link-director"),
   ]);
   state.snapshot = snapshot;
   state.systemStatus = systemStatus;
+  state.linkDirectorStatus = linkDirectorStatus;
   renderAll();
 }
 
@@ -1126,6 +1198,31 @@ async function probeBoard() {
     switchAct("act1");
   } catch (error) {
     setFeedback(error.message, "error");
+  }
+}
+
+async function switchLinkDirectorProfile(profileId) {
+  if (!profileId || state.linkDirectorPending) return;
+  try {
+    state.linkDirectorPending = true;
+    renderAll();
+    setFeedback("正在切换导演台弱网预案...", "warning");
+    const payload = await fetchJSON("/api/link-director/profile", {
+      method: "POST",
+      body: JSON.stringify({ profile_id: profileId }),
+    });
+    state.linkDirectorStatus = payload;
+    renderAll();
+    await refreshAll();
+    setFeedback(
+      payload.status_message || payload.last_operator_action || "导演台预案已更新。",
+      payload.change_applied === false ? "warning" : "success"
+    );
+  } catch (error) {
+    setFeedback(error.message, "error");
+  } finally {
+    state.linkDirectorPending = false;
+    renderAll();
   }
 }
 
@@ -1274,6 +1371,11 @@ function bindEvents() {
   });
   document.getElementById("imageSelect").addEventListener("change", (event) => {
     state.selectedImageIndex = Number(event.target.value || 0);
+  });
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-link-profile-id]");
+    if (!button) return;
+    switchLinkDirectorProfile(button.dataset.linkProfileId);
   });
 }
 

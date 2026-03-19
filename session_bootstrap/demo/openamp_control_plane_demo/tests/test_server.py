@@ -381,6 +381,96 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(headers["cache-control"], "no-store")
         self.assertEqual(payload, {"status": "ok"})
 
+    def test_link_director_status_endpoint_returns_default_scaffold_state(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+
+        status, headers, payload = request_json(state, "GET", "/api/link-director")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["content-type"], "application/json; charset=utf-8")
+        self.assertEqual(headers["cache-control"], "no-store")
+        self.assertEqual(payload["selected_profile_id"], "normal")
+        self.assertEqual(payload["selected_profile_label"], "正常链路")
+        self.assertEqual(payload["selected_profile"]["profile_id"], "normal")
+        self.assertEqual(payload["backend_binding"], "ui_scaffold_only")
+        self.assertEqual(payload["backend_status"], "ui_scaffold_only")
+        self.assertIn("不执行 tc/netem", payload["summary"])
+        self.assertIn("live 控制面与证据读数继续如实显示", payload["truth_note"])
+
+    def test_link_director_profile_endpoint_switches_profile_and_emits_event(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state = DashboardState(None, 30.0, probe_cache_path=None, event_archive_root=temp_dir)
+
+            status, headers, payload = request_json(
+                state,
+                "POST",
+                "/api/link-director/profile",
+                body=json.dumps({"profile_id": "lossy"}).encode("utf-8"),
+            )
+            current_status, _, current_payload = request_json(state, "GET", "/api/link-director")
+            event_status, _, event_payload = request_json(state, "GET", "/api/event-spine?limit=10")
+            archive = event_payload["aggregate"]["archive"]
+            events_path = Path(archive["events_jsonl"])
+            archived_events = [
+                json.loads(line)
+                for line in events_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["content-type"], "application/json; charset=utf-8")
+        self.assertTrue(payload["change_applied"])
+        self.assertEqual(payload["previous_profile_id"], "normal")
+        self.assertEqual(payload["selected_profile_id"], "lossy")
+        self.assertEqual(payload["selected_profile_label"], "高丢包")
+        self.assertIn("未执行 tc/netem", payload["status_message"])
+        self.assertEqual(current_status, 200)
+        self.assertEqual(current_payload["selected_profile_id"], "lossy")
+        self.assertEqual(event_status, 200)
+        self.assertEqual(event_payload["aggregate"]["link_profile"]["selected_profile_id"], "lossy")
+        self.assertEqual(event_payload["aggregate"]["link_profile"]["selected_profile_label"], "高丢包")
+        event_types = [item["type"] for item in event_payload["recent_events"]]
+        self.assertIn("LINK_PROFILE_CHANGED", event_types)
+        self.assertIn("ARCHIVE_SNAPSHOT_WRITTEN", event_types)
+        link_profile_events = [event for event in archived_events if event["type"] == "LINK_PROFILE_CHANGED"]
+        self.assertEqual(len(link_profile_events), 1)
+        self.assertEqual(link_profile_events[0]["data"]["profile_id"], "lossy")
+        self.assertEqual(link_profile_events[0]["data"]["previous_profile_id"], "normal")
+
+    def test_link_director_profile_endpoint_is_honest_noop_when_profile_is_unchanged(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state = DashboardState(None, 30.0, probe_cache_path=None, event_archive_root=temp_dir)
+
+            status, _, payload = request_json(
+                state,
+                "POST",
+                "/api/link-director/profile",
+                body=json.dumps({"profile_id": "normal"}).encode("utf-8"),
+            )
+            event_status, _, event_payload = request_json(state, "GET", "/api/event-spine?limit=10")
+
+        self.assertEqual(status, 200)
+        self.assertFalse(payload["change_applied"])
+        self.assertEqual(payload["selected_profile_id"], "normal")
+        self.assertIn("UI/control-plane scaffold", payload["status_message"])
+        self.assertEqual(event_status, 200)
+        self.assertEqual(event_payload["aggregate"]["event_count"], 0)
+        self.assertEqual(event_payload["recent_events"], [])
+
+    def test_link_director_profile_endpoint_rejects_unsupported_profiles(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+
+        status, headers, payload = request_json(
+            state,
+            "POST",
+            "/api/link-director/profile",
+            body=json.dumps({"profile_id": "not-real"}).encode("utf-8"),
+        )
+
+        self.assertEqual(status, 400)
+        self.assertEqual(headers["content-type"], "application/json; charset=utf-8")
+        self.assertEqual(payload, {"status": "error", "message": "unsupported profile_id"})
+
     def test_event_spine_endpoint_tracks_live_inference_completion_and_archive(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             state = DashboardState(None, 30.0, probe_cache_path=None, event_archive_root=temp_dir)
@@ -1536,6 +1626,8 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertIn("const state = {", body)
         self.assertIn('fetchJSON("/api/snapshot")', body)
         self.assertIn('fetchJSON("/api/system-status")', body)
+        self.assertIn('fetchJSON("/api/link-director")', body)
+        self.assertIn('fetchJSON("/api/link-director/profile"', body)
 
     def test_app_css_serves_dashboard_stylesheet(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
