@@ -47,6 +47,11 @@ _ARTIFACT_MISMATCH_PATTERNS = (
     "artifact_sha256 mismatch",
 )
 
+_BOARD_BUSY_PATTERNS = (
+    "duplicate_job_id",
+    "job_active",
+)
+
 _MESSAGE_TEMPLATES = {
     "probe": {
         "auth_error": "板卡 SSH 认证失败，请检查用户名、密码或 SSH 端口设置。",
@@ -58,6 +63,7 @@ _MESSAGE_TEMPLATES = {
     },
     "inference": {
         "auth_error": "远端推理认证失败，请检查板卡用户名、密码或 SSH 端口设置。",
+        "board_busy": "板端当前 guard_state=JOB_ACTIVE，OpenAMP 已拒绝重复 live launch。当前 demo 不会自动 SAFE_STOP；请等待现有作业完成或由操作员手动 SAFE_STOP 后再重试。",
         "config_error": "远端推理配置不完整或不可用，请检查连接信息和推理环境参数。",
         "artifact_mismatch": "远端 current 工件与界面展示的 trusted current SHA 不一致，请同步板端 optimized_model.so 后重试。",
         "host_env_error": "当前主机环境禁止建立 SSH socket，无法验证真机 OpenAMP 链路。",
@@ -130,6 +136,8 @@ def classify_status_category(
     text = _normalize_text(stderr, stdout, error)
     if any(pattern in text for pattern in _HOST_ENV_PATTERNS):
         return "host_env_error"
+    if all(pattern in text for pattern in _BOARD_BUSY_PATTERNS):
+        return "board_busy"
     if any(pattern in text for pattern in _AUTH_PATTERNS):
         return "auth_error"
     if any(pattern in text for pattern in _TIMEOUT_PATTERNS):

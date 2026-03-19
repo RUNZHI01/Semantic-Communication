@@ -45,7 +45,7 @@ STATIC_ROOT = Path(__file__).resolve().parent / "static"
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Serve the integrated OpenAMP demo dashboard.")
+    parser = argparse.ArgumentParser(description="Serve the Feiteng semantic visual return demo dashboard.")
     parser.add_argument("--host", default="127.0.0.1", help="Bind host.")
     parser.add_argument("--port", type=int, default=8079, help="Bind port.")
     parser.add_argument(
@@ -223,23 +223,23 @@ class DashboardState:
         if board_online:
             mode_label = "在线模式"
             mode_tone = "online"
-            mode_summary = "板卡 SSH 与 RPMsg 读数可用，第二幕会展示真实在线推进。"
+            mode_summary = "当前处于 3-core Linux + RTOS demo mode；板卡 SSH 与 RPMsg 控制面可用，第二幕会展示语义回传数据面的真实在线推进。"
         elif board_access.connection_ready:
             mode_label = "降级模式"
             mode_tone = "degraded"
-            mode_summary = "本场会话已就绪；若真机链路暂不可用，界面会明确切回归档证据。"
+            mode_summary = "本场会话已就绪；若真机链路暂不可用，界面会明确切回归档证据，不把 demo mode 数字混写成 4-core 性能口径。"
         elif board_access.has_preloaded_defaults and board_access.missing_connection_fields() == ["password"]:
             mode_label = "待补全密码"
             mode_tone = "degraded"
-            mode_summary = "SSH 与推理默认值已预载；补一次密码即可触发真机动作。"
+            mode_summary = "SSH 与推理默认值已预载；补一次密码即可触发真机动作。headline 性能仍以 4-core Linux performance mode 报告为准。"
         elif board_access.configured:
             mode_label = "待补全会话"
             mode_tone = "degraded"
-            mode_summary = "已接入部分会话信息；补齐缺失字段后即可尝试真机动作。"
+            mode_summary = "已接入部分会话信息；补齐缺失字段后即可尝试真机动作。OpenAMP live 仅用于控制与安全演示。"
         else:
             mode_label = "离线模式"
             mode_tone = "offline"
-            mode_summary = "尚未配置板卡会话，当前只展示证据与预录结果。"
+            mode_summary = "尚未配置板卡会话，当前只展示证据与预录结果；headline 性能仍引用 4-core Linux performance mode 报告。"
 
         return {
             "generated_at": snapshot["generated_at"],
@@ -1068,7 +1068,7 @@ def main() -> int:
     if args.probe_startup:
         app_state.refresh_live_probe()
     server = DemoHTTPServer((args.host, args.port), DemoRequestHandler, app_state)
-    print(f"OpenAMP demo dashboard: http://{args.host}:{args.port}")
+    print(f"Feiteng semantic visual return demo dashboard: http://{args.host}:{args.port}")
     print(f"Project root: {PROJECT_ROOT}")
     server.serve_forever()
     return 0
