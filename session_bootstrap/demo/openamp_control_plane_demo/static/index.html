@@ -31,7 +31,20 @@
       </div>
     </header>
 
-    <section class="panel mission-panel">
+    <section class="panel command-center-panel" id="commandCenterPanel">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Command Center</p>
+          <h2>一页收口 / Operator Command Seat</h2>
+        </div>
+        <span class="muted" id="commandCenterBoundaryNote">等待整页态势聚合...</span>
+      </div>
+      <article class="command-strip" id="commandStripCard">正在生成 command strip...</article>
+      <div class="command-jump-row" id="commandQuickJumpRow"></div>
+      <div class="command-scene-grid" id="commandSceneGrid"></div>
+    </section>
+
+    <section class="panel mission-panel" id="missionPanel">
       <div class="section-head">
         <div>
           <p class="eyebrow">任务态势</p>
@@ -60,7 +73,7 @@
           </div>
           <div id="deviceStatusModule"></div>
         </article>
-        <article class="mission-card">
+        <article class="mission-card" id="safetyMissionCard">
           <div class="mission-card-head">
             <div>
               <div class="label">链路状态</div>
@@ -70,7 +83,7 @@
           </div>
           <div id="linkStatusModule"></div>
         </article>
-        <article class="mission-card">
+        <article class="mission-card" id="archiveTimelineCard">
           <div class="mission-card-head">
             <div>
               <div class="label">回传 / 重建</div>
@@ -103,7 +116,7 @@
       </div>
     </section>
 
-    <section class="panel credential-panel">
+    <section class="panel credential-panel" id="credentialPanel">
       <div class="section-head">
         <div>
           <p class="eyebrow">会话接入</p>
@@ -181,7 +194,7 @@
           <div id="boardLiveCard"></div>
         </article>
       </div>
-      <article class="panel-lite evidence-stack">
+      <article class="panel-lite evidence-stack" id="jobManifestGateShell">
         <div class="inline-actions">
           <div>
             <div class="label">任务票闸机</div>
@@ -291,7 +304,7 @@
         </article>
       </div>
       <div id="comparisonBoard" class="comparison-board"></div>
-      <article class="panel-lite compare-viewer-shell">
+      <article class="panel-lite compare-viewer-shell" id="compareViewerShell">
         <div class="compare-viewer-head">
           <div>
             <div class="label">Compare Viewer</div>

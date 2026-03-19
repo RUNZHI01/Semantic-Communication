@@ -231,6 +231,161 @@ body {
   gap: 0.75rem;
 }
 
+.command-center-panel {
+  display: grid;
+  gap: 1rem;
+}
+
+.command-strip {
+  display: grid;
+  gap: 0.95rem;
+  padding: 1.05rem;
+  border-radius: 24px;
+  border: 1px solid rgba(19, 44, 61, 0.12);
+  background:
+    radial-gradient(circle at top right, rgba(201, 93, 18, 0.14), transparent 28%),
+    linear-gradient(145deg, rgba(19, 44, 61, 0.9), rgba(19, 44, 61, 0.78));
+  color: #f7efe5;
+}
+
+.command-strip-head,
+.command-primary-row,
+.command-rollup-head,
+.command-scene-top,
+.command-scene-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8rem;
+  align-items: start;
+}
+
+.command-strip-head h3,
+.command-rollup h4,
+.command-scene-card h3 {
+  margin: 0;
+  font-family: "Noto Serif SC", "Source Han Serif SC", "STSong", "SimSun", serif;
+}
+
+.command-strip-head h3 {
+  font-size: clamp(1.2rem, 2vw, 1.55rem);
+}
+
+.command-strip .label,
+.command-strip .compact-copy {
+  color: rgba(247, 239, 229, 0.82);
+}
+
+.command-strip-summary {
+  margin: 0;
+  max-width: 64rem;
+  color: rgba(247, 239, 229, 0.95);
+}
+
+.command-primary-copy {
+  display: grid;
+  gap: 0.3rem;
+}
+
+.command-rollup-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.command-rollup,
+.command-scene-card {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.95rem;
+  border-radius: 20px;
+  border: 1px solid rgba(19, 44, 61, 0.1);
+  background: rgba(255, 255, 255, 0.86);
+}
+
+.command-rollup[data-tone="online"],
+.command-scene-card[data-tone="online"] {
+  border-color: rgba(13, 122, 105, 0.2);
+}
+
+.command-rollup[data-tone="degraded"],
+.command-scene-card[data-tone="degraded"] {
+  border-color: rgba(163, 106, 8, 0.24);
+}
+
+.command-rollup[data-tone="offline"],
+.command-scene-card[data-tone="offline"] {
+  border-color: rgba(176, 59, 45, 0.24);
+}
+
+.command-rollup h4,
+.command-scene-card h3 {
+  font-size: 1.02rem;
+}
+
+.command-rollup p,
+.command-scene-card p {
+  margin: 0;
+}
+
+.command-rollup-value {
+  font-size: 1.28rem;
+  font-weight: 900;
+  color: var(--ink);
+}
+
+.command-rollup-note,
+.command-scene-note,
+.command-scene-meta {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.command-jump-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.command-jump-row .button,
+.command-scene-actions .button {
+  box-shadow: none;
+}
+
+.command-scene-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.85rem;
+}
+
+.command-scene-card {
+  min-height: 16rem;
+}
+
+.command-scene-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.7rem;
+  padding: 0.28rem 0.55rem;
+  border-radius: 999px;
+  background: rgba(201, 93, 18, 0.1);
+  color: var(--accent);
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+
+.command-scene-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.command-scene-actions {
+  margin-top: auto;
+  align-items: center;
+}
+
 .mission-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1233,6 +1388,8 @@ select:focus {
 
 @media (max-width: 1080px) {
   .hero,
+  .command-rollup-grid,
+  .command-scene-grid,
   .mission-grid,
   .credential-grid,
   .status-grid,
@@ -1272,6 +1429,8 @@ select:focus {
 
   .hero,
   .act-nav,
+  .command-rollup-grid,
+  .command-scene-grid,
   .mission-grid,
   .credential-grid,
   .status-grid,
@@ -1300,6 +1459,14 @@ select:focus {
 
   .section-head {
     align-items: start;
+    flex-direction: column;
+  }
+
+  .command-strip-head,
+  .command-primary-row,
+  .command-rollup-head,
+  .command-scene-top,
+  .command-scene-actions {
     flex-direction: column;
   }
 
