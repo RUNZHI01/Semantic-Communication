@@ -161,15 +161,82 @@ function missionNote(text) {
   return `<p class="compact-copy mission-note">${escapeHtml(text)}</p>`;
 }
 
+function normalizeCueJump(item) {
+  if (!item) return null;
+  const targetId = item.targetId || item.target_id || "";
+  if (!targetId) return null;
+  return {
+    label: item.label || "",
+    targetId,
+    actId: item.actId || item.act_id || "",
+    primary: Boolean(item.primary),
+  };
+}
+
+function normalizeOperatorCue(cue) {
+  if (!cue || typeof cue !== "object") {
+    return {
+      statusLabel: "",
+      statusTone: "neutral",
+      currentSceneId: "",
+      currentSceneLabel: "",
+      currentSceneTone: "neutral",
+      presenterLine: "",
+      nextStepLabel: "",
+      nextStepNote: "",
+      nextAction: null,
+      boundaryNote: "",
+      manualBoundaryNote: "",
+      quickJumps: [],
+      scenes: [],
+    };
+  }
+  return {
+    statusLabel: cue.status_label || "",
+    statusTone: cue.status_tone || "neutral",
+    currentSceneId: cue.current_scene_id || "",
+    currentSceneLabel: cue.current_scene_label || cue.status_label || "",
+    currentSceneTone: cue.current_scene_tone || cue.status_tone || "neutral",
+    presenterLine: cue.presenter_line || "",
+    nextStepLabel: cue.next_step_label || "",
+    nextStepNote: cue.next_step_note || "",
+    nextAction: normalizeCueJump(cue.next_action),
+    boundaryNote: cue.boundary_note || "",
+    manualBoundaryNote: cue.manual_boundary_note || "",
+    quickJumps: (cue.quick_jumps || []).map((item) => normalizeCueJump(item)).filter(Boolean),
+    scenes: (cue.scenes || []).map((scene) => ({
+      ...scene,
+      jump: normalizeCueJump(scene.jump),
+      checks: Array.isArray(scene.checks) ? scene.checks : [],
+      ready_count: Number(scene.ready_count || 0),
+      total_checks: Number(scene.total_checks || (scene.checks || []).length),
+      recommended: Boolean(scene.recommended),
+    })),
+  };
+}
+
 function commandJumpButton(item, primary = false) {
-  if (!item || !item.targetId) return "";
+  const jump = normalizeCueJump(item);
+  if (!jump || !jump.targetId) return "";
   return `
     <button
       class="button ${primary ? "button-primary" : "button-secondary"}"
       type="button"
-      data-jump-target="${escapeHtml(item.targetId)}"
-      ${item.actId ? `data-jump-act="${escapeHtml(item.actId)}"` : ""}
-    >${escapeHtml(item.label)}</button>
+      data-jump-target="${escapeHtml(jump.targetId)}"
+      ${jump.actId ? `data-jump-act="${escapeHtml(jump.actId)}"` : ""}
+    >${escapeHtml(jump.label)}</button>
+  `;
+}
+
+function cueCheckChip(check) {
+  return `
+    <div class="cue-check-chip" data-tone="${escapeHtml(check.tone || (check.ready ? "online" : "degraded"))}">
+      <div class="status-dot ${lampClass(check.tone || (check.ready ? "online" : "degraded"))}"></div>
+      <div>
+        <strong>${escapeHtml(check.label || "检查项")}</strong>
+        <small>${escapeHtml(check.note || "")}</small>
+      </div>
+    </div>
   `;
 }
 
@@ -190,6 +257,8 @@ function commandRollupCard(item) {
 }
 
 function commandSceneCard(scene) {
+  const checks = Array.isArray(scene.checks) ? scene.checks : [];
+  const readyLabel = scene.total_checks ? `${scene.ready_count || 0} / ${scene.total_checks} ready` : "";
   return `
     <article class="command-scene-card" data-tone="${escapeHtml(scene.tone || "neutral")}">
       <div class="command-scene-top">
@@ -201,8 +270,11 @@ function commandSceneCard(scene) {
         <h3>${escapeHtml(scene.title || "")}</h3>
       </div>
       <p class="command-scene-note">${escapeHtml(scene.note || "")}</p>
+      ${scene.cue_line ? `<p class="command-scene-cue">${escapeHtml(scene.cue_line)}</p>` : ""}
+      ${checks.length ? `<div class="command-scene-checks">${checks.map((check) => cueCheckChip(check)).join("")}</div>` : ""}
       <div class="command-scene-meta">
         ${(scene.meta || []).map((item) => `<span>${escapeHtml(item)}</span>`).join("")}
+        ${readyLabel ? `<span>${escapeHtml(readyLabel)}</span>` : ""}
       </div>
       <div class="command-scene-actions">
         ${commandJumpButton(scene.jump, scene.jump?.primary)}
@@ -248,6 +320,65 @@ function archiveCommandSummary(systemStatus) {
   };
 }
 
+function operatorCueSceneCard(scene, currentSceneId) {
+  const recommended = scene.recommended || scene.scene_id === currentSceneId;
+  const checks = Array.isArray(scene.checks) ? scene.checks : [];
+  return `
+    <article class="operator-cue-scene-card" data-tone="${escapeHtml(scene.tone || "neutral")}" ${recommended ? 'data-current="true"' : ""}>
+      <div class="operator-cue-scene-top">
+        <div>
+          <div class="label">${escapeHtml(scene.eyebrow || "场景")}</div>
+          <h4>${escapeHtml(scene.title || "")}</h4>
+        </div>
+        <div class="status-pill ${toneClass(scene.tone || "neutral")}">${escapeHtml(scene.status || "待命")}</div>
+      </div>
+      <p class="compact-copy">${escapeHtml(scene.cue_line || scene.note || "")}</p>
+      <div class="operator-cue-check-grid">
+        ${checks.map((check) => cueCheckChip(check)).join("")}
+      </div>
+      <div class="command-scene-actions">
+        ${commandJumpButton(scene.jump, false)}
+        <span class="status-inline">${escapeHtml(scene.total_checks ? `${scene.ready_count || 0} / ${scene.total_checks} ready` : scene.jump_hint || "")}</span>
+      </div>
+    </article>
+  `;
+}
+
+function renderOperatorCue(cue) {
+  const shell = document.getElementById("operatorCueShell");
+  if (!cue.currentSceneLabel) {
+    shell.innerHTML = `
+      <div class="label">Operator Assist</div>
+      <p class="compact-copy">等待 operator cue 数据。</p>
+    `;
+    return;
+  }
+  shell.innerHTML = `
+    <div class="operator-cue-top">
+      <div>
+        <div class="label">Operator Assist / Manual Cue</div>
+        <h3>${escapeHtml(cue.currentSceneLabel)}</h3>
+      </div>
+      <div class="status-pill ${toneClass(cue.currentSceneTone || cue.statusTone || "neutral")}">${escapeHtml(cue.statusLabel || cue.currentSceneLabel)}</div>
+    </div>
+    <p class="operator-cue-line">${escapeHtml(cue.presenterLine || cue.nextStepNote || "")}</p>
+    <div class="operator-cue-actions">
+      <div class="operator-cue-copy">
+        <div class="label">Next Manual Step</div>
+        <div class="compact-copy">${escapeHtml(cue.nextStepNote || cue.manualBoundaryNote || "")}</div>
+      </div>
+      ${commandJumpButton(cue.nextAction, true)}
+    </div>
+    <div class="status-meta">
+      <span>${escapeHtml(cue.boundaryNote || "")}</span>
+      <span>${escapeHtml(cue.manualBoundaryNote || "")}</span>
+    </div>
+    <div class="operator-cue-scene-grid">
+      ${cue.scenes.map((scene) => operatorCueSceneCard(scene, cue.currentSceneId)).join("")}
+    </div>
+  `;
+}
+
 function buildCommandCenterModel(snapshot, systemStatus) {
   const mission = snapshot.mission || {};
   const live = systemStatus.live || {};
@@ -255,6 +386,7 @@ function buildCommandCenterModel(snapshot, systemStatus) {
   const gate = systemStatus.job_manifest_gate || {};
   const safetyPanel = effectiveSafetyPanel(systemStatus);
   const linkDirector = effectiveLinkDirectorStatus(snapshot);
+  const operatorCue = normalizeOperatorCue(systemStatus.operator_cue || {});
   const selectedLinkProfile = linkDirector.selected_profile || {};
   const archive = archiveCommandSummary(systemStatus);
   const compareSample = selectedCompareViewerSample(snapshot);
@@ -272,30 +404,30 @@ function buildCommandCenterModel(snapshot, systemStatus) {
   const boardBusy = String(live.guard_state || "").toUpperCase() === "JOB_ACTIVE";
   const faultLatched = String(safetyPanel.latch_state || "").toUpperCase() === "LATCHED";
 
-  let summaryLabel = "指挥席就绪";
-  let summaryTone = "online";
-  let summaryText =
-    "当前页面已经把链路预案、任务票、Current / PyTorch 对照、安全收口和 archive timeline 放进同一个 operator seat；动作仍由操作员逐步触发。";
-  let primaryJump = { label: "跳到第三幕 Compare", actId: "act3", targetId: "compareViewerShell", primary: true };
+  let summaryLabel = operatorCue.currentSceneLabel || "指挥席就绪";
+  let summaryTone = operatorCue.currentSceneTone || "online";
+  let summaryText = operatorCue.nextStepNote
+    || "当前页面已经把链路预案、任务票、Current / PyTorch 对照、安全收口和 archive timeline 放进同一个 operator seat；动作仍由操作员逐步触发。";
+  let primaryJump = operatorCue.nextAction || { label: "跳到第三幕 Compare", actId: "act3", targetId: "compareViewerShell", primary: true };
 
-  if (faultLatched) {
+  if (!operatorCue.currentSceneLabel && faultLatched) {
     summaryLabel = "安全收口优先";
     summaryTone = safetyPanel.panel_tone || "offline";
     summaryText =
       `当前 last_fault_code=${safetyPanel.last_fault_code || "UNKNOWN"} 仍锁存在控制面镜像中；是否执行 SAFE_STOP 收口仍由操作员决定。`;
     primaryJump = { label: "跳到第四幕 SAFE_STOP", actId: "act4", targetId: "act4Panel", primary: true };
-  } else if (!boardAccess.connection_ready) {
+  } else if (!operatorCue.currentSceneLabel && !boardAccess.connection_ready) {
     summaryLabel = "先补本场会话";
     summaryTone = systemStatus.execution_mode?.tone || "degraded";
     summaryText = systemStatus.execution_mode?.summary || "先录入本场板卡会话，再触发真机探板和 live 动作。";
     primaryJump = { label: "跳到会话接入", targetId: "credentialPanel", primary: true };
-  } else if (!live.board_online) {
+  } else if (!operatorCue.currentSceneLabel && !live.board_online) {
     summaryLabel = "先完成探板";
     summaryTone = systemStatus.execution_mode?.tone || "degraded";
     summaryText =
       "当前没有新的 live 板卡读数。第一幕会继续如实显示证据态，但若要推进真机动作，需要先由操作员执行探板。";
     primaryJump = { label: "跳到第一幕探板", actId: "act1", targetId: "act1Panel", primary: true };
-  } else if (boardBusy) {
+  } else if (!operatorCue.currentSceneLabel && boardBusy) {
     summaryLabel = "等待当前作业收口";
     summaryTone = activeProgress.tone || "degraded";
     summaryText =
@@ -306,31 +438,31 @@ function buildCommandCenterModel(snapshot, systemStatus) {
       targetId: active.variant === "baseline" ? "act3Panel" : "act2Panel",
       primary: true,
     };
-  } else if (String(gate.verdict || "").toLowerCase() !== "allow") {
+  } else if (!operatorCue.currentSceneLabel && String(gate.verdict || "").toLowerCase() !== "allow") {
     summaryLabel = "先看任务票闸机";
     summaryTone = gate.tone || "degraded";
     summaryText =
       gate.message || "当前 ticket 仍处于草案或保守阻断态；M6 只把这个 verdict 提到顶层，不伪造已放行。";
     primaryJump = { label: "跳到任务票闸机", actId: "act1", targetId: "jobManifestGateShell", primary: true };
-  } else if (!state.currentResult) {
+  } else if (!operatorCue.currentSceneLabel && !state.currentResult) {
     summaryLabel = "推进第二幕 Current live";
     summaryTone = "online";
     summaryText =
       "会话、探板和 gate 均已具备后，第二幕仍由操作员手动触发 Current 300 张图在线推进。";
     primaryJump = { label: "跳到第二幕 Current", actId: "act2", targetId: "act2Panel", primary: true };
-  } else if (currentFallback) {
+  } else if (!operatorCue.currentSceneLabel && currentFallback) {
     summaryLabel = "当前仍是归档展示";
     summaryTone = "degraded";
     summaryText =
       "本场 Current 结果仍在归档/回退态。M6 会如实把这一点抬到顶层，而不是伪装成 72 秒自动闭环。";
     primaryJump = { label: "回到第二幕 Current", actId: "act2", targetId: "act2Panel", primary: true };
-  } else if (!currentLiveDone) {
+  } else if (!operatorCue.currentSceneLabel && !currentLiveDone) {
     summaryLabel = "等待第二幕推进";
     summaryTone = currentLiveProgress.tone || "degraded";
     summaryText =
       `Current live 当前状态=${currentLiveProgress.label || "等待触发"}；第三幕对照会继续沿用同一选样和边界口径。`;
     primaryJump = { label: "跳到第二幕 Current", actId: "act2", targetId: "act2Panel", primary: true };
-  } else if (safetyPanel.safe_stop_state === "RECOVERED") {
+  } else if (!operatorCue.currentSceneLabel && safetyPanel.safe_stop_state === "RECOVERED") {
     summaryLabel = "SAFE_STOP 已收口";
     summaryTone = safetyPanel.panel_tone || "degraded";
     summaryText =
@@ -384,7 +516,7 @@ function buildCommandCenterModel(snapshot, systemStatus) {
     },
   ];
 
-  const scenes = [
+  const defaultScenes = [
     {
       number: "01",
       eyebrow: "可信状态",
@@ -489,13 +621,13 @@ function buildCommandCenterModel(snapshot, systemStatus) {
   ];
 
   return {
-    boundaryNote: mission.mode_split_note || "",
+    boundaryNote: operatorCue.boundaryNote || mission.mode_split_note || "",
     summaryLabel,
     summaryTone,
     summaryText,
     primaryJump,
     rollups,
-    quickJumps: [
+    quickJumps: operatorCue.quickJumps.length ? operatorCue.quickJumps : [
       { label: "Mission 总览", targetId: "missionPanel" },
       { label: "会话接入", targetId: "credentialPanel" },
       { label: "任务票闸机", actId: "act1", targetId: "jobManifestGateShell" },
@@ -504,9 +636,10 @@ function buildCommandCenterModel(snapshot, systemStatus) {
       { label: "第四幕 SAFE_STOP", actId: "act4", targetId: "act4Panel" },
       { label: "Blackbox Timeline", targetId: "archiveTimelineCard" },
     ],
-    manualNote:
-      "M6 只提供 operator-assist sequencing、摘要和页内跳转。探板、票据预检、Current/PyTorch 运行、故障注入和 SAFE_STOP 仍由操作员手动触发。",
-    scenes,
+    manualNote: operatorCue.manualBoundaryNote
+      || "M6 只提供 operator-assist sequencing、摘要和页内跳转。探板、票据预检、Current/PyTorch 运行、故障注入和 SAFE_STOP 仍由操作员手动触发。",
+    scenes: operatorCue.scenes.length ? operatorCue.scenes : defaultScenes,
+    operatorCue,
   };
 }
 
@@ -514,6 +647,7 @@ function renderCommandCenter(snapshot, systemStatus) {
   const model = buildCommandCenterModel(snapshot, systemStatus);
   document.getElementById("commandCenterBoundaryNote").textContent =
     `${model.boundaryNote} 所有推进仍保持 operator-driven/manual。`.trim();
+  renderOperatorCue(model.operatorCue);
   document.getElementById("commandStripCard").innerHTML = `
     <div class="command-strip-head">
       <div>
