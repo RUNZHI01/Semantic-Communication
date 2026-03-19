@@ -2,12 +2,17 @@
 
 - package_date: `2026-03-15`
 - mode: `offline-first`
-- goal: `把已完成的 OpenAMP 真机证据转成一套可直接上台的 operator flow`
+- goal: `把已完成的 OpenAMP 真机证据转成一套可直接上台的飞腾多核弱网安全语义视觉回传系统 operator flow`
 - hard_constraints:
   - `不要 reboot`
   - `不要在台上做新的远端实验`
   - `不要手工 stop/start remoteproc0`
   - `不要把 Act 3 写成 live 试错`
+- positioning_guardrails:
+  - `对外定位 = 飞腾多核弱网安全语义视觉回传系统`
+  - `headline performance = 4-core Linux performance mode`
+  - `OpenAMP live cue = 3-core Linux + RTOS demo mode`
+  - `OpenAMP = control plane / safety，不是 speedup path`
 
 ## 0. 交付模式
 
@@ -246,7 +251,7 @@
 ### 推荐话术
 
 > 我们不是为了做一个“能收发消息”的 OpenAMP demo，而是为了给已经证明更快的 trusted current 提供可审计的执行边界。  
-> 同一个 trusted SHA 既对应性能结论，也被 admission gate 和 watchdog 保护，这才是这套系统的工程价值。
+> 同一个 trusted SHA 既对应性能结论，也被 admission gate 和 watchdog 保护；性能数字引用 4-core Linux performance mode，而当前 OpenAMP live cue 明确属于 3-core Linux + RTOS demo mode，这才是这套系统的工程价值。
 
 ### 本幕允许主张
 
