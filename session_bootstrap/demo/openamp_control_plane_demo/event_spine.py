@@ -334,6 +334,10 @@ class DemoEventSpine:
         self._bus.subscribe(self._store.apply)
         self._bus.subscribe(self._archive.append)
 
+    @property
+    def session_id(self) -> str:
+        return self._session_id
+
     def publish(
         self,
         event_type: str,
