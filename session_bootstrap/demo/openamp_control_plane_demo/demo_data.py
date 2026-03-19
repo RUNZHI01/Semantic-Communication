@@ -942,6 +942,7 @@ def build_compare_viewer_snapshot() -> dict[str, Any]:
         "mode_note": "先提供并排 compare viewer，不宣称已实现交互式 slider。",
         "fallback_note": (
             "compare viewer 优先沿用当前页面内已拿到的同样例 current / baseline 结果；"
+            "页面刷新后若系统状态保留最近一次已完成结果，也会继续优先显示；"
             "若没有匹配结果，则明确回退到仓库内已有的 archive/reference 图像。"
         ),
         "samples": [build_compare_viewer_sample(index) for index, _ in enumerate(PRERECORDED_SAMPLE_FIXTURES)],
@@ -1239,6 +1240,8 @@ def build_latest_live_status_snapshot() -> dict[str, Any]:
 
 def build_mission_snapshot() -> dict[str, Any]:
     reference_baseline = build_pytorch_reference_baseline_snapshot()
+    link_director = build_link_director_catalog()
+    job_manifest_gate = build_job_manifest_contract_snapshot()
     archive_timeline = [
         {
             "timestamp": "2026-03-17",
@@ -1296,6 +1299,8 @@ def build_mission_snapshot() -> dict[str, Any]:
             "headline performance 引用 4-core Linux performance mode；本场 live operator flow 明确属于 3-core Linux + RTOS demo mode。"
         ),
         "batch_target": int(reference_baseline["output_count"] or 300),
+        "link_director": link_director,
+        "job_manifest_gate": job_manifest_gate,
         "archive_timeline": archive_timeline,
     }
 

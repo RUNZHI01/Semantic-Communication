@@ -70,6 +70,7 @@ class DemoDataTest(unittest.TestCase):
         self.assertEqual(guided_demo["comparison"]["baseline_source"]["label"], "PyTorch 参考基线")
         self.assertAlmostEqual(guided_demo["comparison"]["end_to_end"]["current_ms"], 230.339)
         self.assertIn("先提供并排 compare viewer", guided_demo["compare_viewer"]["mode_note"])
+        self.assertIn("页面刷新后若系统状态保留最近一次已完成结果", guided_demo["compare_viewer"]["fallback_note"])
         self.assertEqual(guided_demo["compare_viewer"]["samples"][0]["current"]["source_label"], "Current 归档重建图")
         self.assertEqual(guided_demo["compare_viewer"]["samples"][0]["baseline"]["source_label"], "PyTorch 参考 archive")
 
