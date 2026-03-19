@@ -9,7 +9,7 @@
 1. 先讲一句定位：`不是 generic TVM 项目，而是飞腾多核弱网安全语义视觉回传系统`
 2. 再讲双模式：`4-core Linux performance mode` vs `3-core Linux + RTOS demo mode`
 3. 性能页只说 `484.183 / 231.522 / 134.617 / +56.077%`
-4. Demo 页只说 `8115`、`current 300/300`、`baseline 300/300`
+4. Demo 页默认只说：`Current 数据面在线推进`、`PyTorch reference archive 300/300`、`OpenAMP 负责 control plane / safety`
 5. 安全页只说 OpenAMP 控制闭环和 `FIT-01/02/03`
 
 ## 台上可以展示什么
@@ -32,7 +32,7 @@
 ## 台上该说的数字
 
 - 性能模式：`PyTorch 484.183 ms/image`，`TVM serial current 231.522 ms/image`，`pipeline current 134.617 ms/image`，`same-run uplift +56.077%`
-- Demo 模式：`8115 是唯一有效 demo 实例`，`current 300/300`，`baseline 300/300`
+- Demo 模式：`8115 是唯一有效 demo 实例`，`current live 300/300`，`PyTorch reference archive 300/300`
 - 模式边界：`remoteproc0=running` 时 Linux 在线核 `0-3 -> 0-2`，所以 demo mode 是 `3-core Linux + RTOS`
 
 ## 绝对不要说的句子
@@ -40,6 +40,7 @@
 - `OpenAMP 让 TVM 更快`
 - `所有数字都来自同一种 operating mode`
 - `demo mode 也是完整 4-core Linux`
+- `第三幕这些 live 数字就是 headline performance`
 - `我们现场再打一遍 FIT 给您看`
 
 ## 备份窗口

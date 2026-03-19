@@ -1294,8 +1294,8 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertTrue(headers["content-type"].startswith("text/html"))
         self.assertEqual(headers["cache-control"], "no-store")
-        self.assertIn("<title>OpenAMP 四幕交互演示系统</title>", body)
-        self.assertIn("OpenAMP 控制面四幕交互演示", body)
+        self.assertIn("<title>飞腾多核弱网安全语义视觉回传演示系统</title>", body)
+        self.assertIn("飞腾多核弱网安全语义视觉回传系统", body)
         self.assertIn('<script src="/app.js"></script>', body)
 
     def test_app_js_serves_dashboard_javascript(self) -> None:
