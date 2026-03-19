@@ -286,7 +286,7 @@ class ServerMainTest(unittest.TestCase):
         self.assertEqual(
             stdout.getvalue().splitlines(),
             [
-                "OpenAMP demo dashboard: http://0.0.0.0:8090",
+                "Feiteng semantic visual return demo dashboard: http://0.0.0.0:8090",
                 f"Project root: {server.PROJECT_ROOT}",
             ],
         )
@@ -359,7 +359,7 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(headers["content-type"], "application/json; charset=utf-8")
         self.assertIn("generated_at", payload)
-        self.assertEqual(payload["project"]["name"], "TVM MetaSchedule Execution Project")
+        self.assertEqual(payload["project"]["name"], "飞腾多核弱网安全语义视觉回传系统")
         self.assertEqual(payload["mode"]["effective_label"], "仅展示证据")
         self.assertIn("current_status", payload["board"])
         self.assertIn("fits", payload)

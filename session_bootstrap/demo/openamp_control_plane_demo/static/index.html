@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>OpenAMP 四幕交互演示系统</title>
+  <title>飞腾多核弱网安全语义视觉回传演示系统</title>
   <link rel="stylesheet" href="/app.css">
 </head>
 <body>
@@ -12,8 +12,8 @@
   <main class="shell">
     <header class="hero panel">
       <div class="hero-copy">
-        <p class="eyebrow">答辩演示系统</p>
-        <h1>OpenAMP 控制面四幕交互演示</h1>
+        <p class="eyebrow">飞腾系统答辩演示</p>
+        <h1>飞腾多核弱网安全语义视觉回传系统</h1>
         <p class="lede" id="heroSummary">正在加载演示快照与证据包...</p>
         <div class="hero-actions">
           <button id="reloadButton" class="button button-secondary" type="button">刷新证据快照</button>
@@ -23,7 +23,7 @@
       </div>
       <div class="hero-side">
         <div class="status-card panel-lite">
-          <div class="label">当前模式</div>
+          <div class="label">当前演示模式</div>
           <div class="mode-pill" id="modePill">准备中</div>
           <p class="compact-copy" id="modeSummary">等待系统状态。</p>
         </div>
@@ -72,16 +72,16 @@
     <nav class="act-nav panel" aria-label="四幕导航">
       <button class="act-tab active" data-act="act1" type="button">
         <span class="act-number">01</span>
-        <span class="act-title">可信启动</span>
+        <span class="act-title">可信状态</span>
         <span class="act-lamp" id="act1Lamp"></span>
       </button>
       <button class="act-tab" data-act="act2" type="button">
         <span class="act-number">02</span>
-        <span class="act-title">一键重建</span>
+        <span class="act-title">语义回传</span>
       </button>
       <button class="act-tab" data-act="act3" type="button">
         <span class="act-number">03</span>
-        <span class="act-title">基线对比</span>
+        <span class="act-title">正式对照</span>
       </button>
       <button class="act-tab" data-act="act4" type="button">
         <span class="act-number">04</span>
@@ -94,7 +94,7 @@
       <div class="section-head">
         <div>
           <p class="eyebrow">第一幕</p>
-          <h2>可信启动与当前板卡状态</h2>
+          <h2>可信状态与当前板卡接入</h2>
         </div>
         <span class="muted" id="act1StatusNote">等待探测。</span>
       </div>
@@ -119,7 +119,7 @@
       <div class="section-head">
         <div>
           <p class="eyebrow">第二幕</p>
-          <h2>一键重建演示</h2>
+          <h2>Current 语义视觉回传在线推进</h2>
         </div>
         <span class="muted" id="act2SourceLabel">等待执行。</span>
       </div>
@@ -128,7 +128,7 @@
           <span>测试图</span>
           <select id="imageSelect"></select>
         </label>
-        <button id="runCurrentButton" class="button button-primary" type="button">启动 Current signed 300 张图在线推进</button>
+        <button id="runCurrentButton" class="button button-primary" type="button">启动 Current 数据面 300 张图在线推进</button>
       </div>
       <div class="panel-lite live-progress-shell">
         <div class="live-progress-top">
@@ -168,9 +168,9 @@
       <div class="section-head">
         <div>
           <p class="eyebrow">第三幕</p>
-          <h2>正式基线对比</h2>
+          <h2>正式对照与性能口径</h2>
         </div>
-        <span class="muted">第三幕将真实启动 PyTorch live，并与 Current live 做第一类对比</span>
+        <span class="muted">第三幕把 4-core Linux performance mode 的正式性能口径与当前 demo mode 在线展示分开呈现</span>
       </div>
       <div class="dual-progress-grid">
         <article class="panel-lite progress-summary-card">
@@ -208,11 +208,11 @@
       </div>
       <div id="comparisonBoard" class="comparison-board"></div>
       <div class="inline-actions">
-        <button id="runBaselineButton" class="button button-secondary" type="button">运行 PyTorch 300 张图</button>
-        <button id="runCurrentAgainButton" class="button button-primary" type="button">运行 Current signed 300 张图</button>
-        <button id="runAllButton" class="button button-secondary" type="button">一键顺序运行 PyTorch + Current 300 张图</button>
+        <button id="runBaselineButton" class="button button-secondary" type="button">运行 PyTorch 数据面 300 张图</button>
+        <button id="runCurrentAgainButton" class="button button-primary" type="button">运行 Current 数据面 300 张图</button>
+        <button id="runAllButton" class="button button-secondary" type="button">一键顺序运行 PyTorch + Current 数据面 300 张图</button>
       </div>
-      <div class="panel-lite" id="comparisonRunNote">Current live 与 PyTorch live 的控制面边界会在此处明确显示；样例图仍保留归档参考图用于稳定展示。</div>
+      <div class="panel-lite" id="comparisonRunNote">第三幕会明确区分语义回传数据面结果与 OpenAMP 控制面边界，并单独标注 4-core performance mode / 3-core demo mode。</div>
     </section>
 
     <section class="act-panel panel" id="act4Panel">

@@ -625,8 +625,9 @@ def build_performance_snapshot() -> dict[str, Any]:
     return {
         "artifact_sha": artifact_sha,
         "positioning_note": (
-            "第三幕基线已切到 2026-03-12 归档的 PyTorch reference manifest。Current 继续保留 live / formal report 口径；"
-            "OpenAMP wrapper 负责准入和状态控制，不替代现有推理数据通路。"
+            "第三幕默认基线已切到 2026-03-12 归档的 PyTorch reference manifest。第二、三幕展示的是飞腾侧语义视觉回传数据面结果；"
+            "OpenAMP wrapper 只负责控制面准入、状态控制和安全收口，不替代现有推理数据通路。"
+            "headline 性能统一引用 4-core Linux performance mode；本场 OpenAMP live 明确属于 3-core Linux + RTOS demo mode。"
         ),
         "metrics": [
             {
@@ -979,17 +980,17 @@ def build_latest_live_status_snapshot() -> dict[str, Any]:
         "title": "最新可用 demo 结论",
         "report_date": "2026-03-17",
         "as_of": "2026-03-17 current live / 2026-03-12 reference baseline",
-        "status_label": "Current live + PyTorch 参考基线",
-        "headline": "Current live 300 / 300；基线固定切到 PyTorch reference archive",
+        "status_label": "Current live 数据面 + PyTorch 参考基线",
+        "headline": "Current live 300 / 300；第三幕默认基线切到 PyTorch reference archive",
         "hero_summary": (
-            "2026-03-17 当前 demo 以 Current live 为唯一在线执行路径；"
-            "Current 最近一次真机 reconstruction 已完成 300 / 300。"
-            "由于 Baseline TVM live 仍受 artifact SHA mismatch 阻塞，第三幕已切到 "
-            "2026-03-12 归档的 PyTorch 参考基线。"
+            "当前答辩 demo 把 Current live 用作飞腾侧语义视觉回传数据面的在线路径；"
+            "第三幕默认基线固定使用 2026-03-12 归档的 PyTorch 参考结果。"
+            "2026-03-17 的 dual-path live 结论继续作为历史证据保留。"
         ),
         "summary": (
-            "Current 路径继续保留 live 300 / 300 演示。Baseline TVM live 当前不作为现场路径；"
-            "第三幕基线改用 2026-03-12 归档的 PyTorch reference manifest 与 300 张重建结果。"
+            "Current 路径继续保留 live 300 / 300 演示。第三幕默认展示 2026-03-12 归档的 "
+            "PyTorch reference manifest 与 300 张重建结果；不把 2026-03-17 的 baseline live 历史结论"
+            "直接当成本场默认 operator flow。"
         ),
         "valid_instance": "8115",
         "current": {
@@ -1010,10 +1011,15 @@ def build_latest_live_status_snapshot() -> dict[str, Any]:
         "facts": [
             "8115 是当前唯一该用的 demo 实例。",
             "Current 路径最近一次 live reconstruction 已完成真实 300 / 300。",
-            "Baseline TVM live 当前仍受 artifact SHA mismatch 阻塞，现场不再宣称 baseline live 可运行。",
-            "第三幕基线固定改用 2026-03-12 归档的 PyTorch reference 300 / 300。",
+            "第三幕默认基线固定改用 2026-03-12 归档的 PyTorch reference 300 / 300。",
+            "第二、三幕的数据面展示与 OpenAMP 控制面状态分开表述。",
+            "headline performance 统一引用 4-core Linux performance mode；本场 OpenAMP live 属于 3-core Linux + RTOS demo mode。",
         ],
-        "boundary_note": "基线按钮只加载归档 PyTorch reference 结果，不再尝试 baseline TVM live。",
+        "boundary_note": (
+            "OpenAMP 当前负责 control plane / safety；Current reconstruction 继续走既有数据通路。"
+            "headline performance 统一引用 4-core Linux performance mode，本场 live demo 明确属于 "
+            "3-core Linux + RTOS demo mode。"
+        ),
         "report": link_entry(LATEST_LIVE_DUALPATH_REPORT, "2026-03-17 current live 状态报告"),
         "probe": link_entry(REPORTS_ROOT / "openamp_demo_live_probe_latest.json", "最新在线探板 JSON"),
         "links": [
@@ -1039,7 +1045,8 @@ def build_operator_snapshot() -> dict[str, Any]:
         ],
         "host_side": {
             "summary": (
-                "主机侧读取仓库内已保存的证据包、原始 JSON 探板、性能报告和 wrapper 摘要，不额外生成新的业务结论。"
+                "主机侧读取仓库内已保存的控制面证据包、原始 JSON 探板和性能报告；界面把 OpenAMP 控制面与语义回传数据面分开展示，"
+                "不额外生成新的业务结论。"
             ),
             "items": [
                 link_entry(PACKAGE_ROOT / "README.md", "证据包索引"),
@@ -1098,8 +1105,8 @@ def build_snapshot(live_probe: dict[str, Any] | None = None) -> dict[str, Any]:
     return {
         "generated_at": now_iso(),
         "project": {
-            "name": "TVM MetaSchedule Execution Project",
-            "focus": "OpenAMP 控制面集成演示看板",
+            "name": "飞腾多核弱网安全语义视觉回传系统",
+            "focus": "演示层：OpenAMP 控制面与语义回传数据面联动看板",
             "package_id": summary["package_id"],
             "final_verdict": summary["final_verdict"],
             "trusted_current_sha": coverage["trusted_current_sha"],

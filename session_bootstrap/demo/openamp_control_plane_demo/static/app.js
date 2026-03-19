@@ -157,8 +157,9 @@ function renderTop(snapshot, systemStatus) {
     ? ` 当前 live 预检已切到 signed manifest，key_id=${admission.key_id || "unknown"}.`
     : "";
   document.getElementById("heroSummary").textContent =
-    `${latestLive.hero_summary || ""} trusted current SHA ${snapshot.project.trusted_current_sha.slice(0, 12)} 已与当前演示材料对齐。` +
-    ` 第一幕展示板卡状态。${currentSummary}${baselineSummary} 第四幕保留 FIT-01 / FIT-02 / FIT-03 证据。` +
+    `${snapshot.project.focus || ""}。${latestLive.hero_summary || ""} trusted current SHA ${snapshot.project.trusted_current_sha.slice(0, 12)} 已与当前演示材料对齐。` +
+    ` 第一幕展示板卡状态。${currentSummary}${baselineSummary} OpenAMP 负责控制面 / 安全边界；Current 与 PyTorch 重建继续走既有数据面。` +
+    ` headline 性能引用 4-core Linux performance mode，本场 live 明确属于 3-core Linux + RTOS demo mode。第四幕保留 FIT-01 / FIT-02 / FIT-03 证据。` +
     admissionSuffix;
 
   const modePill = document.getElementById("modePill");
@@ -270,10 +271,10 @@ function renderAct1(snapshot, systemStatus) {
     kpiCard("飞腾派 / SSH", live.board_online ? "在线" : "未在线", live.board_online ? "当前演示进程已拿到最新只读读数。" : "尚无新的在线读数，回退到证据。", live.board_online ? "online" : "offline"),
     kpiCard("OpenAMP / remoteproc", live.remoteproc_state, `RPMsg 设备：${live.rpmsg_device}`, live.remoteproc_state),
     kpiCard("guard_state", live.guard_state, `last_fault_code：${live.last_fault_code}`, live.guard_state),
-    kpiCard("运行目标", live.target, `runtime：${live.runtime}`, "online"),
+    kpiCard("数据面运行目标", live.target, `runtime：${live.runtime}`, "online"),
     kpiCard("准入策略", admission.label || "Legacy SHA allowlist", admission.note || "当前 live 准入配置。", admission.tone || "neutral"),
-    kpiCard("Current live", currentSupport.label || "Current live", currentSupport.note || "Current 路径状态。", currentSupport.tone || "neutral"),
-    kpiCard("PyTorch live", baselineSupport.label || "PyTorch live", baselineSupport.note || "PyTorch 路径状态。", baselineSupport.tone || "neutral"),
+    kpiCard("Current 数据面", currentSupport.label || "Current live", currentSupport.note || "Current 路径状态。", currentSupport.tone || "neutral"),
+    kpiCard("PyTorch 参考 / live", baselineSupport.label || "PyTorch live", baselineSupport.note || "PyTorch 路径状态。", baselineSupport.tone || "neutral"),
   ].join("");
 
   const evidence = snapshot.board.evidence_status;
@@ -641,7 +642,7 @@ function renderComparison(snapshot) {
     notes.push("板端当前 guard_state=JOB_ACTIVE；demo 会保守阻断新的 live launch，不自动 SAFE_STOP。");
   }
   document.getElementById("comparisonRunNote").textContent =
-    notes.join(" ") || "Current signed live 可在线推进；第三幕基线固定使用 PyTorch 参考归档，不再尝试 Baseline TVM live。";
+    notes.join(" ") || "Current 数据面可在线推进；第三幕默认展示 PyTorch 参考归档，并把数据面结果与 OpenAMP 控制面边界分开标注。";
 }
 
 function renderFault(snapshot) {
@@ -736,20 +737,20 @@ function applyLaunchPolicy(systemStatus) {
   const runAllButton = document.getElementById("runAllButton");
 
   const currentLabel = currentSupport.mode === "signed_manifest_v1"
-    ? "启动 Current signed 300 张图在线推进"
-    : "启动 Current 300 张图在线推进";
+    ? "启动 Current signed 数据面 300 张图在线推进"
+    : "启动 Current 数据面 300 张图在线推进";
   currentButton.textContent = currentLabel;
   currentAgainButton.textContent = currentSupport.mode === "signed_manifest_v1"
-    ? "运行 Current signed 300 张图"
-    : "运行 Current 300 张图";
+    ? "运行 Current signed 数据面 300 张图"
+    : "运行 Current 数据面 300 张图";
   baselineButton.textContent = baselineSupport.launch_allowed === false
-    ? "PyTorch live 未就绪"
+    ? "PyTorch 参考基线（归档）"
     : baselineSupport.mode === "signed_manifest_v1"
-      ? "运行 PyTorch signed 300 张图"
-      : "运行 PyTorch 300 张图";
+      ? "运行 PyTorch signed 数据面 300 张图"
+      : "运行 PyTorch 数据面 300 张图";
   runAllButton.textContent = baselineSupport.launch_allowed === false
-    ? "PyTorch + Current live 当前未开放"
-    : "一键顺序运行 PyTorch + Current 300 张图";
+    ? "PyTorch 参考 + Current 当前未开放 live"
+    : "一键顺序运行 PyTorch + Current 数据面 300 张图";
 
   currentButton.disabled = currentBlocked;
   currentAgainButton.disabled = currentBlocked;
