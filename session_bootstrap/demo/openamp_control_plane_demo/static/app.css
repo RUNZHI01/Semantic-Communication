@@ -1010,6 +1010,93 @@ select:focus {
   color: var(--accent);
 }
 
+.compare-viewer-shell {
+  margin-top: 1rem;
+  display: grid;
+  gap: 0.9rem;
+}
+
+.compare-viewer-head,
+.compare-viewer-pane-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8rem;
+  align-items: start;
+}
+
+.compare-viewer-head h3,
+.compare-viewer-pane-head h4 {
+  margin: 0;
+  font-family: "Noto Serif SC", "Source Han Serif SC", "STSong", "SimSun", serif;
+}
+
+.compare-viewer-context,
+.compare-viewer-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+}
+
+.compare-context-card,
+.compare-viewer-pane {
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.86);
+  padding: 0.95rem;
+}
+
+.compare-context-card {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.compare-context-card span,
+.compare-viewer-source {
+  font-size: 0.76rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.compare-context-card strong {
+  font-size: 0.98rem;
+}
+
+.compare-context-card small {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.compare-viewer-pane {
+  margin: 0;
+  display: grid;
+  gap: 0.7rem;
+}
+
+.compare-viewer-pane img {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: contain;
+  border-radius: 18px;
+  background: #eef2f4;
+}
+
+.compare-viewer-source {
+  display: block;
+}
+
+.compare-viewer-metrics {
+  margin-top: 0;
+}
+
+.compare-viewer-path {
+  font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 0.8rem;
+  color: var(--muted);
+  word-break: break-all;
+}
+
 .fault-toolbar {
   margin-bottom: 0.9rem;
 }
@@ -1047,6 +1134,8 @@ select:focus {
   .dual-grid,
   .dual-progress-grid,
   .image-compare,
+  .compare-viewer-context,
+  .compare-viewer-grid,
   .comparison-board,
   .stage-chip-row,
   .fault-summary,
@@ -1059,6 +1148,8 @@ select:focus {
 
   .credential-grid label.full-span,
   .image-compare,
+  .compare-viewer-context,
+  .compare-viewer-grid,
   .comparison-board,
   .fault-summary {
     grid-column: 1 / -1;
@@ -1082,6 +1173,8 @@ select:focus {
   .dual-grid,
   .dual-progress-grid,
   .image-compare,
+  .compare-viewer-context,
+  .compare-viewer-grid,
   .stage-chip-row,
   .timeline-grid,
   .fit-grid,

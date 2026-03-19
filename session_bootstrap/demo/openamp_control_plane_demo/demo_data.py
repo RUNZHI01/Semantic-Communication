@@ -901,6 +901,53 @@ def build_inference_sample_catalog() -> list[dict[str, Any]]:
     return catalog
 
 
+def build_compare_viewer_sample(image_index: int) -> dict[str, Any]:
+    current_payload = build_prerecorded_inference_result(image_index, "current")
+    baseline_payload = build_prerecorded_inference_result(image_index, "baseline")
+    return {
+        "index": image_index,
+        "sample": dict(current_payload["sample"]),
+        "reference": {
+            "label": "参考原图",
+            "image_path": current_payload["image_sources"]["original_path"],
+        },
+        "current": {
+            "label": "Current reconstruction",
+            "source_label": "Current 归档重建图",
+            "execution_mode": current_payload["execution_mode"],
+            "image_b64": current_payload["reconstructed_image_b64"],
+            "image_path": current_payload["image_sources"]["reconstructed_path"],
+            "quality": dict(current_payload["quality"]),
+            "fallback_note": (
+                "若当前没有匹配本样例的最新 Current 结果，左侧继续显示仓库内已有的 current reconstruction archive。"
+            ),
+        },
+        "baseline": {
+            "label": "PyTorch reference",
+            "source_label": "PyTorch 参考 archive",
+            "execution_mode": baseline_payload["execution_mode"],
+            "image_b64": baseline_payload["reconstructed_image_b64"],
+            "image_path": baseline_payload["image_sources"]["reconstructed_path"],
+            "quality": dict(baseline_payload["quality"]),
+            "fallback_note": (
+                "若当前没有匹配本样例的基线结果，右侧固定显示 2026-03-12 归档的 PyTorch reference reconstruction。"
+            ),
+        },
+    }
+
+
+def build_compare_viewer_snapshot() -> dict[str, Any]:
+    return {
+        "title": "重建结果对照",
+        "mode_note": "先提供并排 compare viewer，不宣称已实现交互式 slider。",
+        "fallback_note": (
+            "compare viewer 优先沿用当前页面内已拿到的同样例 current / baseline 结果；"
+            "若没有匹配结果，则明确回退到仓库内已有的 archive/reference 图像。"
+        ),
+        "samples": [build_compare_viewer_sample(index) for index, _ in enumerate(PRERECORDED_SAMPLE_FIXTURES)],
+    }
+
+
 def build_prerecorded_inference_result(image_index: int, variant: str) -> dict[str, Any]:
     variant_key = variant.lower()
     if image_index < 0 or image_index >= len(PRERECORDED_SAMPLE_FIXTURES):
@@ -908,9 +955,14 @@ def build_prerecorded_inference_result(image_index: int, variant: str) -> dict[s
     fixture = PRERECORDED_SAMPLE_FIXTURES[image_index]
     comparison = build_comparison_snapshot()
     current_quality = quality_metrics_by_relative_path(str(QUALITY_CURRENT_REPORT))
+    baseline_quality = quality_metrics_by_relative_path(str(QUALITY_BASELINE_REPORT))
     reference_baseline = build_pytorch_reference_baseline_snapshot()
     reference_record = pytorch_reference_records_by_relative_path().get(fixture["relative_path"], {})
-    quality_entry = current_quality.get(fixture["relative_path"], {}) if variant_key == "current" else {}
+    quality_entry = (
+        current_quality.get(fixture["relative_path"], {})
+        if variant_key == "current"
+        else baseline_quality.get(fixture["relative_path"], {})
+    )
     original_path = fixture["original_path"]
     reconstructed_path = fixture["current_path"] if variant_key == "current" else fixture["baseline_path"]
 
@@ -960,6 +1012,10 @@ def build_prerecorded_inference_result(image_index: int, variant: str) -> dict[s
             "label": fixture["label"],
             "title": fixture["title"],
             "note": fixture["note"],
+        },
+        "image_sources": {
+            "original_path": repo_relative(original_path),
+            "reconstructed_path": repo_relative(reconstructed_path),
         },
         "original_image_b64": image_data_uri(str(original_path)),
         "reconstructed_image_b64": image_data_uri(str(reconstructed_path)),
@@ -1120,6 +1176,7 @@ def build_guided_demo_snapshot() -> dict[str, Any]:
     return {
         "sample_catalog": build_inference_sample_catalog(),
         "comparison": build_comparison_snapshot(),
+        "compare_viewer": build_compare_viewer_snapshot(),
         "fault_catalog": build_fault_catalog(),
     }
 
