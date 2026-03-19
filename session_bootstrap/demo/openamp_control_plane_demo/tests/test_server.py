@@ -2075,6 +2075,8 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(headers["cache-control"], "no-store")
         self.assertIn("<title>飞腾多核弱网安全语义视觉回传演示系统</title>", body)
         self.assertIn("飞腾多核弱网安全语义视觉回传系统", body)
+        self.assertIn('id="compareViewerBoard"', body)
+        self.assertIn('id="compareViewerSampleLabel"', body)
         self.assertIn('<script src="/app.js"></script>', body)
 
     def test_app_js_serves_dashboard_javascript(self) -> None:
@@ -2092,6 +2094,8 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertIn('fetchJSON("/api/archive/sessions?limit=25")', body)
         self.assertIn('fetchJSON(`/api/archive/session?session_id=${encodeURIComponent(nextArchiveSessionId)}&limit=25`)', body)
         self.assertIn('fetchJSON("/api/link-director/profile"', body)
+        self.assertIn("selectedCompareViewerSample", body)
+        self.assertIn('document.getElementById("compareViewerBoard")', body)
 
     def test_app_css_serves_dashboard_stylesheet(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)

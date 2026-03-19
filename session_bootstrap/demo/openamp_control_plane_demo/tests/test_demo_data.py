@@ -63,11 +63,15 @@ class DemoDataTest(unittest.TestCase):
         guided_demo = snapshot["guided_demo"]
 
         self.assertIn("comparison", guided_demo)
+        self.assertIn("compare_viewer", guided_demo)
         self.assertIn("sample_catalog", guided_demo)
         self.assertGreaterEqual(len(guided_demo["sample_catalog"]), 1)
         self.assertAlmostEqual(guided_demo["comparison"]["payload"]["baseline_ms"], 436.722)
         self.assertEqual(guided_demo["comparison"]["baseline_source"]["label"], "PyTorch 参考基线")
         self.assertAlmostEqual(guided_demo["comparison"]["end_to_end"]["current_ms"], 230.339)
+        self.assertIn("先提供并排 compare viewer", guided_demo["compare_viewer"]["mode_note"])
+        self.assertEqual(guided_demo["compare_viewer"]["samples"][0]["current"]["source_label"], "Current 归档重建图")
+        self.assertEqual(guided_demo["compare_viewer"]["samples"][0]["baseline"]["source_label"], "PyTorch 参考 archive")
 
     def test_snapshot_surfaces_latest_live_dualpath_status_report(self) -> None:
         snapshot = build_snapshot()
@@ -101,6 +105,8 @@ class DemoDataTest(unittest.TestCase):
         self.assertEqual(payload["execution_mode"], "reference")
         self.assertEqual(payload["source_label"], "PyTorch 参考基线")
         self.assertIn("PyTorch reference manifest", payload["message"])
+        self.assertIn("session_bootstrap/tmp/quality_metrics_inputs_20260312/reference/reconstructions/", payload["image_sources"]["reconstructed_path"])
+        self.assertIsNotNone(payload["quality"]["psnr_db"])
         self.assertEqual(
             payload["evidence"][0]["path"],
             "session_bootstrap/tmp/quality_metrics_inputs_20260312/reference/pytorch_reference_manifest.json",

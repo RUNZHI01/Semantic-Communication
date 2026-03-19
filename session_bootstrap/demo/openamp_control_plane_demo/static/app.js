@@ -1096,6 +1096,130 @@ function renderInference(result) {
   ].join("");
 }
 
+function selectedCompareViewerSample(snapshot) {
+  const samples = snapshot?.guided_demo?.compare_viewer?.samples || [];
+  if (!samples.length) return null;
+  return samples.find((sample) => Number(sample.index) === Number(state.selectedImageIndex)) || samples[0];
+}
+
+function resultMatchesSelectedSample(result, sampleIndex) {
+  return Boolean(result) && Number(result.image_index) === Number(sampleIndex);
+}
+
+function compareViewerMetrics(pane) {
+  const chips = [];
+  if (pane.executionMode) {
+    chips.push(`<div class="metric-chip">mode: ${escapeHtml(pane.executionMode)}</div>`);
+  }
+  if (pane.quality?.psnr_db !== null && pane.quality?.psnr_db !== undefined) {
+    chips.push(`<div class="metric-chip">PSNR: ${Number(pane.quality.psnr_db || 0).toFixed(2)} dB</div>`);
+  }
+  if (pane.quality?.ssim !== null && pane.quality?.ssim !== undefined) {
+    chips.push(`<div class="metric-chip">SSIM: ${Number(pane.quality.ssim || 0).toFixed(4)}</div>`);
+  }
+  return chips.length ? `<div class="metric-inline compare-viewer-metrics">${chips.join("")}</div>` : "";
+}
+
+function compareViewerPaneState(snapshot, variant) {
+  const compareSample = selectedCompareViewerSample(snapshot);
+  if (!compareSample) return null;
+  const fallback = variant === "baseline" ? compareSample.baseline : compareSample.current;
+  const latest = variant === "baseline" ? state.baselineResult : state.currentResult;
+  const useLatest = resultMatchesSelectedSample(latest, compareSample.index);
+  const source = useLatest ? latest : fallback;
+  const quality = {
+    psnr_db: source?.quality?.psnr_db ?? fallback?.quality?.psnr_db,
+    ssim: source?.quality?.ssim ?? fallback?.quality?.ssim,
+  };
+
+  let badgeLabel = variant === "baseline" ? "reference archive" : "current archive";
+  let badgeTone = variant === "baseline" ? "neutral" : "degraded";
+  if (useLatest && source.execution_mode === "live") {
+    badgeLabel = source.request_state === "running" ? "latest live status" : "latest live result";
+    badgeTone = "online";
+  } else if (useLatest) {
+    badgeLabel = "latest result";
+    badgeTone = variant === "baseline" ? "neutral" : "degraded";
+  }
+
+  return {
+    sideLabel: variant === "baseline" ? "右侧" : "左侧",
+    title: fallback.label || (variant === "baseline" ? "PyTorch reference" : "Current reconstruction"),
+    badgeLabel,
+    badgeTone,
+    sourceLabel: source?.source_label || fallback.source_label || "",
+    imageSrc: useLatest ? source.reconstructed_image_b64 : fallback.image_b64,
+    imagePath: useLatest
+      ? source?.image_sources?.reconstructed_path || fallback.image_path || ""
+      : fallback.image_path || "",
+    note: useLatest
+      ? String(source?.message || fallback.fallback_note || "")
+      : String(fallback.fallback_note || source?.message || ""),
+    executionMode: source?.execution_mode || fallback.execution_mode || "",
+    quality,
+  };
+}
+
+function compareViewerPane(pane) {
+  if (!pane) return "";
+  return `
+    <figure class="compare-viewer-pane">
+      <div class="compare-viewer-pane-head">
+        <div>
+          <div class="label">${escapeHtml(pane.sideLabel)}</div>
+          <h4>${escapeHtml(pane.title)}</h4>
+        </div>
+        <div class="status-pill ${toneClass(pane.badgeTone)}">${escapeHtml(pane.badgeLabel)}</div>
+      </div>
+      <div class="compare-viewer-source">${escapeHtml(pane.sourceLabel)}</div>
+      <img src="${pane.imageSrc}" alt="${escapeHtml(pane.title)}">
+      ${compareViewerMetrics(pane)}
+      <figcaption class="compact-copy">${escapeHtml(pane.note)}</figcaption>
+      <div class="compare-viewer-path">${escapeHtml(pane.imagePath)}</div>
+    </figure>
+  `;
+}
+
+function renderCompareViewer(snapshot) {
+  const viewer = snapshot?.guided_demo?.compare_viewer || {};
+  const compareSample = selectedCompareViewerSample(snapshot);
+  const sampleLabel = compareSample?.sample?.label || "等待样例";
+  const sampleTitle = compareSample?.sample?.title || "";
+  document.getElementById("compareViewerSampleLabel").textContent = sampleTitle
+    ? `${sampleLabel} | ${sampleTitle}`
+    : sampleLabel;
+  document.getElementById("compareViewerModeNote").textContent =
+    `${viewer.mode_note || ""} ${viewer.fallback_note || ""}`.trim() || "等待 compare viewer 数据。";
+
+  if (!compareSample) {
+    document.getElementById("compareViewerContext").innerHTML = "";
+    document.getElementById("compareViewerBoard").innerHTML = "";
+    return;
+  }
+
+  document.getElementById("compareViewerContext").innerHTML = [
+    `
+      <div class="compare-context-card">
+        <span>当前样例</span>
+        <strong>${escapeHtml(compareSample.sample?.label || "")}</strong>
+        <small>${escapeHtml(compareSample.sample?.note || "")}</small>
+      </div>
+    `,
+    `
+      <div class="compare-context-card">
+        <span>selected image_index</span>
+        <strong>${escapeHtml(String(compareSample.index))}</strong>
+        <small>${escapeHtml(compareSample.reference?.image_path || "")}</small>
+      </div>
+    `,
+  ].join("");
+
+  document.getElementById("compareViewerBoard").innerHTML = [
+    compareViewerPane(compareViewerPaneState(snapshot, "current")),
+    compareViewerPane(compareViewerPaneState(snapshot, "baseline")),
+  ].join("");
+}
+
 function comparisonCard(card) {
   const baselineLabel = card.baseline_label || "baseline";
   const currentLabel = card.current_label || "current";
@@ -1122,13 +1246,18 @@ function renderComparison(snapshot) {
   const currentSupport = state.systemStatus?.live?.variant_support?.current || {};
   const baselineSupport = state.systemStatus?.live?.variant_support?.baseline || {};
   const boardBusy = String(state.systemStatus?.live?.guard_state || "").toUpperCase() === "JOB_ACTIVE";
+  const compareSample = selectedCompareViewerSample(snapshot);
   renderComparisonProgressCards();
   document.getElementById("comparisonBoard").innerHTML = [
     comparisonCard(comparison.payload),
     comparisonCard(comparison.end_to_end),
   ].join("");
+  renderCompareViewer(snapshot);
 
   const notes = [];
+  if (compareSample?.sample?.label) {
+    notes.push(`当前 compare viewer 样例：${compareSample.sample.label}，左侧显示 Current，右侧显示 PyTorch reference。`);
+  }
   if (state.baselineResult) {
     notes.push(`基线：${state.baselineResult.source_label}，${state.baselineResult.message}`);
   }
@@ -1587,6 +1716,9 @@ function bindEvents() {
   });
   document.getElementById("imageSelect").addEventListener("change", (event) => {
     state.selectedImageIndex = Number(event.target.value || 0);
+    if (state.snapshot) {
+      renderComparison(state.snapshot);
+    }
   });
   document.addEventListener("click", (event) => {
     const button = event.target.closest("[data-link-profile-id]");
