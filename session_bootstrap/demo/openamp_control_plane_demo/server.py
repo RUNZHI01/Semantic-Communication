@@ -29,7 +29,7 @@ from demo_data import (
     resolve_repo_path,
 )
 from fault_injector import query_live_status, run_fault_action, run_recover_action
-from event_spine import CONTROL_MODE_SCOPE, DATA_MODE_SCOPE, DemoEventSpine, default_event_archive_root
+from event_spine import CONTROL_MODE_SCOPE, DATA_MODE_SCOPE, DemoEventSpine, MODE_BOUNDARY_NOTE, default_event_archive_root
 from inference_runner import (
     DEFAULT_MAX_INPUTS,
     DEMO_ADMISSION_MODE_ENV,
@@ -205,19 +205,71 @@ class DashboardState:
         except KeyError as exc:
             raise ValueError("unsupported profile_id") from exc
 
-        action = (
-            f"导演台已切到 {profile['label']} 预案；当前仅更新操作员态势与后续绑定目标，"
-            "未执行 tc/netem 或物理弱网控制。"
-        )
+        change_applied = False
+        previous_profile_id = "normal"
+        previous_profile_label = link_profile_by_id("normal")["label"]
         with self._lock:
-            self._link_director = {
-                "selected_profile_id": profile["profile_id"],
-                "last_applied_at": now_iso(),
-                "last_operator_action": action,
-                "apply_status": "staged",
-                "backend_binding": "ui_scaffold_only",
-            }
-        return self.current_link_director_status()
+            previous_profile_id = str(self._link_director.get("selected_profile_id") or "normal")
+            try:
+                previous_profile_label = link_profile_by_id(previous_profile_id)["label"]
+            except KeyError:
+                previous_profile_id = "normal"
+                previous_profile_label = link_profile_by_id("normal")["label"]
+            if previous_profile_id != profile["profile_id"]:
+                action = (
+                    f"导演台已切到 {profile['label']} 预案；当前仅更新操作员态势与后续绑定目标，"
+                    "未执行 tc/netem 或物理弱网控制。"
+                )
+                self._link_director = {
+                    "selected_profile_id": profile["profile_id"],
+                    "last_applied_at": now_iso(),
+                    "last_operator_action": action,
+                    "apply_status": "staged",
+                    "backend_binding": "ui_scaffold_only",
+                }
+                change_applied = True
+
+        if not change_applied:
+            status = self.current_link_director_status()
+            status["change_applied"] = False
+            status["status_message"] = (
+                f"导演台已保持 {profile['label']} 预案；当前仍是 UI/control-plane scaffold，"
+                "不会执行 tc/netem 或改写 live telemetry。"
+            )
+            status["previous_profile_id"] = previous_profile_id
+            status["previous_profile_label"] = previous_profile_label
+            return status
+
+        status = self.current_link_director_status()
+        status["change_applied"] = True
+        status["status_message"] = str(status.get("last_operator_action") or "")
+        status["previous_profile_id"] = previous_profile_id
+        status["previous_profile_label"] = previous_profile_label
+        self._event_spine.publish(
+            "LINK_PROFILE_CHANGED",
+            source="link_director",
+            plane="control",
+            mode_scope=CONTROL_MODE_SCOPE,
+            message=str(status.get("last_operator_action") or f"Link director switched to {profile['label']}."),
+            data={
+                "profile_id": profile["profile_id"],
+                "profile_label": profile["label"],
+                "previous_profile_id": previous_profile_id,
+                "previous_profile_label": previous_profile_label,
+                "backend_binding": str(status.get("backend_binding") or "ui_scaffold_only"),
+            },
+        )
+        self._archive_event_snapshot(
+            reason="link_profile_changed",
+            extra={
+                "profile_id": profile["profile_id"],
+                "profile_label": profile["label"],
+                "previous_profile_id": previous_profile_id,
+                "previous_profile_label": previous_profile_label,
+                "backend_binding": str(status.get("backend_binding") or "ui_scaffold_only"),
+            },
+        )
+        return status
 
     def current_snapshot(self) -> dict[str, Any]:
         with self._lock:
@@ -334,6 +386,7 @@ class DashboardState:
             "backend_status": catalog["backend_status"],
             "summary": catalog["summary"],
             "plane_split_note": catalog["plane_split_note"],
+            "mode_boundary_note": MODE_BOUNDARY_NOTE,
             "truth_note": "当前仅记录导演台预案；live 控制面与证据读数继续如实显示。",
             "selected_profile_id": selected_id,
             "selected_profile_label": selected["label"],
@@ -1571,6 +1624,9 @@ class DemoRequestHandler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/snapshot":
             self.respond_json(HTTPStatus.OK, self.server.app_state.current_snapshot())
             return
+        if parsed.path == "/api/link-director":
+            self.respond_json(HTTPStatus.OK, self.server.app_state.current_link_director_status())
+            return
         if parsed.path == "/api/event-spine":
             params = parse_qs(parsed.query)
             limit = max(1, min(100, self.coerce_int(params.get("limit", ["25"])[0], default=25)))
@@ -1614,6 +1670,14 @@ class DemoRequestHandler(SimpleHTTPRequestHandler):
                 self.respond_json(HTTPStatus.BAD_REQUEST, {"status": "error", "message": str(exc)})
                 return
             self.respond_json(HTTPStatus.OK, {"status": "ok", "board_access": payload})
+            return
+        if parsed.path == "/api/link-director/profile":
+            try:
+                payload = self.server.app_state.set_link_director_profile(body)
+            except ValueError as exc:
+                self.respond_json(HTTPStatus.BAD_REQUEST, {"status": "error", "message": str(exc)})
+                return
+            self.respond_json(HTTPStatus.OK, payload)
             return
         if parsed.path == "/api/probe-board":
             payload = self.server.app_state.refresh_live_probe()
