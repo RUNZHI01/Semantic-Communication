@@ -411,6 +411,9 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(payload["live"]["variant_support"]["baseline"]["mode"], "legacy_sha")
         self.assertEqual(payload["live"]["variant_support"]["baseline"]["label"], "PyTorch legacy live")
         self.assertTrue(payload["live"]["variant_support"]["baseline"]["launch_allowed"])
+        self.assertFalse(payload["active_inference"]["running"])
+        self.assertEqual(payload["active_inference"]["queue_depth"], 0)
+        self.assertEqual(payload["active_inference"]["progress"]["count_label"], "0 active / 0 queued")
 
     def test_system_status_endpoint_exposes_redacted_board_access(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
@@ -496,6 +499,42 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(payload["live"]["variant_support"]["current"]["label"], "Current signed live 已支持")
         self.assertEqual(payload["live"]["variant_support"]["baseline"]["label"], "PyTorch legacy live")
         self.assertTrue(payload["live"]["variant_support"]["baseline"]["launch_allowed"])
+
+    def test_system_status_endpoint_surfaces_running_active_inference(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        running_job = FakeInferenceJob(
+            [
+                {
+                    "status": "running",
+                    "request_state": "running",
+                    "status_category": "running",
+                    "execution_mode": "live",
+                    "variant": "current",
+                    "message": "OpenAMP 控制面已接管本次演示，界面正在同步板端阶段。",
+                    "runner_summary": {},
+                    "wrapper_summary": {},
+                    "diagnostics": {},
+                    "progress": live_progress_payload("真实在线推进", "running", 76, "板端执行中"),
+                    "artifacts": {},
+                }
+            ],
+            job_id="demo-job-active",
+        )
+        state._inference_jobs[running_job.job_id] = {
+            "job": running_job,
+            "job_id": running_job.job_id,
+            "variant": "current",
+            "image_index": 0,
+        }
+
+        status, _, payload = request_json(state, "GET", "/api/system-status")
+
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["active_inference"]["running"])
+        self.assertEqual(payload["active_inference"]["job_id"], "demo-job-active")
+        self.assertEqual(payload["active_inference"]["variant"], "current")
+        self.assertEqual(payload["active_inference"]["queue_depth"], 1)
+        self.assertEqual(payload["active_inference"]["progress"]["current_stage"], "板端执行中")
 
     def test_board_access_endpoint_accepts_password_only_and_keeps_preloaded_defaults(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)

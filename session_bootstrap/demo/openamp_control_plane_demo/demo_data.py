@@ -1030,6 +1030,69 @@ def build_latest_live_status_snapshot() -> dict[str, Any]:
     }
 
 
+def build_mission_snapshot() -> dict[str, Any]:
+    reference_baseline = build_pytorch_reference_baseline_snapshot()
+    archive_timeline = [
+        {
+            "timestamp": "2026-03-17",
+            "lane": "mission",
+            "title": "Current live 300 / 300 已归档",
+            "summary": "Current 路径的 300 张图 live reconstruction 仍是当前答辩 demo 的有效在线证据。",
+            "tone": "online",
+            "links": [
+                link_entry(LATEST_LIVE_DUALPATH_REPORT, "2026-03-17 current live 状态报告"),
+                link_entry(REPORTS_ROOT / "openamp_demo_live_probe_latest.json", "最新在线探板 JSON"),
+            ],
+        },
+        {
+            "timestamp": "2026-03-15",
+            "lane": "safety",
+            "title": "FIT-03 watchdog 修复后 READY 收口",
+            "summary": "停发 heartbeat 5 秒后显式暴露 HEARTBEAT_TIMEOUT，并回到 READY。",
+            "tone": "warning",
+            "links": [
+                link_entry(REPORTS_ROOT / "openamp_phase5_fit03_watchdog_success_2026-03-15.md", "FIT-03 修复后摘要"),
+                link_entry(
+                    REPORTS_ROOT / "openamp_heartbeat_timeout_fit_watchdogfix_20260315_023410" / "remote_probe.json",
+                    "FIT-03 修复后远程探板",
+                ),
+            ],
+        },
+        {
+            "timestamp": "2026-03-15",
+            "lane": "device",
+            "title": "JOB_DONE 清理路径已确认",
+            "summary": "现有板级证据表明：板卡无需重启即可通过 JOB_DONE / SAFE_STOP 回到 READY。",
+            "tone": "online",
+            "links": [
+                link_entry(REPORTS_ROOT / "openamp_phase5_job_done_success_2026-03-15.md", "JOB_DONE 摘要"),
+                link_entry(REPORTS_ROOT / "openamp_job_done_real_probe_20260315_001.json", "JOB_DONE 原始探板"),
+            ],
+        },
+        {
+            "timestamp": str(reference_baseline["completed_at"] or "")[:10] or "2026-03-12",
+            "lane": "reference",
+            "title": "PyTorch 参考基线 300 / 300 归档",
+            "summary": "第三幕默认基线固定引用归档的 PyTorch reference manifest，不重新走 baseline TVM live。",
+            "tone": "neutral",
+            "links": [link_entry(PYTORCH_REFERENCE_MANIFEST, "PyTorch 参考 manifest")],
+        },
+    ]
+    return {
+        "title": "任务态势总览",
+        "summary": (
+            "把 OpenAMP 控制面、语义视觉回传数据面、SAFE_STOP 安全收口和正式性能口径放到同一页，但继续如实分开表述。"
+        ),
+        "control_plane_note": "OpenAMP / RPMsg 当前只负责 control plane、状态门禁和 SAFE_STOP。",
+        "data_plane_note": "Current 与 PyTorch reconstruction 继续走既有数据面，不改后端协议。",
+        "mode_split_note": (
+            "headline performance 引用 4-core Linux performance mode；本场 live operator flow 明确属于 3-core Linux + RTOS demo mode。"
+        ),
+        "batch_target": int(reference_baseline["output_count"] or 300),
+        "archive_timeline": archive_timeline,
+    }
+
+
 def build_operator_snapshot() -> dict[str, Any]:
     return {
         "launch_commands": [
@@ -1125,6 +1188,7 @@ def build_snapshot(live_probe: dict[str, Any] | None = None) -> dict[str, Any]:
         "fits": fits,
         "performance": performance,
         "guided_demo": build_guided_demo_snapshot(),
+        "mission": build_mission_snapshot(),
         "operator": build_operator_snapshot(),
         "docs": build_docs_snapshot(),
     }

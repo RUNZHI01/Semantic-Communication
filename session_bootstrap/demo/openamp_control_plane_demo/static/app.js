@@ -129,6 +129,127 @@ function kpiCard(label, value, note, lamp = "") {
   `;
 }
 
+function shortSha(value) {
+  const text = String(value || "");
+  return text ? text.slice(0, 12) : "NA";
+}
+
+function setStatusBadge(id, label, tone) {
+  const element = document.getElementById(id);
+  element.className = `status-pill ${toneClass(tone)}`;
+  element.textContent = label;
+}
+
+function missionMetric(label, value, note = "") {
+  return `
+    <div class="mission-metric">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+      ${note ? `<small>${escapeHtml(note)}</small>` : ""}
+    </div>
+  `;
+}
+
+function missionNote(text) {
+  return `<p class="compact-copy mission-note">${escapeHtml(text)}</p>`;
+}
+
+function renderFlowStrip(stages) {
+  if (!stages || !stages.length) return "";
+  return `
+    <div class="flow-strip">
+      ${stages
+        .map(
+          (stage) => `
+            <div class="flow-chip" data-status="${escapeHtml(stage.status || "pending")}">
+              <span>${escapeHtml(stage.label || stage.key || "阶段")}</span>
+              <strong>${escapeHtml(stage.status === "done" ? "已完成" : stage.status === "current" ? "推进中" : stage.status === "error" ? "阻断" : "待命")}</strong>
+            </div>
+          `
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+function latestResultForVariant(variant) {
+  if (variant === "baseline") {
+    if (state.baselineResult) return state.baselineResult;
+  } else if (state.currentResult) {
+    return state.currentResult;
+  }
+  const lastInference = state.systemStatus?.last_inference || {};
+  return lastInference.variant === variant ? lastInference : null;
+}
+
+function lastLogLine(entries) {
+  if (!entries || !entries.length) return "";
+  return String(entries[entries.length - 1] || "");
+}
+
+function timelineEvent(stamp, lane, title, summary, tone, links = []) {
+  return { stamp, lane, title, summary, tone, links };
+}
+
+function buildMissionTimeline(snapshot, systemStatus) {
+  const items = [];
+  const live = systemStatus.live || {};
+  const active = systemStatus.active_inference || {};
+  const activeProgress = active.progress || {};
+  const lastInference = systemStatus.last_inference || {};
+  const lastFault = state.faultResult || systemStatus.last_fault || {};
+
+  if (live.last_probe_at) {
+    items.push(
+      timelineEvent(
+        live.last_probe_at,
+        "device",
+        "板卡只读探板",
+        `remoteproc=${live.remoteproc_state} | RPMsg=${live.rpmsg_device} | guard=${live.guard_state}`,
+        live.board_online ? "online" : systemStatus.execution_mode?.tone || "degraded"
+      )
+    );
+  }
+  if (active.running) {
+    items.push(
+      timelineEvent(
+        active.job_id || activeProgress.count_label || "live",
+        "queue",
+        `${active.variant === "baseline" ? "PyTorch" : active.variant === "current" ? "Current" : "板端"} 活动作业`,
+        activeProgress.current_stage || active.message || "当前 live 作业正在推进。",
+        activeProgress.tone || "degraded"
+      )
+    );
+    const activeLog = lastLogLine(activeProgress.event_log);
+    if (activeLog) {
+      items.push(timelineEvent("live", "queue", "最近控制面事件", activeLog, activeProgress.tone || "degraded"));
+    }
+  } else if (lastInference.variant) {
+    items.push(
+      timelineEvent(
+        systemStatus.generated_at,
+        "return",
+        `${lastInference.variant === "baseline" ? "PyTorch" : "Current"} 最近一次结果`,
+        lastInference.message || lastInference.source_label || "已记录最近一次 operator 可见结果。",
+        lastInference.execution_mode === "live" || lastInference.execution_mode === "reference" ? "online" : "degraded"
+      )
+    );
+  }
+  if (lastFault.last_fault_code) {
+    items.push(
+      timelineEvent(
+        lastFault.status === "recovered" ? "SAFE_STOP" : lastFault.last_fault_code,
+        "safety",
+        lastFault.status === "recovered" ? "SAFE_STOP 收口" : "最近告警",
+        lastLogLine(lastFault.log_entries) || lastFault.message || `last_fault_code=${lastFault.last_fault_code}`,
+        lastFault.status_lamp === "green" ? "online" : lastFault.status_lamp === "yellow" ? "degraded" : "offline"
+      )
+    );
+  }
+
+  return items.concat(snapshot.mission?.archive_timeline || []).slice(0, 6);
+}
+
 function setFeedback(message, tone) {
   const banner = document.getElementById("feedbackBanner");
   if (!message) {
@@ -261,6 +382,164 @@ function renderBoardAccess(systemStatus) {
   `;
 }
 
+function renderMissionDashboard(snapshot, systemStatus) {
+  const mission = snapshot.mission || {};
+  const live = systemStatus.live || {};
+  const active = systemStatus.active_inference || {};
+  const activeProgress = normalizeProgress(active.progress || null);
+  const currentResult = latestResultForVariant("current");
+  const baselineResult = latestResultForVariant("baseline");
+  const currentLiveProgress = active.running && active.variant === "current"
+    ? activeProgress
+    : normalizeProgress(currentResult?.live_progress || null);
+  const baselineLiveProgress = normalizeProgress(baselineResult?.live_progress || null);
+  const lastFault = state.faultResult || systemStatus.last_fault || {};
+  const lastFaultCode = lastFault.last_fault_code || live.last_fault_code || "UNKNOWN";
+  const queueStages = active.running ? activeProgress.stages : (currentResult?.live_progress?.stages || []);
+  const currentSampleLabel =
+    currentResult?.sample?.label ||
+    currentResult?.sample_label ||
+    snapshot.guided_demo?.sample_catalog?.[0]?.label ||
+    "样例 208";
+
+  document.getElementById("missionSummary").textContent =
+    `${mission.summary || ""} ${mission.mode_split_note || ""}`.trim();
+
+  setStatusBadge(
+    "taskQueueBadge",
+    active.running ? activeProgress.label || "队列占用" : "Idle",
+    active.running ? activeProgress.tone || "degraded" : "neutral"
+  );
+  document.getElementById("taskQueueModule").innerHTML = `
+    <div class="mission-big">${escapeHtml(active.running ? activeProgress.count_label : "0 active / 0 queued")}</div>
+    <div class="mission-metrics">
+      ${missionMetric("当前阶段", active.running ? activeProgress.current_stage : "等待操作员发起任务", active.running ? progressSourceLabel(activeProgress.count_source) : "control plane queue")}
+      ${missionMetric("Current 批次", `${mission.batch_target || 300} 张 / 轮`, "数据面 batch target")}
+      ${missionMetric("最近结果", systemStatus.last_inference?.variant ? `${systemStatus.last_inference.variant} / ${systemStatus.last_inference.execution_mode}` : "尚无记录", systemStatus.last_inference?.source_label || "等待第一轮动作")}
+    </div>
+    ${renderFlowStrip(queueStages)}
+    ${missionNote(active.running ? active.message : (mission.control_plane_note || "OpenAMP 当前只负责 control plane queue / safety gate。"))}
+  `;
+
+  setStatusBadge(
+    "deviceStatusBadge",
+    live.board_online ? "Board Online" : systemStatus.execution_mode?.label || "Evidence",
+    live.board_online ? "online" : systemStatus.execution_mode?.tone || "degraded"
+  );
+  document.getElementById("deviceStatusModule").innerHTML = `
+    <div class="mission-metrics">
+      ${missionMetric("会话模式", systemStatus.execution_mode?.label || "未知", "3-core Linux + RTOS demo mode")}
+      ${missionMetric("remoteproc", live.remoteproc_state || "unknown", `RPMsg ${live.rpmsg_device || "unknown"}`)}
+      ${missionMetric("guard_state", live.guard_state || "UNKNOWN", `fault=${live.last_fault_code || "UNKNOWN"}`)}
+      ${missionMetric("runtime / target", `${live.runtime || "unknown"} / ${live.target || "unknown"}`, `trusted SHA ${shortSha(live.trusted_sha)}`)}
+    </div>
+    ${missionNote(live.last_probe_at ? `最近只读探板 ${live.last_probe_at}` : snapshot.board?.evidence_status?.summary || "当前设备状态以正式证据包为准。")}
+    ${renderLinks([...(snapshot.board?.current_status?.evidence || []), ...(snapshot.board?.evidence_status?.evidence || [])].slice(0, 2))}
+  `;
+
+  let currentPathLabel = "等待 Current live";
+  let currentPathTone = "neutral";
+  if (active.running && active.variant === "current") {
+    currentPathLabel = "Current live 正在推进";
+    currentPathTone = activeProgress.tone || "online";
+  } else if (currentResult?.execution_mode === "live") {
+    currentPathLabel = "Current live 已完成";
+    currentPathTone = "online";
+  } else if (currentResult?.status === "fallback" || currentResult?.execution_mode === "prerecorded") {
+    currentPathLabel = "Current 归档展示";
+    currentPathTone = "degraded";
+  }
+
+  setStatusBadge("linkStatusBadge", currentPathLabel, currentPathTone);
+  document.getElementById("linkStatusModule").innerHTML = `
+    <div class="mission-metrics">
+      ${missionMetric("控制面", live.board_online ? "OpenAMP / RPMsg 在线" : "证据 / 降级态", live.status_note || "当前不会改写 lower layer 协议")}
+      ${missionMetric("Current 数据面", currentPathLabel, currentResult?.source_label || "等待本轮 live 或归档展示")}
+      ${missionMetric("PyTorch 参考", snapshot.latest_live_status?.baseline?.completed || "archive", snapshot.latest_live_status?.baseline?.note || "reference archive")}
+      ${missionMetric("口径分层", "4-core headline / 3-core demo", "headline performance vs operator live mode")}
+    </div>
+    ${missionNote(`${mission.control_plane_note || ""} ${mission.data_plane_note || ""}`.trim())}
+  `;
+
+  const currentCountLabel =
+    (active.running && active.variant === "current")
+      ? currentLiveProgress.count_label
+      : currentResult?.live_progress?.count_label || snapshot.latest_live_status?.current?.completed || "等待执行";
+  const baselineCountLabel =
+    baselineResult?.live_progress?.count_label || snapshot.latest_live_status?.baseline?.completed || "archive";
+  const qualityNote = currentResult?.quality?.psnr_db !== undefined && currentResult?.quality?.psnr_db !== null
+    ? `PSNR ${Number(currentResult.quality.psnr_db || 0).toFixed(2)} dB / SSIM ${Number(currentResult.quality.ssim || 0).toFixed(4)}`
+    : "图像与指标默认来自归档样例 / PyTorch reference manifest";
+  const returnTone = active.running && active.variant === "current"
+    ? activeProgress.tone || "online"
+    : currentResult?.execution_mode === "live" || baselineResult?.execution_mode === "reference"
+      ? "online"
+      : currentResult?.status === "fallback" || currentResult?.execution_mode === "prerecorded"
+        ? "degraded"
+        : "neutral";
+  const returnLabel = active.running && active.variant === "current"
+    ? currentLiveProgress.label || "Current live"
+    : currentResult?.source_label || snapshot.latest_live_status?.status_label || "等待执行";
+  setStatusBadge("returnStatusBadge", returnLabel, returnTone);
+  document.getElementById("returnStatusModule").innerHTML = `
+    <div class="mission-big">${escapeHtml(currentCountLabel)}</div>
+    <div class="mission-metrics">
+      ${missionMetric("Current", currentCountLabel, currentResult?.source_label || snapshot.latest_live_status?.current?.note || "数据面 operator run")}
+      ${missionMetric("参考基线", baselineCountLabel, baselineResult?.source_label || snapshot.latest_live_status?.baseline?.note || "reference archive")}
+      ${missionMetric("当前样例", currentSampleLabel, "归档样例画面用于稳定展示")}
+      ${missionMetric("质量", qualityNote, "仅在有可用图像/质量记录时展示")}
+    </div>
+    ${missionNote(currentResult?.message || baselineResult?.message || snapshot.latest_live_status?.summary || "等待 operator 触发回传 / 重建任务。")}
+  `;
+
+  let safetyLabel = "无告警";
+  let safetyTone = "online";
+  if (lastFault.status === "recovered") {
+    safetyLabel = "SAFE_STOP 已执行";
+    safetyTone = lastFault.last_fault_code === "NONE" ? "online" : "degraded";
+  } else if (String(lastFaultCode).toUpperCase() !== "NONE") {
+    safetyLabel = "告警锁存";
+    safetyTone = "offline";
+  }
+  setStatusBadge("safetyStatusBadge", safetyLabel, safetyTone);
+  document.getElementById("safetyStatusModule").innerHTML = `
+    <div class="mission-metrics">
+      ${missionMetric("guard_state", lastFault.guard_state || live.guard_state || "UNKNOWN", "当前板端安全态")}
+      ${missionMetric("last_fault_code", lastFaultCode, lastFault.source_label || live.status_source || "formal evidence / live status")}
+      ${missionMetric("fault_count", String(live.total_fault_count ?? 0), "control plane 统计值")}
+      ${missionMetric("SAFE_STOP", lastFault.status === "recovered" ? "已执行" : "待命 / 手动触发", lastFault.execution_mode || "live / replay")}
+    </div>
+    ${missionNote(lastFault.message || live.status_note || "SAFE_STOP / alarm 继续沿用当前控制面语义，不改协议。")}
+  `;
+
+  const timelineItems = buildMissionTimeline(snapshot, systemStatus);
+  setStatusBadge(
+    "timelineStatusBadge",
+    active.running ? "Live + Archive" : "Archive + Recent State",
+    active.running ? activeProgress.tone || "degraded" : "neutral"
+  );
+  document.getElementById("eventTimelineModule").innerHTML = `
+    <div class="event-list">
+      ${timelineItems
+        .map(
+          (item) => `
+            <article class="event-item" data-tone="${escapeHtml(item.tone || "neutral")}">
+              <div class="event-head">
+                <span class="event-stamp">${escapeHtml(item.stamp || "NA")}</span>
+                <span class="event-lane">${escapeHtml(item.lane || "event")}</span>
+              </div>
+              <strong>${escapeHtml(item.title || "事件")}</strong>
+              <p class="compact-copy">${escapeHtml(item.summary || "")}</p>
+              ${renderLinks(item.links || [])}
+            </article>
+          `
+        )
+        .join("")}
+    </div>
+    ${missionNote(mission.mode_split_note || "")}
+  `;
+}
+
 function renderAct1(snapshot, systemStatus) {
   const live = systemStatus.live;
   const admission = live.admission || {};
@@ -348,6 +627,7 @@ function progressSourceLabel(source) {
     "runner_log.sample_latency_lines": "实时 runner 日志",
     "runner_summary.processed_count": "最终 runner 汇总",
     pytorch_reference_manifest: "PyTorch 参考 manifest",
+    board_status: "板端状态缓存",
     demo_default: "演示默认值",
   };
   return labels[source] || "实时状态";
@@ -767,6 +1047,7 @@ function renderAll() {
   if (!state.snapshot || !state.systemStatus) return;
   renderTop(state.snapshot, state.systemStatus);
   renderLatestLiveStatus(state.snapshot);
+  renderMissionDashboard(state.snapshot, state.systemStatus);
   renderBoardAccess(state.systemStatus);
   renderAct1(state.snapshot, state.systemStatus);
   renderSampleOptions(state.snapshot);
