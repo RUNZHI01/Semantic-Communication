@@ -825,8 +825,20 @@ function latestResultForVariant(variant) {
   } else if (state.currentResult) {
     return state.currentResult;
   }
+  const recent = state.systemStatus?.recent_results?.[variant];
+  if (recent) return recent;
   const lastInference = state.systemStatus?.last_inference || {};
   return lastInference.variant === variant ? lastInference : null;
+}
+
+function hydrateRecentResultsFromSystemStatus(systemStatus) {
+  const recentResults = systemStatus?.recent_results || {};
+  if (recentResults.current) {
+    state.currentResult = recentResults.current;
+  }
+  if (recentResults.baseline) {
+    state.baselineResult = recentResults.baseline;
+  }
 }
 
 function effectiveLinkDirectorStatus(snapshot) {
@@ -2104,6 +2116,7 @@ async function refreshAll() {
   state.currentArchiveSessionId = archiveSessionsPayload.current_session_id || "";
   state.selectedArchiveSessionId = nextArchiveSessionId;
   state.archiveSession = archiveSession;
+  hydrateRecentResultsFromSystemStatus(systemStatus);
   renderAll();
 }
 

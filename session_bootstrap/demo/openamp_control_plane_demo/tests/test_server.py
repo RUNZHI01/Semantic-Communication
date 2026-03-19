@@ -1279,6 +1279,198 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertIn("SAFE_STOP", payload["operator_cue"]["presenter_line"])
         self.assertEqual(payload["operator_cue"]["scenes"][3]["checks"][1]["label"], "Blackbox timeline")
 
+    def test_system_status_endpoint_exposes_recent_results_for_refresh_hydration(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        baseline_payload = server.build_prerecorded_inference_result(0, "baseline")
+        baseline_payload["job_id"] = "baseline-archive-001"
+        current_payload = server.build_prerecorded_inference_result(0, "current")
+        current_payload.update(
+            {
+                "status": "success",
+                "execution_mode": "live",
+                "status_category": "success",
+                "source_label": "真实在线推进 + 归档样例图",
+                "message": "Current live 结果已经回到页面。",
+                "job_id": "demo-job-live-001",
+                "request_state": "completed",
+                "live_progress": live_progress_payload("真实在线推进", "completed", 100, "已返回结果"),
+            }
+        )
+
+        state._update_last_inference_summary(baseline_payload, "baseline")
+        state._update_last_inference_summary(current_payload, "current")
+
+        status, _, payload = request_json(state, "GET", "/api/system-status")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["last_inference"]["variant"], "current")
+        self.assertEqual(payload["recent_results"]["current"]["job_id"], "demo-job-live-001")
+        self.assertEqual(payload["recent_results"]["current"]["execution_mode"], "live")
+        self.assertEqual(payload["recent_results"]["current"]["sample"]["label"], current_payload["sample"]["label"])
+        self.assertTrue(payload["recent_results"]["current"]["reconstructed_image_b64"].startswith("data:image/png;base64,"))
+        self.assertEqual(payload["recent_results"]["baseline"]["job_id"], "baseline-archive-001")
+        self.assertEqual(payload["recent_results"]["baseline"]["execution_mode"], "reference")
+
+    def test_operator_readiness_smoke_state_covers_required_page_modules(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            state = DashboardState(None, 30.0, probe_cache_path=None, event_archive_root=temp_dir)
+            request_json(
+                state,
+                "POST",
+                "/api/session/board-access",
+                body=json.dumps({"password": "demo-pass"}).encode("utf-8"),
+            )
+            state._last_live_probe = live_probe_payload("2026-03-19T19:22:00+0800", "board reachable")
+            state._last_control_status = {
+                "status": "success",
+                "guard_state": "READY",
+                "last_fault_code": "NONE",
+                "active_job_id": 0,
+                "total_fault_count": 0,
+                "logs": ["[19:22:00] STATUS_RESP: READY / fault=NONE"],
+            }
+
+            with (
+                patch(
+                    "server.describe_demo_admission",
+                    return_value={
+                        "status": "ready",
+                        "mode": "signed_manifest_v1",
+                        "label": "Signed manifest v1",
+                        "tone": "online",
+                        "bundle_path": "/tmp/openamp_demo_signed_admission/current.bundle.json",
+                        "public_key_path": "/tmp/openamp_demo_signed_admission/current.public.pem",
+                        "manifest_sha256": "a" * 64,
+                        "artifact_sha256": "b" * 64,
+                        "key_id": "demo-live-20260316",
+                        "verified_locally": True,
+                        "artifact_match": True,
+                        "note": "key_id=demo-live-20260316 | bundle=current.bundle.json",
+                    },
+                ),
+                patch(
+                    "server.describe_demo_variant_support",
+                    side_effect=[
+                        {
+                            "variant": "current",
+                            "status": "ready",
+                            "mode": "signed_manifest_v1",
+                            "label": "Current signed live 已支持",
+                            "tone": "online",
+                            "note": "Current signed-admission live path is supported.",
+                            "supported": True,
+                            "launch_allowed": True,
+                        },
+                        {
+                            "variant": "baseline",
+                            "status": "ready",
+                            "mode": "legacy_sha",
+                            "label": "PyTorch legacy live",
+                            "tone": "online",
+                            "note": "PyTorch live path is still using the legacy SHA allowlist.",
+                            "supported": True,
+                            "launch_allowed": True,
+                        },
+                        {
+                            "variant": "current",
+                            "status": "ready",
+                            "mode": "signed_manifest_v1",
+                            "label": "Current signed live 已支持",
+                            "tone": "online",
+                            "note": "Current signed-admission live path is supported.",
+                            "supported": True,
+                            "launch_allowed": True,
+                        },
+                        {
+                            "variant": "baseline",
+                            "status": "ready",
+                            "mode": "legacy_sha",
+                            "label": "PyTorch legacy live",
+                            "tone": "online",
+                            "note": "PyTorch live path is still using the legacy SHA allowlist.",
+                            "supported": True,
+                            "launch_allowed": True,
+                        },
+                    ],
+                ),
+                patch(
+                    "server.query_live_status",
+                    return_value={
+                        "status": "success",
+                        "guard_state": "READY",
+                        "active_job_id": 0,
+                        "last_fault_code": "NONE",
+                        "total_fault_count": 0,
+                        "logs": ["[19:22:01] STATUS_RESP: READY / fault=NONE"],
+                    },
+                ),
+            ):
+                preview_status, _, preview_payload = request_json(
+                    state,
+                    "POST",
+                    "/api/job-manifest-gate/preview",
+                    body=json.dumps({"variant": "current"}).encode("utf-8"),
+                )
+                link_status, _, link_payload = request_json(
+                    state,
+                    "POST",
+                    "/api/link-director/profile",
+                    body=json.dumps({"profile_id": "lossy"}).encode("utf-8"),
+                )
+
+                baseline_payload = server.build_prerecorded_inference_result(0, "baseline")
+                baseline_payload["job_id"] = "baseline-archive-300"
+                current_payload = server.build_prerecorded_inference_result(0, "current")
+                current_payload.update(
+                    {
+                        "status": "success",
+                        "execution_mode": "live",
+                        "status_category": "success",
+                        "source_label": "真实在线推进 + 归档样例图",
+                        "message": "Current live 结果已经回到页面。",
+                        "job_id": "demo-job-compare-300",
+                        "request_state": "completed",
+                        "live_progress": live_progress_payload("真实在线推进", "completed", 100, "已返回结果"),
+                    }
+                )
+                state._update_last_inference_summary(baseline_payload, "baseline")
+                state._update_last_inference_summary(current_payload, "current")
+
+                status, _, payload = request_json(state, "GET", "/api/system-status")
+                archive_list_status, _, archive_list_payload = request_json(state, "GET", "/api/archive/sessions?limit=10")
+                current_session_id = archive_list_payload["current_session_id"] or archive_list_payload["sessions"][0]["session_id"]
+                archive_status, _, archive_payload = request_json(
+                    state,
+                    "GET",
+                    f"/api/archive/session?session_id={current_session_id}&limit=10",
+                )
+
+        self.assertEqual(preview_status, 200)
+        self.assertEqual(preview_payload["gate"]["verdict"], "allow")
+        self.assertEqual(link_status, 200)
+        self.assertEqual(link_payload["selected_profile_id"], "lossy")
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["operator_cue"]["current_scene_id"], "scene3")
+        self.assertEqual(payload["operator_cue"]["next_action"]["target_id"], "compareViewerShell")
+        self.assertEqual(payload["link_director"]["selected_profile_id"], "lossy")
+        self.assertEqual(payload["job_manifest_gate"]["verdict"], "allow")
+        self.assertEqual(payload["recent_results"]["current"]["execution_mode"], "live")
+        self.assertEqual(payload["recent_results"]["baseline"]["execution_mode"], "reference")
+        self.assertEqual(payload["safety_panel"]["panel_label"], "无告警")
+        self.assertEqual(payload["safety_panel"]["safe_stop_state"], "IDLE")
+        self.assertGreaterEqual(payload["event_spine"]["event_count"], 4)
+        self.assertEqual(archive_list_status, 200)
+        self.assertGreaterEqual(archive_list_payload["session_count"], 1)
+        self.assertTrue(current_session_id)
+        self.assertEqual(archive_status, 200)
+        self.assertEqual(archive_payload["summary"]["session_id"], current_session_id)
+        self.assertGreaterEqual(archive_payload["summary"]["event_count"], 1)
+        self.assertTrue(archive_payload["timeline"])
+        self.assertTrue(
+            {"JOB_SUBMITTED", "JOB_ADMITTED", "LINK_PROFILE_CHANGED", "ARCHIVE_SNAPSHOT_WRITTEN"}
+            & {item["title"] for item in archive_payload["timeline"]}
+        )
+
     def test_system_status_endpoint_includes_demo_admission_summary(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
 
@@ -2243,6 +2435,10 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertIn('fetchJSON("/api/link-director/profile"', body)
         self.assertIn("normalizeOperatorCue", body)
         self.assertIn("renderOperatorCue", body)
+        self.assertIn("hydrateRecentResultsFromSystemStatus", body)
+        self.assertIn("systemStatus?.recent_results", body)
+        self.assertIn("state.currentResult = recentResults.current;", body)
+        self.assertIn("state.baselineResult = recentResults.baseline;", body)
         self.assertIn('document.getElementById("operatorCueShell")', body)
         self.assertIn("systemStatus.operator_cue", body)
         self.assertIn("buildCommandCenterModel", body)

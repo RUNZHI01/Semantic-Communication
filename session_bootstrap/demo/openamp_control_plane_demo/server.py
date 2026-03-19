@@ -753,6 +753,7 @@ class DashboardState:
         )
         self._last_control_status: dict[str, Any] | None = None
         self._last_inference_result: dict[str, Any] | None = None
+        self._recent_inference_results: dict[str, dict[str, Any]] = {}
         self._last_fault_result: dict[str, Any] | None = None
         self._inference_jobs: dict[str, dict[str, Any]] = {}
         self._manifest_preview_count = 0
@@ -1366,6 +1367,7 @@ class DashboardState:
             board_access = self._board_access
             control_status = self._last_control_status
             last_inference = self._last_inference_result
+            recent_inference_results = dict(self._recent_inference_results)
             last_fault = self._last_fault_result
 
         snapshot = build_snapshot(live_probe=live_probe)
@@ -1502,6 +1504,7 @@ class DashboardState:
             "live": live_payload,
             "active_inference": active_inference,
             "last_inference": last_inference or {},
+            "recent_results": recent_inference_results,
             "last_fault": last_fault or {},
             "safety_panel": safety_panel,
             "job_manifest_gate": job_manifest_gate,
@@ -1915,6 +1918,7 @@ class DashboardState:
         return payload
 
     def _update_last_inference_summary(self, payload: dict[str, Any], variant: str) -> None:
+        cached_payload = json.loads(json.dumps(payload, ensure_ascii=False))
         self._last_inference_result = {
             "status": payload["status"],
             "execution_mode": payload["execution_mode"],
@@ -1927,6 +1931,7 @@ class DashboardState:
             "sample_label": payload["sample"]["label"],
             "request_state": payload.get("request_state", "completed"),
         }
+        self._recent_inference_results[variant] = cached_payload
 
     def _running_inference_job_record(self) -> dict[str, Any] | None:
         with self._lock:
