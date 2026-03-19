@@ -171,6 +171,94 @@ class DashboardState:
             live_probe = self._last_live_probe
         return build_snapshot(live_probe=live_probe)
 
+    def _idle_active_inference_summary(self) -> dict[str, Any]:
+        return {
+            "running": False,
+            "job_id": "",
+            "variant": "",
+            "source": "demo_process",
+            "queue_depth": 0,
+            "request_state": "idle",
+            "status_category": "idle",
+            "message": "当前 demo 进程内没有活动中的 live 作业。",
+            "progress": {
+                "state": "idle",
+                "label": "队列空闲",
+                "tone": "neutral",
+                "percent": 0,
+                "phase_percent": 0,
+                "completed_count": 0,
+                "expected_count": DEFAULT_MAX_INPUTS,
+                "remaining_count": DEFAULT_MAX_INPUTS,
+                "completion_ratio": 0.0,
+                "count_source": "demo_default",
+                "count_label": "0 active / 0 queued",
+                "current_stage": "等待操作员发起任务",
+                "stages": [],
+                "event_log": [],
+            },
+        }
+
+    def _active_inference_summary(self) -> dict[str, Any]:
+        record = self._running_inference_job_record()
+        if record is not None:
+            snapshot = record["snapshot"]
+            progress = snapshot.get("progress") if isinstance(snapshot.get("progress"), dict) else {}
+            return {
+                "running": True,
+                "job_id": record["job_id"],
+                "variant": record["variant"],
+                "source": "demo_process",
+                "queue_depth": 1,
+                "request_state": snapshot.get("request_state", "running"),
+                "status_category": snapshot.get("status_category", "running"),
+                "message": str(snapshot.get("message") or "当前 live 作业正在推进。"),
+                "progress": progress,
+            }
+
+        with self._lock:
+            control_status = dict(self._last_control_status or {})
+
+        guard_state = str(control_status.get("guard_state") or "").upper()
+        if guard_state != "JOB_ACTIVE":
+            return self._idle_active_inference_summary()
+
+        active_job_id = int(control_status.get("active_job_id") or 0)
+        event_log = list(control_status.get("logs") or [])
+        return {
+            "running": True,
+            "job_id": "",
+            "variant": "unknown",
+            "source": "board_status",
+            "queue_depth": 1,
+            "request_state": "running",
+            "status_category": "board_busy",
+            "message": "板端当前报告 guard_state=JOB_ACTIVE；demo 仅展示现有作业状态，不自动 SAFE_STOP。",
+            "progress": {
+                "state": "running",
+                "label": "板端已有活动作业",
+                "tone": "degraded",
+                "percent": 0,
+                "phase_percent": 0,
+                "completed_count": 0,
+                "expected_count": DEFAULT_MAX_INPUTS,
+                "remaining_count": DEFAULT_MAX_INPUTS,
+                "completion_ratio": 0.0,
+                "count_source": "board_status",
+                "count_label": f"active_job_id={active_job_id}" if active_job_id else "JOB_ACTIVE",
+                "current_stage": "等待当前作业完成或人工 SAFE_STOP",
+                "stages": [
+                    {
+                        "key": "job_active",
+                        "label": "板端作业占用",
+                        "status": "current",
+                        "detail": "当前 board status 报告 guard_state=JOB_ACTIVE。",
+                    }
+                ],
+                "event_log": event_log,
+            },
+        }
+
     def current_system_status(self) -> dict[str, Any]:
         with self._lock:
             live_probe = self._last_live_probe
@@ -180,6 +268,7 @@ class DashboardState:
             last_fault = self._last_fault_result
 
         snapshot = build_snapshot(live_probe=live_probe)
+        active_inference = self._active_inference_summary()
         current_board_access = self._live_board_access_for_variant(board_access, variant="current")
         baseline_board_access = self._live_board_access_for_variant(board_access, variant="baseline")
         admission = describe_demo_admission(current_board_access, variant="current")
@@ -269,6 +358,7 @@ class DashboardState:
                 "status_source": status_source,
                 "status_note": status_note,
             },
+            "active_inference": active_inference,
             "last_inference": last_inference or {},
             "last_fault": last_fault or {},
         }
@@ -443,7 +533,10 @@ class DashboardState:
         with self._lock:
             records = list(self._inference_jobs.values())
         for record in records:
-            snapshot = record["job"].snapshot()
+            snapshot = record.get("last_snapshot")
+            if not isinstance(snapshot, dict):
+                snapshot = record["job"].snapshot()
+                record["last_snapshot"] = snapshot
             if snapshot.get("request_state") == "running":
                 return {
                     "job_id": record["job_id"],
@@ -618,6 +711,7 @@ class DashboardState:
                             "job_id": live_job.job_id,
                             "variant": variant,
                             "image_index": image_index,
+                            "last_snapshot": live_result,
                         }
                         with self._lock:
                             self._inference_jobs[live_job.job_id] = record
@@ -643,6 +737,7 @@ class DashboardState:
                         "job_id": live_job.job_id,
                         "variant": variant,
                         "image_index": image_index,
+                        "last_snapshot": live_result,
                     }
                     with self._lock:
                         self._inference_jobs[live_job.job_id] = record
@@ -655,6 +750,7 @@ class DashboardState:
                     "job_id": live_job.job_id,
                     "variant": variant,
                     "image_index": image_index,
+                    "last_snapshot": live_result,
                 }
                 with self._lock:
                     self._inference_jobs[live_job.job_id] = record
@@ -702,7 +798,10 @@ class DashboardState:
             record = self._inference_jobs.get(job_id)
         if record is None:
             raise KeyError(job_id)
-        payload = self._build_inference_response(record, record["job"].snapshot())
+        job_snapshot = record["job"].snapshot()
+        with self._lock:
+            record["last_snapshot"] = job_snapshot
+        payload = self._build_inference_response(record, job_snapshot)
         with self._lock:
             if payload.get("request_state") == "completed":
                 self._update_last_inference_summary(payload, record["variant"])

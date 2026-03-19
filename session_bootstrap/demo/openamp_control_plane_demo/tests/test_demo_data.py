@@ -85,6 +85,16 @@ class DemoDataTest(unittest.TestCase):
         self.assertEqual(snapshot["docs"][0]["path"], latest["report"]["path"])
         self.assertEqual(snapshot["docs"][1]["path"], "session_bootstrap/tmp/quality_metrics_inputs_20260312/reference/pytorch_reference_manifest.json")
 
+    def test_snapshot_contains_mission_dashboard_archive_timeline(self) -> None:
+        snapshot = build_snapshot()
+        mission = snapshot["mission"]
+
+        self.assertEqual(mission["batch_target"], 300)
+        self.assertIn("OpenAMP / RPMsg", mission["control_plane_note"])
+        self.assertIn("3-core Linux + RTOS demo mode", mission["mode_split_note"])
+        self.assertGreaterEqual(len(mission["archive_timeline"]), 4)
+        self.assertEqual(mission["archive_timeline"][0]["title"], "Current live 300 / 300 已归档")
+
     def test_prerecorded_baseline_uses_pytorch_reference_manifest(self) -> None:
         payload = build_prerecorded_inference_result(0, "baseline")
 

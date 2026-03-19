@@ -31,6 +31,78 @@
       </div>
     </header>
 
+    <section class="panel mission-panel">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">任务态势</p>
+          <h2>操作员 Mission / Status Dashboard</h2>
+        </div>
+        <span class="muted" id="missionSummary">正在聚合任务、设备、链路与安全状态...</span>
+      </div>
+      <div class="mission-grid">
+        <article class="mission-card">
+          <div class="mission-card-head">
+            <div>
+              <div class="label">任务队列</div>
+              <h3>Task Queue / State Flow</h3>
+            </div>
+            <div class="status-pill tone-neutral" id="taskQueueBadge">等待状态</div>
+          </div>
+          <div id="taskQueueModule"></div>
+        </article>
+        <article class="mission-card">
+          <div class="mission-card-head">
+            <div>
+              <div class="label">设备状态</div>
+              <h3>Device Status</h3>
+            </div>
+            <div class="status-pill tone-neutral" id="deviceStatusBadge">等待状态</div>
+          </div>
+          <div id="deviceStatusModule"></div>
+        </article>
+        <article class="mission-card">
+          <div class="mission-card-head">
+            <div>
+              <div class="label">链路状态</div>
+              <h3>Link Status</h3>
+            </div>
+            <div class="status-pill tone-neutral" id="linkStatusBadge">等待状态</div>
+          </div>
+          <div id="linkStatusModule"></div>
+        </article>
+        <article class="mission-card">
+          <div class="mission-card-head">
+            <div>
+              <div class="label">回传 / 重建</div>
+              <h3>Return / Reconstruction</h3>
+            </div>
+            <div class="status-pill tone-neutral" id="returnStatusBadge">等待状态</div>
+          </div>
+          <div id="returnStatusModule"></div>
+        </article>
+        <article class="mission-card">
+          <div class="mission-card-head">
+            <div>
+              <div class="label">安全收口</div>
+              <h3>SAFE_STOP / Alarm</h3>
+            </div>
+            <div class="status-pill tone-neutral" id="safetyStatusBadge">等待状态</div>
+          </div>
+          <div id="safetyStatusModule"></div>
+        </article>
+        <article class="mission-card">
+          <div class="mission-card-head">
+            <div>
+              <div class="label">事件流</div>
+              <h3>Event Timeline</h3>
+            </div>
+            <div class="status-pill tone-neutral" id="timelineStatusBadge">等待状态</div>
+          </div>
+          <div id="eventTimelineModule"></div>
+        </article>
+      </div>
+    </section>
+
     <section class="panel credential-panel">
       <div class="section-head">
         <div>
