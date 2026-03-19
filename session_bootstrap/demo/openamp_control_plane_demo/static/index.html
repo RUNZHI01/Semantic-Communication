@@ -12,18 +12,20 @@
   <main class="shell">
     <header class="hero panel">
       <div class="hero-copy">
-        <p class="eyebrow">飞腾系统答辩演示</p>
+        <div class="hero-topline">
+          <p class="eyebrow">Mission Ops Console</p>
+          <span class="hero-timestamp" id="generatedAt"></span>
+        </div>
         <h1>飞腾多核弱网安全语义视觉回传系统</h1>
         <p class="lede" id="heroSummary">正在加载演示快照与证据包...</p>
         <div class="hero-actions">
           <button id="reloadButton" class="button button-secondary" type="button">刷新证据快照</button>
           <button id="probeButton" class="button button-primary" type="button">探测板卡 / OpenAMP</button>
         </div>
-        <div id="latestLiveStatusCard" class="panel-lite evidence-stack">正在加载最新 live 双路径状态...</div>
       </div>
       <div class="hero-side">
         <div class="status-card panel-lite">
-          <div class="label">当前演示模式</div>
+          <div class="label">Current System State</div>
           <div class="mode-pill" id="modePill">准备中</div>
           <p class="compact-copy" id="modeSummary">等待系统状态。</p>
         </div>
@@ -34,26 +36,251 @@
     <section class="panel command-center-panel" id="commandCenterPanel">
       <div class="section-head">
         <div>
-          <p class="eyebrow">Command Center</p>
-          <h2>操作指挥席 / Operator Seat</h2>
+          <p class="eyebrow">Command Deck</p>
+          <h2>操作指挥席 / Scene Workbench</h2>
         </div>
         <span class="muted" id="commandCenterBoundaryNote">等待整页态势聚合...</span>
       </div>
-      <article class="operator-cue-shell" id="operatorCueShell">正在生成 operator cue...</article>
       <article class="command-strip" id="commandStripCard">正在生成 command strip...</article>
       <div class="command-jump-row" id="commandQuickJumpRow"></div>
-      <div class="command-scene-grid" id="commandSceneGrid"></div>
+      <div class="command-shell">
+        <div class="scene-workbench">
+          <nav class="act-nav panel-lite" aria-label="四幕导航">
+            <button class="act-tab active" data-act="act1" type="button">
+              <span class="act-number">01</span>
+              <span class="act-title">可信状态</span>
+              <span class="act-lamp" id="act1Lamp"></span>
+            </button>
+            <button class="act-tab" data-act="act2" type="button">
+              <span class="act-number">02</span>
+              <span class="act-title">语义回传</span>
+            </button>
+            <button class="act-tab" data-act="act3" type="button">
+              <span class="act-number">03</span>
+              <span class="act-title">正式对照</span>
+            </button>
+            <button class="act-tab" data-act="act4" type="button">
+              <span class="act-number">04</span>
+              <span class="act-title">故障注入与恢复</span>
+              <span class="act-lamp" id="act4Lamp"></span>
+            </button>
+          </nav>
+          <div class="command-scene-grid" id="commandSceneGrid"></div>
+
+          <section class="act-panel active panel-lite" id="act1Panel">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">第一幕</p>
+                <h2>可信状态与当前板卡接入</h2>
+              </div>
+              <span class="muted" id="act1StatusNote">等待探测。</span>
+            </div>
+            <div class="status-grid" id="act1StatusGrid"></div>
+            <div class="dual-grid">
+              <article class="panel-lite">
+                <div class="label">最近一次证据确认</div>
+                <div id="boardEvidenceCard"></div>
+              </article>
+              <article class="panel-lite">
+                <div class="label">在线读数 / 会话状态</div>
+                <div id="boardLiveCard"></div>
+              </article>
+            </div>
+            <div class="evidence-stack">
+              <div class="mini-title">P0 关键里程碑</div>
+              <div id="milestonesGrid" class="timeline-grid"></div>
+            </div>
+          </section>
+
+          <section class="act-panel panel-lite" id="act2Panel">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">第二幕</p>
+                <h2>Current 语义视觉回传在线推进</h2>
+              </div>
+              <span class="muted" id="act2SourceLabel">等待执行。</span>
+            </div>
+            <div class="inline-actions">
+              <label class="sample-picker">
+                <span>测试图</span>
+                <select id="imageSelect"></select>
+              </label>
+              <button id="runCurrentButton" class="button button-primary" type="button">启动 Current 数据面 300 张图在线推进</button>
+            </div>
+            <div class="panel-lite live-progress-shell">
+              <div class="live-progress-top">
+                <div>
+                  <div class="label">Current 在线推进</div>
+                  <div class="status-pill tone-neutral" id="liveProgressBadge">等待触发</div>
+                </div>
+                <div class="live-progress-countbox">
+                  <strong id="liveProgressCount">0 / 300</strong>
+                  <span>已完成图像</span>
+                </div>
+              </div>
+              <div class="progress-axis-shell">
+                <div class="progress-track"><span class="progress-fill" id="liveProgressBar"></span><span class="progress-marker" id="liveProgressMarker"></span></div>
+                <div class="progress-axis-labels" id="liveProgressAxis"></div>
+              </div>
+              <div class="compact-copy" id="liveProgressMeta">等待本场 300 张图 live run。</div>
+              <div class="stage-chip-row" id="liveStageChips"></div>
+              <div class="log-panel live-trace-panel" id="liveTracePanel">等待板端推进。</div>
+            </div>
+            <div class="image-compare">
+              <figure class="image-card">
+                <div class="image-label">参考图</div>
+                <img id="originalImage" alt="参考图">
+              </figure>
+              <figure class="image-card">
+                <div class="image-label">重建图</div>
+                <img id="reconstructedImage" alt="重建图">
+              </figure>
+            </div>
+            <div class="timing-board" id="timingBoard"></div>
+            <div class="metric-inline" id="qualityMetrics"></div>
+            <p class="compact-copy" id="inferenceMessage">等待触发重建。</p>
+          </section>
+
+          <section class="act-panel panel-lite" id="act3Panel">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">第三幕</p>
+                <h2>正式对照与性能口径</h2>
+              </div>
+              <span class="muted">正式性能口径与当前样例 provenance 分开看</span>
+            </div>
+            <div class="dual-progress-grid">
+              <article class="panel-lite progress-summary-card">
+                <div class="progress-summary-head">
+                  <div>
+                    <div class="label">PyTorch Reference</div>
+                    <h3>PyTorch live 300 张图</h3>
+                  </div>
+                  <div class="status-pill tone-neutral" id="baselineProgressBadge">等待触发</div>
+                </div>
+                <div class="progress-summary-count" id="baselineProgressCount">0 / 300</div>
+                <div class="compact-copy progress-summary-stage" id="baselineProgressStage">等待触发。</div>
+                <div class="progress-axis-shell progress-axis-shell-compact">
+                  <div class="progress-track"><span class="progress-fill" id="baselineProgressBar"></span><span class="progress-marker" id="baselineProgressMarker"></span></div>
+                  <div class="progress-axis-labels" id="baselineProgressAxis"></div>
+                </div>
+                <div class="compact-copy progress-summary-meta" id="baselineProgressMeta">尚未开始 PyTorch live。</div>
+              </article>
+              <article class="panel-lite progress-summary-card">
+                <div class="progress-summary-head">
+                  <div>
+                    <div class="label">Current Live</div>
+                    <h3>Current 300 张图</h3>
+                  </div>
+                  <div class="status-pill tone-neutral" id="comparisonCurrentProgressBadge">等待触发</div>
+                </div>
+                <div class="progress-summary-count" id="comparisonCurrentProgressCount">0 / 300</div>
+                <div class="compact-copy progress-summary-stage" id="comparisonCurrentProgressStage">等待触发。</div>
+                <div class="progress-axis-shell progress-axis-shell-compact">
+                  <div class="progress-track"><span class="progress-fill" id="comparisonCurrentProgressBar"></span><span class="progress-marker" id="comparisonCurrentProgressMarker"></span></div>
+                  <div class="progress-axis-labels" id="comparisonCurrentProgressAxis"></div>
+                </div>
+                <div class="compact-copy progress-summary-meta" id="comparisonCurrentProgressMeta">尚未开始 live run。</div>
+              </article>
+            </div>
+            <article class="panel-lite compare-viewer-shell" id="compareViewerShell">
+              <div class="compare-viewer-head">
+                <div>
+                  <div class="label">Compare Viewer</div>
+                  <h3 id="compareViewerSampleLabel">等待样例选择</h3>
+                </div>
+                <div class="compact-copy" id="compareViewerModeNote">等待 compare viewer 数据。</div>
+              </div>
+              <div id="compareViewerContext" class="compare-viewer-context"></div>
+              <div id="compareViewerBoard" class="compare-viewer-grid"></div>
+            </article>
+            <div id="comparisonBoard" class="comparison-board"></div>
+            <div class="inline-actions">
+              <button id="runBaselineButton" class="button button-secondary" type="button">运行 PyTorch 数据面 300 张图</button>
+              <button id="runCurrentAgainButton" class="button button-primary" type="button">运行 Current 数据面 300 张图</button>
+              <button id="runAllButton" class="button button-secondary" type="button">一键顺序运行 PyTorch + Current 数据面 300 张图</button>
+            </div>
+            <div class="panel-lite" id="comparisonRunNote">第三幕会明确区分语义回传数据面结果与 OpenAMP 控制面边界，并单独标注 4-core performance mode / 3-core demo mode。</div>
+          </section>
+
+          <section class="act-panel panel-lite" id="act4Panel">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">第四幕</p>
+                <h2>故障注入与安全恢复</h2>
+              </div>
+              <span class="muted" id="faultStatusHeadline">等待注入动作。</span>
+            </div>
+            <div class="fault-toolbar">
+              <button class="button button-danger" data-fault="wrong_sha" type="button">注入错误 SHA</button>
+              <button class="button button-danger" data-fault="heartbeat_timeout" type="button">注入心跳超时</button>
+              <button class="button button-danger" data-fault="illegal_param" type="button">注入非法参数</button>
+              <button id="recoverButton" class="button button-primary" type="button">SAFE_STOP 收口</button>
+            </div>
+            <div class="fault-summary" id="faultSummary"></div>
+            <div class="log-panel" id="faultLogPanel"></div>
+            <div class="fit-grid" id="fitGrid"></div>
+          </section>
+        </div>
+
+        <aside class="operations-rail">
+          <article class="rail-card panel-lite" id="latestLiveStatusCard">正在加载最新 live 双路径状态...</article>
+          <article class="rail-card operator-cue-shell" id="operatorCueShell">正在生成 operator cue...</article>
+          <article class="rail-card panel-lite evidence-stack" id="jobManifestGateShell">
+            <div class="inline-actions rail-card-head">
+              <div>
+                <div class="label">任务票闸机</div>
+                <div class="mini-title">Job Manifest Gate</div>
+              </div>
+              <button id="previewManifestGateButton" class="button button-secondary" type="button">
+                demo-only 票据预检
+              </button>
+            </div>
+            <div id="jobManifestGateCard"></div>
+          </article>
+          <article class="rail-card panel-lite" id="linkDirectorRail">
+            <div class="mission-card-head">
+              <div>
+                <div class="label">链路导演台</div>
+                <h3>Link Director</h3>
+              </div>
+              <div class="status-pill tone-neutral" id="linkStatusBadge">等待状态</div>
+            </div>
+            <div id="linkStatusModule"></div>
+          </article>
+          <article class="rail-card panel-lite" id="safetyMissionCard">
+            <div class="mission-card-head">
+              <div>
+                <div class="label">安全收口</div>
+                <h3>SAFE_STOP / Alarm</h3>
+              </div>
+              <div class="status-pill tone-neutral" id="safetyStatusBadge">等待状态</div>
+            </div>
+            <div id="safetyStatusModule"></div>
+          </article>
+        </aside>
+      </div>
     </section>
 
     <section class="panel mission-panel" id="missionPanel">
       <div class="section-head">
         <div>
-          <p class="eyebrow">任务态势</p>
-          <h2>Mission Summary</h2>
+          <p class="eyebrow">Evidence Band</p>
+          <h2>Blackbox / Device / Return Evidence</h2>
         </div>
-        <span class="muted" id="missionSummary">正在聚合任务、设备、链路与安全状态...</span>
+        <span class="muted" id="missionSummary">正在聚合任务、设备、回传与事件证据...</span>
       </div>
-      <div class="mission-grid">
+      <div class="mission-band">
+        <article class="mission-card mission-card-archive" id="archiveTimelineCard">
+          <div class="mission-card-head">
+            <div>
+              <div class="label">事件流</div>
+              <h3>Event Timeline</h3>
+            </div>
+            <div class="status-pill tone-neutral" id="timelineStatusBadge">等待状态</div>
+          </div>
+          <div id="eventTimelineModule"></div>
+        </article>
         <article class="mission-card">
           <div class="mission-card-head">
             <div>
@@ -74,17 +301,7 @@
           </div>
           <div id="deviceStatusModule"></div>
         </article>
-        <article class="mission-card" id="safetyMissionCard">
-          <div class="mission-card-head">
-            <div>
-              <div class="label">链路状态</div>
-              <h3>Link Status</h3>
-            </div>
-            <div class="status-pill tone-neutral" id="linkStatusBadge">等待状态</div>
-          </div>
-          <div id="linkStatusModule"></div>
-        </article>
-        <article class="mission-card mission-card-archive" id="archiveTimelineCard">
+        <article class="mission-card">
           <div class="mission-card-head">
             <div>
               <div class="label">回传 / 重建</div>
@@ -94,36 +311,16 @@
           </div>
           <div id="returnStatusModule"></div>
         </article>
-        <article class="mission-card">
-          <div class="mission-card-head">
-            <div>
-              <div class="label">安全收口</div>
-              <h3>SAFE_STOP / Alarm</h3>
-            </div>
-            <div class="status-pill tone-neutral" id="safetyStatusBadge">等待状态</div>
-          </div>
-          <div id="safetyStatusModule"></div>
-        </article>
-        <article class="mission-card">
-          <div class="mission-card-head">
-            <div>
-              <div class="label">事件流</div>
-              <h3>Event Timeline</h3>
-            </div>
-            <div class="status-pill tone-neutral" id="timelineStatusBadge">等待状态</div>
-          </div>
-          <div id="eventTimelineModule"></div>
-        </article>
       </div>
     </section>
 
     <section class="panel credential-panel" id="credentialPanel">
       <div class="section-head">
         <div>
-          <p class="eyebrow">会话接入</p>
-          <h2>板卡会话接入</h2>
+          <p class="eyebrow">Session Access</p>
+          <h2>板卡会话接入 / Credential Deck</h2>
         </div>
-        <span class="muted" id="generatedAt"></span>
+        <span class="muted">只保存于当前 demo 进程内</span>
       </div>
       <form id="boardAccessForm" class="credential-grid">
         <label>
@@ -155,204 +352,22 @@
       <div class="status-banner" id="feedbackBanner" hidden></div>
     </section>
 
-    <nav class="act-nav panel" aria-label="四幕导航">
-      <button class="act-tab active" data-act="act1" type="button">
-        <span class="act-number">01</span>
-        <span class="act-title">可信状态</span>
-        <span class="act-lamp" id="act1Lamp"></span>
-      </button>
-      <button class="act-tab" data-act="act2" type="button">
-        <span class="act-number">02</span>
-        <span class="act-title">语义回传</span>
-      </button>
-      <button class="act-tab" data-act="act3" type="button">
-        <span class="act-number">03</span>
-        <span class="act-title">正式对照</span>
-      </button>
-      <button class="act-tab" data-act="act4" type="button">
-        <span class="act-number">04</span>
-        <span class="act-title">故障注入与恢复</span>
-        <span class="act-lamp" id="act4Lamp"></span>
-      </button>
-    </nav>
-
-    <section class="act-panel active panel" id="act1Panel">
+    <section class="panel evidence-panel">
       <div class="section-head">
         <div>
-          <p class="eyebrow">第一幕</p>
-          <h2>可信状态与当前板卡接入</h2>
-        </div>
-        <span class="muted" id="act1StatusNote">等待探测。</span>
-      </div>
-      <div class="status-grid" id="act1StatusGrid"></div>
-      <div class="dual-grid">
-        <article class="panel-lite">
-          <div class="label">最近一次证据确认</div>
-          <div id="boardEvidenceCard"></div>
-        </article>
-        <article class="panel-lite">
-          <div class="label">在线读数 / 会话状态</div>
-          <div id="boardLiveCard"></div>
-        </article>
-      </div>
-      <article class="panel-lite evidence-stack" id="jobManifestGateShell">
-        <div class="inline-actions">
-          <div>
-            <div class="label">任务票闸机</div>
-            <div class="mini-title">Job Manifest Gate</div>
-          </div>
-          <button id="previewManifestGateButton" class="button button-secondary" type="button">
-            demo-only 票据预检
-          </button>
-        </div>
-        <div id="jobManifestGateCard"></div>
-      </article>
-      <div class="evidence-stack">
-        <div class="mini-title">P0 关键里程碑</div>
-        <div id="milestonesGrid" class="timeline-grid"></div>
-      </div>
-    </section>
-
-    <section class="act-panel panel" id="act2Panel">
-      <div class="section-head">
-        <div>
-          <p class="eyebrow">第二幕</p>
-          <h2>Current 语义视觉回传在线推进</h2>
-        </div>
-        <span class="muted" id="act2SourceLabel">等待执行。</span>
-      </div>
-      <div class="inline-actions">
-        <label class="sample-picker">
-          <span>测试图</span>
-          <select id="imageSelect"></select>
-        </label>
-        <button id="runCurrentButton" class="button button-primary" type="button">启动 Current 数据面 300 张图在线推进</button>
-      </div>
-      <div class="panel-lite live-progress-shell">
-        <div class="live-progress-top">
-          <div>
-            <div class="label">Current 在线推进</div>
-            <div class="status-pill tone-neutral" id="liveProgressBadge">等待触发</div>
-          </div>
-          <div class="live-progress-countbox">
-            <strong id="liveProgressCount">0 / 300</strong>
-            <span>已完成图像</span>
-          </div>
-        </div>
-        <div class="progress-axis-shell">
-          <div class="progress-track"><span class="progress-fill" id="liveProgressBar"></span><span class="progress-marker" id="liveProgressMarker"></span></div>
-          <div class="progress-axis-labels" id="liveProgressAxis"></div>
-        </div>
-        <div class="compact-copy" id="liveProgressMeta">等待本场 300 张图 live run。</div>
-        <div class="stage-chip-row" id="liveStageChips"></div>
-        <div class="log-panel live-trace-panel" id="liveTracePanel">等待板端推进。</div>
-      </div>
-      <div class="image-compare">
-        <figure class="image-card">
-          <div class="image-label">参考图</div>
-          <img id="originalImage" alt="参考图">
-        </figure>
-        <figure class="image-card">
-          <div class="image-label">重建图</div>
-          <img id="reconstructedImage" alt="重建图">
-        </figure>
-      </div>
-      <div class="timing-board" id="timingBoard"></div>
-      <div class="metric-inline" id="qualityMetrics"></div>
-      <p class="compact-copy" id="inferenceMessage">等待触发重建。</p>
-    </section>
-
-    <section class="act-panel panel" id="act3Panel">
-      <div class="section-head">
-        <div>
-          <p class="eyebrow">第三幕</p>
-          <h2>正式对照与性能口径</h2>
-        </div>
-        <span class="muted">正式性能口径与当前样例 provenance 分开看</span>
-      </div>
-      <div class="dual-progress-grid">
-        <article class="panel-lite progress-summary-card">
-          <div class="progress-summary-head">
-            <div>
-              <div class="label">PyTorch Reference</div>
-              <h3>PyTorch live 300 张图</h3>
-            </div>
-            <div class="status-pill tone-neutral" id="baselineProgressBadge">等待触发</div>
-          </div>
-          <div class="progress-summary-count" id="baselineProgressCount">0 / 300</div>
-          <div class="compact-copy progress-summary-stage" id="baselineProgressStage">等待触发。</div>
-          <div class="progress-axis-shell progress-axis-shell-compact">
-            <div class="progress-track"><span class="progress-fill" id="baselineProgressBar"></span><span class="progress-marker" id="baselineProgressMarker"></span></div>
-            <div class="progress-axis-labels" id="baselineProgressAxis"></div>
-          </div>
-          <div class="compact-copy progress-summary-meta" id="baselineProgressMeta">尚未开始 PyTorch live。</div>
-        </article>
-        <article class="panel-lite progress-summary-card">
-          <div class="progress-summary-head">
-            <div>
-              <div class="label">Current Live</div>
-              <h3>Current 300 张图</h3>
-            </div>
-            <div class="status-pill tone-neutral" id="comparisonCurrentProgressBadge">等待触发</div>
-          </div>
-          <div class="progress-summary-count" id="comparisonCurrentProgressCount">0 / 300</div>
-          <div class="compact-copy progress-summary-stage" id="comparisonCurrentProgressStage">等待触发。</div>
-          <div class="progress-axis-shell progress-axis-shell-compact">
-            <div class="progress-track"><span class="progress-fill" id="comparisonCurrentProgressBar"></span><span class="progress-marker" id="comparisonCurrentProgressMarker"></span></div>
-            <div class="progress-axis-labels" id="comparisonCurrentProgressAxis"></div>
-          </div>
-          <div class="compact-copy progress-summary-meta" id="comparisonCurrentProgressMeta">尚未开始 live run。</div>
-        </article>
-      </div>
-      <div id="comparisonBoard" class="comparison-board"></div>
-      <article class="panel-lite compare-viewer-shell" id="compareViewerShell">
-        <div class="compare-viewer-head">
-          <div>
-            <div class="label">Compare Viewer</div>
-            <h3 id="compareViewerSampleLabel">等待样例选择</h3>
-          </div>
-          <div class="compact-copy" id="compareViewerModeNote">等待 compare viewer 数据。</div>
-        </div>
-        <div id="compareViewerContext" class="compare-viewer-context"></div>
-        <div id="compareViewerBoard" class="compare-viewer-grid"></div>
-      </article>
-      <div class="inline-actions">
-        <button id="runBaselineButton" class="button button-secondary" type="button">运行 PyTorch 数据面 300 张图</button>
-        <button id="runCurrentAgainButton" class="button button-primary" type="button">运行 Current 数据面 300 张图</button>
-        <button id="runAllButton" class="button button-secondary" type="button">一键顺序运行 PyTorch + Current 数据面 300 张图</button>
-      </div>
-      <div class="panel-lite" id="comparisonRunNote">第三幕会明确区分语义回传数据面结果与 OpenAMP 控制面边界，并单独标注 4-core performance mode / 3-core demo mode。</div>
-    </section>
-
-    <section class="act-panel panel" id="act4Panel">
-      <div class="section-head">
-        <div>
-          <p class="eyebrow">第四幕</p>
-          <h2>故障注入与安全恢复</h2>
-        </div>
-        <span class="muted" id="faultStatusHeadline">等待注入动作。</span>
-      </div>
-      <div class="fault-toolbar">
-        <button class="button button-danger" data-fault="wrong_sha" type="button">注入错误 SHA</button>
-        <button class="button button-danger" data-fault="heartbeat_timeout" type="button">注入心跳超时</button>
-        <button class="button button-danger" data-fault="illegal_param" type="button">注入非法参数</button>
-        <button id="recoverButton" class="button button-primary" type="button">SAFE_STOP 收口</button>
-      </div>
-      <div class="fault-summary" id="faultSummary"></div>
-      <div class="log-panel" id="faultLogPanel"></div>
-      <div class="fit-grid" id="fitGrid"></div>
-    </section>
-
-    <section class="panel">
-      <div class="section-head">
-        <div>
-          <p class="eyebrow">证据与材料</p>
-          <h2>原始证据入口</h2>
+          <p class="eyebrow">Performance + Sources</p>
+          <h2>正式口径与原始材料入口</h2>
         </div>
       </div>
-      <p id="performanceNote" class="lede compact"></p>
-      <div id="performanceGrid" class="performance-grid"></div>
-      <div id="sourcesGrid" class="sources-grid"></div>
+      <div class="evidence-layout">
+        <div class="evidence-column">
+          <p id="performanceNote" class="lede compact"></p>
+          <div id="performanceGrid" class="performance-grid"></div>
+        </div>
+        <div class="evidence-column">
+          <div id="sourcesGrid" class="sources-grid"></div>
+        </div>
+      </div>
     </section>
   </main>
   <script src="/app.js"></script>

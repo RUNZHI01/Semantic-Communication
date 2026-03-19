@@ -15,6 +15,7 @@ const state = {
   archiveSession: null,
   selectedArchiveSessionId: "",
   currentArchiveSessionId: "",
+  userSelectedAct: false,
 };
 
 function docHref(path) {
@@ -246,6 +247,24 @@ function normalizeOperatorCue(cue) {
   };
 }
 
+function actIdForSceneId(sceneId) {
+  const mapping = {
+    scene1: "act1",
+    scene2: "act2",
+    scene3: "act3",
+    scene4: "act4",
+  };
+  return mapping[String(sceneId || "").trim()] || "";
+}
+
+function syncActiveActFromCue() {
+  if (state.userSelectedAct) return;
+  const suggestedActId = actIdForSceneId(state.systemStatus?.operator_cue?.current_scene_id || "");
+  if (suggestedActId) {
+    state.activeAct = suggestedActId;
+  }
+}
+
 function commandJumpButton(item, primary = false) {
   const jump = normalizeCueJump(item);
   if (!jump || !jump.targetId) return "";
@@ -294,7 +313,7 @@ function commandSceneCard(scene) {
     metaItems.unshift(readyLabel);
   }
   return `
-    <article class="command-scene-card" data-tone="${escapeHtml(scene.tone || "neutral")}">
+    <article class="command-scene-card" data-tone="${escapeHtml(scene.tone || "neutral")}" ${scene.recommended ? 'data-current="true"' : ""}>
       <div class="command-scene-top">
         <span class="command-scene-number">${escapeHtml(scene.number || "")}</span>
         <div class="status-pill ${toneClass(scene.tone || "neutral")}">${escapeHtml(scene.status || "待命")}</div>
@@ -375,7 +394,7 @@ function renderOperatorCue(cue) {
   const shell = document.getElementById("operatorCueShell");
   if (!cue.currentSceneLabel) {
     shell.innerHTML = `
-      <div class="label">Operator Assist</div>
+      <div class="label">Operator Cue</div>
       <p class="compact-copy">等待 operator cue 数据。</p>
     `;
     return;
@@ -386,40 +405,42 @@ function renderOperatorCue(cue) {
     || cue.scenes[0]
     || null;
   const currentChecks = Array.isArray(currentScene?.checks) ? currentScene.checks : [];
-  const nextStep = cue.nextStepLabel || cue.nextStepNote || compactManualNote(cue.manualBoundaryNote);
-  const presenterLine = cue.presenterLine || cue.nextStepNote || "";
+  const nextStep = cue.nextStepNote || cue.nextStepLabel || compactManualNote(cue.manualBoundaryNote);
+  const presenterLine = cue.presenterLine || currentScene?.cue_line || cue.nextStepNote || "";
+  const boundaryBits = [
+    compactManualNote(cue.manualBoundaryNote),
+    compactSentence(cue.boundaryNote, 120),
+  ].filter(Boolean);
   shell.innerHTML = `
     <div class="operator-cue-top">
       <div>
-        <div class="label">Operator Assist / Manual Cue</div>
+        <div class="label">Operator Cue</div>
         <h3>${escapeHtml(cue.currentSceneLabel)}</h3>
       </div>
       <div class="status-pill ${toneClass(cue.currentSceneTone || cue.statusTone || "neutral")}">${escapeHtml(cue.statusLabel || cue.currentSceneLabel)}</div>
-    </div>
-    ${presenterLine ? `<p class="operator-cue-line">${escapeHtml(presenterLine)}</p>` : ""}
-    <div class="operator-cue-actions">
-      <div class="operator-cue-copy">
-        <div class="label">Next Manual Step</div>
-        <div class="compact-copy">${escapeHtml(compactSentence(nextStep, 160))}</div>
-      </div>
-      ${commandJumpButton(cue.nextAction, true)}
     </div>
     ${currentScene ? `
       <div class="operator-cue-focus">
         <div class="operator-cue-focus-head">
           <div>
-            <div class="label">Current Scene</div>
+            <div class="label">Presenter Line</div>
             <strong>${escapeHtml(currentScene.title || cue.currentSceneLabel)}</strong>
           </div>
           <div class="status-pill ${toneClass(currentScene.tone || cue.currentSceneTone || "neutral")}">${escapeHtml(currentScene.status || cue.statusLabel || "待命")}</div>
         </div>
-        <p class="compact-copy">${escapeHtml(compactSentence(currentScene.cue_line || currentScene.note || cue.nextStepNote || "", 160))}</p>
+        <p class="operator-cue-line">${escapeHtml(compactSentence(presenterLine, 180))}</p>
         ${currentChecks.length ? `<div class="operator-cue-check-grid">${currentChecks.map((check) => cueCheckChip(check)).join("")}</div>` : ""}
       </div>
     ` : ""}
-    <p class="compact-copy operator-cue-subnote">${escapeHtml(compactManualNote(cue.manualBoundaryNote))}</p>
-    <div class="operator-cue-scene-grid">
-      ${cue.scenes.map((scene) => operatorCueSceneCard(scene, cue.currentSceneId)).join("")}
+    <div class="operator-cue-actions">
+      <div class="operator-cue-copy">
+        <div class="label">Next Operator Action</div>
+        <div class="compact-copy">${escapeHtml(compactSentence(nextStep, 170))}</div>
+      </div>
+      ${commandJumpButton(cue.nextAction, true)}
+    </div>
+    <div class="operator-cue-boundary-list">
+      ${boundaryBits.map((item) => `<p class="compact-copy operator-cue-subnote">${escapeHtml(item)}</p>`).join("")}
     </div>
   `;
 }
@@ -695,18 +716,23 @@ function renderCommandCenter(snapshot, systemStatus) {
   document.getElementById("commandStripCard").innerHTML = `
     <div class="command-strip-head">
       <div>
-        <div class="label">Operator Summary</div>
+        <div class="label">Primary Story</div>
         <h3>${escapeHtml(model.summaryLabel)}</h3>
       </div>
-      <div class="status-pill ${toneClass(model.summaryTone || "neutral")}">${escapeHtml(model.summaryLabel)}</div>
+      <div class="status-pill ${toneClass(model.summaryTone || "neutral")}">${escapeHtml(model.operatorCue.currentSceneId ? `Scene ${model.operatorCue.currentSceneId.replace("scene", "")}` : model.summaryLabel)}</div>
     </div>
     <p class="command-strip-summary">${escapeHtml(compactSentence(model.summaryText, 200))}</p>
     <div class="command-primary-row">
       <div class="command-primary-copy">
-        <div class="label">Recommended Jump</div>
-        <div class="compact-copy">${escapeHtml(model.manualNote)}</div>
+        <div class="label">Next Operator Action</div>
+        <div class="compact-copy">${escapeHtml(model.primaryJump.label || model.manualNote)}</div>
+        <div class="status-inline">${escapeHtml(model.manualNote)}</div>
       </div>
       ${commandJumpButton(model.primaryJump, true)}
+    </div>
+    <div class="command-guard-row">
+      <span>${escapeHtml(compactModeBoundary(model.boundaryNote || snapshot.mission?.mode_split_note || ""))}</span>
+      <span>${escapeHtml(model.rollups[2]?.note || model.manualNote)}</span>
     </div>
     <div class="command-rollup-grid">
       ${model.rollups.map((item) => commandRollupCard(item)).join("")}
@@ -1122,22 +1148,15 @@ function setFeedback(message, tone) {
 }
 
 function renderTop(snapshot, systemStatus) {
-  const admission = systemStatus.live?.admission || {};
-  const currentSupport = systemStatus.live?.variant_support?.current || {};
-  const baselineSupport = systemStatus.live?.variant_support?.baseline || {};
+  const cue = normalizeOperatorCue(systemStatus.operator_cue || {});
   const latestLive = snapshot.latest_live_status || {};
-  const currentSummary = currentSupport.note
-    ? `${currentSupport.label || "Current live"}：${currentSupport.note}`
-    : "第二幕展示 Current live。";
-  const baselineSummary = baselineSupport.note
-    ? `第三幕基线：${baselineSupport.note}`
-    : "第三幕展示 formal baseline 对比。";
-  const admissionSuffix = admission.mode === "signed_manifest_v1"
-    ? ` 当前 live 预检已切到 signed manifest，key_id=${admission.key_id || "unknown"}.`
-    : "";
+  const live = systemStatus.live || {};
+  const boundary = compactModeBoundary(cue.boundaryNote || snapshot.mission?.mode_split_note || "");
+  const nextStep = compactSentence(cue.nextStepNote || cue.nextStepLabel || "等待操作员选择下一步。", 128);
+  const sceneLabel = cue.currentSceneLabel || systemStatus.execution_mode.label || "Command deck";
   document.getElementById("heroSummary").textContent =
-    `${snapshot.project.focus || "飞腾多核弱网安全语义视觉回传系统"}。${compactSentence(latestLive.hero_summary || latestLive.summary || "先看操作指挥席，再按四幕推进。", 160)} ` +
-    `${currentSummary} ${baselineSummary}${admissionSuffix}`;
+    `${sceneLabel} ｜ ${systemStatus.execution_mode.label} ｜ board=${live.board_online ? "online" : "evidence"} / guard=${live.guard_state || "UNKNOWN"}。` +
+    `下一步：${nextStep} ${boundary}`;
 
   const modePill = document.getElementById("modePill");
   modePill.className = `mode-pill ${toneClass(systemStatus.execution_mode.tone)}`;
@@ -1145,10 +1164,10 @@ function renderTop(snapshot, systemStatus) {
   document.getElementById("modeSummary").textContent = systemStatus.execution_mode.summary;
   document.getElementById("generatedAt").textContent = `快照更新 ${snapshot.generated_at}`;
   document.getElementById("topStats").innerHTML = [
-    statCard("P0 里程碑", String(snapshot.stats.p0_milestones_verified), "演示系统保留的板级证据项"),
-    statCard("FIT 最终通过", String(snapshot.stats.fit_final_pass_count), "正式收口后的通过项"),
-    statCard("Payload", `${snapshot.stats.payload_current_ms} ms`, "正式 current 口径"),
-    statCard("端到端", `${snapshot.stats.end_to_end_current_ms} ms/image`, "正式 current 口径"),
+    statCard("Board", live.board_online ? "ONLINE" : "EVIDENCE", `fault=${live.last_fault_code || "UNKNOWN"}`),
+    statCard("Current", latestLive.current?.completed || "等待", latestLive.current?.note || "Current run"),
+    statCard("Reference", latestLive.baseline?.completed || "等待", latestLive.baseline?.note || "PyTorch baseline"),
+    statCard("FIT / P0", `${snapshot.stats.fit_final_pass_count} / ${snapshot.stats.p0_milestones_verified}`, `payload ${snapshot.stats.payload_current_ms} ms`),
   ].join("");
 }
 
@@ -1158,13 +1177,13 @@ function renderLatestLiveStatus(snapshot) {
   const links = latest.links || [latest.report, latest.probe].filter(Boolean);
   const facts = Array.isArray(latest.facts) ? latest.facts.slice(0, 3) : [];
   document.getElementById("latestLiveStatusCard").innerHTML = `
-    <div class="label">本场主结论</div>
+    <div class="label">Live Verdict</div>
     <div class="inline-actions latest-live-top">
       <div class="mini-title">${escapeHtml(latest.headline)}</div>
       <div class="status-pill tone-online">${escapeHtml(latest.status_label)}</div>
     </div>
-    <p class="compact-copy">${escapeHtml(latest.summary)}</p>
-    <div class="metric-strip">
+    <p class="compact-copy">${escapeHtml(compactSentence(latest.summary, 150))}</p>
+    <div class="metric-strip metric-strip-rail">
       ${statCard(latest.current.label, latest.current.completed, latest.current.note)}
       ${statCard(latest.baseline.label, latest.baseline.completed, latest.baseline.note)}
       ${statCard(latest.board.label, latest.board.value, latest.board.note)}
@@ -1254,7 +1273,10 @@ function renderMissionDashboard(snapshot, systemStatus) {
     "样例 208";
 
   document.getElementById("missionSummary").textContent =
-    mission.summary || "把任务、设备、链路、安全与 archive 收在同一页。";
+    compactSentence(
+      mission.summary || "下方保留 blackbox timeline、device、queue 与 return evidence；gate、link 与 SAFE_STOP 收进主控制台侧栏。",
+      140
+    );
 
   setStatusBadge(
     "taskQueueBadge",
@@ -1269,7 +1291,7 @@ function renderMissionDashboard(snapshot, systemStatus) {
       ${missionMetric("最近结果", systemStatus.last_inference?.variant ? `${systemStatus.last_inference.variant} / ${systemStatus.last_inference.execution_mode}` : "尚无记录", systemStatus.last_inference?.source_label || "等待第一轮动作")}
     </div>
     ${renderFlowStrip(queueStages)}
-    ${missionNote(active.running ? active.message : (mission.control_plane_note || "OpenAMP 当前只负责 control plane queue / safety gate。"))}
+    ${missionNote(compactSentence(active.running ? active.message : (mission.control_plane_note || "OpenAMP 当前只负责 control plane queue / safety gate。"), 140))}
   `;
 
   setStatusBadge(
@@ -1284,7 +1306,7 @@ function renderMissionDashboard(snapshot, systemStatus) {
       ${missionMetric("guard_state", live.guard_state || "UNKNOWN", `fault=${live.last_fault_code || "UNKNOWN"}`)}
       ${missionMetric("runtime / target", `${live.runtime || "unknown"} / ${live.target || "unknown"}`, `trusted SHA ${shortSha(live.trusted_sha)}`)}
     </div>
-    ${missionNote(live.last_probe_at ? `最近只读探板 ${live.last_probe_at}` : snapshot.board?.evidence_status?.summary || "当前设备状态以正式证据包为准。")}
+    ${missionNote(compactSentence(live.last_probe_at ? `最近只读探板 ${live.last_probe_at}` : snapshot.board?.evidence_status?.summary || "当前设备状态以正式证据包为准。", 140))}
     ${renderLinks([...(snapshot.board?.current_status?.evidence || []), ...(snapshot.board?.evidence_status?.evidence || [])].slice(0, 2))}
   `;
 
@@ -1337,8 +1359,8 @@ function renderMissionDashboard(snapshot, systemStatus) {
         )
         .join("")}
     </div>
-    ${missionNote(linkDirector.status_message || linkDirector.last_operator_action || selectedLinkProfile.summary || linkDirector.summary || "导演台当前只做 operator cue 与预案切换。")}
-    ${missionNote(linkDirector.truth_note || "导演台是 operator scaffold；board telemetry 继续保持只读。")}
+    ${missionNote(compactSentence(linkDirector.status_message || linkDirector.last_operator_action || selectedLinkProfile.summary || linkDirector.summary || "导演台当前只做 operator cue 与预案切换。", 150))}
+    ${missionNote(compactSentence(linkDirector.truth_note || "导演台是 operator scaffold；board telemetry 继续保持只读。", 140))}
   `;
 
   const currentCountLabel =
@@ -1369,7 +1391,7 @@ function renderMissionDashboard(snapshot, systemStatus) {
       ${missionMetric("当前样例", currentSampleLabel, "归档样例画面用于稳定展示")}
       ${missionMetric("质量", qualityNote, "仅在有可用图像/质量记录时展示")}
     </div>
-    ${missionNote(currentResult?.message || baselineResult?.message || snapshot.latest_live_status?.summary || "等待 operator 触发回传 / 重建任务。")}
+    ${missionNote(compactSentence(currentResult?.message || baselineResult?.message || snapshot.latest_live_status?.summary || "等待 operator 触发回传 / 重建任务。", 150))}
   `;
 
   setStatusBadge("safetyStatusBadge", safetyPanel.panel_label || "安全面板", safetyPanel.panel_tone || "neutral");
@@ -2085,14 +2107,23 @@ function renderAll() {
   applyLaunchPolicy(state.systemStatus);
 }
 
-function switchAct(actId) {
-  state.activeAct = actId;
+function applyActiveAct() {
+  const actId = state.activeAct;
   document.querySelectorAll(".act-tab").forEach((tab) => {
     tab.classList.toggle("active", tab.dataset.act === actId);
   });
   document.querySelectorAll(".act-panel").forEach((panel) => {
     panel.classList.toggle("active", panel.id === `${actId}Panel`);
   });
+}
+
+function switchAct(actId, options = {}) {
+  if (!actId) return;
+  state.activeAct = actId;
+  if (options.user !== false) {
+    state.userSelectedAct = true;
+  }
+  applyActiveAct();
 }
 
 function jumpToTarget(targetId, actId = "") {
@@ -2154,7 +2185,9 @@ async function refreshAll() {
   state.selectedArchiveSessionId = nextArchiveSessionId;
   state.archiveSession = archiveSession;
   hydrateRecentResultsFromSystemStatus(systemStatus);
+  syncActiveActFromCue();
   renderAll();
+  applyActiveAct();
 }
 
 async function saveBoardAccess() {
@@ -2423,7 +2456,7 @@ function bindEvents() {
 async function bootstrap() {
   bindEvents();
   await refreshAll();
-  switchAct(state.activeAct);
+  applyActiveAct();
 }
 
 bootstrap().catch((error) => {
