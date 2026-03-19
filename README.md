@@ -1,10 +1,11 @@
 # TVM MetaSchedule Execution Project
 
-基于 TVM、MNN 框架优化的 cGAN 模型轻量级图像语义通信系统 —— 飞腾派端侧部署与调优工程。
+面向极端场景应急巡检的飞腾多核异构安全语义图像回传系统。
 
-- **参赛赛事：** 第九届全国大学生集成电路创新创业大赛（飞腾杯）
+- **参赛赛事：** 第八届全国大学生集成电路创新创业大赛（飞腾杯）
 - **队伍编号：** CICC0903540
 - **团队名称：** 逃离荒岛队
+- **当前对外定位：** 不是 generic TVM/MNN 优化项目，而是部署在飞腾平台上的、可运行、可管控、可安全停机的弱网语义视觉回传系统。
 
 ## 当前最佳成绩
 
@@ -92,6 +93,10 @@
 - `session_bootstrap/reports/defense_talk_track_2min_20260320.md`
 - `session_bootstrap/reports/defense_demo_operator_card_20260320.md`
 - `session_bootstrap/reports/project_reframing_for_feiteng_cup_20260319.md`
+
+## 项目一句话
+
+前线无人机/巡检机器人在弱网或灾后场景下难以稳定回传原始图像，因此系统先在上位机提取语义特征，再把低负载语义张量传到飞腾边缘节点；Linux 主核负责图像重建、显示与存储，RTOS/Bare Metal 从核通过 OpenAMP 负责作业准入、心跳监护和安全停机。
 
 ## 技术架构
 
