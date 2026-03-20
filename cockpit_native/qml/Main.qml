@@ -715,11 +715,20 @@ ApplicationWindow {
             opacity: 0.82
         }
 
+        Item {
+            id: shellHeaderAnchorProxy
+            x: shellContentLayout.x + shellHeaderCard.x
+            y: shellContentLayout.y + shellHeaderCard.y
+            width: shellHeaderCard.width
+            height: shellHeaderCard.height
+            visible: false
+        }
+
         Rectangle {
             id: commandFabricBackdrop
             anchors.left: parent.left
             anchors.right: parent.right
-            anchors.top: shellHeaderCard.bottom
+            anchors.top: shellHeaderAnchorProxy.bottom
             anchors.bottom: bottomActionBerth.top
             anchors.leftMargin: root.scaled(root.wideLayout ? 26 : 12)
             anchors.rightMargin: root.scaled(root.wideLayout ? 26 : 12)
@@ -775,7 +784,7 @@ ApplicationWindow {
 
         Rectangle {
             anchors.horizontalCenter: centerStageBerth.horizontalCenter
-            anchors.top: shellHeaderCard.bottom
+            anchors.top: shellHeaderAnchorProxy.bottom
             anchors.bottom: centerStageBerth.top
             anchors.topMargin: root.scaled(8)
             anchors.bottomMargin: root.scaled(8)
@@ -1005,6 +1014,7 @@ ApplicationWindow {
         }
 
         ColumnLayout {
+            id: shellContentLayout
             anchors.fill: parent
             anchors.leftMargin: root.shellPadding + root.safeLeft
             anchors.topMargin: root.shellPadding + root.safeTop

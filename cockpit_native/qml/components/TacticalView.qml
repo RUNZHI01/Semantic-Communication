@@ -212,11 +212,11 @@ PanelFrame {
         }
     ]
     readonly property string projectionApertureLabel: wallboardStatusTone === "warning"
-        ? "GLOBAL RISK APERTURE"
+        ? "GLOBAL THREAT APERTURE"
         : "GLOBAL DEFENSE APERTURE"
     readonly property string projectionApertureDetail: wallboardStatusTone === "warning"
-        ? "弱网锚点与控制事件已经压入中心孔径。"
-        : "航迹、热点弧线与采样心跳在同一孔径内保持锁定。"
+        ? "弱网锚点、控制事件与高风险热点已经压入中心防护孔径。"
+        : "航迹、热点弧线、采样心跳与在线锚点在同一防护孔径内保持锁定。"
     readonly property var apertureRibbonModel: [
         {
             "label": "GRID",
@@ -419,7 +419,9 @@ PanelFrame {
     ]
     readonly property int warningHotspotCount: hotspotCountByTone("warning")
     readonly property int onlineHotspotCount: hotspotCountByTone("online")
-    readonly property string stageEnvelopeLabel: compactCardLayout ? "STACKED WALLBOARD BUS" : "TRIPLE RAIL WALLBOARD BUS"
+    readonly property string stageEnvelopeLabel: compactCardLayout
+        ? (wallboardStatusTone === "warning" ? "STACKED THREAT FABRIC" : "STACKED DEFENSE FABRIC")
+        : (wallboardStatusTone === "warning" ? "TRIPLE RAIL THREAT FABRIC" : "TRIPLE RAIL DEFENSE FABRIC")
     readonly property string stageEnvelopeStamp: "GRID " + String(sampleData["sequence"] || 0)
     readonly property var stageEnvelopeModel: [
         {
@@ -448,11 +450,11 @@ PanelFrame {
         }
     ]
     readonly property string stageCommandBridgeLabel: wallboardStatusTone === "warning"
-        ? "GLOBAL WATCH BRIDGE"
-        : "GLOBAL COMMAND BRIDGE"
+        ? "DDoS WATCH BRIDGE"
+        : "MISSION-CONTROL BRIDGE"
     readonly property string stageCommandBridgeDetail: wallboardStatusTone === "warning"
-        ? "把弱网、锚点与控制事件压进同一桥接层，中心主舞台优先追踪链路风险。"
-        : "把航迹、热点弧线与采样心跳锁进同一桥接层，中心主舞台保持稳定锁定。"
+        ? "把弱网、锚点、控制事件与热点警戒网格压进同一桥接层，中心主舞台优先追踪链路风险。"
+        : "把航迹、热点弧线、采样心跳与在线锚点锁进同一桥接层，中心主舞台维持防护稳态。"
     readonly property var stageBridgeModel: [
         {
             "label": "STATUS",
@@ -477,6 +479,52 @@ PanelFrame {
             "value": String(warningHotspotCount) + " WARN",
             "detail": String(wallboardHotspots.length) + " sectors",
             "tone": warningHotspotCount > 0 ? "warning" : "online"
+        }
+    ]
+    readonly property string threatPostureLabel: wallboardStatusTone === "warning"
+        ? "链路风险、弱网锚点与控制事件进入压制优先级。"
+        : "航迹链、热点网格与在线锚点保持稳态防护锁定。"
+    readonly property string threatPostureEnglish: wallboardStatusTone === "warning"
+        ? "THREAT SUPPRESSION"
+        : "DEFENSE LOCK"
+    readonly property var threatFabricModel: [
+        {
+            "label": "POSTURE",
+            "value": threatPostureEnglish,
+            "detail": compactMessage(threatPostureLabel, "防护稳态", 34),
+            "tone": wallboardStatusTone
+        },
+        {
+            "label": "HOT GRID",
+            "value": String(warningHotspotCount) + " warn",
+            "detail": String(wallboardHotspots.length) + " sectors",
+            "tone": warningHotspotCount > 0 ? "warning" : "online"
+        },
+        {
+            "label": "ANCHOR",
+            "value": compactMessage(String(liveAnchorData["valid_instance"] || "--"), "--", 16),
+            "detail": compactMessage(String(liveAnchorData["board_status"] || sampleTimestamp), sampleTimestamp, 24),
+            "tone": String(liveAnchorData["tone"] || "neutral")
+        }
+    ]
+    readonly property var controlMeshModel: [
+        {
+            "label": "LINK",
+            "value": compactMessage(String(controlSummary["link_profile"] || "--"), "--", 18),
+            "detail": compactMessage(recommendedScenarioId, "--", 24),
+            "tone": "warning"
+        },
+        {
+            "label": "EVENT",
+            "value": compactMessage(latestEventValue, "--", 20),
+            "detail": compactMessage(lastJobLabel, "--", 18),
+            "tone": latestEventTone
+        },
+        {
+            "label": "SOURCE",
+            "value": compactMessage(root.sourceStatusLabel(), "--", 16),
+            "detail": compactMessage(sampleTransportLabel, "--", 20),
+            "tone": "neutral"
         }
     ]
     readonly property var longitudeTicks: [-150, -90, -30, 30, 90, 150]
@@ -2393,6 +2441,192 @@ PanelFrame {
                         }
 
                         Rectangle {
+                            visible: !compactCardLayout
+                            anchors.left: parent.left
+                            anchors.top: parent.top
+                            anchors.leftMargin: shellWindow ? shellWindow.scaled(22) : 22
+                            anchors.topMargin: shellWindow ? shellWindow.scaled(100) : 100
+                            width: Math.min(parent.width * 0.22, shellWindow ? shellWindow.scaled(168) : 168)
+                            radius: shellWindow ? shellWindow.edgeRadius : 10
+                            gradient: Gradient {
+                                GradientStop { position: 0.0; color: Qt.lighter(root.toneFill(root.wallboardStatusTone), 1.08) }
+                                GradientStop { position: 1.0; color: "#081320" }
+                            }
+                            border.color: root.toneColor(root.wallboardStatusTone)
+                            border.width: 1
+                            implicitHeight: threatFabricColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(9) : 9) * 2)
+                            opacity: 0.94
+
+                            Rectangle {
+                                anchors.fill: parent
+                                anchors.margins: 1
+                                radius: parent.radius - 1
+                                color: "transparent"
+                                border.color: "#12344f"
+                                border.width: 1
+                                opacity: 0.82
+                            }
+
+                            Column {
+                                id: threatFabricColumn
+                                anchors.fill: parent
+                                anchors.margins: shellWindow ? shellWindow.scaled(9) : 9
+                                spacing: shellWindow ? shellWindow.scaled(6) : 6
+
+                                Text {
+                                    text: "THREAT FABRIC"
+                                    color: shellWindow ? shellWindow.accentCyan : "#72f3ff"
+                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                    font.letterSpacing: shellWindow ? shellWindow.scaled(1) : 1
+                                }
+
+                                Repeater {
+                                    model: root.threatFabricModel
+
+                                    delegate: Rectangle {
+                                        readonly property var fabricMetric: modelData
+                                        width: parent.width
+                                        radius: shellWindow ? shellWindow.edgeRadius : 10
+                                        gradient: Gradient {
+                                            GradientStop { position: 0.0; color: Qt.lighter(root.toneFill(fabricMetric["tone"]), 1.12) }
+                                            GradientStop { position: 1.0; color: root.toneFill(fabricMetric["tone"]) }
+                                        }
+                                        border.color: root.toneColor(fabricMetric["tone"])
+                                        border.width: 1
+                                        implicitHeight: fabricMetricColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(7) : 7) * 2)
+
+                                        Column {
+                                            id: fabricMetricColumn
+                                            anchors.fill: parent
+                                            anchors.margins: shellWindow ? shellWindow.scaled(7) : 7
+                                            spacing: 1
+
+                                            Text {
+                                                text: fabricMetric["label"]
+                                                color: shellWindow ? shellWindow.textMuted : "#4e7392"
+                                                font.pixelSize: shellWindow ? shellWindow.captionSize : 9
+                                                font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                            }
+
+                                            Text {
+                                                width: parent.width
+                                                text: fabricMetric["value"]
+                                                color: shellWindow ? shellWindow.textStrong : "#f4fbff"
+                                                font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                                font.bold: true
+                                                font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                                wrapMode: Text.WrapAnywhere
+                                            }
+
+                                            Text {
+                                                width: parent.width
+                                                text: fabricMetric["detail"]
+                                                color: shellWindow ? shellWindow.textSecondary : "#83acc8"
+                                                font.pixelSize: shellWindow ? shellWindow.captionSize : 9
+                                                font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                                wrapMode: Text.WordWrap
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            visible: !compactCardLayout
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            anchors.rightMargin: shellWindow ? shellWindow.scaled(22) : 22
+                            anchors.topMargin: shellWindow ? shellWindow.scaled(100) : 100
+                            width: Math.min(parent.width * 0.22, shellWindow ? shellWindow.scaled(168) : 168)
+                            radius: shellWindow ? shellWindow.edgeRadius : 10
+                            gradient: Gradient {
+                                GradientStop { position: 0.0; color: "#10263b" }
+                                GradientStop { position: 1.0; color: "#081320" }
+                            }
+                            border.color: root.traceStrong
+                            border.width: 1
+                            implicitHeight: controlMeshColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(9) : 9) * 2)
+                            opacity: 0.94
+
+                            Rectangle {
+                                anchors.fill: parent
+                                anchors.margins: 1
+                                radius: parent.radius - 1
+                                color: "transparent"
+                                border.color: "#12344f"
+                                border.width: 1
+                                opacity: 0.82
+                            }
+
+                            Column {
+                                id: controlMeshColumn
+                                anchors.fill: parent
+                                anchors.margins: shellWindow ? shellWindow.scaled(9) : 9
+                                spacing: shellWindow ? shellWindow.scaled(6) : 6
+
+                                Text {
+                                    text: "CONTROL MESH"
+                                    color: shellWindow ? shellWindow.accentBlue : "#38b6ff"
+                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                    font.letterSpacing: shellWindow ? shellWindow.scaled(1) : 1
+                                }
+
+                                Repeater {
+                                    model: root.controlMeshModel
+
+                                    delegate: Rectangle {
+                                        readonly property var meshMetric: modelData
+                                        width: parent.width
+                                        radius: shellWindow ? shellWindow.edgeRadius : 10
+                                        gradient: Gradient {
+                                            GradientStop { position: 0.0; color: Qt.lighter(root.toneFill(meshMetric["tone"]), 1.12) }
+                                            GradientStop { position: 1.0; color: root.toneFill(meshMetric["tone"]) }
+                                        }
+                                        border.color: root.toneColor(meshMetric["tone"])
+                                        border.width: 1
+                                        implicitHeight: meshMetricColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(7) : 7) * 2)
+
+                                        Column {
+                                            id: meshMetricColumn
+                                            anchors.fill: parent
+                                            anchors.margins: shellWindow ? shellWindow.scaled(7) : 7
+                                            spacing: 1
+
+                                            Text {
+                                                text: meshMetric["label"]
+                                                color: shellWindow ? shellWindow.textMuted : "#4e7392"
+                                                font.pixelSize: shellWindow ? shellWindow.captionSize : 9
+                                                font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                            }
+
+                                            Text {
+                                                width: parent.width
+                                                text: meshMetric["value"]
+                                                color: shellWindow ? shellWindow.textStrong : "#f4fbff"
+                                                font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                                font.bold: true
+                                                font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                                wrapMode: Text.WrapAnywhere
+                                            }
+
+                                            Text {
+                                                width: parent.width
+                                                text: meshMetric["detail"]
+                                                color: shellWindow ? shellWindow.textSecondary : "#83acc8"
+                                                font.pixelSize: shellWindow ? shellWindow.captionSize : 9
+                                                font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                                wrapMode: Text.WordWrap
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Rectangle {
                             anchors.left: parent.left
                             anchors.right: parent.right
                             anchors.bottom: parent.bottom
@@ -2417,7 +2651,7 @@ PanelFrame {
 
                                 Text {
                                     Layout.fillWidth: true
-                                    text: "APERTURE BUS / " + root.sampleSequenceLabel
+                                    text: (root.wallboardStatusTone === "warning" ? "THREAT FABRIC BUS / " : "DEFENSE FABRIC BUS / ") + root.sampleSequenceLabel
                                     color: shellWindow ? shellWindow.accentBlue : "#38b6ff"
                                     font.pixelSize: shellWindow ? shellWindow.captionSize : 9
                                     font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
@@ -4092,6 +4326,30 @@ PanelFrame {
                                     hotspot["tone"] === "warning" ? 2.0 : 1.8,
                                     28 + (hotspotIndex * 6),
                                     meshGlow
+                                )
+
+                                if (hotspot["tone"] === "warning") {
+                                    ctx.beginPath()
+                                    ctx.arc(px(hotspot["longitude"]), py(hotspot["latitude"]), 16 + (hotspot["intensity"] * 10), 0, Math.PI * 2)
+                                    ctx.strokeStyle = "rgba(255,191,82,0.28)"
+                                    ctx.lineWidth = 1.2
+                                    ctx.stroke()
+                                }
+                            }
+
+                            for (var meshIndex = 0; meshIndex < root.wallboardHotspots.length - 1; ++meshIndex) {
+                                var meshStart = root.wallboardHotspots[meshIndex]
+                                var meshEnd = root.wallboardHotspots[meshIndex + 1]
+                                var hotLink = meshStart["tone"] === "warning" || meshEnd["tone"] === "warning"
+                                drawArc(
+                                    meshStart["longitude"],
+                                    meshStart["latitude"],
+                                    meshEnd["longitude"],
+                                    meshEnd["latitude"],
+                                    hotLink ? "rgba(255,191,82,0.18)" : "rgba(79,188,255,0.16)",
+                                    hotLink ? 1.2 : 1.0,
+                                    12 + ((meshIndex % 3) * 6),
+                                    hotLink ? "rgba(255,191,82,0.1)" : "rgba(114,243,255,0.08)"
                                 )
                             }
 
