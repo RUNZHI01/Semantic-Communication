@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import collections
 import datetime as dt
 import json
 import math
@@ -14,6 +15,12 @@ import sys
 import zlib
 from pathlib import Path
 from typing import Any
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from output_shape_utils import analyze_shape_pair, crop_array_to_target
 
 
 DEFAULT_REPORT_DIR = Path("session_bootstrap/reports")
@@ -42,9 +49,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--size-mismatch",
-        choices=("crop", "error"),
-        default="crop",
-        help="How to handle mismatched image sizes.",
+        choices=("crop", "crop-top-left", "crop-center", "error"),
+        default="crop-top-left",
+        help=(
+            "How to handle mismatched image sizes. "
+            "'crop' preserves the historical top-left crop behavior."
+        ),
     )
     parser.add_argument(
         "--allow-mismatch",
@@ -301,14 +311,49 @@ def load_image_as_float_rgb(path: Path, np):
     return load_png_with_pure_python(path, np)
 
 
-def maybe_crop_to_common_shape(ref_image, test_image, np):
+def resolve_size_mismatch_mode(mode: str) -> str:
+    if mode == "crop":
+        return "crop-top-left"
+    return mode
+
+
+def maybe_crop_to_common_shape(ref_image, test_image, np, *, mode: str):
     if ref_image.shape == test_image.shape:
-        return ref_image, test_image, False, ref_image.shape, test_image.shape
-    min_height = min(ref_image.shape[0], test_image.shape[0])
-    min_width = min(ref_image.shape[1], test_image.shape[1])
-    ref_cropped = ref_image[:min_height, :min_width, :]
-    test_cropped = test_image[:min_height, :min_width, :]
-    return ref_cropped, test_cropped, True, ref_image.shape, test_image.shape
+        return ref_image, test_image, False, ref_image.shape, test_image.shape, None
+
+    analysis = analyze_shape_pair(
+        list(ref_image.shape),
+        list(test_image.shape),
+        left_label="ref",
+        right_label="test",
+    )
+    if analysis["relation"] != "spatial_mismatch" or not analysis["common_shape"]:
+        raise ValueError(
+            "cannot crop images with incompatible shapes: "
+            f"ref={list(ref_image.shape)} test={list(test_image.shape)} relation={analysis['relation']}"
+        )
+
+    target_height, target_width = analysis["common_shape"][-2:]
+    anchor = "center" if mode == "crop-center" else "top-left"
+    ref_cropped, ref_crop = crop_array_to_target(
+        ref_image,
+        (target_height, target_width),
+        anchor=anchor,
+        np=np,
+    )
+    test_cropped, test_crop = crop_array_to_target(
+        test_image,
+        (target_height, target_width),
+        anchor=anchor,
+        np=np,
+    )
+    crop_metadata = {
+        "analysis": analysis,
+        "anchor": anchor,
+        "ref_crop": ref_crop,
+        "test_crop": test_crop,
+    }
+    return ref_cropped, test_cropped, True, ref_image.shape, test_image.shape, crop_metadata
 
 
 def psnr_db(ref_image, test_image, np) -> float:
@@ -490,6 +535,43 @@ def fmt_metric(value: Any, digits: int) -> str:
     return str(value)
 
 
+def build_shape_mismatch_summary(
+    *,
+    mismatch_rows: list[dict[str, Any]],
+    normalized_pair_count: int,
+    size_mismatch_mode_resolved: str,
+) -> dict[str, Any]:
+    if normalized_pair_count <= 0:
+        return {
+            "status": "none",
+            "normalized_pair_count": 0,
+            "normalization_mode": size_mismatch_mode_resolved,
+            "message": "No shape mismatch detected.",
+            "first_pattern": None,
+        }
+
+    first_pattern = mismatch_rows[0] if mismatch_rows else None
+    if first_pattern is None:
+        message = (
+            f"Normalized {normalized_pair_count} shape-mismatched pair(s) via "
+            f"{size_mismatch_mode_resolved}."
+        )
+    else:
+        message = (
+            f"Normalized {normalized_pair_count} shape-mismatched pair(s) via "
+            f"{size_mismatch_mode_resolved}; top pattern ref={first_pattern['ref_shape']} "
+            f"test={first_pattern['test_shape']} compared={first_pattern['compared_shape']} "
+            f"anchor={first_pattern['anchor']}."
+        )
+    return {
+        "status": "normalized_warning",
+        "normalized_pair_count": normalized_pair_count,
+        "normalization_mode": size_mismatch_mode_resolved,
+        "message": message,
+        "first_pattern": first_pattern,
+    }
+
+
 def build_markdown_report(report: dict[str, Any]) -> str:
     aggregate = report["aggregate"]
     psnr = aggregate["psnr_db"]
@@ -510,7 +592,11 @@ def build_markdown_report(report: dict[str, Any]) -> str:
         f"- compared_image_count: {report['compared_image_count']}",
         f"- max_images: {report['max_images']}",
         f"- size_mismatch_mode: {report['size_mismatch_mode']}",
+        f"- size_mismatch_mode_resolved: {report['size_mismatch_mode_resolved']}",
         f"- cropped_pair_count: {report['cropped_pair_count']}",
+        f"- shape_mismatch_count: {report['shape_mismatch_count']}",
+        f"- shape_mismatch_status: {report['shape_mismatch_status']}",
+        f"- shape_mismatch_message: {report['shape_mismatch_message']}",
         f"- lpips_mode: {report['lpips_mode']}",
         f"- lpips_status: {report['lpips_status']}",
         f"- psnr_perfect_match_count: {aggregate['psnr_db']['perfect_match_count']}",
@@ -532,6 +618,17 @@ def build_markdown_report(report: dict[str, Any]) -> str:
     else:
         lines.append("| LPIPS | skipped | skipped | skipped | skipped | skipped |")
 
+    if report["shape_mismatch_status"] != "none":
+        lines.extend(
+            [
+                "",
+                "## Shape Mismatch Gate",
+                "",
+                f"- status: {report['shape_mismatch_status']}",
+                f"- message: {report['shape_mismatch_message']}",
+            ]
+        )
+
     lines.extend(
         [
             "",
@@ -543,6 +640,22 @@ def build_markdown_report(report: dict[str, Any]) -> str:
             "",
         ]
     )
+
+    if report["shape_mismatch_patterns"]:
+        lines.extend(
+            [
+                "## Shape Mismatch Patterns",
+                "",
+                "| Count | Relation | Ref Shape | Test Shape | Compared Shape | Anchor | Center Hint |",
+                "|---:|---|---|---|---|---|---|",
+            ]
+        )
+        for row in report["shape_mismatch_patterns"]:
+            lines.append(
+                f"| {row['count']} | {row['relation']} | {row['ref_shape']} | {row['test_shape']} | "
+                f"{row['compared_shape']} | {row['anchor']} | {row['normalization_hint_center']} |"
+            )
+        lines.append("")
 
     if report["missing_in_test"]:
         lines.extend(
@@ -607,6 +720,10 @@ def terminal_summary(report: dict[str, Any]) -> str:
             f"{fmt_metric(lpips_summary['median'], 6)} / "
             f"{fmt_metric(lpips_summary['max'], 6)}"
         )
+    lines.append(
+        f"Shape mismatch: {report['shape_mismatch_status']} "
+        f"({report['shape_mismatch_message']})"
+    )
     if report.get("markdown_report"):
         lines.append(f"Markdown report: {report['markdown_report']}")
     if report.get("json_report"):
@@ -652,6 +769,7 @@ def compare_directories(args: argparse.Namespace) -> dict[str, Any]:
     if args.max_images:
         matched_paths = matched_paths[: args.max_images]
 
+    size_mismatch_mode_resolved = resolve_size_mismatch_mode(args.size_mismatch)
     lpips_scorer = LpipsScorer(mode=args.lpips, net=args.lpips_net, device=args.lpips_device)
 
     per_image = []
@@ -659,20 +777,27 @@ def compare_directories(args: argparse.Namespace) -> dict[str, Any]:
     ssim_values = []
     lpips_values = []
     cropped_pair_count = 0
+    shape_mismatch_patterns = collections.Counter()
 
     for relative_path in matched_paths:
         ref_path = ref_pngs[relative_path]
         test_path = test_pngs[relative_path]
         ref_image = load_image_as_float_rgb(ref_path, np)
         test_image = load_image_as_float_rgb(test_path, np)
+        crop_metadata = None
 
         if ref_image.shape != test_image.shape:
-            if args.size_mismatch == "error":
+            if size_mismatch_mode_resolved == "error":
                 raise SystemExit(
                     "ERROR: image size mismatch for "
                     f"{relative_path}: ref={ref_image.shape} test={test_image.shape}"
                 )
-            ref_image, test_image, cropped, ref_shape, test_shape = maybe_crop_to_common_shape(ref_image, test_image, np)
+            ref_image, test_image, cropped, ref_shape, test_shape, crop_metadata = maybe_crop_to_common_shape(
+                ref_image,
+                test_image,
+                np,
+                mode=size_mismatch_mode_resolved,
+            )
         else:
             cropped = False
             ref_shape = ref_image.shape
@@ -680,6 +805,13 @@ def compare_directories(args: argparse.Namespace) -> dict[str, Any]:
 
         if cropped:
             cropped_pair_count += 1
+            pattern_key = (
+                tuple(int(dim) for dim in ref_shape),
+                tuple(int(dim) for dim in test_shape),
+                tuple(int(dim) for dim in ref_image.shape),
+                crop_metadata["anchor"],
+            )
+            shape_mismatch_patterns[pattern_key] += 1
 
         psnr_value = psnr_db(ref_image, test_image, np)
         ssim_value = ssim_score(ref_image, test_image, np)
@@ -699,6 +831,7 @@ def compare_directories(args: argparse.Namespace) -> dict[str, Any]:
                 "test_shape": list(test_shape),
                 "compared_shape": list(ref_image.shape),
                 "cropped": cropped,
+                "crop_metadata": crop_metadata,
                 "psnr_db": psnr_value,
                 "ssim": ssim_value,
                 "lpips": lpips_value,
@@ -707,9 +840,31 @@ def compare_directories(args: argparse.Namespace) -> dict[str, Any]:
 
     worst_cases = sorted(per_image, key=lambda row: row["psnr_db"])[: min(10, len(per_image))]
 
+    mismatch_rows = []
+    for (ref_shape, test_shape, compared_shape, anchor), count in shape_mismatch_patterns.most_common():
+        analysis = analyze_shape_pair(list(ref_shape), list(test_shape), left_label="ref", right_label="test")
+        mismatch_rows.append(
+            {
+                "count": count,
+                "relation": analysis["relation"],
+                "ref_shape": list(ref_shape),
+                "test_shape": list(test_shape),
+                "compared_shape": list(compared_shape),
+                "anchor": anchor,
+                "normalization_hint_center": analysis["normalization_hint_center"],
+                "normalization_hint_top_left": analysis["normalization_hint_top_left"],
+            }
+        )
+
+    shape_mismatch_summary = build_shape_mismatch_summary(
+        mismatch_rows=mismatch_rows,
+        normalized_pair_count=cropped_pair_count,
+        size_mismatch_mode_resolved=size_mismatch_mode_resolved,
+    )
+
     report = {
         "run_id": run_id,
-        "status": "success",
+        "status": "success_shape_mismatch_warned" if cropped_pair_count else "success",
         "timestamp": iso_timestamp(),
         "comparison_label": comparison_label,
         "ref_dir": str(ref_dir),
@@ -718,7 +873,13 @@ def compare_directories(args: argparse.Namespace) -> dict[str, Any]:
         "compared_image_count": len(per_image),
         "max_images": args.max_images,
         "size_mismatch_mode": args.size_mismatch,
+        "size_mismatch_mode_resolved": size_mismatch_mode_resolved,
         "cropped_pair_count": cropped_pair_count,
+        "shape_mismatch_count": cropped_pair_count,
+        "shape_mismatch_status": shape_mismatch_summary["status"],
+        "shape_mismatch_message": shape_mismatch_summary["message"],
+        "shape_mismatch_summary": shape_mismatch_summary,
+        "shape_mismatch_patterns": mismatch_rows,
         "lpips_mode": args.lpips,
         "lpips_status": lpips_scorer.reason,
         "missing_in_test_count": len(missing_in_test),
