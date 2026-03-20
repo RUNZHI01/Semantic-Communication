@@ -298,6 +298,7 @@ class BuildBaselineExportBridgeTest(unittest.TestCase):
                 )
 
             self.assertIn("older JSON object-graph format", str(ctx.exception))
+            self.assertIn("probe_legacy_baseline_db_bridge.py", str(ctx.exception))
 
 
 if __name__ == "__main__":
