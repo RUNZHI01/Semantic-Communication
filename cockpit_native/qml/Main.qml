@@ -21,6 +21,8 @@ ApplicationWindow {
     readonly property var meta: DataUtils.objectOrEmpty(uiState["meta"])
     readonly property var statusRows: DataUtils.arrayOrEmpty(leftPanelData["rows"])
     readonly property var centerControlSummary: DataUtils.objectOrEmpty(centerPanelData["control_summary"])
+    readonly property var centerFeedContract: DataUtils.objectOrEmpty(centerPanelData["feed_contract"])
+    readonly property var centerSampleData: DataUtils.objectOrEmpty(centerPanelData["sample"])
     readonly property bool softwareRenderEnabled: !!options["softwareRender"]
 
     readonly property int designWidth: 1440
@@ -33,15 +35,20 @@ ApplicationWindow {
     readonly property color bgColorDeep: "#020710"
     readonly property color bgColorMid: "#071629"
     readonly property color bgColorLight: "#0f3359"
+    readonly property color bgColorHaze: "#173f67"
     readonly property color shellColor: "#07101d"
     readonly property color shellColorRaised: "#0b1727"
+    readonly property color shellColorInset: "#071522"
+    readonly property color shellColorGlass: "#0d2031"
     readonly property color panelColor: "#0a1523"
     readonly property color panelColorRaised: "#102239"
+    readonly property color panelColorSoft: "#0c1a2b"
     readonly property color cardColor: "#112743"
     readonly property color cardColorSoft: "#0c1829"
     readonly property color borderSoft: "#214666"
     readonly property color borderStrong: "#5ac7ff"
     readonly property color accentBlue: "#4ebcff"
+    readonly property color accentBlueSoft: "#2f86be"
     readonly property color accentCyan: "#9ff1ff"
     readonly property color accentGreen: "#42f0bc"
     readonly property color accentAmber: "#ffbf52"
@@ -50,6 +57,7 @@ ApplicationWindow {
     readonly property color textPrimary: "#d7efff"
     readonly property color textSecondary: "#8db2cc"
     readonly property color textMuted: "#5a778e"
+    readonly property color textTertiary: "#4b667d"
     readonly property color gridLine: "#132b42"
     readonly property color gridLineStrong: "#24567d"
 
@@ -63,18 +71,18 @@ ApplicationWindow {
     readonly property int safeBottom: Number(insets["bottom"] || 0)
 
     readonly property int outerPadding: scaled(20)
-    readonly property int shellPadding: scaled(24)
-    readonly property int zoneGap: scaled(18)
-    readonly property int compactGap: scaled(8)
-    readonly property int panelPadding: scaled(18)
-    readonly property int cardPadding: scaled(14)
-    readonly property int panelRadius: scaled(22)
-    readonly property int cardRadius: scaled(14)
-    readonly property int edgeRadius: scaled(10)
+    readonly property int shellPadding: scaled(26)
+    readonly property int zoneGap: scaled(20)
+    readonly property int compactGap: scaled(10)
+    readonly property int panelPadding: scaled(20)
+    readonly property int cardPadding: scaled(16)
+    readonly property int panelRadius: scaled(24)
+    readonly property int cardRadius: scaled(16)
+    readonly property int edgeRadius: scaled(12)
     readonly property int headerTitleSize: scaled(38)
-    readonly property int sectionTitleSize: scaled(24)
+    readonly property int sectionTitleSize: scaled(26)
     readonly property int bodyEmphasisSize: scaled(15)
-    readonly property int bodySize: scaled(13)
+    readonly property int bodySize: scaled(14)
     readonly property int captionSize: scaled(11)
     readonly property int eyebrowSize: scaled(10)
 
@@ -90,6 +98,7 @@ ApplicationWindow {
     readonly property string topTitle: primaryLabel(meta["title"] || "飞腾原生座舱 / Feiteng Native Cockpit")
     readonly property string topSubtitle: secondaryLabel(meta["title"] || "飞腾原生座舱 / Feiteng Native Cockpit")
     readonly property var liveAnchor: DataUtils.objectOrEmpty(rightPanelData["live_anchor"])
+    readonly property string recommendedScenarioId: String(rightPanelData["recommended_scenario_id"] || "--")
 
     readonly property var headerChipModel: [
         {
@@ -115,6 +124,60 @@ ApplicationWindow {
         {
             "label": "渲染",
             "value": softwareRenderEnabled ? "软件回退" : "图形加速",
+            "tone": softwareRenderEnabled ? "warning" : "online"
+        }
+    ]
+    readonly property var headerMirrorModel: [
+        {
+            "label": "采样时钟",
+            "value": String(centerSampleData["captured_at"] || "--"),
+            "tone": "neutral"
+        },
+        {
+            "label": "链路档位",
+            "value": String(centerControlSummary["link_profile"] || "--"),
+            "tone": "warning"
+        },
+        {
+            "label": "弱网策略",
+            "value": recommendedScenarioId,
+            "tone": "warning"
+        },
+        {
+            "label": "板端锚点",
+            "value": String(liveAnchor["board_status"] || "--"),
+            "tone": String(liveAnchor["tone"] || "neutral")
+        }
+    ]
+    readonly property var shellFooterModel: [
+        {
+            "label": "会话",
+            "value": String((statusRow("会话") || {})["value"] || "--"),
+            "detail": "当前证据会话",
+            "tone": "neutral"
+        },
+        {
+            "label": "布局策略",
+            "value": String(meta["layout_strategy"] || "--"),
+            "detail": "自适应壳体布局",
+            "tone": "neutral"
+        },
+        {
+            "label": "数据源",
+            "value": String(centerFeedContract["active_source_label"] || centerPanelData["source_label"] || "--"),
+            "detail": String(centerControlSummary["link_profile"] || "--"),
+            "tone": "neutral"
+        },
+        {
+            "label": "弱网策略",
+            "value": recommendedScenarioId,
+            "detail": String((statusRow("快照原因") || {})["value"] || "archive mirror"),
+            "tone": "warning"
+        },
+        {
+            "label": "渲染路径",
+            "value": softwareRenderEnabled ? "软件回退" : "图形加速",
+            "detail": softwareRenderEnabled ? "software-safe launch" : "gpu primary launch",
             "tone": softwareRenderEnabled ? "warning" : "online"
         }
     ]
@@ -203,13 +266,23 @@ ApplicationWindow {
     }
 
     Rectangle {
+        width: root.width * 1.18
+        height: root.scaled(240)
+        rotation: -8
+        color: root.bgColorHaze
+        opacity: 0.08
+        x: -root.width * 0.06
+        y: root.height * 0.16
+    }
+
+    Rectangle {
         anchors.fill: parent
         gradient: Gradient {
             GradientStop { position: 0.0; color: root.bgColorLight }
             GradientStop { position: 0.38; color: root.bgColorMid }
             GradientStop { position: 1.0; color: root.bgColorDeep }
         }
-        opacity: 0.72
+        opacity: 0.78
     }
 
     Item {
@@ -251,8 +324,8 @@ ApplicationWindow {
         Rectangle {
             anchors.fill: parent
             radius: root.panelRadius + root.scaled(4)
-            color: "#0b2d4e"
-            opacity: 0.12
+            color: "#0f3557"
+            opacity: 0.14
         }
 
         Rectangle {
@@ -260,11 +333,25 @@ ApplicationWindow {
             radius: root.panelRadius
             gradient: Gradient {
                 GradientStop { position: 0.0; color: root.shellColorRaised }
-                GradientStop { position: 0.48; color: root.shellColor }
+                GradientStop { position: 0.24; color: root.shellColorGlass }
+                GradientStop { position: 0.48; color: root.shellColorInset }
+                GradientStop { position: 0.68; color: root.shellColor }
                 GradientStop { position: 1.0; color: "#040b16" }
             }
             border.color: "#2c77aa"
             border.width: 1
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            radius: root.panelRadius
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: "#1f5a8600" }
+                GradientStop { position: 0.16; color: "#184a7022" }
+                GradientStop { position: 0.48; color: "transparent" }
+                GradientStop { position: 1.0; color: "#02060c88" }
+            }
+            opacity: 0.88
         }
 
         Rectangle {
@@ -275,6 +362,16 @@ ApplicationWindow {
             border.color: "#0c2640"
             border.width: 1
             opacity: 0.9
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            anchors.margins: root.scaled(12)
+            radius: root.panelRadius - root.scaled(12)
+            color: "transparent"
+            border.color: "#102d47"
+            border.width: 1
+            opacity: 0.54
         }
 
         Rectangle {
@@ -289,6 +386,40 @@ ApplicationWindow {
                 GradientStop { position: 1.0; color: "transparent" }
             }
             opacity: 0.68
+        }
+
+        Rectangle {
+            visible: root.wideLayout
+            anchors.left: parent.left
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            anchors.margins: root.scaled(20)
+            width: Math.max(root.scaled(212), parent.width * 0.17)
+            radius: root.cardRadius
+            gradient: Gradient {
+                orientation: Gradient.Horizontal
+                GradientStop { position: 0.0; color: "#1f5d8900" }
+                GradientStop { position: 0.42; color: "#1a4f7718" }
+                GradientStop { position: 1.0; color: "#0a192600" }
+            }
+            opacity: 0.62
+        }
+
+        Rectangle {
+            visible: root.wideLayout
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            anchors.margins: root.scaled(20)
+            width: Math.max(root.scaled(212), parent.width * 0.17)
+            radius: root.cardRadius
+            gradient: Gradient {
+                orientation: Gradient.Horizontal
+                GradientStop { position: 0.0; color: "#0a192600" }
+                GradientStop { position: 0.58; color: "#16476918" }
+                GradientStop { position: 1.0; color: "#1a597f00" }
+            }
+            opacity: 0.6
         }
 
         Item {
@@ -422,7 +553,7 @@ ApplicationWindow {
                     height: parent.height * 0.78
                     radius: width / 2
                     color: "#1171b1"
-                    opacity: 0.09
+                    opacity: 0.11
                     x: -width * 0.24
                     y: -height * 0.18
                 }
@@ -440,7 +571,7 @@ ApplicationWindow {
                         spacing: root.compactGap
 
                         Text {
-                            text: "飞行态势总控 / Native Operations Shell"
+                            text: "安全态势总控 / Native Security-Ops Shell"
                             color: root.accentCyan
                             font.pixelSize: root.eyebrowSize
                             font.family: root.monoFamily
@@ -467,7 +598,7 @@ ApplicationWindow {
                         }
 
                         Text {
-                            text: meta["subtitle"] || "Qt/QML 原生壳体读取既有 TVM/OpenAMP 合同，保持自适应布局与安全区处理。"
+                            text: meta["subtitle"] || "Qt/QML 原生壳体继续沿用既有 TVM/OpenAMP 合同，以安全运营中台风格整合飞行、链路、弱网与锚点观测。"
                             color: root.textSecondary
                             font.pixelSize: root.bodySize
                             font.family: root.uiFamily
@@ -484,23 +615,41 @@ ApplicationWindow {
                                 delegate: Rectangle {
                                     readonly property var chip: root.headerChipModel[index]
                                     radius: root.edgeRadius
-                                    color: root.toneFill(chip["tone"])
+                                    gradient: Gradient {
+                                        GradientStop { position: 0.0; color: Qt.lighter(root.toneFill(chip["tone"]), 1.16) }
+                                        GradientStop { position: 1.0; color: root.toneFill(chip["tone"]) }
+                                    }
                                     border.color: root.toneColor(chip["tone"])
                                     border.width: 1
-                                    height: chipText.implicitHeight + chipValue.implicitHeight + root.scaled(18)
-                                    width: Math.max(root.scaled(150), chipText.implicitWidth + chipValue.implicitWidth + root.scaled(28))
+                                    height: chipText.implicitHeight + chipValue.implicitHeight + root.scaled(20)
+                                    width: Math.max(root.scaled(154), chipText.implicitWidth + chipValue.implicitWidth + root.scaled(30))
+
+                                    Rectangle {
+                                        anchors.left: parent.left
+                                        anchors.right: parent.right
+                                        anchors.top: parent.top
+                                        height: root.scaled(2)
+                                        gradient: Gradient {
+                                            GradientStop { position: 0.0; color: "transparent" }
+                                            GradientStop { position: 0.28; color: root.toneColor(chip["tone"]) }
+                                            GradientStop { position: 0.74; color: Qt.lighter(root.toneColor(chip["tone"]), 1.18) }
+                                            GradientStop { position: 1.0; color: "transparent" }
+                                        }
+                                        opacity: 0.76
+                                    }
 
                                     Column {
                                         anchors.fill: parent
-                                        anchors.margins: root.scaled(9)
-                                        spacing: root.scaled(2)
+                                        anchors.margins: root.scaled(10)
+                                        spacing: root.scaled(3)
 
                                         Text {
                                             id: chipText
                                             text: chip["label"]
-                                            color: root.textSecondary
+                                            color: root.textMuted
                                             font.pixelSize: root.captionSize
-                                            font.family: root.uiFamily
+                                            font.family: root.monoFamily
+                                            font.letterSpacing: root.scaled(1)
                                         }
 
                                         Text {
@@ -521,12 +670,36 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         radius: root.cardRadius
                         gradient: Gradient {
-                            GradientStop { position: 0.0; color: "#0d1f31" }
-                            GradientStop { position: 1.0; color: "#091625" }
+                            GradientStop { position: 0.0; color: "#11253b" }
+                            GradientStop { position: 0.46; color: "#0b1828" }
+                            GradientStop { position: 1.0; color: "#081321" }
                         }
-                        border.color: "#21537d"
+                        border.color: "#2b78ab"
                         border.width: 1
                         implicitHeight: summaryColumn.implicitHeight + (root.cardPadding * 2)
+
+                        Rectangle {
+                            anchors.fill: parent
+                            radius: parent.radius
+                            color: "transparent"
+                            border.color: "#143754"
+                            border.width: 1
+                            opacity: 0.78
+                        }
+
+                        Rectangle {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            height: root.scaled(3)
+                            gradient: Gradient {
+                                GradientStop { position: 0.0; color: "transparent" }
+                                GradientStop { position: 0.24; color: root.accentBlue }
+                                GradientStop { position: 0.72; color: root.accentCyan }
+                                GradientStop { position: 1.0; color: "transparent" }
+                            }
+                            opacity: 0.82
+                        }
 
                         Column {
                             id: summaryColumn
@@ -535,11 +708,11 @@ ApplicationWindow {
                             spacing: root.compactGap
 
                             Text {
-                                text: "合同快照 / Live Contract Mirror"
-                                color: root.accentBlue
+                                text: "态势镜像 / Mission Control Mirror"
+                                color: root.accentCyan
                                 font.pixelSize: root.eyebrowSize
                                 font.family: root.monoFamily
-                                font.letterSpacing: root.scaled(1)
+                                font.letterSpacing: root.scaled(2)
                             }
 
                             Text {
@@ -554,18 +727,70 @@ ApplicationWindow {
 
                             Text {
                                 width: parent.width
-                                text: root.liveAnchor["probe_summary"] || "显示的是仓库合同与归档快照，不推断不存在的实时链路。"
+                                text: root.liveAnchor["probe_summary"] || "中心总控右舷维持合同镜像与归档锚点，只展示已知板端事实，不虚构实时链路。"
                                 color: root.textSecondary
                                 font.pixelSize: root.bodySize
                                 font.family: root.uiFamily
                                 wrapMode: Text.WordWrap
                             }
 
+                            GridLayout {
+                                width: parent.width
+                                columns: root.compactLayout ? 1 : 2
+                                columnSpacing: root.compactGap
+                                rowSpacing: root.compactGap
+
+                                Repeater {
+                                    model: root.headerMirrorModel.length
+
+                                    delegate: Rectangle {
+                                        readonly property var metric: root.headerMirrorModel[index]
+                                        Layout.fillWidth: true
+                                        radius: root.edgeRadius
+                                        gradient: Gradient {
+                                            GradientStop { position: 0.0; color: Qt.lighter(root.toneFill(metric["tone"]), 1.1) }
+                                            GradientStop { position: 1.0; color: root.toneFill(metric["tone"]) }
+                                        }
+                                        border.color: root.toneColor(metric["tone"])
+                                        border.width: 1
+                                        implicitHeight: metricColumn.implicitHeight + (root.scaled(10) * 2)
+
+                                        Column {
+                                            id: metricColumn
+                                            anchors.fill: parent
+                                            anchors.margins: root.scaled(10)
+                                            spacing: root.scaled(3)
+
+                                            Text {
+                                                text: metric["label"]
+                                                color: root.textMuted
+                                                font.pixelSize: root.captionSize
+                                                font.family: root.monoFamily
+                                                font.letterSpacing: root.scaled(1)
+                                            }
+
+                                            Text {
+                                                width: parent.width
+                                                text: metric["value"]
+                                                color: root.textStrong
+                                                font.pixelSize: root.bodySize
+                                                font.bold: true
+                                                font.family: root.monoFamily
+                                                wrapMode: Text.WrapAnywhere
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
                             Rectangle {
                                 width: parent.width
                                 radius: root.edgeRadius
-                                color: "#081321"
-                                border.color: "#143654"
+                                gradient: Gradient {
+                                    GradientStop { position: 0.0; color: "#0a1727" }
+                                    GradientStop { position: 1.0; color: "#081321" }
+                                }
+                                border.color: "#1a486a"
                                 border.width: 1
                                 implicitHeight: snapshotColumn.implicitHeight + (root.scaled(12) * 2)
 
@@ -576,8 +801,8 @@ ApplicationWindow {
                                     spacing: root.scaled(4)
 
                                     Text {
-                                        text: "Snapshot Path"
-                                        color: root.textMuted
+                                        text: "快照路径 / Snapshot Path"
+                                        color: root.accentBlue
                                         font.pixelSize: root.captionSize
                                         font.family: root.monoFamily
                                     }
@@ -644,6 +869,167 @@ ApplicationWindow {
                     Layout.fillWidth: true
                     shellWindow: root
                     panelData: root.bottomPanelData
+                }
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                radius: root.cardRadius
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: "#0f2236" }
+                    GradientStop { position: 0.46; color: "#0a1828" }
+                    GradientStop { position: 1.0; color: "#08121f" }
+                }
+                border.color: "#2a79ae"
+                border.width: 1
+                implicitHeight: shellFooterLayout.implicitHeight + (root.scaled(12) * 2)
+
+                Rectangle {
+                    anchors.fill: parent
+                    anchors.margins: 1
+                    radius: parent.radius - 1
+                    color: "transparent"
+                    border.color: "#133754"
+                    border.width: 1
+                    opacity: 0.82
+                }
+
+                Rectangle {
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    height: root.scaled(3)
+                    gradient: Gradient {
+                        GradientStop { position: 0.0; color: "transparent" }
+                        GradientStop { position: 0.22; color: root.accentBlue }
+                        GradientStop { position: 0.72; color: root.accentCyan }
+                        GradientStop { position: 1.0; color: "transparent" }
+                    }
+                    opacity: 0.8
+                }
+
+                ColumnLayout {
+                    id: shellFooterLayout
+                    anchors.fill: parent
+                    anchors.margins: root.scaled(12)
+                    spacing: root.compactGap
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: root.compactGap
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: root.scaled(2)
+
+                            Text {
+                                text: "壳体总线 / SHELL BUS"
+                                color: root.accentBlue
+                                font.pixelSize: root.captionSize
+                                font.family: root.monoFamily
+                                font.letterSpacing: root.scaled(1)
+                            }
+
+                            Text {
+                                text: "统一显示当前会话、布局策略、源状态与安全渲染路径，让整个原生 cockpit 收口成一条完成态总线。"
+                                color: root.textSecondary
+                                font.pixelSize: root.captionSize
+                                font.family: root.uiFamily
+                                wrapMode: Text.WordWrap
+                            }
+                        }
+
+                        Rectangle {
+                            Layout.alignment: Qt.AlignTop
+                            radius: root.edgeRadius
+                            color: "#091726"
+                            border.color: "#1c547c"
+                            border.width: 1
+                            implicitWidth: shellStamp.implicitWidth + (root.scaled(12) * 2)
+                            implicitHeight: shellStamp.implicitHeight + (root.scaled(5) * 2)
+
+                            Text {
+                                id: shellStamp
+                                anchors.centerIn: parent
+                                text: "ADAPTIVE ZONES"
+                                color: root.textPrimary
+                                font.pixelSize: root.captionSize
+                                font.family: root.monoFamily
+                            }
+                        }
+                    }
+
+                    GridLayout {
+                        Layout.fillWidth: true
+                        columns: root.compactLayout ? 1 : (root.mediumLayout ? 2 : root.shellFooterModel.length)
+                        columnSpacing: root.compactGap
+                        rowSpacing: root.compactGap
+
+                        Repeater {
+                            model: root.shellFooterModel.length
+
+                            delegate: Rectangle {
+                                readonly property var itemData: root.shellFooterModel[index]
+                                Layout.fillWidth: true
+                                radius: root.edgeRadius
+                                gradient: Gradient {
+                                    GradientStop { position: 0.0; color: Qt.lighter(root.toneFill(itemData["tone"]), 1.12) }
+                                    GradientStop { position: 1.0; color: root.toneFill(itemData["tone"]) }
+                                }
+                                border.color: root.toneColor(itemData["tone"])
+                                border.width: 1
+                                implicitHeight: footerMetricColumn.implicitHeight + (root.scaled(9) * 2)
+
+                                Rectangle {
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.top: parent.top
+                                    height: root.scaled(2)
+                                    gradient: Gradient {
+                                        GradientStop { position: 0.0; color: "transparent" }
+                                        GradientStop { position: 0.28; color: root.toneColor(itemData["tone"]) }
+                                        GradientStop { position: 0.74; color: Qt.lighter(root.toneColor(itemData["tone"]), 1.16) }
+                                        GradientStop { position: 1.0; color: "transparent" }
+                                    }
+                                    opacity: 0.74
+                                }
+
+                                Column {
+                                    id: footerMetricColumn
+                                    anchors.fill: parent
+                                    anchors.margins: root.scaled(9)
+                                    spacing: root.scaled(2)
+
+                                    Text {
+                                        text: itemData["label"]
+                                        color: root.textMuted
+                                        font.pixelSize: root.captionSize
+                                        font.family: root.monoFamily
+                                        font.letterSpacing: root.scaled(1)
+                                    }
+
+                                    Text {
+                                        width: parent.width
+                                        text: itemData["value"]
+                                        color: root.textStrong
+                                        font.pixelSize: root.bodySize
+                                        font.bold: true
+                                        font.family: root.monoFamily
+                                        wrapMode: Text.WrapAnywhere
+                                    }
+
+                                    Text {
+                                        width: parent.width
+                                        text: itemData["detail"]
+                                        color: root.textSecondary
+                                        font.pixelSize: root.captionSize
+                                        font.family: root.uiFamily
+                                        wrapMode: Text.WordWrap
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
