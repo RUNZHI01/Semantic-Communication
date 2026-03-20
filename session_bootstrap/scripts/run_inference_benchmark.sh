@@ -20,9 +20,12 @@ Notes:
   - Optional vars:
       INFERENCE_BASELINE_CMD, INFERENCE_CURRENT_CMD
       INFERENCE_REPEAT, INFERENCE_WARMUP_RUNS, INFERENCE_TIMEOUT_SEC
+      INFERENCE_COMPARE_SHAPE_POLICY=ignore|warn|fail
       INFERENCE_BASELINE_ARCHIVE, INFERENCE_CURRENT_ARCHIVE
       INFERENCE_BASELINE_EXPECTED_SHA256
       INFERENCE_CURRENT_EXPECTED_SHA256
+      INFERENCE_BASELINE_EXPECTED_OUTPUT_SHAPE
+      INFERENCE_CURRENT_EXPECTED_OUTPUT_SHAPE
       EXECUTION_ID, INFERENCE_EXECUTION_ID, LOG_DIR, REPORT_DIR
       ALLOW_REPORT_OVERWRITE=1
 EOF
@@ -89,6 +92,7 @@ THREADS="${THREADS:-unknown}"
 INFERENCE_TIMEOUT_SEC="${INFERENCE_TIMEOUT_SEC:-900}"
 INFERENCE_REPEAT="${INFERENCE_REPEAT:-5}"
 INFERENCE_WARMUP_RUNS="${INFERENCE_WARMUP_RUNS:-1}"
+INFERENCE_COMPARE_SHAPE_POLICY="${INFERENCE_COMPARE_SHAPE_POLICY:-warn}"
 INFERENCE_BASELINE_CMD="${INFERENCE_BASELINE_CMD:-bash ./session_bootstrap/scripts/run_remote_tvm_inference_payload.sh --variant baseline}"
 INFERENCE_CURRENT_CMD="${INFERENCE_CURRENT_CMD:-bash ./session_bootstrap/scripts/run_remote_tvm_inference_payload.sh --variant current}"
 LOG_DIR_RESOLVED="$(resolve_path "${LOG_DIR:-./session_bootstrap/logs}")"
@@ -106,6 +110,14 @@ if ! [[ "$INFERENCE_WARMUP_RUNS" =~ ^[0-9]+$ ]]; then
   echo "ERROR: INFERENCE_WARMUP_RUNS must be a non-negative integer." >&2
   exit 1
 fi
+case "$INFERENCE_COMPARE_SHAPE_POLICY" in
+  ignore|warn|fail)
+    ;;
+  *)
+    echo "ERROR: INFERENCE_COMPARE_SHAPE_POLICY must be ignore, warn, or fail." >&2
+    exit 1
+    ;;
+esac
 if [[ "$INFERENCE_TIMEOUT_SEC" -gt 0 ]] && ! command -v timeout >/dev/null 2>&1; then
   echo "ERROR: timeout command not found but INFERENCE_TIMEOUT_SEC is set." >&2
   exit 1
@@ -151,10 +163,13 @@ EOF
   echo "inference_repeat=$INFERENCE_REPEAT"
   echo "inference_warmup_runs=$INFERENCE_WARMUP_RUNS"
   echo "inference_timeout_sec=$INFERENCE_TIMEOUT_SEC"
+  echo "inference_compare_shape_policy=$INFERENCE_COMPARE_SHAPE_POLICY"
   echo "baseline_cmd=$INFERENCE_BASELINE_CMD"
   echo "current_cmd=$INFERENCE_CURRENT_CMD"
   echo "baseline_expected_sha256=${INFERENCE_BASELINE_EXPECTED_SHA256:-NA}"
   echo "current_expected_sha256=${INFERENCE_CURRENT_EXPECTED_SHA256:-NA}"
+  echo "baseline_expected_output_shape=${INFERENCE_BASELINE_EXPECTED_OUTPUT_SHAPE:-NA}"
+  echo "current_expected_output_shape=${INFERENCE_CURRENT_EXPECTED_OUTPUT_SHAPE:-NA}"
 } >"$LOG_FILE"
 
 LAST_EXIT_CODE=0
@@ -173,6 +188,15 @@ LAST_ARTIFACT_SHA256="NA"
 LAST_ARTIFACT_SHA256_EXPECTED="NA"
 LAST_ARTIFACT_SHA256_MATCH="NA"
 LAST_ERROR=""
+
+OUTPUT_SHAPE_COMPARE_STATUS="not_checked"
+OUTPUT_SHAPE_COMPARE_REASON="not_checked"
+OUTPUT_SHAPE_COMPARE_MESSAGE="Output shape comparison has not run yet."
+OUTPUT_SHAPE_COMPARE_RELATION="unknown"
+OUTPUT_SHAPE_COMPARE_COMMON_SHAPE="NA"
+OUTPUT_SHAPE_COMPARE_DELTA_CURRENT_MINUS_BASELINE="NA"
+OUTPUT_SHAPE_COMPARE_NORMALIZATION_HINT_CENTER="NA"
+OUTPUT_SHAPE_COMPARE_NORMALIZATION_HINT_TOP_LEFT="NA"
 
 parse_last_json_line() {
   python3 - "$1" <<'PY'
@@ -240,6 +264,95 @@ elif val is None:
 else:
     print(val)
 PY
+}
+
+compare_output_shapes_json() {
+  python3 - "$SCRIPT_DIR" "$1" "$2" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+script_dir = Path(sys.argv[1])
+if str(script_dir) not in sys.path:
+    sys.path.insert(0, str(script_dir))
+
+from output_shape_utils import analyze_shape_pair
+
+analysis = analyze_shape_pair(
+    sys.argv[2],
+    sys.argv[3],
+    left_label="baseline",
+    right_label="current",
+)
+print(json.dumps(analysis, ensure_ascii=False))
+PY
+}
+
+evaluate_output_shape_compare() {
+  local baseline_shape="$1"
+  local current_shape="$2"
+  local analysis_json shapes_match relation common_shape delta hint_center hint_top_left
+
+  OUTPUT_SHAPE_COMPARE_STATUS="not_checked"
+  OUTPUT_SHAPE_COMPARE_REASON="not_checked"
+  OUTPUT_SHAPE_COMPARE_MESSAGE="Output shape comparison has not run yet."
+  OUTPUT_SHAPE_COMPARE_RELATION="unknown"
+  OUTPUT_SHAPE_COMPARE_COMMON_SHAPE="NA"
+  OUTPUT_SHAPE_COMPARE_DELTA_CURRENT_MINUS_BASELINE="NA"
+  OUTPUT_SHAPE_COMPARE_NORMALIZATION_HINT_CENTER="NA"
+  OUTPUT_SHAPE_COMPARE_NORMALIZATION_HINT_TOP_LEFT="NA"
+
+  if ! analysis_json="$(compare_output_shapes_json "$baseline_shape" "$current_shape")"; then
+    OUTPUT_SHAPE_COMPARE_STATUS="unavailable"
+    OUTPUT_SHAPE_COMPARE_REASON="shape_analysis_failed"
+    OUTPUT_SHAPE_COMPARE_MESSAGE="Output shape comparison unavailable because shape analysis failed."
+    return 0
+  fi
+
+  shapes_match="$(json_field "$analysis_json" shapes_match)"
+  relation="$(json_field "$analysis_json" relation)"
+  common_shape="$(json_field "$analysis_json" common_shape)"
+  delta="$(json_field "$analysis_json" delta_right_minus_left)"
+  hint_center="$(json_field "$analysis_json" normalization_hint_center)"
+  hint_top_left="$(json_field "$analysis_json" normalization_hint_top_left)"
+
+  OUTPUT_SHAPE_COMPARE_RELATION="$relation"
+  OUTPUT_SHAPE_COMPARE_COMMON_SHAPE="$common_shape"
+  OUTPUT_SHAPE_COMPARE_DELTA_CURRENT_MINUS_BASELINE="$delta"
+  OUTPUT_SHAPE_COMPARE_NORMALIZATION_HINT_CENTER="$hint_center"
+  OUTPUT_SHAPE_COMPARE_NORMALIZATION_HINT_TOP_LEFT="$hint_top_left"
+
+  if [[ "$shapes_match" == "True" ]]; then
+    OUTPUT_SHAPE_COMPARE_STATUS="match"
+    OUTPUT_SHAPE_COMPARE_REASON="baseline_current_shapes_match"
+    OUTPUT_SHAPE_COMPARE_MESSAGE="Baseline/current output shapes match: $baseline_shape"
+    return 0
+  fi
+
+  if [[ "$relation" == "unknown" ]]; then
+    OUTPUT_SHAPE_COMPARE_STATUS="unavailable"
+    OUTPUT_SHAPE_COMPARE_REASON="baseline_or_current_shape_missing"
+    OUTPUT_SHAPE_COMPARE_MESSAGE="Output shape comparison unavailable because baseline=$baseline_shape current=$current_shape."
+    return 0
+  fi
+
+  OUTPUT_SHAPE_COMPARE_REASON="baseline_current_shapes_differ"
+  OUTPUT_SHAPE_COMPARE_MESSAGE="Baseline/current output shape mismatch under policy=$INFERENCE_COMPARE_SHAPE_POLICY: baseline=$baseline_shape current=$current_shape relation=$relation common_shape=$common_shape center_hint=$hint_center top_left_hint=$hint_top_left"
+
+  case "$INFERENCE_COMPARE_SHAPE_POLICY" in
+    ignore)
+      OUTPUT_SHAPE_COMPARE_STATUS="mismatch_ignored"
+      return 0
+      ;;
+    warn)
+      OUTPUT_SHAPE_COMPARE_STATUS="mismatch_warned"
+      return 0
+      ;;
+    fail)
+      OUTPUT_SHAPE_COMPARE_STATUS="mismatch_failed"
+      return 2
+      ;;
+  esac
 }
 
 run_once() {
@@ -365,6 +478,15 @@ write_report() {
 - inference_repeat: $INFERENCE_REPEAT
 - inference_warmup_runs: $INFERENCE_WARMUP_RUNS
 - inference_timeout_sec: $INFERENCE_TIMEOUT_SEC
+- output_shape_compare_policy: $INFERENCE_COMPARE_SHAPE_POLICY
+- output_shape_compare_status: $OUTPUT_SHAPE_COMPARE_STATUS
+- output_shape_compare_reason: $OUTPUT_SHAPE_COMPARE_REASON
+- output_shape_compare_relation: $OUTPUT_SHAPE_COMPARE_RELATION
+- output_shape_compare_common_shape: $OUTPUT_SHAPE_COMPARE_COMMON_SHAPE
+- output_shape_delta_current_minus_baseline: $OUTPUT_SHAPE_COMPARE_DELTA_CURRENT_MINUS_BASELINE
+- output_shape_normalization_hint_center: $OUTPUT_SHAPE_COMPARE_NORMALIZATION_HINT_CENTER
+- output_shape_normalization_hint_top_left: $OUTPUT_SHAPE_COMPARE_NORMALIZATION_HINT_TOP_LEFT
+- output_shape_compare_message: $OUTPUT_SHAPE_COMPARE_MESSAGE
 - baseline_expected_sha256_configured: ${INFERENCE_BASELINE_EXPECTED_SHA256:-NA}
 - current_expected_sha256_configured: ${INFERENCE_CURRENT_EXPECTED_SHA256:-NA}
 - baseline_load_ms: $baseline_load_ms
@@ -446,6 +568,7 @@ current_artifact_sha256_match="NA"
 
 delta_ms="NA"
 improvement_pct="NA"
+success_status="success"
 
 if run_once baseline "$INFERENCE_BASELINE_CMD"; then
   baseline_load_ms="$LAST_LOAD_MS"
@@ -500,7 +623,30 @@ fi
 delta_ms="$(awk -v b="$baseline_run_median_ms" -v c="$current_run_median_ms" 'BEGIN { printf "%.3f", c - b }')"
 improvement_pct="$(awk -v b="$baseline_run_median_ms" -v c="$current_run_median_ms" 'BEGIN { if (b == 0) { printf "0.00" } else { printf "%.2f", ((b - c) / b) * 100 } }')"
 
-write_report "success" "$baseline_load_ms" "$baseline_vm_init_ms" "$baseline_run_median_ms" "$baseline_run_mean_ms" "$baseline_run_min_ms" "$baseline_run_max_ms" "$baseline_run_variance_ms2" "$baseline_run_count" "$baseline_exit_code" "$baseline_output_shape" "$baseline_output_dtype" "$current_load_ms" "$current_vm_init_ms" "$current_run_median_ms" "$current_run_mean_ms" "$current_run_min_ms" "$current_run_max_ms" "$current_run_variance_ms2" "$current_run_count" "$current_exit_code" "$current_output_shape" "$current_output_dtype" "$delta_ms" "$improvement_pct"
+if evaluate_output_shape_compare "$baseline_output_shape" "$current_output_shape"; then
+  case "$OUTPUT_SHAPE_COMPARE_STATUS" in
+    mismatch_warned)
+      success_status="success_shape_mismatch_warned"
+      echo "WARN: $OUTPUT_SHAPE_COMPARE_MESSAGE" | tee -a "$LOG_FILE" >&2
+      ;;
+    mismatch_ignored)
+      success_status="success_shape_mismatch_ignored"
+      echo "INFO: $OUTPUT_SHAPE_COMPARE_MESSAGE" >>"$LOG_FILE"
+      ;;
+    match|unavailable)
+      echo "INFO: $OUTPUT_SHAPE_COMPARE_MESSAGE" >>"$LOG_FILE"
+      ;;
+  esac
+else
+  write_report "failed_output_shape_mismatch" "$baseline_load_ms" "$baseline_vm_init_ms" "$baseline_run_median_ms" "$baseline_run_mean_ms" "$baseline_run_min_ms" "$baseline_run_max_ms" "$baseline_run_variance_ms2" "$baseline_run_count" "$baseline_exit_code" "$baseline_output_shape" "$baseline_output_dtype" "$current_load_ms" "$current_vm_init_ms" "$current_run_median_ms" "$current_run_mean_ms" "$current_run_min_ms" "$current_run_max_ms" "$current_run_variance_ms2" "$current_run_count" "$current_exit_code" "$current_output_shape" "$current_output_dtype" "$delta_ms" "$improvement_pct"
+  echo "ERROR: $OUTPUT_SHAPE_COMPARE_MESSAGE" | tee -a "$LOG_FILE" >&2
+  echo "Inference benchmark failed in output-shape gate"
+  echo "  report: $REPORT_FILE"
+  echo "  log:    $LOG_FILE"
+  exit 2
+fi
+
+write_report "$success_status" "$baseline_load_ms" "$baseline_vm_init_ms" "$baseline_run_median_ms" "$baseline_run_mean_ms" "$baseline_run_min_ms" "$baseline_run_max_ms" "$baseline_run_variance_ms2" "$baseline_run_count" "$baseline_exit_code" "$baseline_output_shape" "$baseline_output_dtype" "$current_load_ms" "$current_vm_init_ms" "$current_run_median_ms" "$current_run_mean_ms" "$current_run_min_ms" "$current_run_max_ms" "$current_run_variance_ms2" "$current_run_count" "$current_exit_code" "$current_output_shape" "$current_output_dtype" "$delta_ms" "$improvement_pct"
 
 echo "Inference benchmark completed"
 echo "  report: $REPORT_FILE"

@@ -4,7 +4,7 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SESSION_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-ONE_SHOT_SCRIPT="$SCRIPT_DIR/run_phytium_current_safe_one_shot.sh"
+ONE_SHOT_SCRIPT="${PHYTIUM_BASELINE_STYLE_ONE_SHOT_SCRIPT:-$SCRIPT_DIR/run_phytium_current_safe_one_shot.sh}"
 DEFAULT_REBUILD_ENV="$SESSION_DIR/config/rpc_tune_rebuild_current_safe.recommended_cortex_a72_neon.2026-03-10.phytium_pi.env"
 DEFAULT_INFERENCE_ENV="$SESSION_DIR/config/inference_compare_scheme_a_fair.2026-03-11.phytium_pi.env"
 DEFAULT_REPORT_PREFIX="phytium_baseline_style_current_rebuild"
