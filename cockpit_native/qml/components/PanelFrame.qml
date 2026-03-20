@@ -480,6 +480,40 @@ Rectangle {
     Repeater {
         model: 4
 
+        delegate: Item {
+            readonly property bool leftSide: index % 2 === 0
+            readonly property bool topSide: index < 2
+            width: shellWindow ? shellWindow.scaled(26) : 26
+            height: width
+            x: leftSide
+                ? frame.traceInset - (shellWindow ? shellWindow.scaled(4) : 4)
+                : frame.width - frame.traceInset - width + (shellWindow ? shellWindow.scaled(4) : 4)
+            y: topSide
+                ? frame.traceInset - (shellWindow ? shellWindow.scaled(4) : 4)
+                : frame.height - frame.traceInset - height + (shellWindow ? shellWindow.scaled(4) : 4)
+            opacity: 0.62
+
+            Rectangle {
+                width: parent.width
+                height: 1
+                x: 0
+                y: topSide ? 0 : parent.height - height
+                color: index === 0 || index === 3 ? frame.glowTone : frame.ambientTone
+            }
+
+            Rectangle {
+                width: 1
+                height: parent.height
+                x: leftSide ? 0 : parent.width - width
+                y: 0
+                color: index === 0 || index === 3 ? frame.glowTone : frame.ambientTone
+            }
+        }
+    }
+
+    Repeater {
+        model: 4
+
         delegate: Rectangle {
             width: shellWindow ? shellWindow.scaled(8) : 8
             height: width
