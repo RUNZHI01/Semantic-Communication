@@ -13,9 +13,9 @@ PanelFrame {
     readonly property int enabledActionCount: enabledActions()
     readonly property int readonlyActionCount: Math.max(0, actions.length - enabledActionCount)
 
-    panelColor: shellWindow ? shellWindow.cardColorSoft : "#08131b"
-    borderTone: shellWindow ? shellWindow.borderSoft : "#1a3f61"
-    accentTone: shellWindow ? shellWindow.accentBlue : "#38b6ff"
+    panelColor: shellWindow ? shellWindow.panelColorRaised : "#08131b"
+    borderTone: shellWindow ? shellWindow.panelTraceStrong : "#1a3f61"
+    accentTone: shellWindow ? shellWindow.accentCyan : "#38b6ff"
 
     implicitHeight: contentLayout.implicitHeight + ((shellWindow ? shellWindow.panelPadding : 16) * 2)
 
@@ -59,11 +59,11 @@ PanelFrame {
             Layout.fillWidth: true
             radius: shellWindow ? shellWindow.cardRadius : 14
             gradient: Gradient {
-                GradientStop { position: 0.0; color: "#123554" }
-                GradientStop { position: 0.5; color: "#0a1d2e" }
-                GradientStop { position: 1.0; color: "#06101a" }
+                GradientStop { position: 0.0; color: shellWindow ? shellWindow.shellDockTop : "#123554" }
+                GradientStop { position: 0.5; color: shellWindow ? shellWindow.shellDockMid : "#0a1d2e" }
+                GradientStop { position: 1.0; color: shellWindow ? shellWindow.shellDockBottom : "#06101a" }
             }
-            border.color: "#3190cb"
+            border.color: shellWindow ? shellWindow.panelGlowStrong : "#3190cb"
             border.width: 1
             implicitHeight: heroLayout.implicitHeight + ((shellWindow ? shellWindow.cardPadding : 12) * 2)
 
@@ -100,7 +100,7 @@ PanelFrame {
                     spacing: shellWindow ? shellWindow.compactGap : 8
 
                     Text {
-                        text: panel["title"] || "操作条 / Action Strip"
+                        text: panel["title"] || "执行坞站 / Action Dock"
                         color: shellWindow ? shellWindow.accentBlue : "#38b6ff"
                         font.pixelSize: shellWindow ? shellWindow.eyebrowSize : 10
                         font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
@@ -108,7 +108,7 @@ PanelFrame {
                     }
 
                     Text {
-                        text: "执行控制舱"
+                        text: "执行指令坞站"
                         color: shellWindow ? shellWindow.textStrong : "#f4fbff"
                         font.pixelSize: shellWindow ? shellWindow.sectionTitleSize : 20
                         font.bold: true
@@ -116,7 +116,7 @@ PanelFrame {
                     }
 
                     Text {
-                        text: "EXECUTION CONTROL WINDOW"
+                        text: "ACTION DOCK / EXECUTION BUS"
                         color: shellWindow ? shellWindow.textSecondary : "#83acc8"
                         font.pixelSize: shellWindow ? shellWindow.captionSize : 11
                         font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
@@ -125,7 +125,7 @@ PanelFrame {
 
                     Text {
                         Layout.fillWidth: true
-                        text: "保持原生壳体自适应布局，只暴露真实可执行的合同动作，其余项作为只读指示。"
+                        text: "延续主舞台的蓝色技术壳体语义，把真实可执行的合同动作收口为下方指令坞站，其余项继续保持只读显示。"
                         color: shellWindow ? shellWindow.textSecondary : "#83acc8"
                         wrapMode: Text.WordWrap
                         font.pixelSize: shellWindow ? shellWindow.bodySize : 12
@@ -150,7 +150,7 @@ PanelFrame {
                             spacing: 2
 
                             Text {
-                                text: "执行门控 / EXECUTION GATE"
+                                text: "坞站门控 / ACTION GATE"
                                 color: shellWindow ? shellWindow.accentCyan : "#72f3ff"
                                 font.pixelSize: shellWindow ? shellWindow.captionSize : 10
                                 font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"

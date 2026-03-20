@@ -10,8 +10,8 @@ PanelFrame {
     readonly property var liveAnchor: DataUtils.objectOrEmpty(panel["live_anchor"])
     readonly property var scenarios: DataUtils.arrayOrEmpty(panel["scenarios"])
 
-    panelColor: shellWindow ? shellWindow.cardColorSoft : "#0a1728"
-    borderTone: shellWindow ? shellWindow.borderSoft : "#1a3f61"
+    panelColor: shellWindow ? shellWindow.panelColorRaised : "#0a1728"
+    borderTone: shellWindow ? shellWindow.panelTraceStrong : "#1a3f61"
     accentTone: shellWindow ? shellWindow.accentCyan : "#72f3ff"
 
     implicitHeight: contentLayout.implicitHeight + ((shellWindow ? shellWindow.panelPadding : 18) * 2)
@@ -62,11 +62,11 @@ PanelFrame {
             Layout.fillWidth: true
             radius: shellWindow ? shellWindow.cardRadius : 14
             gradient: Gradient {
-                GradientStop { position: 0.0; color: "#123553" }
-                GradientStop { position: 0.5; color: "#0a1d30" }
-                GradientStop { position: 1.0; color: "#06101a" }
+                GradientStop { position: 0.0; color: shellWindow ? shellWindow.shellDockTop : "#123553" }
+                GradientStop { position: 0.5; color: shellWindow ? shellWindow.shellDockMid : "#0a1d30" }
+                GradientStop { position: 1.0; color: shellWindow ? shellWindow.shellDockBottom : "#06101a" }
             }
-            border.color: "#3191cf"
+            border.color: shellWindow ? shellWindow.panelGlowStrong : "#3191cf"
             border.width: 1
             implicitHeight: heroColumn.implicitHeight + ((shellWindow ? shellWindow.cardPadding : 14) * 2)
 
@@ -97,7 +97,7 @@ PanelFrame {
                 spacing: shellWindow ? shellWindow.compactGap : 8
 
                 Text {
-                    text: panel["title"] || "弱网对照 / Weak-Network"
+                    text: panel["title"] || "右舷弱网轨 / Right Weak-Link Rail"
                     color: shellWindow ? shellWindow.accentBlue : "#38b6ff"
                     font.pixelSize: shellWindow ? shellWindow.eyebrowSize : 10
                     font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
@@ -105,7 +105,7 @@ PanelFrame {
                 }
 
                 Text {
-                    text: "弱网策略"
+                    text: "右舷弱网轨"
                     color: shellWindow ? shellWindow.textStrong : "#f4fbff"
                     font.pixelSize: shellWindow ? shellWindow.sectionTitleSize : 24
                     font.bold: true
@@ -113,7 +113,7 @@ PanelFrame {
                 }
 
                 Text {
-                    text: "WEAK-LINK PLAYBOOK"
+                    text: "RIGHT WEAK-LINK RAIL / PLAYBOOK"
                     color: shellWindow ? shellWindow.textSecondary : "#83acc8"
                     font.pixelSize: shellWindow ? shellWindow.captionSize : 11
                     font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"

@@ -12,6 +12,15 @@ PanelFrame {
     accentTone: shellWindow ? shellWindow.accentCyan : "#72f3ff"
     readonly property color accentBlue: shellWindow ? shellWindow.accentBlue : "#38b6ff"
     readonly property color accentCyan: shellWindow ? shellWindow.accentCyan : "#72f3ff"
+    readonly property color stageSurfaceTop: shellWindow ? shellWindow.shellStageTop : "#153f67"
+    readonly property color stageSurfaceMid: shellWindow ? shellWindow.shellStageMid : "#0a1d31"
+    readonly property color stageSurfaceBottom: shellWindow ? shellWindow.shellStageBottom : "#05101a"
+    readonly property color dockSurfaceTop: shellWindow ? shellWindow.shellDockTop : "#112c47"
+    readonly property color dockSurfaceMid: shellWindow ? shellWindow.shellDockMid : "#0a1828"
+    readonly property color dockSurfaceBottom: shellWindow ? shellWindow.shellDockBottom : "#06101a"
+    readonly property color traceStrong: shellWindow ? shellWindow.panelTraceStrong : "#1f5b86"
+    readonly property color traceTone: shellWindow ? shellWindow.panelTrace : "#143754"
+    readonly property color traceSoft: shellWindow ? shellWindow.panelTraceSoft : "#0d2940"
 
     readonly property var positionData: DataUtils.objectOrEmpty(panel["position"])
     readonly property var kinematicsData: DataUtils.objectOrEmpty(panel["kinematics"])
@@ -426,11 +435,11 @@ PanelFrame {
                 Layout.fillWidth: true
                 radius: shellWindow ? shellWindow.cardRadius : 14
                 gradient: Gradient {
-                    GradientStop { position: 0.0; color: "#123458" }
-                    GradientStop { position: 0.55; color: "#0a1829" }
-                    GradientStop { position: 1.0; color: "#07111d" }
+                    GradientStop { position: 0.0; color: root.stageSurfaceTop }
+                    GradientStop { position: 0.55; color: root.stageSurfaceMid }
+                    GradientStop { position: 1.0; color: root.stageSurfaceBottom }
                 }
-                border.color: "#2f8dcc"
+                border.color: shellWindow ? shellWindow.panelGlowStrong : "#2f8dcc"
                 border.width: 1
                 implicitHeight: heroColumn.implicitHeight + ((shellWindow ? shellWindow.cardPadding : 14) * 2)
 
@@ -475,7 +484,7 @@ PanelFrame {
                     spacing: shellWindow ? shellWindow.compactGap : 8
 
                     Text {
-                        text: panel["title"] || "航迹合同 / Aircraft Feed"
+                        text: panel["title"] || "中心主舞台 / Command Wallboard"
                         color: shellWindow ? shellWindow.accentBlue : "#38b6ff"
                         font.pixelSize: shellWindow ? shellWindow.eyebrowSize : 10
                         font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
@@ -483,7 +492,7 @@ PanelFrame {
                     }
 
                     Text {
-                        text: "全域防护态势墙"
+                        text: "全球防护主舞台"
                         color: shellWindow ? shellWindow.textStrong : "#f4fbff"
                         font.pixelSize: shellWindow ? shellWindow.sectionTitleSize : 24
                         font.bold: true
@@ -491,7 +500,7 @@ PanelFrame {
                     }
 
                     Text {
-                        text: "GLOBAL DEFENSE WALLBOARD"
+                        text: "COMMAND WALLBOARD / GLOBAL DEFENSE"
                         color: shellWindow ? shellWindow.textSecondary : "#83acc8"
                         font.pixelSize: shellWindow ? shellWindow.captionSize : 11
                         font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
@@ -500,7 +509,7 @@ PanelFrame {
 
                     Text {
                         width: parent.width
-                        text: "沿用既有飞机合同作为唯一事实源，把中心区推向安全运营主舞台风格，集中呈现机位、链路、热点弧线与采样心跳。"
+                        text: "沿用既有飞机合同作为唯一事实源，把中心区收束为更明确的指挥主舞台，集中呈现机位、链路、热点弧线与采样心跳。"
                         color: shellWindow ? shellWindow.textSecondary : "#83acc8"
                         font.pixelSize: shellWindow ? shellWindow.bodySize : 13
                         font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
@@ -704,11 +713,11 @@ PanelFrame {
             Layout.minimumHeight: shellWindow ? shellWindow.scaled(compactCardLayout ? 388 : 492) : 492
             radius: shellWindow ? shellWindow.cardRadius : 14
             gradient: Gradient {
-                GradientStop { position: 0.0; color: "#0d2840" }
-                GradientStop { position: 0.36; color: "#081523" }
-                GradientStop { position: 1.0; color: "#040a13" }
+                GradientStop { position: 0.0; color: root.stageSurfaceTop }
+                GradientStop { position: 0.34; color: root.stageSurfaceMid }
+                GradientStop { position: 1.0; color: root.stageSurfaceBottom }
             }
-            border.color: "#3295d6"
+            border.color: shellWindow ? shellWindow.panelGlowStrong : "#3295d6"
             border.width: 1
 
             Rectangle {
@@ -770,7 +779,7 @@ PanelFrame {
                         spacing: shellWindow ? shellWindow.scaled(2) : 2
 
                         Text {
-                            text: "GLOBAL SECURITY WALLBOARD"
+                            text: "全球防护主舞台 / WALLBOARD"
                             color: shellWindow ? shellWindow.accentBlue : "#38b6ff"
                             font.pixelSize: shellWindow ? shellWindow.captionSize : 11
                             font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
@@ -1086,6 +1095,98 @@ PanelFrame {
                     }
 
                     Rectangle {
+                        id: projectionChamber
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        anchors.top: parent.top
+                        anchors.bottom: footerAuditRail.top
+                        anchors.topMargin: root.stageOverlayTopMargin - (shellWindow ? shellWindow.scaled(10) : 10)
+                        anchors.bottomMargin: shellWindow ? shellWindow.scaled(14) : 14
+                        width: Math.min(
+                            parent.width - ((shellWindow ? shellWindow.scaled(compactCardLayout ? 52 : 88) : (compactCardLayout ? 52 : 88)) * 2),
+                            shellWindow ? shellWindow.scaled(compactCardLayout ? 560 : 810) : (compactCardLayout ? 560 : 810)
+                        )
+                        radius: shellWindow ? shellWindow.cardRadius : 14
+                        gradient: Gradient {
+                            GradientStop { position: 0.0; color: "#173f6428" }
+                            GradientStop { position: 0.2; color: "#12345272" }
+                            GradientStop { position: 0.56; color: "#09172648" }
+                            GradientStop { position: 1.0; color: "#06101a18" }
+                        }
+                        border.color: root.traceStrong
+                        border.width: 1
+                        opacity: 0.64
+
+                        Rectangle {
+                            anchors.fill: parent
+                            anchors.margins: 1
+                            radius: parent.radius - 1
+                            color: "transparent"
+                            border.color: root.traceTone
+                            border.width: 1
+                            opacity: 0.84
+                        }
+
+                        Rectangle {
+                            anchors.fill: parent
+                            anchors.margins: shellWindow ? shellWindow.scaled(12) : 12
+                            radius: Math.max(2, parent.radius - (shellWindow ? shellWindow.scaled(12) : 12))
+                            color: "transparent"
+                            border.color: root.traceSoft
+                            border.width: 1
+                            opacity: 0.7
+                        }
+
+                        Rectangle {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            anchors.top: parent.top
+                            anchors.bottom: parent.bottom
+                            width: 1
+                            color: root.traceStrong
+                            opacity: 0.2
+                        }
+
+                        Rectangle {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            height: 1
+                            color: root.traceStrong
+                            opacity: 0.14
+                        }
+
+                        Rectangle {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            anchors.top: parent.top
+                            anchors.topMargin: shellWindow ? shellWindow.scaled(14) : 14
+                            width: parent.width * 0.34
+                            height: shellWindow ? shellWindow.scaled(6) : 6
+                            radius: height / 2
+                            gradient: Gradient {
+                                orientation: Gradient.Horizontal
+                                GradientStop { position: 0.0; color: "#00000000" }
+                                GradientStop { position: 0.24; color: root.traceTone }
+                                GradientStop { position: 0.5; color: root.accentCyan }
+                                GradientStop { position: 0.76; color: root.traceTone }
+                                GradientStop { position: 1.0; color: "#00000000" }
+                            }
+                            opacity: 0.74
+                        }
+
+                        Repeater {
+                            model: 7
+
+                            delegate: Rectangle {
+                                width: projectionChamber.width - ((shellWindow ? shellWindow.scaled(40) : 40) * 2)
+                                height: 1
+                                x: shellWindow ? shellWindow.scaled(40) : 40
+                                y: (shellWindow ? shellWindow.scaled(42) : 42) + index * ((projectionChamber.height - (shellWindow ? shellWindow.scaled(84) : 84)) / Math.max(1, model - 1))
+                                color: index === 3 ? root.traceStrong : root.traceTone
+                                opacity: index === 3 ? 0.22 : 0.1
+                            }
+                        }
+                    }
+
+                    Rectangle {
                         id: leftDockLane
                         visible: !compactCardLayout
                         anchors.left: parent.left
@@ -1097,11 +1198,11 @@ PanelFrame {
                         width: missionDeckCard.width + (shellWindow ? shellWindow.scaled(28) : 28)
                         radius: shellWindow ? shellWindow.cardRadius : 14
                         gradient: Gradient {
-                            GradientStop { position: 0.0; color: "#11273b" }
-                            GradientStop { position: 0.48; color: "#0b1725" }
-                            GradientStop { position: 1.0; color: "#07111d" }
+                            GradientStop { position: 0.0; color: root.dockSurfaceTop }
+                            GradientStop { position: 0.48; color: root.dockSurfaceMid }
+                            GradientStop { position: 1.0; color: root.dockSurfaceBottom }
                         }
-                        border.color: "#143754"
+                        border.color: root.traceTone
                         border.width: 1
                         opacity: 0.72
 
@@ -1152,7 +1253,7 @@ PanelFrame {
                             spacing: 1
 
                             Text {
-                                text: "LEFT COMMAND RAIL"
+                                text: "左舷指挥轨 / COMMAND RAIL"
                                 color: shellWindow ? shellWindow.accentBlue : "#38b6ff"
                                 font.pixelSize: shellWindow ? shellWindow.captionSize : 10
                                 font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
@@ -1238,11 +1339,11 @@ PanelFrame {
                         width: telemetryRailCard.width + (shellWindow ? shellWindow.scaled(28) : 28)
                         radius: shellWindow ? shellWindow.cardRadius : 14
                         gradient: Gradient {
-                            GradientStop { position: 0.0; color: "#102538" }
-                            GradientStop { position: 0.5; color: "#0a1725" }
-                            GradientStop { position: 1.0; color: "#07111d" }
+                            GradientStop { position: 0.0; color: root.dockSurfaceTop }
+                            GradientStop { position: 0.5; color: root.dockSurfaceMid }
+                            GradientStop { position: 1.0; color: root.dockSurfaceBottom }
                         }
-                        border.color: "#143754"
+                        border.color: root.traceTone
                         border.width: 1
                         opacity: 0.72
 
@@ -1293,7 +1394,7 @@ PanelFrame {
                             spacing: 1
 
                             Text {
-                                text: "RIGHT TELEMETRY RAIL"
+                                text: "右舷遥测轨 / TELEMETRY RAIL"
                                 color: shellWindow ? shellWindow.accentCyan : "#72f3ff"
                                 font.pixelSize: shellWindow ? shellWindow.captionSize : 10
                                 font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
@@ -1532,7 +1633,7 @@ PanelFrame {
                         anchors.bottomMargin: shellWindow ? shellWindow.scaled(14) : 14
                         radius: shellWindow ? shellWindow.cardRadius : 14
                         color: "transparent"
-                        border.color: "#174567"
+                        border.color: root.traceStrong
                         border.width: 1
                         opacity: 0.92
 
@@ -1627,7 +1728,7 @@ PanelFrame {
 
                             Text {
                                 Layout.fillWidth: true
-                                text: "SYSTEM ENCLOSURE / " + root.stageEnvelopeLabel
+                                text: "主舞台围护 / " + root.stageEnvelopeLabel
                                 color: shellWindow ? shellWindow.accentBlue : "#38b6ff"
                                 font.pixelSize: shellWindow ? shellWindow.captionSize : 10
                                 font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
@@ -1741,10 +1842,10 @@ PanelFrame {
                         anchors.topMargin: root.stageDockMargin
                         radius: shellWindow ? shellWindow.edgeRadius : 10
                         gradient: Gradient {
-                            GradientStop { position: 0.0; color: "#0b1c2d" }
-                            GradientStop { position: 1.0; color: "#091522" }
+                            GradientStop { position: 0.0; color: root.dockSurfaceTop }
+                            GradientStop { position: 1.0; color: root.dockSurfaceBottom }
                         }
-                        border.color: "#2b6f9d"
+                        border.color: root.traceStrong
                         border.width: 1
                         implicitWidth: stageTagRow.implicitWidth + ((shellWindow ? shellWindow.scaled(14) : 14) * 2)
                         implicitHeight: stageTagRow.implicitHeight + ((shellWindow ? shellWindow.scaled(7) : 7) * 2)
@@ -1755,7 +1856,7 @@ PanelFrame {
                             spacing: shellWindow ? shellWindow.compactGap : 8
 
                             Text {
-                                text: "TACTICAL THEATER"
+                                text: "主舞台 / TACTICAL THEATER"
                                 color: shellWindow ? shellWindow.accentBlue : "#38b6ff"
                                 font.pixelSize: shellWindow ? shellWindow.captionSize : 10
                                 font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
@@ -1790,11 +1891,11 @@ PanelFrame {
                         )
                         radius: shellWindow ? shellWindow.edgeRadius : 10
                         gradient: Gradient {
-                            GradientStop { position: 0.0; color: "#0b1d30" }
-                            GradientStop { position: 0.56; color: "#091524" }
-                            GradientStop { position: 1.0; color: "#08111c" }
+                            GradientStop { position: 0.0; color: root.dockSurfaceTop }
+                            GradientStop { position: 0.56; color: root.dockSurfaceMid }
+                            GradientStop { position: 1.0; color: root.dockSurfaceBottom }
                         }
-                        border.color: "#2a6f9d"
+                        border.color: root.traceStrong
                         border.width: 1
                         implicitHeight: stageCommandShelfLayout.implicitHeight + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
 
@@ -2761,11 +2862,11 @@ PanelFrame {
                         width: root.missionDeckWidth
                         radius: shellWindow ? shellWindow.cardRadius : 14
                         gradient: Gradient {
-                            GradientStop { position: 0.0; color: "#10273d" }
-                            GradientStop { position: 0.46; color: "#0b1827" }
-                            GradientStop { position: 1.0; color: "#081321" }
+                            GradientStop { position: 0.0; color: root.dockSurfaceTop }
+                            GradientStop { position: 0.46; color: root.dockSurfaceMid }
+                            GradientStop { position: 1.0; color: root.dockSurfaceBottom }
                         }
-                        border.color: "#2b6f9d"
+                        border.color: root.traceStrong
                         border.width: 1
                         anchors.left: parent.left
                         anchors.top: parent.top
@@ -3201,11 +3302,11 @@ PanelFrame {
                         width: root.telemetryRailWidth
                         radius: shellWindow ? shellWindow.cardRadius : 14
                         gradient: Gradient {
-                            GradientStop { position: 0.0; color: "#10273d" }
-                            GradientStop { position: 0.42; color: "#0c1a28" }
-                            GradientStop { position: 1.0; color: "#081321" }
+                            GradientStop { position: 0.0; color: root.dockSurfaceTop }
+                            GradientStop { position: 0.42; color: root.dockSurfaceMid }
+                            GradientStop { position: 1.0; color: root.dockSurfaceBottom }
                         }
-                        border.color: "#2b6f9d"
+                        border.color: root.traceStrong
                         border.width: 1
                         anchors.right: parent.right
                         anchors.top: parent.top
@@ -3537,11 +3638,11 @@ PanelFrame {
                         width: Math.min(parent.width - ((shellWindow ? shellWindow.scaled(180) : 180) * 2), shellWindow ? shellWindow.scaled(720) : 720)
                         radius: shellWindow ? shellWindow.cardRadius : 14
                         gradient: Gradient {
-                            GradientStop { position: 0.0; color: "#0d2032" }
-                            GradientStop { position: 0.55; color: "#081321" }
-                            GradientStop { position: 1.0; color: "#071018" }
+                            GradientStop { position: 0.0; color: root.dockSurfaceTop }
+                            GradientStop { position: 0.55; color: root.dockSurfaceMid }
+                            GradientStop { position: 1.0; color: root.dockSurfaceBottom }
                         }
-                        border.color: "#2a6e9e"
+                        border.color: root.traceStrong
                         border.width: 1
                         implicitHeight: projectionColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(12) : 12) * 2)
 
@@ -3773,10 +3874,10 @@ PanelFrame {
                         anchors.bottomMargin: root.stageDockMargin
                         radius: shellWindow ? shellWindow.edgeRadius : 10
                         gradient: Gradient {
-                            GradientStop { position: 0.0; color: "#081524" }
-                            GradientStop { position: 1.0; color: "#0a1928" }
+                            GradientStop { position: 0.0; color: root.dockSurfaceTop }
+                            GradientStop { position: 1.0; color: root.dockSurfaceBottom }
                         }
-                        border.color: "#265f89"
+                        border.color: root.traceStrong
                         border.width: 1
                         implicitHeight: footerRailColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
 
