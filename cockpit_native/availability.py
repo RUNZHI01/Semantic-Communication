@@ -19,4 +19,5 @@ def availability_report() -> dict[str, Any]:
         "available": available,
         "status": "ready" if available else "missing",
         "smoke_check_hint": "python3 -m cockpit_native --smoke-import-check",
+        "launch_hint": "python3 -m cockpit_native",
     }

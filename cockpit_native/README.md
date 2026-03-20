@@ -14,8 +14,16 @@ Dump the normalized UI state:
 python3 -m cockpit_native --dump-ui-state
 ```
 
-Launch the QML shell when `PySide6` is installed:
+Launch the adaptive QML shell when `PySide6` is installed:
 
 ```bash
 python3 -m cockpit_native
+```
+
+The launcher now supervises the Qt process and retries once with software rendering if the first GPU-backed launch exits early.
+
+Force software rendering from the start:
+
+```bash
+python3 -m cockpit_native --software-render
 ```
