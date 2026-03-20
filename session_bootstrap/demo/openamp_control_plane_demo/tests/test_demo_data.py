@@ -121,8 +121,14 @@ class DemoDataTest(unittest.TestCase):
         self.assertEqual(aircraft["source_api_path"], "/api/aircraft-position")
         self.assertEqual(aircraft["source_kind"], "backend_stub")
         self.assertEqual(aircraft["source_status"], "stub")
-        self.assertIn("backend-fed", aircraft["ownership_note"])
-        self.assertIn("browser geolocation", aircraft["ownership_note"])
+        self.assertEqual(aircraft["source_label"], "Backend stub contract")
+        self.assertIn("upper-computer/backend contract", aircraft["ownership_note"])
+        self.assertNotIn("browser geolocation", aircraft["ownership_note"])
+        self.assertEqual(aircraft["sample"]["sequence"], 0)
+        self.assertEqual(aircraft["sample"]["transport"], "backend_http_post")
+        self.assertFalse(aircraft["feed_contract"]["primary_source"]["active"])
+        self.assertTrue(aircraft["feed_contract"]["fallback_source"]["active"])
+        self.assertEqual(aircraft["feed_contract"]["active_source_label"], "Backend Stub Contract")
         self.assertAlmostEqual(aircraft["position"]["latitude"], 30.572815)
         self.assertAlmostEqual(aircraft["position"]["longitude"], 104.066801)
         self.assertEqual(len(aircraft["track"]), 6)
@@ -136,6 +142,12 @@ class DemoDataTest(unittest.TestCase):
                 "position": {"latitude": 31.111111, "longitude": 121.222222},
                 "kinematics": {"heading_deg": 135.2, "ground_speed_kph": 266.4, "altitude_m": 2401.5},
                 "fix": {"type": "RTK", "confidence_m": 1.8, "satellites": 18},
+                "sample": {
+                    "captured_at": "2026-03-20T12:34:56+0800",
+                    "sequence": 7,
+                    "transport": "backend_http_post",
+                    "producer_id": "upper-computer-gps-daemon",
+                },
             }
         )
 
@@ -146,6 +158,11 @@ class DemoDataTest(unittest.TestCase):
         self.assertAlmostEqual(aircraft["position"]["longitude"], 121.222222)
         self.assertAlmostEqual(aircraft["kinematics"]["heading_deg"], 135.2)
         self.assertAlmostEqual(aircraft["kinematics"]["ground_speed_kph"], 266.4)
+        self.assertEqual(aircraft["sample"]["sequence"], 7)
+        self.assertEqual(aircraft["sample"]["captured_at"], "2026-03-20T12:34:56+0800")
+        self.assertTrue(aircraft["feed_contract"]["primary_source"]["active"])
+        self.assertFalse(aircraft["feed_contract"]["fallback_source"]["active"])
+        self.assertEqual(aircraft["feed_contract"]["active_source_label"], "Upper Computer GPS")
 
     def test_prerecorded_baseline_uses_pytorch_reference_manifest(self) -> None:
         payload = build_prerecorded_inference_result(0, "baseline")

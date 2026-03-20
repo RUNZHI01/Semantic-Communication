@@ -1266,7 +1266,11 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(payload["aircraft_position"]["source_api_path"], "/api/aircraft-position")
         self.assertEqual(payload["aircraft_position"]["source_kind"], "backend_stub")
         self.assertEqual(payload["aircraft_position"]["source_status"], "stub")
-        self.assertIn("backend-fed", payload["aircraft_position"]["ownership_note"])
+        self.assertEqual(payload["aircraft_position"]["source_label"], "Backend stub contract")
+        self.assertIn("upper-computer/backend contract", payload["aircraft_position"]["ownership_note"])
+        self.assertFalse(payload["aircraft_position"]["feed_contract"]["primary_source"]["active"])
+        self.assertTrue(payload["aircraft_position"]["feed_contract"]["fallback_source"]["active"])
+        self.assertEqual(payload["aircraft_position"]["sample"]["sequence"], 0)
 
     def test_aircraft_position_endpoint_updates_backend_feed(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
@@ -1283,6 +1287,12 @@ class DemoHTTPServerTest(unittest.TestCase):
                     "position": {"latitude": 31.205, "longitude": 121.551},
                     "kinematics": {"heading_deg": 145.0, "ground_speed_kph": 275.5, "altitude_m": 3201.2},
                     "fix": {"type": "RTK", "confidence_m": 2.1, "satellites": 19},
+                    "sample": {
+                        "captured_at": "2026-03-20T09:41:00+0800",
+                        "sequence": 12,
+                        "transport": "backend_http_post",
+                        "producer_id": "upper-computer-gps-daemon",
+                    },
                 }
             ).encode("utf-8"),
         )
@@ -1293,6 +1303,10 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertAlmostEqual(payload["position"]["latitude"], 31.205)
         self.assertAlmostEqual(payload["position"]["longitude"], 121.551)
         self.assertEqual(payload["fix"]["type"], "RTK")
+        self.assertEqual(payload["sample"]["sequence"], 12)
+        self.assertEqual(payload["sample"]["captured_at"], "2026-03-20T09:41:00+0800")
+        self.assertTrue(payload["feed_contract"]["primary_source"]["active"])
+        self.assertFalse(payload["feed_contract"]["fallback_source"]["active"])
 
         status, _, latest = request_json(state, "GET", "/api/aircraft-position")
 
@@ -1300,6 +1314,33 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(latest["source_status"], "live")
         self.assertAlmostEqual(latest["kinematics"]["ground_speed_kph"], 275.5)
         self.assertAlmostEqual(latest["kinematics"]["altitude_m"], 3201.2)
+        self.assertEqual(latest["sample"]["sequence"], 12)
+        self.assertEqual(latest["feed_contract"]["active_source_label"], "Upper Computer GPS")
+
+    def test_aircraft_position_endpoint_auto_sequences_live_samples_when_feed_metadata_is_implicit(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+
+        first_status, _, first_payload = request_json(
+            state,
+            "POST",
+            "/api/aircraft-position",
+            body=json.dumps({"position": {"latitude": 31.2, "longitude": 121.5}}).encode("utf-8"),
+        )
+        second_status, _, second_payload = request_json(
+            state,
+            "POST",
+            "/api/aircraft-position",
+            body=json.dumps({"position": {"latitude": 31.21, "longitude": 121.51}}).encode("utf-8"),
+        )
+
+        self.assertEqual(first_status, 200)
+        self.assertEqual(second_status, 200)
+        self.assertEqual(first_payload["source_kind"], "upper_computer_gps")
+        self.assertEqual(first_payload["source_status"], "live")
+        self.assertEqual(first_payload["sample"]["sequence"], 1)
+        self.assertEqual(second_payload["sample"]["sequence"], 2)
+        self.assertTrue(second_payload["sample"]["captured_at"])
+        self.assertIn("Upper Computer GPS", second_payload["feed_contract"]["active_source_label"])
 
     def test_system_status_endpoint_prioritizes_operator_cue_scene4_when_fault_is_latched(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
@@ -2461,6 +2502,7 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertIn('id="cockpitShell"', body)
         self.assertIn('id="flightStage"', body)
         self.assertIn('id="aircraftVector"', body)
+        self.assertIn('id="aircraftContractStrip"', body)
         self.assertIn('id="missionCoreCard"', body)
         self.assertIn('id="comparePeekCard"', body)
         self.assertIn('id="weakNetworkConsole"', body)
@@ -2489,6 +2531,8 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertIn('fetchJSON(`/api/archive/session?session_id=${encodeURIComponent(nextArchiveSessionId)}&limit=25`)', body)
         self.assertIn('fetchJSON("/api/link-director/profile"', body)
         self.assertIn("systemStatus?.aircraft_position", body)
+        self.assertIn('document.getElementById("aircraftContractStrip")', body)
+        self.assertIn("aircraft.feed_contract?.summary", body)
         self.assertIn("renderCockpitShell", body)
         self.assertIn("openDrawer", body)
         self.assertIn("closeDrawer", body)

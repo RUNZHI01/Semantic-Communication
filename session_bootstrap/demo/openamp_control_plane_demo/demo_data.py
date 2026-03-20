@@ -277,8 +277,8 @@ DEFAULT_AIRCRAFT_POSITION = {
     "mission_call_sign": "M9-DEMO",
     "source_kind": "backend_stub",
     "source_status": "stub",
-    "source_label": "Upper Computer GPS feed (stub)",
-    "source_note": "真实上位机 GPS feed 尚未接入；当前使用 backend stub contract 演示 cockpit telemetry。",
+    "source_label": "Backend stub contract",
+    "source_note": "真实上位机 feed 缺席时，demo backend 持续通过同一 aircraft-position contract 提供 stub telemetry。",
     "latitude": 30.572815,
     "longitude": 104.066801,
     "altitude_m": 1820.0,
@@ -288,6 +288,9 @@ DEFAULT_AIRCRAFT_POSITION = {
     "fix_type": "3D",
     "confidence_m": 6.5,
     "satellites": 11,
+    "sample_sequence": 0,
+    "sample_transport": "backend_http_post",
+    "sample_producer_id": "upper-computer-gps-daemon",
 }
 
 
@@ -336,6 +339,7 @@ def build_aircraft_position_snapshot(feed: dict[str, Any] | None = None) -> dict
     position_payload = payload.get("position") if isinstance(payload.get("position"), dict) else {}
     kinematics_payload = payload.get("kinematics") if isinstance(payload.get("kinematics"), dict) else {}
     fix_payload = payload.get("fix") if isinstance(payload.get("fix"), dict) else {}
+    sample_payload = payload.get("sample") if isinstance(payload.get("sample"), dict) else {}
 
     latitude = coerce_float(
         position_payload.get("latitude", payload.get("latitude")),
@@ -373,9 +377,31 @@ def build_aircraft_position_snapshot(feed: dict[str, Any] | None = None) -> dict
         payload.get("source_status") or payload.get("feed_status") or DEFAULT_AIRCRAFT_POSITION["source_status"]
     ).strip().lower()
     source_kind = str(payload.get("source_kind") or DEFAULT_AIRCRAFT_POSITION["source_kind"]).strip() or "backend_stub"
-    source_label = str(payload.get("source_label") or DEFAULT_AIRCRAFT_POSITION["source_label"]).strip() or "Upper Computer GPS feed"
+    source_label = str(payload.get("source_label") or DEFAULT_AIRCRAFT_POSITION["source_label"]).strip() or "Backend stub contract"
     source_note = str(payload.get("source_note") or DEFAULT_AIRCRAFT_POSITION["source_note"]).strip()
     fix_type = str(payload.get("fix_type") or fix_payload.get("type") or DEFAULT_AIRCRAFT_POSITION["fix_type"]).strip() or "3D"
+    captured_at = str(sample_payload.get("captured_at") or payload.get("captured_at") or payload.get("updated_at") or now_iso())
+    sample_sequence = coerce_int(
+        sample_payload.get("sequence", payload.get("sequence")),
+        DEFAULT_AIRCRAFT_POSITION["sample_sequence"],
+    )
+    sample_transport = str(
+        sample_payload.get("transport")
+        or payload.get("transport")
+        or DEFAULT_AIRCRAFT_POSITION["sample_transport"]
+    ).strip() or "backend_http_post"
+    sample_producer_id = str(
+        sample_payload.get("producer_id")
+        or payload.get("producer_id")
+        or DEFAULT_AIRCRAFT_POSITION["sample_producer_id"]
+    ).strip() or "upper-computer-gps-daemon"
+    primary_feed_active = source_kind == "upper_computer_gps" and source_status not in {"stub", "fallback", "absent"}
+    contract_summary = (
+        "Upper-computer GPS is primary; cockpit telemetry is read from the demo backend contract."
+        if primary_feed_active
+        else "Upper-computer GPS feed is absent; cockpit telemetry is currently served by the backend stub contract."
+    )
+    active_contract_label = "Upper Computer GPS" if primary_feed_active else "Backend Stub Contract"
 
     return {
         "contract_version": "aircraft_position.v1",
@@ -384,15 +410,42 @@ def build_aircraft_position_snapshot(feed: dict[str, Any] | None = None) -> dict
         "source_status": source_status,
         "source_label": source_label,
         "source_note": source_note,
-        "ownership_note": "Aircraft position is backend-fed from upper-computer GPS; browser geolocation is intentionally not used.",
+        "ownership_note": "Aircraft position authority sits in the upper-computer/backend contract; the cockpit only mirrors backend telemetry.",
         "fallback_note": (
-            "真实上位机 GPS feed 尚未接入时，页面继续读取 backend stub contract；"
-            "真实 feed 接入后仍走同一 API，不需要浏览器权限。"
+            "真实上位机 feed 缺席时，页面继续读取 backend stub contract；"
+            "真实 feed 接入后仍走同一 API。"
         ),
         "integration_note": "Recommended producer: upper-computer GPS daemon POSTs samples to /api/aircraft-position.",
         "aircraft_id": str(payload.get("aircraft_id") or DEFAULT_AIRCRAFT_POSITION["aircraft_id"]),
         "mission_call_sign": str(payload.get("mission_call_sign") or DEFAULT_AIRCRAFT_POSITION["mission_call_sign"]),
         "updated_at": str(payload.get("updated_at") or now_iso()),
+        "sample": {
+            "captured_at": captured_at,
+            "sequence": sample_sequence,
+            "transport": sample_transport,
+            "producer_id": sample_producer_id,
+        },
+        "feed_contract": {
+            "authority": "demo_backend",
+            "consumer": "cockpit_shell",
+            "api_path": "/api/aircraft-position",
+            "summary": contract_summary,
+            "primary_source": {
+                "source_kind": "upper_computer_gps",
+                "label": "Upper Computer GPS",
+                "producer_id": sample_producer_id,
+                "transport": sample_transport,
+                "active": primary_feed_active,
+            },
+            "fallback_source": {
+                "source_kind": "backend_stub",
+                "label": "Backend Stub Contract",
+                "active": not primary_feed_active,
+                "activation_note": "Only active while the upper-computer feed is absent.",
+            },
+            "active_source_kind": source_kind if primary_feed_active else "backend_stub",
+            "active_source_label": active_contract_label,
+        },
         "position": {
             "latitude": round(latitude, 6),
             "longitude": round(longitude, 6),
