@@ -4,3 +4,6 @@ session_bootstrap/scripts/__pycache__/
 __pycache__/
 *.py[cod]
 session_bootstrap/config/big_little_pipeline.current.runtime_*.env
+
+# Native cockpit local env
+cockpit_native/.venv/
