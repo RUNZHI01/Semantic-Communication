@@ -124,33 +124,33 @@ class DemoRepoAdapter:
         last_event = recent_events[0] if recent_events else {}
 
         left_panel = {
-            "title": "System / Board",
-            "summary": "Read-only normalization of the current OpenAMP demo evidence state.",
+            "title": "系统 / 板态",
+            "summary": "当前 OpenAMP 演示证据状态的只读归一化视图。",
             "rows": [
-                {"label": "Session", "value": str(aggregate.get("session_id") or "unknown"), "tone": "neutral"},
-                {"label": "Last Event", "value": str(aggregate.get("last_event_type") or "unknown"), "tone": "online"},
-                {"label": "Last Event At", "value": str(aggregate.get("last_event_at") or ""), "tone": "neutral"},
+                {"label": "会话", "value": str(aggregate.get("session_id") or "unknown"), "tone": "neutral"},
+                {"label": "最近事件", "value": str(aggregate.get("last_event_type") or "unknown"), "tone": "online"},
+                {"label": "事件时间", "value": str(aggregate.get("last_event_at") or ""), "tone": "neutral"},
                 {
-                    "label": "Jobs",
+                    "label": "作业统计",
                     "value": (
-                        f"submitted {int(jobs.get('submitted_count') or 0)} / "
-                        f"rejected {int(jobs.get('rejected_count') or 0)} / "
-                        f"done {int(jobs.get('done_count') or 0)}"
+                        f"已提交 {int(jobs.get('submitted_count') or 0)} / "
+                        f"拒绝 {int(jobs.get('rejected_count') or 0)} / "
+                        f"完成 {int(jobs.get('done_count') or 0)}"
                     ),
                     "tone": "warning" if int(jobs.get("rejected_count") or 0) else "online",
                 },
                 {
-                    "label": "Heartbeat",
+                    "label": "心跳",
                     "value": str(heartbeat.get("status") or "unknown"),
                     "tone": "online" if str(heartbeat.get("status") or "").lower() == "ok" else "warning",
                 },
                 {
-                    "label": "Link Profile",
+                    "label": "链路档位",
                     "value": str(link_profile.get("selected_profile_label") or "正常链路"),
                     "tone": "neutral",
                 },
                 {
-                    "label": "Archive Snapshot",
+                    "label": "快照原因",
                     "value": str(snapshot.get("reason") or "unknown"),
                     "tone": "warning",
                 },
@@ -160,11 +160,16 @@ class DemoRepoAdapter:
         }
 
         center_panel = {
-            "title": "Tactical / Aircraft View",
+            "title": "航迹 / 飞机合同",
             "mission_call_sign": str(aircraft_position.get("mission_call_sign") or "M9-DEMO"),
             "aircraft_id": str(aircraft_position.get("aircraft_id") or "FT-AIR-01"),
             "source_label": str(aircraft_position.get("source_label") or ""),
             "source_status": str(aircraft_position.get("source_status") or ""),
+            "source_api_path": str(aircraft_position.get("source_api_path") or ""),
+            "ownership_note": str(aircraft_position.get("ownership_note") or ""),
+            "fallback_note": str(aircraft_position.get("fallback_note") or ""),
+            "sample": dict(aircraft_position.get("sample") or {}),
+            "feed_contract": dict(aircraft_position.get("feed_contract") or {}),
             "position": dict(aircraft_position.get("position") or {}),
             "kinematics": dict(aircraft_position.get("kinematics") or {}),
             "fix": dict(aircraft_position.get("fix") or {}),
@@ -177,7 +182,7 @@ class DemoRepoAdapter:
         }
 
         right_panel = {
-            "title": "Weak-Network Comparison",
+            "title": "弱网对照 / Weak-Network",
             "summary": str(weak_network.get("summary") or ""),
             "truth_note": str(weak_network.get("truth_note") or ""),
             "recommended_scenario_id": str(weak_network.get("recommended_scenario_id") or ""),
@@ -186,45 +191,49 @@ class DemoRepoAdapter:
         }
 
         bottom_actions = {
-            "title": "Action Strip",
+            "title": "操作条 / Action Strip",
             "actions": [
                 {
                     "action_id": "reload_contracts",
-                    "label": "Reload Contracts",
+                    "label": "重载合同",
                     "tone": "online",
                     "enabled": True,
-                    "note": "Reload repo-backed snapshot and contract builders.",
+                    "note": "重新读取仓库快照与合同构建器。",
                 },
                 {
                     "action_id": "show_snapshot_path",
-                    "label": "Show Snapshot",
+                    "label": "快照路径",
                     "tone": "neutral",
                     "enabled": False,
                     "note": str(snapshot_path.relative_to(self.paths.project_root)),
                 },
                 {
                     "action_id": "recommended_link_profile",
-                    "label": "Recommended Weak-Net",
+                    "label": "推荐弱网档",
                     "tone": "warning",
                     "enabled": False,
                     "note": str(weak_network.get("recommended_scenario_id") or ""),
                 },
                 {
                     "action_id": "aircraft_contract",
-                    "label": "Aircraft Contract",
+                    "label": "飞机合同 API",
                     "tone": "neutral",
                     "enabled": False,
                     "note": str(aircraft_position.get("source_api_path") or "/api/aircraft-position"),
                 },
             ],
+            "footer_note": "默认执行 `python3 -m cockpit_native`；若需强制软件渲染，可追加 `--software-render`。",
         }
 
         return {
             "meta": {
-                "title": "Feiteng Native Cockpit Prototype",
-                "subtitle": "Qt/QML shell driven by the current repo-backed TVM/OpenAMP demo contracts.",
+                "title": "飞腾原生座舱 / Feiteng Native Cockpit",
+                "subtitle": "Qt/QML 原生壳体继续读取仓库现有 TVM/OpenAMP 演示合同，不假设固定分辨率。",
                 "project_root": str(self.paths.project_root),
                 "snapshot_path": str(snapshot_path),
+                "layout_strategy": "adaptive_zones",
+                "design_direction": "resolution-independent logical zones with scalable type, spacing, and safe-area padding",
+                "launch_hint": "python3 -m cockpit_native",
             },
             "zones": {
                 "left_status_panel": left_panel,
