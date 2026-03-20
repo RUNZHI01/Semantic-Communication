@@ -64,6 +64,25 @@ require_var() {
   fi
 }
 
+shell_quote() {
+  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
+
+build_remote_probe_command() {
+  local remote_command="env"
+  local arg=""
+  for arg in "$@"; do
+    remote_command+=" $(shell_quote "$arg")"
+  done
+  # REMOTE_TVM_PYTHON may be a shell snippet such as
+  # "env PYTHONPATH=/tmp/tvm_only /usr/bin/python3".
+  remote_command+=" ${REMOTE_TVM_PYTHON}"
+  remote_command+=" $(shell_quote "-")"
+  remote_command+=" $(shell_quote "$ARCHIVE_DIR")"
+  remote_command+=" $(shell_quote "$VARIANT")"
+  printf '%s' "$remote_command"
+}
+
 REMOTE_MODE_RAW="${REMOTE_MODE:-ssh}"
 REMOTE_MODE="$(printf '%s' "$REMOTE_MODE_RAW" | tr '[:upper:]' '[:lower:]')"
 if [[ "$REMOTE_MODE" != "ssh" && "$REMOTE_MODE" != "local" ]]; then
@@ -236,6 +255,15 @@ print(json.dumps(report, ensure_ascii=False))
 PY
 
   if [[ "$REMOTE_MODE" == "ssh" ]]; then
+    local remote_command
+    remote_command="$(build_remote_probe_command \
+      "INFERENCE_ENTRY=$INFERENCE_ENTRY_VALUE" \
+      "INFERENCE_WARMUP_RUNS=$INFERENCE_WARMUP_RUNS_VALUE" \
+      "INFERENCE_REPEAT=$INFERENCE_REPEAT_VALUE" \
+      "INFERENCE_DEVICE=$INFERENCE_DEVICE_VALUE" \
+      "INFERENCE_EXPECTED_SHA256=$INFERENCE_EXPECTED_SHA256_VALUE" \
+      "TUNE_INPUT_SHAPE=$TUNE_INPUT_SHAPE" \
+      "TUNE_INPUT_DTYPE=$TUNE_INPUT_DTYPE")"
     set +e
     bash "$SCRIPT_DIR/ssh_with_password.sh" \
       --host "$REMOTE_HOST" \
@@ -243,15 +271,7 @@ PY
       --pass "$REMOTE_PASS" \
       --port "${REMOTE_SSH_PORT:-22}" \
       -- \
-      env \
-      "INFERENCE_ENTRY=$INFERENCE_ENTRY_VALUE" \
-      "INFERENCE_WARMUP_RUNS=$INFERENCE_WARMUP_RUNS_VALUE" \
-      "INFERENCE_REPEAT=$INFERENCE_REPEAT_VALUE" \
-      "INFERENCE_DEVICE=$INFERENCE_DEVICE_VALUE" \
-      "INFERENCE_EXPECTED_SHA256=$INFERENCE_EXPECTED_SHA256_VALUE" \
-      "TUNE_INPUT_SHAPE=$TUNE_INPUT_SHAPE" \
-      "TUNE_INPUT_DTYPE=$TUNE_INPUT_DTYPE" \
-      "$REMOTE_TVM_PYTHON" - "$ARCHIVE_DIR" "$VARIANT" \
+      "$remote_command" \
       <"$py_script"
     rc=$?
     set -e
