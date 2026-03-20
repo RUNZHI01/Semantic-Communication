@@ -444,6 +444,7 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(payload["selected_profile"]["profile_id"], "normal")
         self.assertEqual(payload["backend_binding"], "ui_scaffold_only")
         self.assertEqual(payload["backend_status"], "ui_scaffold_only")
+        self.assertEqual(payload["selected_profile"]["evidence_binding"]["mode"], "live_anchor")
         self.assertIn("不执行 tc/netem", payload["summary"])
         self.assertIn("live 控制面与证据读数继续如实显示", payload["truth_note"])
 
@@ -473,6 +474,7 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(payload["previous_profile_id"], "normal")
         self.assertEqual(payload["selected_profile_id"], "lossy")
         self.assertEqual(payload["selected_profile_label"], "高丢包")
+        self.assertEqual(payload["selected_profile"]["evidence_binding"]["scenario_id"], "snr10_real_compare")
         self.assertIn("未执行 tc/netem", payload["status_message"])
         self.assertEqual(current_status, 200)
         self.assertEqual(current_payload["selected_profile_id"], "lossy")
@@ -1252,6 +1254,52 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertIn("4-core", payload["operator_cue"]["boundary_note"])
         self.assertTrue(payload["operator_cue"]["scenes"][2]["checks"][0]["ready"])
         self.assertTrue(payload["operator_cue"]["scenes"][2]["checks"][1]["ready"])
+
+    def test_system_status_endpoint_includes_backend_aircraft_position_contract(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+
+        status, _, payload = request_json(state, "GET", "/api/system-status")
+
+        self.assertEqual(status, 200)
+        self.assertIn("aircraft_position", payload)
+        self.assertEqual(payload["aircraft_position"]["contract_version"], "aircraft_position.v1")
+        self.assertEqual(payload["aircraft_position"]["source_api_path"], "/api/aircraft-position")
+        self.assertEqual(payload["aircraft_position"]["source_kind"], "backend_stub")
+        self.assertEqual(payload["aircraft_position"]["source_status"], "stub")
+        self.assertIn("backend-fed", payload["aircraft_position"]["ownership_note"])
+
+    def test_aircraft_position_endpoint_updates_backend_feed(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+
+        status, _, payload = request_json(
+            state,
+            "POST",
+            "/api/aircraft-position",
+            body=json.dumps(
+                {
+                    "source_kind": "upper_computer_gps",
+                    "source_status": "live",
+                    "source_label": "Upper Computer GPS live feed",
+                    "position": {"latitude": 31.205, "longitude": 121.551},
+                    "kinematics": {"heading_deg": 145.0, "ground_speed_kph": 275.5, "altitude_m": 3201.2},
+                    "fix": {"type": "RTK", "confidence_m": 2.1, "satellites": 19},
+                }
+            ).encode("utf-8"),
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["source_kind"], "upper_computer_gps")
+        self.assertEqual(payload["source_status"], "live")
+        self.assertAlmostEqual(payload["position"]["latitude"], 31.205)
+        self.assertAlmostEqual(payload["position"]["longitude"], 121.551)
+        self.assertEqual(payload["fix"]["type"], "RTK")
+
+        status, _, latest = request_json(state, "GET", "/api/aircraft-position")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(latest["source_status"], "live")
+        self.assertAlmostEqual(latest["kinematics"]["ground_speed_kph"], 275.5)
+        self.assertAlmostEqual(latest["kinematics"]["altitude_m"], 3201.2)
 
     def test_system_status_endpoint_prioritizes_operator_cue_scene4_when_fault_is_latched(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
@@ -2410,10 +2458,17 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(headers["cache-control"], "no-store")
         self.assertIn("<title>飞腾多核弱网安全语义视觉回传演示系统</title>", body)
         self.assertIn("飞腾多核弱网安全语义视觉回传系统", body)
-        self.assertIn('id="commandCenterPanel"', body)
+        self.assertIn('id="cockpitShell"', body)
+        self.assertIn('id="flightStage"', body)
+        self.assertIn('id="aircraftVector"', body)
+        self.assertIn('id="missionCoreCard"', body)
+        self.assertIn('id="comparePeekCard"', body)
+        self.assertIn('id="weakNetworkConsole"', body)
         self.assertIn('id="operatorCueShell"', body)
-        self.assertIn('id="commandStripCard"', body)
-        self.assertIn('id="commandSceneGrid"', body)
+        self.assertIn('id="mainSafetyMirror"', body)
+        self.assertIn('id="sessionDrawer"', body)
+        self.assertIn('id="compareDrawer"', body)
+        self.assertIn('id="safetyDrawer"', body)
         self.assertIn('id="compareViewerBoard"', body)
         self.assertIn('id="compareViewerSampleLabel"', body)
         self.assertIn('<script src="/app.js"></script>', body)
@@ -2433,8 +2488,14 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertIn('fetchJSON("/api/archive/sessions?limit=25")', body)
         self.assertIn('fetchJSON(`/api/archive/session?session_id=${encodeURIComponent(nextArchiveSessionId)}&limit=25`)', body)
         self.assertIn('fetchJSON("/api/link-director/profile"', body)
+        self.assertIn("systemStatus?.aircraft_position", body)
+        self.assertIn("renderCockpitShell", body)
+        self.assertIn("openDrawer", body)
+        self.assertIn("closeDrawer", body)
         self.assertIn("normalizeOperatorCue", body)
         self.assertIn("renderOperatorCue", body)
+        self.assertIn("renderWeakNetworkConsole", body)
+        self.assertNotIn("navigator.geolocation", body)
         self.assertIn("hydrateRecentResultsFromSystemStatus", body)
         self.assertIn("systemStatus?.recent_results", body)
         self.assertIn("state.currentResult = recentResults.current;", body)
@@ -2442,11 +2503,14 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertIn('document.getElementById("operatorCueShell")', body)
         self.assertIn("systemStatus.operator_cue", body)
         self.assertIn("buildCommandCenterModel", body)
-        self.assertIn("renderCommandCenter", body)
+        self.assertIn("resolveWeakNetworkSelection", body)
         self.assertIn("jumpToTarget", body)
-        self.assertIn('document.getElementById("commandStripCard")', body)
-        self.assertIn('document.getElementById("commandSceneGrid")', body)
+        self.assertIn('document.getElementById("missionCoreCard")', body)
+        self.assertIn('document.getElementById("weakNetworkConsole")', body)
+        self.assertIn('document.getElementById("comparePeekCard")', body)
         self.assertIn("data-jump-target", body)
+        self.assertIn("data-open-drawer", body)
+        self.assertIn("data-weak-scenario-id", body)
         self.assertIn("effectiveSafetyPanel", body)
         self.assertIn("renderSafetyFrontPanel", body)
         self.assertIn("systemStatus.safety_panel", body)
@@ -2464,11 +2528,12 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(headers["cache-control"], "no-store")
         self.assertIn(":root {", body)
         self.assertIn("--accent: #c95d12;", body)
+        self.assertIn(".cockpit-shell", body)
+        self.assertIn(".flight-stage", body)
+        self.assertIn(".details-drawer", body)
+        self.assertIn(".aircraft-vector", body)
         self.assertIn(".operator-cue-shell", body)
-        self.assertIn(".operator-cue-scene-grid", body)
-        self.assertIn(".cue-check-chip", body)
-        self.assertIn(".command-center-panel", body)
-        self.assertIn(".command-strip", body)
+        self.assertIn(".weak-console-metrics", body)
 
     def test_docs_endpoint_renders_repo_relative_markdown_document(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 from functools import lru_cache
 import json
+import math
 import re
 import time
 from pathlib import Path
@@ -142,6 +143,11 @@ LINK_PROFILE_PRESETS = (
             "loss_pct": 0.1,
             "outage": "无",
         },
+        "evidence_binding": {
+            "mode": "live_anchor",
+            "label": "8115 live 锚点",
+            "note": "正常链路默认回到 8115 live 300 / 300 与最新探板锚点，不伪造新的弱网对照。",
+        },
     },
     {
         "profile_id": "jitter",
@@ -158,6 +164,12 @@ LINK_PROFILE_PRESETS = (
             "jitter_ms": 60,
             "loss_pct": 1.0,
             "outage": "无",
+        },
+        "evidence_binding": {
+            "mode": "repo_compare",
+            "scenario_id": "snr12_real_compare",
+            "label": "SNR 12 真机对照",
+            "note": "把抖动导演位绑定到仓库内已有的 SNR 12 真机 compare 结果，展示真实导出参数而不是静态文案。",
         },
     },
     {
@@ -176,6 +188,12 @@ LINK_PROFILE_PRESETS = (
             "loss_pct": 12.0,
             "outage": "无",
         },
+        "evidence_binding": {
+            "mode": "repo_compare",
+            "scenario_id": "snr10_real_compare",
+            "label": "SNR 10 真机对照",
+            "note": "把高丢包导演位绑定到仓库内已有的 SNR 10 真机 compare 结果，展示真实导出参数而不是静态文案。",
+        },
     },
     {
         "profile_id": "flaky",
@@ -192,6 +210,11 @@ LINK_PROFILE_PRESETS = (
             "jitter_ms": 120,
             "loss_pct": 35.0,
             "outage": "5s on / 3s off",
+        },
+        "evidence_binding": {
+            "mode": "staged_only",
+            "label": "导演位预案",
+            "note": "当前仓库没有与间歇断连一一对应的真机 compare 结论；保留导演位，不伪造弱网参数输出。",
         },
     },
     {
@@ -210,12 +233,183 @@ LINK_PROFILE_PRESETS = (
             "loss_pct": 0.0,
             "outage": "清除弱网预案",
         },
+        "evidence_binding": {
+            "mode": "repo_compare",
+            "scenario_id": "snr10_bestcurrent",
+            "label": "SNR 10 bestcurrent",
+            "note": "恢复位默认对齐到仓库内最新 bestcurrent SNR 10 compare，展示收口后的推荐参数与吞吐结论。",
+        },
     },
 )
+
+WEAK_NETWORK_COMPARE_FIXTURES = (
+    {
+        "scenario_id": "snr12_real_compare",
+        "label": "SNR 12 真机对照",
+        "tone": "degraded",
+        "recommended": False,
+        "operator_note": "较温和的弱网档位，保持 300 / 300，同时给出 serial vs pipeline 的真实吞吐差。",
+        "report_json": REPORTS_ROOT / "big_little_compare_20260318_053619.json",
+        "report_md": REPORTS_ROOT / "big_little_compare_20260318_053619.md",
+    },
+    {
+        "scenario_id": "snr10_real_compare",
+        "label": "SNR 10 真机对照",
+        "tone": "degraded",
+        "recommended": False,
+        "operator_note": "更重的弱网档位，直接展示 SNR=10 时的真实 compare 导出参数与吞吐差。",
+        "report_json": REPORTS_ROOT / "big_little_compare_20260318_095615.json",
+        "report_md": REPORTS_ROOT / "big_little_compare_20260318_095615.md",
+    },
+    {
+        "scenario_id": "snr10_bestcurrent",
+        "label": "SNR 10 bestcurrent",
+        "tone": "online",
+        "recommended": True,
+        "operator_note": "当前最适合放到答辩台上的 SNR 10 收口档位，pipeline 与队列参数已经稳定。",
+        "report_json": REPORTS_ROOT / "big_little_compare_20260318_123300.json",
+        "report_md": REPORTS_ROOT / "big_little_compare_20260318_123300.md",
+    },
+)
+
+DEFAULT_AIRCRAFT_POSITION = {
+    "aircraft_id": "FT-AIR-01",
+    "mission_call_sign": "M9-DEMO",
+    "source_kind": "backend_stub",
+    "source_status": "stub",
+    "source_label": "Upper Computer GPS feed (stub)",
+    "source_note": "真实上位机 GPS feed 尚未接入；当前使用 backend stub contract 演示 cockpit telemetry。",
+    "latitude": 30.572815,
+    "longitude": 104.066801,
+    "altitude_m": 1820.0,
+    "ground_speed_kph": 248.0,
+    "heading_deg": 78.0,
+    "vertical_speed_mps": 1.4,
+    "fix_type": "3D",
+    "confidence_m": 6.5,
+    "satellites": 11,
+}
 
 
 def now_iso() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%S%z")
+
+
+def coerce_float(value: Any, default: float) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def coerce_int(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def normalize_heading_deg(value: Any, default: float = 0.0) -> float:
+    heading = coerce_float(value, default) % 360.0
+    return round(heading, 1)
+
+
+def build_aircraft_track(latitude: float, longitude: float, heading_deg: float) -> list[dict[str, Any]]:
+    heading = math.radians((heading_deg + 180.0) % 360.0)
+    track: list[dict[str, Any]] = []
+    for index in range(5, -1, -1):
+        distance = 0.052 * index
+        lat_offset = math.cos(heading) * distance * 0.48
+        lon_offset = math.sin(heading) * distance
+        track.append(
+            {
+                "latitude": round(latitude + lat_offset, 6),
+                "longitude": round(longitude + lon_offset, 6),
+                "age_sec": index * 6,
+            }
+        )
+    return track
+
+
+def build_aircraft_position_snapshot(feed: dict[str, Any] | None = None) -> dict[str, Any]:
+    payload = dict(feed or {})
+    position_payload = payload.get("position") if isinstance(payload.get("position"), dict) else {}
+    kinematics_payload = payload.get("kinematics") if isinstance(payload.get("kinematics"), dict) else {}
+    fix_payload = payload.get("fix") if isinstance(payload.get("fix"), dict) else {}
+
+    latitude = coerce_float(
+        position_payload.get("latitude", payload.get("latitude")),
+        DEFAULT_AIRCRAFT_POSITION["latitude"],
+    )
+    longitude = coerce_float(
+        position_payload.get("longitude", payload.get("longitude")),
+        DEFAULT_AIRCRAFT_POSITION["longitude"],
+    )
+    altitude_m = coerce_float(
+        kinematics_payload.get("altitude_m", payload.get("altitude_m")),
+        DEFAULT_AIRCRAFT_POSITION["altitude_m"],
+    )
+    ground_speed_kph = coerce_float(
+        kinematics_payload.get("ground_speed_kph", payload.get("ground_speed_kph")),
+        DEFAULT_AIRCRAFT_POSITION["ground_speed_kph"],
+    )
+    vertical_speed_mps = coerce_float(
+        kinematics_payload.get("vertical_speed_mps", payload.get("vertical_speed_mps")),
+        DEFAULT_AIRCRAFT_POSITION["vertical_speed_mps"],
+    )
+    heading_deg = normalize_heading_deg(
+        kinematics_payload.get("heading_deg", payload.get("heading_deg")),
+        default=DEFAULT_AIRCRAFT_POSITION["heading_deg"],
+    )
+    confidence_m = coerce_float(
+        fix_payload.get("confidence_m", payload.get("confidence_m")),
+        DEFAULT_AIRCRAFT_POSITION["confidence_m"],
+    )
+    satellites = coerce_int(
+        fix_payload.get("satellites", payload.get("satellites")),
+        DEFAULT_AIRCRAFT_POSITION["satellites"],
+    )
+    source_status = str(
+        payload.get("source_status") or payload.get("feed_status") or DEFAULT_AIRCRAFT_POSITION["source_status"]
+    ).strip().lower()
+    source_kind = str(payload.get("source_kind") or DEFAULT_AIRCRAFT_POSITION["source_kind"]).strip() or "backend_stub"
+    source_label = str(payload.get("source_label") or DEFAULT_AIRCRAFT_POSITION["source_label"]).strip() or "Upper Computer GPS feed"
+    source_note = str(payload.get("source_note") or DEFAULT_AIRCRAFT_POSITION["source_note"]).strip()
+    fix_type = str(payload.get("fix_type") or fix_payload.get("type") or DEFAULT_AIRCRAFT_POSITION["fix_type"]).strip() or "3D"
+
+    return {
+        "contract_version": "aircraft_position.v1",
+        "source_api_path": "/api/aircraft-position",
+        "source_kind": source_kind,
+        "source_status": source_status,
+        "source_label": source_label,
+        "source_note": source_note,
+        "ownership_note": "Aircraft position is backend-fed from upper-computer GPS; browser geolocation is intentionally not used.",
+        "fallback_note": (
+            "真实上位机 GPS feed 尚未接入时，页面继续读取 backend stub contract；"
+            "真实 feed 接入后仍走同一 API，不需要浏览器权限。"
+        ),
+        "integration_note": "Recommended producer: upper-computer GPS daemon POSTs samples to /api/aircraft-position.",
+        "aircraft_id": str(payload.get("aircraft_id") or DEFAULT_AIRCRAFT_POSITION["aircraft_id"]),
+        "mission_call_sign": str(payload.get("mission_call_sign") or DEFAULT_AIRCRAFT_POSITION["mission_call_sign"]),
+        "updated_at": str(payload.get("updated_at") or now_iso()),
+        "position": {
+            "latitude": round(latitude, 6),
+            "longitude": round(longitude, 6),
+        },
+        "kinematics": {
+            "altitude_m": round(altitude_m, 1),
+            "ground_speed_kph": round(ground_speed_kph, 1),
+            "heading_deg": heading_deg,
+            "vertical_speed_mps": round(vertical_speed_mps, 2),
+        },
+        "fix": {
+            "type": fix_type,
+            "confidence_m": round(confidence_m, 1),
+            "satellites": satellites,
+        },
+        "track": build_aircraft_track(latitude, longitude, heading_deg),
+    }
 
 
 def repo_relative(path: Path) -> str:
@@ -566,6 +760,192 @@ def load_fit_summary(path: Path) -> dict[str, Any]:
         "conclusion": localize_fit_conclusion(payload.get("conclusion", "")),
         "evidence": links,
         "run_id": payload["run_id"],
+    }
+
+
+def safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def safe_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def unwrap_big_little_payload(payload: Any) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        return {}
+    nested = payload.get("pipeline")
+    if isinstance(nested, dict):
+        return nested
+    return payload
+
+
+def timing_summary(source: dict[str, Any], key: str) -> dict[str, float]:
+    raw = source.get(key) if isinstance(source, dict) else {}
+    if not isinstance(raw, dict):
+        return {}
+    return {
+        "count": safe_int(raw.get("count")),
+        "mean_ms": round(safe_float(raw.get("mean_ms")), 3),
+        "median_ms": round(safe_float(raw.get("median_ms")), 3),
+        "max_ms": round(safe_float(raw.get("max_ms")), 3),
+    }
+
+
+def stage_timing_card(stage_id: str, label: str, summary: dict[str, float], *, tone: str) -> dict[str, Any]:
+    return {
+        "stage_id": stage_id,
+        "label": label,
+        "tone": tone,
+        "count": summary.get("count", 0),
+        "mean_ms": summary.get("mean_ms", 0.0),
+        "median_ms": summary.get("median_ms", 0.0),
+        "max_ms": summary.get("max_ms", 0.0),
+    }
+
+
+def build_weak_network_compare_scenario(meta: dict[str, Any]) -> dict[str, Any]:
+    payload = read_json(meta["report_json"])
+    comparison = payload.get("comparison") if isinstance(payload.get("comparison"), dict) else {}
+    serial = unwrap_big_little_payload(payload.get("serial"))
+    pipeline = unwrap_big_little_payload(payload.get("pipeline"))
+
+    processed_count = safe_int(
+        comparison.get("pipeline_processed_count")
+        or pipeline.get("processed_count")
+        or serial.get("processed_count")
+        or pipeline.get("output_count")
+        or serial.get("output_count")
+    )
+    serial_total_wall_ms = safe_float(comparison.get("serial_total_wall_ms"))
+    pipeline_total_wall_ms = safe_float(comparison.get("pipeline_total_wall_ms") or pipeline.get("total_wall_ms"))
+    serial_images_per_sec = safe_float(comparison.get("serial_images_per_sec"))
+    pipeline_images_per_sec = safe_float(comparison.get("pipeline_images_per_sec") or pipeline.get("images_per_sec"))
+    serial_ms_per_image = round(serial_total_wall_ms / processed_count, 3) if processed_count else 0.0
+    pipeline_ms_per_image = round(pipeline_total_wall_ms / processed_count, 3) if processed_count else 0.0
+    throughput_uplift_pct = safe_float(comparison.get("throughput_uplift_pct"))
+    wall_delta_ms = round(max(serial_total_wall_ms - pipeline_total_wall_ms, 0.0), 3)
+    saved_seconds_per_batch = round(wall_delta_ms / 1000.0, 3)
+    saved_ms_per_image = round(max(serial_ms_per_image - pipeline_ms_per_image, 0.0), 3)
+
+    load_summary = timing_summary(pipeline, "preload_load_summary")
+    awgn_summary = timing_summary(pipeline, "preload_awgn_summary")
+    infer_summary = {
+        "count": safe_int(pipeline.get("run_count")),
+        "mean_ms": round(safe_float(pipeline.get("run_mean_ms")), 3),
+        "median_ms": round(safe_float(pipeline.get("run_median_ms")), 3),
+        "max_ms": round(safe_float(pipeline.get("run_max_ms")), 3),
+    }
+    save_summary = timing_summary(pipeline, "save_summary")
+    stage_timings = [
+        stage_timing_card("preload", "载荷预取", load_summary, tone="neutral"),
+        stage_timing_card("awgn", "AWGN 注噪", awgn_summary, tone="degraded"),
+        stage_timing_card("infer", "板端推理", infer_summary, tone="online"),
+        stage_timing_card("save", "结果落盘", save_summary, tone="warning"),
+    ]
+
+    snr_db = round(
+        safe_float(pipeline.get("snr") or serial.get("snr")),
+        3,
+    )
+    batch_size = safe_int(pipeline.get("batch_size") or serial.get("batch_size"))
+    queue_depth = {
+        "input": safe_int(pipeline.get("input_queue_size")),
+        "output": safe_int(pipeline.get("output_queue_size")),
+    }
+    topology = {
+        "big_cores": list(pipeline.get("big_cores") or []),
+        "little_cores": list(pipeline.get("little_cores") or []),
+        "backend": str(pipeline.get("backend") or ""),
+        "runtime": str(pipeline.get("tvm_version") or ""),
+    }
+
+    return {
+        "scenario_id": str(meta["scenario_id"]),
+        "label": str(meta["label"]),
+        "tone": str(meta["tone"]),
+        "recommended": bool(meta.get("recommended")),
+        "operator_note": str(meta.get("operator_note") or ""),
+        "summary": (
+            f"SNR {snr_db:.0f} 真机 compare：pipeline {pipeline_images_per_sec:.3f} img/s，"
+            f"对 serial {serial_images_per_sec:.3f} img/s 提升 {throughput_uplift_pct:.3f}%。"
+        ),
+        "processed_count": processed_count,
+        "channel": {
+            "snr_db": snr_db,
+            "batch_size": batch_size,
+            "max_inputs": safe_int(pipeline.get("max_inputs") or serial.get("max_inputs")),
+            "artifact_sha256": str(pipeline.get("artifact_sha256") or serial.get("artifact_sha256") or ""),
+        },
+        "comparison": {
+            "serial_total_wall_ms": round(serial_total_wall_ms, 3),
+            "pipeline_total_wall_ms": round(pipeline_total_wall_ms, 3),
+            "serial_images_per_sec": round(serial_images_per_sec, 3),
+            "pipeline_images_per_sec": round(pipeline_images_per_sec, 3),
+            "throughput_uplift_pct": round(throughput_uplift_pct, 3),
+            "serial_ms_per_image": serial_ms_per_image,
+            "pipeline_ms_per_image": pipeline_ms_per_image,
+            "saved_seconds_per_batch": saved_seconds_per_batch,
+            "saved_ms_per_image": saved_ms_per_image,
+        },
+        "stage_timings": stage_timings,
+        "topology": {
+            **topology,
+            "input_queue_size": queue_depth["input"],
+            "output_queue_size": queue_depth["output"],
+        },
+        "commands": {
+            "serial": str(payload.get("serial_command") or ""),
+            "pipeline": str(payload.get("pipeline_command") or ""),
+        },
+        "evidence": [
+            link_entry(meta["report_md"], "弱网对照报告"),
+            link_entry(meta["report_json"], "弱网对照 JSON"),
+        ],
+    }
+
+
+def build_weak_network_live_anchor() -> dict[str, Any]:
+    latest = build_latest_live_status_snapshot()
+    probe_payload: dict[str, Any] = {}
+    probe_path = REPORTS_ROOT / "openamp_demo_live_probe_latest.json"
+    if probe_path.is_file():
+        probe_payload = read_json(probe_path)
+    return {
+        "label": "8115 live 锚点",
+        "tone": "online",
+        "valid_instance": str(latest.get("valid_instance") or ""),
+        "current_completed": str((latest.get("current") or {}).get("completed") or ""),
+        "baseline_completed": str((latest.get("baseline") or {}).get("completed") or ""),
+        "board_status": str((latest.get("board") or {}).get("value") or ""),
+        "probe_requested_at": str(probe_payload.get("requested_at") or ""),
+        "probe_summary": str(probe_payload.get("summary") or (latest.get("board") or {}).get("note") or ""),
+        "links": [latest.get("report"), latest.get("probe")],
+    }
+
+
+@lru_cache(maxsize=1)
+def build_weak_network_snapshot() -> dict[str, Any]:
+    scenarios = [build_weak_network_compare_scenario(meta) for meta in WEAK_NETWORK_COMPARE_FIXTURES]
+    recommended = next((item for item in scenarios if item.get("recommended")), scenarios[0] if scenarios else {})
+    return {
+        "title": "弱网对照 / Weak-Net Console",
+        "summary": (
+            "这里展示的是仓库内既有 SNR compare 工具链导出的真实对照参数与吞吐结果，"
+            "不把 Link Director 包装成 tc/netem 或物理弱网控制。"
+        ),
+        "truth_note": (
+            "Link Director 仍是 ui_scaffold_only；真实弱网指标来自已归档的 compare 报告与最新 live 锚点。"
+        ),
+        "recommended_scenario_id": str(recommended.get("scenario_id") or ""),
+        "live_anchor": build_weak_network_live_anchor(),
+        "scenarios": scenarios,
     }
 
 
@@ -1368,7 +1748,10 @@ def build_docs_snapshot() -> list[dict[str, Any]]:
     ]
 
 
-def build_snapshot(live_probe: dict[str, Any] | None = None) -> dict[str, Any]:
+def build_snapshot(
+    live_probe: dict[str, Any] | None = None,
+    aircraft_position: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     summary = parse_markdown_key_values(PACKAGE_ROOT / "summary_report.md")
     coverage = parse_markdown_key_values(PACKAGE_ROOT / "coverage_matrix.md")
     fits = build_fit_snapshot()
@@ -1395,7 +1778,9 @@ def build_snapshot(live_probe: dict[str, Any] | None = None) -> dict[str, Any]:
             "payload_current_ms": performance["micro_summary"]["payload_current_ms"],
             "end_to_end_current_ms": performance["micro_summary"]["end_to_end_current_ms"],
         },
+        "aircraft_position": build_aircraft_position_snapshot(aircraft_position),
         "latest_live_status": build_latest_live_status_snapshot(),
+        "weak_network": build_weak_network_snapshot(),
         "milestones": build_milestones_snapshot(),
         "fits": fits,
         "performance": performance,
