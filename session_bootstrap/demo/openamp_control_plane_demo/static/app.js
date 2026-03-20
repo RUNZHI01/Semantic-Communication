@@ -16,6 +16,9 @@ const state = {
   selectedArchiveSessionId: "",
   currentArchiveSessionId: "",
   userSelectedAct: false,
+  selectedWeakScenarioId: "",
+  weakScenarioPinnedByUser: false,
+  activeDrawer: "",
 };
 
 function docHref(path) {
@@ -75,6 +78,20 @@ function formatMaybeMs(value) {
   const numeric = Number(value);
   if (Number.isNaN(numeric)) return String(value);
   return `${numeric.toFixed(numeric >= 100 ? 1 : 3).replace(/\.000$/, "").replace(/(\.\d)00$/, "$1")} ms`;
+}
+
+function formatNumber(value, digits = 3) {
+  if (value === null || value === undefined || value === "") return "NA";
+  const numeric = Number(value);
+  if (Number.isNaN(numeric)) return String(value);
+  return numeric.toFixed(digits).replace(/\.000$/, "").replace(/(\.\d)00$/, "$1").replace(/(\.\d\d)0$/, "$1");
+}
+
+function formatCoordinate(value, positiveLabel, negativeLabel) {
+  const numeric = Number(value);
+  if (Number.isNaN(numeric)) return "定位待定";
+  const direction = numeric >= 0 ? positiveLabel : negativeLabel;
+  return `${Math.abs(numeric).toFixed(4)}° ${direction}`;
 }
 
 function fieldLabel(field) {
@@ -175,8 +192,19 @@ function compactSentence(text, limit = 140) {
 
 function setStatusBadge(id, label, tone) {
   const element = document.getElementById(id);
+  if (!element) return;
   element.className = `status-pill ${toneClass(tone)}`;
   element.textContent = label;
+}
+
+function weakMetricCard(label, value, note = "", tone = "neutral") {
+  return `
+    <article class="weak-metric-card" data-tone="${escapeHtml(tone)}">
+      <div class="label">${escapeHtml(label)}</div>
+      <div class="value">${escapeHtml(value)}</div>
+      <div class="compact-copy">${escapeHtml(note)}</div>
+    </article>
+  `;
 }
 
 function missionMetric(label, value, note = "") {
@@ -255,6 +283,59 @@ function actIdForSceneId(sceneId) {
     scene4: "act4",
   };
   return mapping[String(sceneId || "").trim()] || "";
+}
+
+function drawerIdForAct(actId) {
+  const mapping = {
+    act1: "sessionDrawer",
+    act2: "currentDrawer",
+    act3: "compareDrawer",
+    act4: "safetyDrawer",
+  };
+  return mapping[String(actId || "").trim()] || "";
+}
+
+function drawerIdForTarget(targetId) {
+  const mapping = {
+    credentialPanel: "sessionDrawer",
+    jobManifestGateShell: "sessionDrawer",
+    act1Panel: "sessionDrawer",
+    act2Panel: "currentDrawer",
+    compareViewerShell: "compareDrawer",
+    performanceGrid: "compareDrawer",
+    act3Panel: "compareDrawer",
+    missionPanel: "safetyDrawer",
+    archiveTimelineCard: "safetyDrawer",
+    act4Panel: "safetyDrawer",
+  };
+  return mapping[String(targetId || "").trim()] || "";
+}
+
+function openDrawer(drawerId) {
+  if (!drawerId) return;
+  state.activeDrawer = drawerId;
+  document.querySelectorAll("[data-drawer]").forEach((drawer) => {
+    drawer.classList.toggle("open", drawer.id === drawerId);
+  });
+  const overlay = document.getElementById("drawerOverlay");
+  if (overlay) {
+    overlay.hidden = false;
+    overlay.classList.add("open");
+  }
+}
+
+function closeDrawer(drawerId = "") {
+  const nextDrawerId = drawerId || state.activeDrawer;
+  if (!nextDrawerId) return;
+  state.activeDrawer = "";
+  document.querySelectorAll("[data-drawer]").forEach((drawer) => {
+    drawer.classList.remove("open");
+  });
+  const overlay = document.getElementById("drawerOverlay");
+  if (overlay) {
+    overlay.classList.remove("open");
+    overlay.hidden = true;
+  }
 }
 
 function syncActiveActFromCue() {
@@ -942,6 +1023,120 @@ function effectiveLinkDirectorStatus(snapshot) {
   };
 }
 
+function weakNetworkCatalog(snapshot) {
+  const weakNetwork = snapshot?.weak_network || {};
+  const scenarios = Array.isArray(weakNetwork.scenarios) ? weakNetwork.scenarios : [];
+  return {
+    ...weakNetwork,
+    scenarios,
+    recommendedScenarioId: weakNetwork.recommended_scenario_id || scenarios[0]?.scenario_id || "",
+  };
+}
+
+function resolveWeakNetworkSelection(snapshot) {
+  const catalog = weakNetworkCatalog(snapshot);
+  const linkDirector = effectiveLinkDirectorStatus(snapshot);
+  const linkedScenarioId = linkDirector.selected_profile?.evidence_binding?.scenario_id || "";
+  const preferredId = state.selectedWeakScenarioId || linkedScenarioId || catalog.recommendedScenarioId;
+  const selectedScenario =
+    catalog.scenarios.find((item) => item.scenario_id === preferredId)
+    || catalog.scenarios.find((item) => item.recommended)
+    || catalog.scenarios[0]
+    || null;
+  return {
+    catalog,
+    linkedScenarioId,
+    selectedScenario,
+  };
+}
+
+function syncWeakNetworkSelection(snapshot) {
+  const catalog = weakNetworkCatalog(snapshot);
+  const knownIds = new Set(catalog.scenarios.map((item) => item.scenario_id));
+  const linkedScenarioId = effectiveLinkDirectorStatus(snapshot).selected_profile?.evidence_binding?.scenario_id || "";
+  if (state.selectedWeakScenarioId && knownIds.has(state.selectedWeakScenarioId)) {
+    return;
+  }
+  if (linkedScenarioId && knownIds.has(linkedScenarioId)) {
+    state.selectedWeakScenarioId = linkedScenarioId;
+    return;
+  }
+  state.selectedWeakScenarioId = catalog.recommendedScenarioId || "";
+}
+
+function effectiveAircraftPosition(snapshot, systemStatus) {
+  return systemStatus?.aircraft_position || snapshot?.aircraft_position || {};
+}
+
+function aircraftFeedTone(aircraft) {
+  const status = String(aircraft?.source_status || "").toLowerCase();
+  if (status === "live") return "online";
+  if (status === "stale") return "degraded";
+  if (status === "stub") return "degraded";
+  return "neutral";
+}
+
+function aircraftScreenPosition(aircraft) {
+  const latitude = Number(aircraft?.position?.latitude);
+  const longitude = Number(aircraft?.position?.longitude);
+  if (Number.isNaN(latitude) || Number.isNaN(longitude)) {
+    return { left: 50, top: 48 };
+  }
+  const left = Math.max(8, Math.min(92, ((longitude + 180) / 360) * 100));
+  const top = Math.max(10, Math.min(90, ((90 - latitude) / 180) * 100));
+  return { left, top };
+}
+
+function aircraftReadoutCard(label, value, note, tone = "neutral") {
+  return `
+    <article class="aircraft-readout-card" data-tone="${escapeHtml(tone)}">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+      <small>${escapeHtml(note || "")}</small>
+    </article>
+  `;
+}
+
+function aircraftTrailMarkup(track) {
+  if (!Array.isArray(track) || !track.length) return "";
+  const total = track.length;
+  return track
+    .map((point, index) => {
+      const position = aircraftScreenPosition({ position: point });
+      return `
+        <span
+          class="aircraft-trail-dot"
+          style="left:${position.left}%; top:${position.top}%; opacity:${Math.max(0.18, (index + 1) / total)}"
+        ></span>
+      `;
+    })
+    .join("");
+}
+
+function cockpitMissionRollup(item) {
+  return `
+    <article class="cockpit-rollup" data-tone="${escapeHtml(item.tone || "neutral")}">
+      <div class="label">${escapeHtml(item.label || "")}</div>
+      <strong>${escapeHtml(item.status || item.value || "等待")}</strong>
+      <span>${escapeHtml(item.value || "")}</span>
+      <small>${escapeHtml(compactSentence(item.note || "", 82))}</small>
+    </article>
+  `;
+}
+
+function cockpitSceneChip(scene) {
+  return `
+    <article class="cockpit-scene-chip" data-tone="${escapeHtml(scene.tone || "neutral")}" ${scene.recommended ? 'data-current="true"' : ""}>
+      <div class="cockpit-scene-chip-top">
+        <span>${escapeHtml(scene.number || "")}</span>
+        <strong>${escapeHtml(scene.status || "待命")}</strong>
+      </div>
+      <p>${escapeHtml(scene.title || "")}</p>
+      <small>${escapeHtml(compactSentence(scene.note || scene.cue_line || "", 72))}</small>
+    </article>
+  `;
+}
+
 function lastLogLine(entries) {
   if (!entries || !entries.length) return "";
   return String(entries[entries.length - 1] || "");
@@ -1147,28 +1342,173 @@ function setFeedback(message, tone) {
   banner.textContent = message;
 }
 
-function renderTop(snapshot, systemStatus) {
+function renderCockpitShell(snapshot, systemStatus) {
   const cue = normalizeOperatorCue(systemStatus.operator_cue || {});
   const latestLive = snapshot.latest_live_status || {};
   const live = systemStatus.live || {};
+  const safetyPanel = effectiveSafetyPanel(systemStatus);
+  const linkDirector = effectiveLinkDirectorStatus(snapshot);
+  const weakNetwork = resolveWeakNetworkSelection(snapshot);
+  const selectedScenario = weakNetwork.selectedScenario;
+  const aircraft = effectiveAircraftPosition(snapshot, systemStatus);
+  const aircraftPosition = aircraftScreenPosition(aircraft);
   const boundary = compactModeBoundary(cue.boundaryNote || snapshot.mission?.mode_split_note || "");
   const nextStep = compactSentence(cue.nextStepNote || cue.nextStepLabel || "等待操作员选择下一步。", 128);
   const sceneLabel = cue.currentSceneLabel || systemStatus.execution_mode.label || "Command deck";
-  document.getElementById("heroSummary").textContent =
-    `${sceneLabel} ｜ ${systemStatus.execution_mode.label} ｜ board=${live.board_online ? "online" : "evidence"} / guard=${live.guard_state || "UNKNOWN"}。` +
-    `下一步：${nextStep} ${boundary}`;
+  const model = buildCommandCenterModel(snapshot, systemStatus);
+  const active = systemStatus.active_inference || {};
+  const activeProgress = normalizeProgress(active.progress || null);
+  const currentResult = latestResultForVariant("current");
+  const currentProgress =
+    active.running && active.variant === "current"
+      ? activeProgress
+      : normalizeProgress(currentResult?.live_progress || null);
+  const currentPane = compareViewerPaneState(snapshot, "current");
+  const baselinePane = compareViewerPaneState(snapshot, "baseline");
+  const comparison = snapshot.guided_demo?.comparison || {};
+  document.getElementById("cockpitHeadline").textContent =
+    `${sceneLabel} ｜ board=${live.board_online ? "online" : "evidence"} / guard=${live.guard_state || "UNKNOWN"} / link=${linkDirector.selected_profile_label || "正常链路"}。下一步：${nextStep}`;
 
-  const modePill = document.getElementById("modePill");
+  const modePill = document.getElementById("cockpitModePill");
   modePill.className = `mode-pill ${toneClass(systemStatus.execution_mode.tone)}`;
   modePill.textContent = systemStatus.execution_mode.label;
-  document.getElementById("modeSummary").textContent = systemStatus.execution_mode.summary;
-  document.getElementById("generatedAt").textContent = `快照更新 ${snapshot.generated_at}`;
-  document.getElementById("topStats").innerHTML = [
+  document.getElementById("cockpitSummaryLine").textContent = `${systemStatus.execution_mode.summary} ${boundary}`;
+  document.getElementById("cockpitTimestamp").textContent = `快照更新 ${snapshot.generated_at}`;
+  document.getElementById("cockpitBoundaryNote").textContent = boundary;
+
+  document.getElementById("missionStatStrip").innerHTML = [
     statCard("Board", live.board_online ? "ONLINE" : "EVIDENCE", `fault=${live.last_fault_code || "UNKNOWN"}`),
-    statCard("Current", latestLive.current?.completed || "等待", latestLive.current?.note || "Current run"),
-    statCard("Reference", latestLive.baseline?.completed || "等待", latestLive.baseline?.note || "PyTorch baseline"),
-    statCard("FIT / P0", `${snapshot.stats.fit_final_pass_count} / ${snapshot.stats.p0_milestones_verified}`, `payload ${snapshot.stats.payload_current_ms} ms`),
+    statCard("Current", currentProgress.count_label || latestLive.current?.completed || "等待", currentProgress.current_stage || latestLive.current?.note || "Current run"),
+    statCard(
+      "Weak-Net",
+      selectedScenario ? `${formatNumber(selectedScenario.comparison?.throughput_uplift_pct || 0)}% uplift` : "等待场景",
+      selectedScenario ? `${formatNumber(selectedScenario.channel?.snr_db || 0, 1)} dB / ${formatNumber(selectedScenario.comparison?.pipeline_images_per_sec || 0)} img/s` : "repo compare"
+    ),
+    statCard("SAFE_STOP", safetyPanel.safe_stop_state || "UNKNOWN", `fault=${safetyPanel.last_fault_code || live.last_fault_code || "UNKNOWN"}`),
   ].join("");
+
+  const aircraftVector = document.getElementById("aircraftVector");
+  aircraftVector.style.left = `${aircraftPosition.left}%`;
+  aircraftVector.style.top = `${aircraftPosition.top}%`;
+  aircraftVector.style.setProperty("--aircraft-heading", `${formatNumber(aircraft.kinematics?.heading_deg || 0, 1)}deg`);
+  document.getElementById("aircraftCallsign").textContent =
+    `${aircraft.mission_call_sign || "M9-DEMO"} / ${aircraft.aircraft_id || "FT-AIR-01"}`;
+  document.getElementById("aircraftPositionText").textContent =
+    `${formatCoordinate(aircraft.position?.latitude, "N", "S")} ｜ ${formatCoordinate(aircraft.position?.longitude, "E", "W")}`;
+  document.getElementById("aircraftTrail").innerHTML = aircraftTrailMarkup(aircraft.track || []);
+  document.getElementById("aircraftReadoutGrid").innerHTML = [
+    aircraftReadoutCard(
+      "GPS Feed",
+      aircraft.source_status || "unknown",
+      aircraft.source_label || "backend feed",
+      aircraftFeedTone(aircraft)
+    ),
+    aircraftReadoutCard(
+      "Altitude",
+      `${formatNumber(aircraft.kinematics?.altitude_m || 0, 0)} m`,
+      `v/s ${formatNumber(aircraft.kinematics?.vertical_speed_mps || 0, 1)} m/s`,
+      "neutral"
+    ),
+    aircraftReadoutCard(
+      "Ground Speed",
+      `${formatNumber(aircraft.kinematics?.ground_speed_kph || 0, 0)} km/h`,
+      `heading ${formatNumber(aircraft.kinematics?.heading_deg || 0, 1)}°`,
+      "online"
+    ),
+    aircraftReadoutCard(
+      "GPS Fix",
+      aircraft.fix?.type || "UNKNOWN",
+      `confidence ${formatNumber(aircraft.fix?.confidence_m || 0, 1)} m / sats ${aircraft.fix?.satellites ?? "NA"}`,
+      aircraftFeedTone(aircraft)
+    ),
+  ].join("");
+  document.getElementById("aircraftFeedNote").textContent = [
+    aircraft.ownership_note || "",
+    aircraft.source_note || aircraft.fallback_note || "",
+    aircraft.integration_note ? `${aircraft.integration_note} (${aircraft.source_api_path || "/api/aircraft-position"})` : "",
+  ].filter(Boolean).join(" ");
+
+  document.getElementById("flightFeedPills").innerHTML = [
+    `<div class="status-pill ${toneClass(aircraftFeedTone(aircraft))}">${escapeHtml(aircraft.source_label || "Upper Computer GPS")}</div>`,
+    `<div class="status-pill ${toneClass(live.board_online ? "online" : systemStatus.execution_mode.tone || "degraded")}">${escapeHtml(live.board_online ? "Board Online" : "Evidence Mode")}</div>`,
+    `<div class="status-pill ${toneClass(linkDirector.tone || "neutral")}">${escapeHtml(linkDirector.selected_profile_label || "正常链路")}</div>`,
+    selectedScenario
+      ? `<div class="status-pill ${toneClass(selectedScenario.tone || "neutral")}">${escapeHtml(`${formatNumber(selectedScenario.channel?.snr_db || 0, 1)} dB / ${formatNumber(selectedScenario.comparison?.pipeline_images_per_sec || 0)} img/s`)}</div>`
+      : "",
+  ].join("");
+
+  document.getElementById("missionCoreCard").innerHTML = `
+    <div class="mission-core-head">
+      <div>
+        <div class="label">Primary Story</div>
+        <h3>${escapeHtml(model.summaryLabel)}</h3>
+      </div>
+      <div class="status-pill ${toneClass(model.summaryTone || "neutral")}">${escapeHtml(model.operatorCue.currentSceneId ? `Scene ${model.operatorCue.currentSceneId.replace("scene", "")}` : model.summaryLabel)}</div>
+    </div>
+    <p class="mission-core-summary">${escapeHtml(compactSentence(model.summaryText, 180))}</p>
+    <div class="cockpit-rollup-grid">
+      ${model.rollups.map((item) => cockpitMissionRollup(item)).join("")}
+    </div>
+    <div class="cockpit-scene-track">
+      ${model.scenes.map((scene) => cockpitSceneChip(scene)).join("")}
+    </div>
+    <div class="mission-core-actions">
+      ${commandJumpButton(model.primaryJump, true)}
+      <div class="inline-actions">
+        ${(model.quickJumps || []).slice(0, 3).map((item) => commandJumpButton(item, false)).join("")}
+      </div>
+    </div>
+  `;
+
+  document.getElementById("comparePeekCard").innerHTML = `
+    <div class="compare-peek-head">
+      <div>
+        <div class="label">Compare Peek</div>
+        <h3>${escapeHtml(selectedCompareViewerSample(snapshot)?.sample?.label || "等待样例")}</h3>
+      </div>
+      <div class="status-pill ${toneClass(currentPane?.badgeTone || baselinePane?.badgeTone || "neutral")}">${escapeHtml(`${comparison.end_to_end?.speedup_x?.toFixed ? comparison.end_to_end.speedup_x.toFixed(1) : formatNumber(comparison.end_to_end?.speedup_x || 0, 1)}x headline`)}</div>
+    </div>
+    <p class="compact-copy compare-peek-note">${escapeHtml(compactSentence(selectedCompareViewerSample(snapshot)?.sample?.note || "Current / PyTorch provenance 继续在 drawer 内展开。", 120))}</p>
+    <div class="compare-peek-grid">
+      ${currentPane ? `
+        <figure class="compare-peek-pane">
+          <img src="${currentPane.imageSrc}" alt="${escapeHtml(currentPane.title)}">
+          <figcaption>
+            <strong>${escapeHtml(currentPane.title)}</strong>
+            <small>${escapeHtml(currentPane.badgeLabel)}</small>
+          </figcaption>
+        </figure>
+      ` : ""}
+      ${baselinePane ? `
+        <figure class="compare-peek-pane">
+          <img src="${baselinePane.imageSrc}" alt="${escapeHtml(baselinePane.title)}">
+          <figcaption>
+            <strong>${escapeHtml(baselinePane.title)}</strong>
+            <small>${escapeHtml(baselinePane.badgeLabel)}</small>
+          </figcaption>
+        </figure>
+      ` : ""}
+    </div>
+    <div class="metric-inline compare-peek-metrics">
+      <div class="metric-chip">payload ${formatMaybeMs(comparison.payload?.current_ms)}</div>
+      <div class="metric-chip">end-to-end ${formatMaybeMs(comparison.end_to_end?.current_ms)}</div>
+      <div class="metric-chip">${selectedScenario ? `weak-net +${formatNumber(selectedScenario.comparison?.throughput_uplift_pct || 0)}%` : "repo compare"}</div>
+    </div>
+    <div class="inline-actions">
+      <button class="button button-secondary" type="button" data-open-drawer="compareDrawer">展开 Compare Drawer</button>
+    </div>
+  `;
+
+  document.getElementById("mainSafetyMirror").innerHTML = `
+    <div class="cockpit-card-head">
+      <div>
+        <div class="label">Safety Mirror</div>
+        <h2>SAFE_STOP / Alarm</h2>
+      </div>
+      <div class="status-pill ${toneClass(safetyPanel.panel_tone || "neutral")}">${escapeHtml(safetyPanel.panel_label || "安全面板")}</div>
+    </div>
+    ${renderSafetyFrontPanel(safetyPanel)}
+  `;
 }
 
 function renderLatestLiveStatus(snapshot) {
@@ -1191,6 +1531,83 @@ function renderLatestLiveStatus(snapshot) {
     </div>
     ${facts.length ? `<ul class="list-plain latest-live-facts">${facts.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : ""}
     ${renderLinks(links)}
+  `;
+}
+
+function renderWeakNetworkConsole(snapshot, systemStatus) {
+  const shell = document.getElementById("weakNetworkConsole");
+  const { catalog, linkedScenarioId, selectedScenario } = resolveWeakNetworkSelection(snapshot);
+  const linkDirector = effectiveLinkDirectorStatus(snapshot);
+  const liveAnchor = catalog.live_anchor || {};
+  if (!selectedScenario) {
+    shell.innerHTML = `
+      <div class="label">Weak-Net Console</div>
+      <p class="compact-copy">等待仓库内弱网对照证据。</p>
+    `;
+    return;
+  }
+
+  const scenarioButtons = catalog.scenarios
+    .map(
+      (scenario) => `
+        <button
+          class="button ${scenario.scenario_id === selectedScenario.scenario_id ? "button-primary" : "button-secondary"} button-small"
+          type="button"
+          data-weak-scenario-id="${escapeHtml(scenario.scenario_id)}"
+        >${escapeHtml(scenario.label)}</button>
+      `
+    )
+    .join("");
+  const directorButtons = (linkDirector.profiles || [])
+    .map(
+      (profile) => `
+        <button
+          class="button ${profile.active ? "button-primary" : "button-secondary"} button-small"
+          type="button"
+          data-link-profile-id="${escapeHtml(profile.profile_id)}"
+          ${(state.linkDirectorPending || profile.active) ? "disabled" : ""}
+        >${escapeHtml(profile.label)}</button>
+      `
+    )
+    .join("");
+  const stageCards = (selectedScenario.stage_timings || [])
+    .map((stage) => weakMetricCard(stage.label, `${formatNumber(stage.mean_ms)} ms`, `med ${formatNumber(stage.median_ms)} / max ${formatNumber(stage.max_ms)}`, stage.tone || "neutral"))
+    .join("");
+  const linkedScenarioNote = linkedScenarioId
+    ? `当前导演位默认绑定到 ${linkDirector.selected_profile?.evidence_binding?.label || linkedScenarioId}。`
+    : (linkDirector.selected_profile?.evidence_binding?.note || "当前导演位没有一一对应的真机 compare 档位。");
+  shell.innerHTML = `
+    <div class="weak-console-head">
+      <div>
+        <div class="label">Weak-Net Console</div>
+        <h3>${escapeHtml(selectedScenario.label)}</h3>
+      </div>
+      <div class="status-pill ${toneClass(selectedScenario.tone || "neutral")}">${escapeHtml(`${formatNumber(selectedScenario.channel?.snr_db || 0, 1)} dB`)}</div>
+    </div>
+    <p class="compact-copy">${escapeHtml(selectedScenario.summary || catalog.summary || "")}</p>
+    <div class="weak-console-selector">${scenarioButtons}</div>
+    <div class="weak-console-metrics">
+      ${weakMetricCard("Pipeline", `${formatNumber(selectedScenario.comparison?.pipeline_images_per_sec || 0)} img/s`, `${formatNumber(selectedScenario.comparison?.pipeline_ms_per_image || 0)} ms/image`, "online")}
+      ${weakMetricCard("Serial", `${formatNumber(selectedScenario.comparison?.serial_images_per_sec || 0)} img/s`, `${formatNumber(selectedScenario.comparison?.serial_ms_per_image || 0)} ms/image`, "neutral")}
+      ${weakMetricCard("Throughput", `+${formatNumber(selectedScenario.comparison?.throughput_uplift_pct || 0)}%`, `${formatNumber(selectedScenario.comparison?.saved_seconds_per_batch || 0)} s / 300 张`, "degraded")}
+      ${weakMetricCard("Topology", `${(selectedScenario.topology?.big_cores || []).join(",") || "NA"} | ${(selectedScenario.topology?.little_cores || []).join(",") || "NA"}`, `Q ${selectedScenario.topology?.input_queue_size || 0}/${selectedScenario.topology?.output_queue_size || 0} ｜ ${shortSha(selectedScenario.channel?.artifact_sha256 || "")}`, "warning")}
+    </div>
+    <div class="weak-stage-grid">
+      ${stageCards}
+    </div>
+    <div class="weak-console-footer">
+      <div class="compact-copy">${escapeHtml(selectedScenario.operator_note || "")}</div>
+      <div class="status-meta">
+        <span>${escapeHtml(`live anchor=${liveAnchor.valid_instance || "NA"} / ${liveAnchor.current_completed || "pending"}`)}</span>
+        <span>${escapeHtml(linkedScenarioNote)}</span>
+      </div>
+    </div>
+    <div class="weak-console-director">
+      <div class="label">Link Director</div>
+      <div class="weak-console-selector">${directorButtons}</div>
+      <p class="compact-copy">${escapeHtml(linkDirector.truth_note || catalog.truth_note || "")}</p>
+    </div>
+    ${renderLinks([...(selectedScenario.evidence || []), ...(liveAnchor.links || [])].filter(Boolean))}
   `;
 }
 
@@ -1973,7 +2390,10 @@ function renderComparison(snapshot) {
 function renderFault(snapshot) {
   const result = state.faultResult;
   const system = state.systemStatus;
-  document.getElementById("act4Lamp").className = `act-lamp ${lampClass(result ? result.status_lamp : system.live.guard_state)}`;
+  const act4Lamp = document.getElementById("act4Lamp");
+  if (act4Lamp) {
+    act4Lamp.className = `act-lamp ${lampClass(result ? result.status_lamp : system.live.guard_state)}`;
+  }
   if (!result) {
     document.getElementById("faultStatusHeadline").textContent = "等待注入动作。";
     document.getElementById("faultSummary").innerHTML = [
@@ -2060,6 +2480,12 @@ function applyLaunchPolicy(systemStatus) {
   const currentAgainButton = document.getElementById("runCurrentAgainButton");
   const baselineButton = document.getElementById("runBaselineButton");
   const runAllButton = document.getElementById("runAllButton");
+  const opsCurrentButton = document.getElementById("opsRunCurrentButton");
+  const opsBaselineButton = document.getElementById("opsRunBaselineButton");
+  const manifestButtons = [
+    document.getElementById("previewManifestGateButton"),
+    document.getElementById("opsManifestButton"),
+  ].filter(Boolean);
 
   const currentLabel = currentSupport.mode === "signed_manifest_v1"
     ? "启动 Current signed 数据面 300 张图在线推进"
@@ -2076,23 +2502,48 @@ function applyLaunchPolicy(systemStatus) {
   runAllButton.textContent = baselineSupport.launch_allowed === false
     ? "PyTorch 参考 + Current 当前未开放 live"
     : "一键顺序运行 PyTorch + Current 数据面 300 张图";
+  if (opsCurrentButton) {
+    opsCurrentButton.textContent = currentSupport.mode === "signed_manifest_v1" ? "Current Signed" : "Current Live";
+  }
+  if (opsBaselineButton) {
+    opsBaselineButton.textContent = baselineSupport.launch_allowed === false
+      ? "Reference Archive"
+      : baselineSupport.mode === "signed_manifest_v1"
+        ? "PyTorch Signed"
+        : "PyTorch Live";
+  }
 
   currentButton.disabled = currentBlocked;
   currentAgainButton.disabled = currentBlocked;
   baselineButton.disabled = baselineBlocked;
   runAllButton.disabled = currentBlocked || baselineBlocked;
+  if (opsCurrentButton) {
+    opsCurrentButton.disabled = currentBlocked;
+  }
+  if (opsBaselineButton) {
+    opsBaselineButton.disabled = baselineBlocked;
+  }
 
   currentButton.title = boardBusy ? boardBusyReason : (currentSupport.note || "");
   currentAgainButton.title = currentButton.title;
   baselineButton.title = baselineSupport.note || "";
   runAllButton.title = boardBusy ? boardBusyReason : (currentBlocked ? (currentSupport.note || "") : (baselineSupport.note || ""));
+  if (opsCurrentButton) {
+    opsCurrentButton.title = currentButton.title;
+  }
+  if (opsBaselineButton) {
+    opsBaselineButton.title = baselineButton.title;
+  }
+  manifestButtons.forEach((button) => {
+    button.title = systemStatus.job_manifest_gate?.message || systemStatus.job_manifest_gate?.admission_note || "demo-only manifest preview";
+  });
 }
 
 function renderAll() {
   if (!state.snapshot || !state.systemStatus) return;
-  renderTop(state.snapshot, state.systemStatus);
+  renderCockpitShell(state.snapshot, state.systemStatus);
+  renderWeakNetworkConsole(state.snapshot, state.systemStatus);
   renderLatestLiveStatus(state.snapshot);
-  renderCommandCenter(state.snapshot, state.systemStatus);
   renderMissionDashboard(state.snapshot, state.systemStatus);
   renderBoardAccess(state.systemStatus);
   renderAct1(state.snapshot, state.systemStatus);
@@ -2103,17 +2554,13 @@ function renderAll() {
   renderFault(state.snapshot);
   renderPerformance(state.snapshot);
   renderSources(state.snapshot);
-  renderActLamps(state.systemStatus);
   applyLaunchPolicy(state.systemStatus);
 }
 
 function applyActiveAct() {
-  const actId = state.activeAct;
-  document.querySelectorAll(".act-tab").forEach((tab) => {
-    tab.classList.toggle("active", tab.dataset.act === actId);
-  });
-  document.querySelectorAll(".act-panel").forEach((panel) => {
-    panel.classList.toggle("active", panel.id === `${actId}Panel`);
+  const drawerId = drawerIdForAct(state.activeAct);
+  document.querySelectorAll("[data-drawer]").forEach((drawer) => {
+    drawer.classList.toggle("is-active-drawer", drawer.id === drawerId);
   });
 }
 
@@ -2124,11 +2571,20 @@ function switchAct(actId, options = {}) {
     state.userSelectedAct = true;
   }
   applyActiveAct();
+  const drawerId = drawerIdForAct(actId);
+  if (drawerId) {
+    openDrawer(drawerId);
+  }
 }
 
 function jumpToTarget(targetId, actId = "") {
+  const drawerId = drawerIdForTarget(targetId) || drawerIdForAct(actId);
+  if (drawerId) {
+    openDrawer(drawerId);
+  }
   if (actId) {
-    switchAct(actId);
+    state.activeAct = actId;
+    applyActiveAct();
   }
   window.requestAnimationFrame(() => {
     const element = document.getElementById(targetId);
@@ -2185,6 +2641,7 @@ async function refreshAll() {
   state.selectedArchiveSessionId = nextArchiveSessionId;
   state.archiveSession = archiveSession;
   hydrateRecentResultsFromSystemStatus(systemStatus);
+  syncWeakNetworkSelection(snapshot);
   syncActiveActFromCue();
   renderAll();
   applyActiveAct();
@@ -2250,6 +2707,10 @@ async function switchLinkDirectorProfile(profileId) {
       body: JSON.stringify({ profile_id: profileId }),
     });
     state.linkDirectorStatus = payload;
+    const linkedScenarioId = payload.selected_profile?.evidence_binding?.scenario_id || "";
+    if (!state.weakScenarioPinnedByUser && linkedScenarioId) {
+      state.selectedWeakScenarioId = linkedScenarioId;
+    }
     renderAll();
     await refreshAll();
     setFeedback(
@@ -2397,33 +2858,63 @@ async function recoverFault() {
 }
 
 function bindEvents() {
-  document.getElementById("reloadButton").addEventListener("click", () => {
-    refreshAll().catch((error) => setFeedback(error.message, "error"));
+  document.querySelectorAll("[data-open-drawer]").forEach((button) => {
+    button.addEventListener("click", () => openDrawer(button.dataset.openDrawer || ""));
   });
-  document.getElementById("probeButton").addEventListener("click", () => {
-    probeBoard();
+  document.querySelectorAll("[data-close-drawer]").forEach((button) => {
+    button.addEventListener("click", () => closeDrawer(button.dataset.closeDrawer || ""));
+  });
+  const overlay = document.getElementById("drawerOverlay");
+  if (overlay) {
+    overlay.addEventListener("click", () => closeDrawer());
+  }
+  [document.getElementById("opsReloadButton")].filter(Boolean).forEach((button) => {
+    button.addEventListener("click", () => {
+      refreshAll().catch((error) => setFeedback(error.message, "error"));
+    });
+  });
+  [document.getElementById("opsProbeButton")].filter(Boolean).forEach((button) => {
+    button.addEventListener("click", () => {
+      probeBoard();
+    });
   });
   document.getElementById("saveAccessButton").addEventListener("click", () => {
     saveBoardAccess();
   });
-  document.getElementById("previewManifestGateButton").addEventListener("click", () => {
-    previewJobManifestGate();
-  });
-  document.getElementById("runCurrentButton").addEventListener("click", () => {
-    runCurrentInference();
-  });
-  document.getElementById("runBaselineButton").addEventListener("click", () => {
-    runBaseline();
-  });
+  [document.getElementById("previewManifestGateButton"), document.getElementById("opsManifestButton")]
+    .filter(Boolean)
+    .forEach((button) => {
+      button.addEventListener("click", () => {
+        previewJobManifestGate();
+      });
+    });
+  [document.getElementById("runCurrentButton"), document.getElementById("opsRunCurrentButton")]
+    .filter(Boolean)
+    .forEach((button) => {
+      button.addEventListener("click", () => {
+        runCurrentInference();
+      });
+    });
+  [document.getElementById("runBaselineButton"), document.getElementById("opsRunBaselineButton")]
+    .filter(Boolean)
+    .forEach((button) => {
+      button.addEventListener("click", () => {
+        runBaseline();
+      });
+    });
   document.getElementById("runCurrentAgainButton").addEventListener("click", () => {
     runCurrentInference();
   });
   document.getElementById("runAllButton").addEventListener("click", () => {
     runAllComparisons();
   });
-  document.getElementById("recoverButton").addEventListener("click", () => {
-    recoverFault();
-  });
+  [document.getElementById("recoverButton"), document.getElementById("opsRecoverButton")]
+    .filter(Boolean)
+    .forEach((button) => {
+      button.addEventListener("click", () => {
+        recoverFault();
+      });
+    });
 
   document.querySelectorAll(".act-tab").forEach((tab) => {
     tab.addEventListener("click", () => switchAct(tab.dataset.act));
@@ -2443,13 +2934,30 @@ function bindEvents() {
       jumpToTarget(jumpButton.dataset.jumpTarget, jumpButton.dataset.jumpAct || "");
       return;
     }
+    const drawerButton = event.target.closest("[data-open-drawer]");
+    if (drawerButton) {
+      openDrawer(drawerButton.dataset.openDrawer || "");
+      return;
+    }
     const button = event.target.closest("[data-link-profile-id]");
-    if (!button) return;
-    switchLinkDirectorProfile(button.dataset.linkProfileId);
+    if (button) {
+      switchLinkDirectorProfile(button.dataset.linkProfileId);
+      return;
+    }
+    const weakScenarioButton = event.target.closest("[data-weak-scenario-id]");
+    if (!weakScenarioButton) return;
+    state.selectedWeakScenarioId = weakScenarioButton.dataset.weakScenarioId || "";
+    state.weakScenarioPinnedByUser = true;
+    renderAll();
   });
   document.addEventListener("change", (event) => {
     if (event.target.id !== "archiveSessionSelect") return;
     loadArchiveSession(event.target.value).catch((error) => setFeedback(error.message, "error"));
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      closeDrawer();
+    }
   });
 }
 

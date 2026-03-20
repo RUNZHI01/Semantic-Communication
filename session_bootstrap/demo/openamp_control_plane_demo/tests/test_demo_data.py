@@ -9,7 +9,7 @@ DEMO_ROOT = Path(__file__).resolve().parents[1]
 if str(DEMO_ROOT) not in sys.path:
     sys.path.insert(0, str(DEMO_ROOT))
 
-from demo_data import build_prerecorded_inference_result, build_snapshot  # noqa: E402
+from demo_data import build_aircraft_position_snapshot, build_prerecorded_inference_result, build_snapshot  # noqa: E402
 
 
 class DemoDataTest(unittest.TestCase):
@@ -99,6 +99,53 @@ class DemoDataTest(unittest.TestCase):
         self.assertIn("3-core Linux + RTOS demo mode", mission["mode_split_note"])
         self.assertGreaterEqual(len(mission["archive_timeline"]), 4)
         self.assertEqual(mission["archive_timeline"][0]["title"], "Current live 300 / 300 已归档")
+
+    def test_snapshot_contains_real_weak_network_console(self) -> None:
+        snapshot = build_snapshot()
+        weak_network = snapshot["weak_network"]
+        scenarios = {item["scenario_id"]: item for item in weak_network["scenarios"]}
+
+        self.assertEqual(weak_network["recommended_scenario_id"], "snr10_bestcurrent")
+        self.assertEqual(weak_network["live_anchor"]["valid_instance"], "8115")
+        self.assertAlmostEqual(scenarios["snr12_real_compare"]["channel"]["snr_db"], 12.0)
+        self.assertAlmostEqual(scenarios["snr10_real_compare"]["comparison"]["throughput_uplift_pct"], 35.298)
+        self.assertAlmostEqual(scenarios["snr10_bestcurrent"]["comparison"]["throughput_uplift_pct"], 56.077)
+        self.assertEqual(scenarios["snr10_bestcurrent"]["topology"]["big_cores"], [2])
+        self.assertEqual(len(scenarios["snr10_bestcurrent"]["stage_timings"]), 4)
+
+    def test_snapshot_contains_backend_aircraft_position_contract(self) -> None:
+        snapshot = build_snapshot()
+        aircraft = snapshot["aircraft_position"]
+
+        self.assertEqual(aircraft["contract_version"], "aircraft_position.v1")
+        self.assertEqual(aircraft["source_api_path"], "/api/aircraft-position")
+        self.assertEqual(aircraft["source_kind"], "backend_stub")
+        self.assertEqual(aircraft["source_status"], "stub")
+        self.assertIn("backend-fed", aircraft["ownership_note"])
+        self.assertIn("browser geolocation", aircraft["ownership_note"])
+        self.assertAlmostEqual(aircraft["position"]["latitude"], 30.572815)
+        self.assertAlmostEqual(aircraft["position"]["longitude"], 104.066801)
+        self.assertEqual(len(aircraft["track"]), 6)
+
+    def test_build_aircraft_position_snapshot_accepts_live_override(self) -> None:
+        aircraft = build_aircraft_position_snapshot(
+            {
+                "source_kind": "upper_computer_gps",
+                "source_status": "live",
+                "source_label": "Upper Computer GPS live feed",
+                "position": {"latitude": 31.111111, "longitude": 121.222222},
+                "kinematics": {"heading_deg": 135.2, "ground_speed_kph": 266.4, "altitude_m": 2401.5},
+                "fix": {"type": "RTK", "confidence_m": 1.8, "satellites": 18},
+            }
+        )
+
+        self.assertEqual(aircraft["source_kind"], "upper_computer_gps")
+        self.assertEqual(aircraft["source_status"], "live")
+        self.assertEqual(aircraft["fix"]["type"], "RTK")
+        self.assertAlmostEqual(aircraft["position"]["latitude"], 31.111111)
+        self.assertAlmostEqual(aircraft["position"]["longitude"], 121.222222)
+        self.assertAlmostEqual(aircraft["kinematics"]["heading_deg"], 135.2)
+        self.assertAlmostEqual(aircraft["kinematics"]["ground_speed_kph"], 266.4)
 
     def test_prerecorded_baseline_uses_pytorch_reference_manifest(self) -> None:
         payload = build_prerecorded_inference_result(0, "baseline")

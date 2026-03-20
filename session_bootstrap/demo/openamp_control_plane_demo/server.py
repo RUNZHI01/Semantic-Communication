@@ -18,6 +18,7 @@ from board_access import BoardAccessConfig, build_board_access_config, build_dem
 from board_probe import DEFAULT_LIVE_PROBE_OUTPUT, is_successful_probe, load_probe_output, run_live_probe, write_probe_output
 from demo_data import (
     PROJECT_ROOT,
+    build_aircraft_position_snapshot,
     build_fault_replay,
     build_job_manifest_contract_snapshot,
     build_link_director_catalog,
@@ -758,6 +759,7 @@ class DashboardState:
         self._inference_jobs: dict[str, dict[str, Any]] = {}
         self._manifest_preview_count = 0
         self._link_director = default_link_director_state()
+        self._aircraft_position = build_aircraft_position_snapshot()
         self._event_spine = DemoEventSpine(event_archive_root)
 
         cached_probe = load_probe_output(probe_cache_path) if probe_cache_path else None
@@ -766,7 +768,7 @@ class DashboardState:
         else:
             self._last_live_probe = None
 
-        initial_snapshot = build_snapshot(self._last_live_probe)
+        initial_snapshot = build_snapshot(self._last_live_probe, aircraft_position=self._aircraft_position)
         self._trusted_current_sha = initial_snapshot["project"]["trusted_current_sha"]
         self._target_label = "cortex-a72 + neon"
         self._runtime_label = "tvm"
@@ -783,6 +785,86 @@ class DashboardState:
         with self._lock:
             self._board_access = config
         return config.to_public_dict()
+
+    def _merged_aircraft_position_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        current = json.loads(json.dumps(self._aircraft_position, ensure_ascii=False))
+        merged = dict(current)
+
+        for key in (
+            "aircraft_id",
+            "mission_call_sign",
+            "source_kind",
+            "source_status",
+            "source_label",
+            "source_note",
+        ):
+            value = payload.get(key)
+            if value not in (None, ""):
+                merged[key] = value
+
+        position = dict(current.get("position") or {})
+        if isinstance(payload.get("position"), dict):
+            position.update(payload["position"])
+        for key in ("latitude", "longitude"):
+            value = payload.get(key)
+            if value not in (None, ""):
+                position[key] = value
+
+        kinematics = dict(current.get("kinematics") or {})
+        if isinstance(payload.get("kinematics"), dict):
+            kinematics.update(payload["kinematics"])
+        for key in ("altitude_m", "ground_speed_kph", "heading_deg", "vertical_speed_mps"):
+            value = payload.get(key)
+            if value not in (None, ""):
+                kinematics[key] = value
+
+        fix = dict(current.get("fix") or {})
+        if isinstance(payload.get("fix"), dict):
+            fix.update(payload["fix"])
+        flat_fix = {
+            "type": payload.get("fix_type"),
+            "confidence_m": payload.get("confidence_m"),
+            "satellites": payload.get("satellites"),
+        }
+        for key, value in flat_fix.items():
+            if value not in (None, ""):
+                fix[key] = value
+
+        merged["position"] = position
+        merged["kinematics"] = kinematics
+        merged["fix"] = fix
+        merged["updated_at"] = now_iso()
+
+        if any(payload.get(key) not in (None, "") for key in ("latitude", "longitude")):
+            merged.setdefault("source_kind", "upper_computer_gps")
+            if not payload.get("source_kind"):
+                merged["source_kind"] = "upper_computer_gps"
+            if not payload.get("source_status"):
+                merged["source_status"] = "live"
+            if not payload.get("source_label"):
+                merged["source_label"] = "Upper Computer GPS live feed"
+        return merged
+
+    def current_aircraft_position(self) -> dict[str, Any]:
+        with self._lock:
+            return json.loads(json.dumps(self._aircraft_position, ensure_ascii=False))
+
+    def set_aircraft_position(self, payload: dict[str, Any]) -> dict[str, Any]:
+        merged = self._merged_aircraft_position_payload(payload)
+        aircraft_position = build_aircraft_position_snapshot(merged)
+        with self._lock:
+            self._aircraft_position = aircraft_position
+
+        self._archive_event_snapshot(
+            reason="aircraft_position_update",
+            extra={
+                "source_kind": aircraft_position["source_kind"],
+                "source_status": aircraft_position["source_status"],
+                "latitude": aircraft_position["position"]["latitude"],
+                "longitude": aircraft_position["position"]["longitude"],
+            },
+        )
+        return aircraft_position
 
     def set_link_director_profile(self, payload: dict[str, Any]) -> dict[str, Any]:
         profile_id = str(payload.get("profile_id") or "").strip().lower()
@@ -862,7 +944,8 @@ class DashboardState:
     def current_snapshot(self) -> dict[str, Any]:
         with self._lock:
             live_probe = self._last_live_probe
-        return build_snapshot(live_probe=live_probe)
+            aircraft_position = self._aircraft_position
+        return build_snapshot(live_probe=live_probe, aircraft_position=aircraft_position)
 
     def _idle_active_inference_summary(self) -> dict[str, Any]:
         return {
@@ -1369,8 +1452,10 @@ class DashboardState:
             last_inference = self._last_inference_result
             recent_inference_results = dict(self._recent_inference_results)
             last_fault = self._last_fault_result
+            aircraft_position = self._aircraft_position
 
-        snapshot = build_snapshot(live_probe=live_probe)
+        snapshot = build_snapshot(live_probe=live_probe, aircraft_position=aircraft_position)
+        aircraft_position_payload = snapshot["aircraft_position"]
         event_spine = self._event_spine.summary(limit=1)
         active_inference = self._active_inference_summary()
         current_board_access = self._live_board_access_for_variant(board_access, variant="current")
@@ -1501,6 +1586,7 @@ class DashboardState:
                 "tone": mode_tone,
                 "summary": mode_summary,
             },
+            "aircraft_position": aircraft_position_payload,
             "live": live_payload,
             "active_inference": active_inference,
             "last_inference": last_inference or {},
@@ -2487,6 +2573,9 @@ class DemoRequestHandler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/link-director":
             self.respond_json(HTTPStatus.OK, self.server.app_state.current_link_director_status())
             return
+        if parsed.path == "/api/aircraft-position":
+            self.respond_json(HTTPStatus.OK, self.server.app_state.current_aircraft_position())
+            return
         if parsed.path == "/api/event-spine":
             params = parse_qs(parsed.query)
             limit = max(1, min(100, self.coerce_int(params.get("limit", ["25"])[0], default=25)))
@@ -2553,6 +2642,10 @@ class DemoRequestHandler(SimpleHTTPRequestHandler):
             except ValueError as exc:
                 self.respond_json(HTTPStatus.BAD_REQUEST, {"status": "error", "message": str(exc)})
                 return
+            self.respond_json(HTTPStatus.OK, payload)
+            return
+        if parsed.path == "/api/aircraft-position":
+            payload = self.server.app_state.set_aircraft_position(body)
             self.respond_json(HTTPStatus.OK, payload)
             return
         if parsed.path == "/api/probe-board":
