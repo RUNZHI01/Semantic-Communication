@@ -277,6 +277,43 @@ body {
   gap: 0.7rem;
 }
 
+.aircraft-contract-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.aircraft-contract-chip {
+  display: grid;
+  gap: 0.14rem;
+  min-width: 8.5rem;
+  padding: 0.55rem 0.72rem;
+  border-radius: 15px;
+  border: 1px solid rgba(132, 153, 173, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.aircraft-contract-chip[data-tone="online"] {
+  border-color: rgba(53, 200, 180, 0.2);
+}
+
+.aircraft-contract-chip[data-tone="degraded"] {
+  border-color: rgba(216, 154, 51, 0.2);
+}
+
+.aircraft-contract-chip span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.aircraft-contract-chip strong {
+  font-size: 0.92rem;
+  color: var(--ink);
+}
+
 .aircraft-readout-card {
   display: grid;
   gap: 0.18rem;
@@ -1416,6 +1453,7 @@ body {
 
 .latest-live-facts {
   margin-top: 0;
+  gap: 0.55rem;
 }
 
 .mini-metric .value {

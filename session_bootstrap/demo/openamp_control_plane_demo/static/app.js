@@ -94,6 +94,15 @@ function formatCoordinate(value, positiveLabel, negativeLabel) {
   return `${Math.abs(numeric).toFixed(4)}° ${direction}`;
 }
 
+function compactTimestampLabel(value) {
+  const text = String(value || "").trim();
+  if (!text) return "NA";
+  if (text.includes("T") && text.length >= 19) {
+    return `${text.slice(5, 10)} ${text.slice(11, 19)}`;
+  }
+  return text;
+}
+
 function fieldLabel(field) {
   const labels = {
     host: "主机",
@@ -491,7 +500,7 @@ function renderOperatorCue(cue) {
   const boundaryBits = [
     compactManualNote(cue.manualBoundaryNote),
     compactSentence(cue.boundaryNote, 120),
-  ].filter(Boolean);
+  ].filter(Boolean).slice(0, 1);
   shell.innerHTML = `
     <div class="operator-cue-top">
       <div>
@@ -509,14 +518,14 @@ function renderOperatorCue(cue) {
           </div>
           <div class="status-pill ${toneClass(currentScene.tone || cue.currentSceneTone || "neutral")}">${escapeHtml(currentScene.status || cue.statusLabel || "待命")}</div>
         </div>
-        <p class="operator-cue-line">${escapeHtml(compactSentence(presenterLine, 180))}</p>
+        <p class="operator-cue-line">${escapeHtml(compactSentence(presenterLine, 116))}</p>
         ${currentChecks.length ? `<div class="operator-cue-check-grid">${currentChecks.map((check) => cueCheckChip(check)).join("")}</div>` : ""}
       </div>
     ` : ""}
     <div class="operator-cue-actions">
       <div class="operator-cue-copy">
         <div class="label">Next Operator Action</div>
-        <div class="compact-copy">${escapeHtml(compactSentence(nextStep, 170))}</div>
+        <div class="compact-copy">${escapeHtml(compactSentence(nextStep, 108))}</div>
       </div>
       ${commandJumpButton(cue.nextAction, true)}
     </div>
@@ -1076,6 +1085,18 @@ function aircraftFeedTone(aircraft) {
   return "neutral";
 }
 
+function aircraftFeedStateLabel(aircraft) {
+  const status = String(aircraft?.source_status || "").toLowerCase();
+  if (status === "live") return "LIVE";
+  if (status === "stale") return "STALE";
+  if (status === "stub") return "STUB";
+  return status ? status.toUpperCase() : "UNKNOWN";
+}
+
+function aircraftContractValue(aircraft) {
+  return aircraft?.feed_contract?.active_source_label || aircraft?.source_label || "Backend Stub Contract";
+}
+
 function aircraftScreenPosition(aircraft) {
   const latitude = Number(aircraft?.position?.latitude);
   const longitude = Number(aircraft?.position?.longitude);
@@ -1094,6 +1115,15 @@ function aircraftReadoutCard(label, value, note, tone = "neutral") {
       <strong>${escapeHtml(value)}</strong>
       <small>${escapeHtml(note || "")}</small>
     </article>
+  `;
+}
+
+function aircraftContractChip(label, value, tone = "neutral") {
+  return `
+    <div class="aircraft-contract-chip" data-tone="${escapeHtml(tone)}">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+    </div>
   `;
 }
 
@@ -1119,7 +1149,7 @@ function cockpitMissionRollup(item) {
       <div class="label">${escapeHtml(item.label || "")}</div>
       <strong>${escapeHtml(item.status || item.value || "等待")}</strong>
       <span>${escapeHtml(item.value || "")}</span>
-      <small>${escapeHtml(compactSentence(item.note || "", 82))}</small>
+      <small>${escapeHtml(compactSentence(item.note || "", 58))}</small>
     </article>
   `;
 }
@@ -1132,7 +1162,7 @@ function cockpitSceneChip(scene) {
         <strong>${escapeHtml(scene.status || "待命")}</strong>
       </div>
       <p>${escapeHtml(scene.title || "")}</p>
-      <small>${escapeHtml(compactSentence(scene.note || scene.cue_line || "", 72))}</small>
+      <small>${escapeHtml(compactSentence(scene.note || scene.cue_line || "", 54))}</small>
     </article>
   `;
 }
@@ -1367,12 +1397,18 @@ function renderCockpitShell(snapshot, systemStatus) {
   const baselinePane = compareViewerPaneState(snapshot, "baseline");
   const comparison = snapshot.guided_demo?.comparison || {};
   document.getElementById("cockpitHeadline").textContent =
-    `${sceneLabel} ｜ board=${live.board_online ? "online" : "evidence"} / guard=${live.guard_state || "UNKNOWN"} / link=${linkDirector.selected_profile_label || "正常链路"}。下一步：${nextStep}`;
+    [
+      sceneLabel,
+      `BOARD ${live.board_online ? "ONLINE" : "EVIDENCE"}`,
+      `GUARD ${live.guard_state || "UNKNOWN"}`,
+      `GPS ${aircraftFeedStateLabel(aircraft)}`,
+      `NEXT ${nextStep}`,
+    ].join(" · ");
 
   const modePill = document.getElementById("cockpitModePill");
   modePill.className = `mode-pill ${toneClass(systemStatus.execution_mode.tone)}`;
   modePill.textContent = systemStatus.execution_mode.label;
-  document.getElementById("cockpitSummaryLine").textContent = `${systemStatus.execution_mode.summary} ${boundary}`;
+  document.getElementById("cockpitSummaryLine").textContent = compactSentence(systemStatus.execution_mode.summary || "等待执行模式。", 104);
   document.getElementById("cockpitTimestamp").textContent = `快照更新 ${snapshot.generated_at}`;
   document.getElementById("cockpitBoundaryNote").textContent = boundary;
 
@@ -1398,9 +1434,9 @@ function renderCockpitShell(snapshot, systemStatus) {
   document.getElementById("aircraftTrail").innerHTML = aircraftTrailMarkup(aircraft.track || []);
   document.getElementById("aircraftReadoutGrid").innerHTML = [
     aircraftReadoutCard(
-      "GPS Feed",
-      aircraft.source_status || "unknown",
-      aircraft.source_label || "backend feed",
+      "Feed State",
+      aircraftFeedStateLabel(aircraft),
+      aircraftContractValue(aircraft),
       aircraftFeedTone(aircraft)
     ),
     aircraftReadoutCard(
@@ -1422,14 +1458,26 @@ function renderCockpitShell(snapshot, systemStatus) {
       aircraftFeedTone(aircraft)
     ),
   ].join("");
-  document.getElementById("aircraftFeedNote").textContent = [
-    aircraft.ownership_note || "",
-    aircraft.source_note || aircraft.fallback_note || "",
-    aircraft.integration_note ? `${aircraft.integration_note} (${aircraft.source_api_path || "/api/aircraft-position"})` : "",
-  ].filter(Boolean).join(" ");
+  document.getElementById("aircraftContractStrip").innerHTML = [
+    aircraftContractChip("Feed", aircraftContractValue(aircraft), aircraftFeedTone(aircraft)),
+    aircraftContractChip(
+      "Sample",
+      `#${aircraft.sample?.sequence ?? 0} · ${compactTimestampLabel(aircraft.sample?.captured_at || aircraft.updated_at)}`,
+      aircraftFeedTone(aircraft)
+    ),
+    aircraftContractChip("Transport", aircraft.sample?.transport || "backend_http_post", "neutral"),
+    aircraftContractChip("API", aircraft.source_api_path || aircraft.feed_contract?.api_path || "/api/aircraft-position", "neutral"),
+  ].join("");
+  document.getElementById("aircraftFeedNote").textContent = compactSentence(
+    [
+      aircraft.feed_contract?.summary || "",
+      aircraft.source_note || aircraft.fallback_note || "",
+    ].filter(Boolean).join(" "),
+    158
+  );
 
   document.getElementById("flightFeedPills").innerHTML = [
-    `<div class="status-pill ${toneClass(aircraftFeedTone(aircraft))}">${escapeHtml(aircraft.source_label || "Upper Computer GPS")}</div>`,
+    `<div class="status-pill ${toneClass(aircraftFeedTone(aircraft))}">${escapeHtml(aircraftContractValue(aircraft))}</div>`,
     `<div class="status-pill ${toneClass(live.board_online ? "online" : systemStatus.execution_mode.tone || "degraded")}">${escapeHtml(live.board_online ? "Board Online" : "Evidence Mode")}</div>`,
     `<div class="status-pill ${toneClass(linkDirector.tone || "neutral")}">${escapeHtml(linkDirector.selected_profile_label || "正常链路")}</div>`,
     selectedScenario
@@ -1445,7 +1493,7 @@ function renderCockpitShell(snapshot, systemStatus) {
       </div>
       <div class="status-pill ${toneClass(model.summaryTone || "neutral")}">${escapeHtml(model.operatorCue.currentSceneId ? `Scene ${model.operatorCue.currentSceneId.replace("scene", "")}` : model.summaryLabel)}</div>
     </div>
-    <p class="mission-core-summary">${escapeHtml(compactSentence(model.summaryText, 180))}</p>
+    <p class="mission-core-summary">${escapeHtml(compactSentence(model.summaryText, 102))}</p>
     <div class="cockpit-rollup-grid">
       ${model.rollups.map((item) => cockpitMissionRollup(item)).join("")}
     </div>
@@ -1468,7 +1516,11 @@ function renderCockpitShell(snapshot, systemStatus) {
       </div>
       <div class="status-pill ${toneClass(currentPane?.badgeTone || baselinePane?.badgeTone || "neutral")}">${escapeHtml(`${comparison.end_to_end?.speedup_x?.toFixed ? comparison.end_to_end.speedup_x.toFixed(1) : formatNumber(comparison.end_to_end?.speedup_x || 0, 1)}x headline`)}</div>
     </div>
-    <p class="compact-copy compare-peek-note">${escapeHtml(compactSentence(selectedCompareViewerSample(snapshot)?.sample?.note || "Current / PyTorch provenance 继续在 drawer 内展开。", 120))}</p>
+    <div class="status-meta compare-peek-meta">
+      <span>${escapeHtml(currentPane?.badgeLabel || "current pending")}</span>
+      <span>${escapeHtml(baselinePane?.badgeLabel || "baseline pending")}</span>
+      <span>${escapeHtml(selectedScenario ? `weak +${formatNumber(selectedScenario.comparison?.throughput_uplift_pct || 0)}%` : "repo compare")}</span>
+    </div>
     <div class="compare-peek-grid">
       ${currentPane ? `
         <figure class="compare-peek-pane">
@@ -1522,14 +1574,18 @@ function renderLatestLiveStatus(snapshot) {
       <div class="mini-title">${escapeHtml(latest.headline)}</div>
       <div class="status-pill tone-online">${escapeHtml(latest.status_label)}</div>
     </div>
-    <p class="compact-copy">${escapeHtml(compactSentence(latest.summary, 150))}</p>
+    <div class="status-meta latest-live-meta">
+      <span>${escapeHtml(`report=${latest.report_date}`)}</span>
+      <span>${escapeHtml(`instance=${latest.valid_instance}`)}</span>
+      <span>${escapeHtml(`as_of=${latest.as_of}`)}</span>
+    </div>
     <div class="metric-strip metric-strip-rail">
       ${statCard(latest.current.label, latest.current.completed, latest.current.note)}
       ${statCard(latest.baseline.label, latest.baseline.completed, latest.baseline.note)}
       ${statCard(latest.board.label, latest.board.value, latest.board.note)}
       ${statCard("有效实例", latest.valid_instance, `收口 ${latest.as_of}`)}
     </div>
-    ${facts.length ? `<ul class="list-plain latest-live-facts">${facts.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : ""}
+    ${facts.length ? `<div class="metric-inline latest-live-facts">${facts.map((item) => `<div class="metric-chip">${escapeHtml(compactSentence(item, 56))}</div>`).join("")}</div>` : ""}
     ${renderLinks(links)}
   `;
 }
@@ -1584,7 +1640,11 @@ function renderWeakNetworkConsole(snapshot, systemStatus) {
       </div>
       <div class="status-pill ${toneClass(selectedScenario.tone || "neutral")}">${escapeHtml(`${formatNumber(selectedScenario.channel?.snr_db || 0, 1)} dB`)}</div>
     </div>
-    <p class="compact-copy">${escapeHtml(selectedScenario.summary || catalog.summary || "")}</p>
+    <div class="status-meta weak-console-meta">
+      <span>${escapeHtml(`SNR ${formatNumber(selectedScenario.channel?.snr_db || 0, 1)} dB`)}</span>
+      <span>${escapeHtml(`batch ${selectedScenario.channel?.batch_size || "NA"} / max ${selectedScenario.channel?.max_inputs || "NA"}`)}</span>
+      <span>${escapeHtml(`anchor ${liveAnchor.valid_instance || "NA"} / ${liveAnchor.current_completed || "pending"}`)}</span>
+    </div>
     <div class="weak-console-selector">${scenarioButtons}</div>
     <div class="weak-console-metrics">
       ${weakMetricCard("Pipeline", `${formatNumber(selectedScenario.comparison?.pipeline_images_per_sec || 0)} img/s`, `${formatNumber(selectedScenario.comparison?.pipeline_ms_per_image || 0)} ms/image`, "online")}
@@ -1596,16 +1656,17 @@ function renderWeakNetworkConsole(snapshot, systemStatus) {
       ${stageCards}
     </div>
     <div class="weak-console-footer">
-      <div class="compact-copy">${escapeHtml(selectedScenario.operator_note || "")}</div>
       <div class="status-meta">
-        <span>${escapeHtml(`live anchor=${liveAnchor.valid_instance || "NA"} / ${liveAnchor.current_completed || "pending"}`)}</span>
-        <span>${escapeHtml(linkedScenarioNote)}</span>
+        <span>${escapeHtml(compactSentence(selectedScenario.operator_note || "", 54))}</span>
+        <span>${escapeHtml(compactSentence(linkedScenarioNote, 76))}</span>
       </div>
     </div>
     <div class="weak-console-director">
       <div class="label">Link Director</div>
       <div class="weak-console-selector">${directorButtons}</div>
-      <p class="compact-copy">${escapeHtml(linkDirector.truth_note || catalog.truth_note || "")}</p>
+      <div class="status-meta">
+        <span>${escapeHtml(compactSentence(linkDirector.truth_note || catalog.truth_note || "", 84))}</span>
+      </div>
     </div>
     ${renderLinks([...(selectedScenario.evidence || []), ...(liveAnchor.links || [])].filter(Boolean))}
   `;

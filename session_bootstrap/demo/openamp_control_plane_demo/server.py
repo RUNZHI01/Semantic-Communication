@@ -830,12 +830,24 @@ class DashboardState:
             if value not in (None, ""):
                 fix[key] = value
 
+        sample = dict(current.get("sample") or {})
+        if isinstance(payload.get("sample"), dict):
+            sample.update(payload["sample"])
+        for key in ("captured_at", "sequence", "producer_id", "transport"):
+            value = payload.get(key)
+            if value not in (None, ""):
+                sample[key] = value
+
         merged["position"] = position
         merged["kinematics"] = kinematics
         merged["fix"] = fix
         merged["updated_at"] = now_iso()
 
-        if any(payload.get(key) not in (None, "") for key in ("latitude", "longitude")):
+        position_changed = any(payload.get(key) not in (None, "") for key in ("latitude", "longitude")) or isinstance(
+            payload.get("position"),
+            dict,
+        )
+        if position_changed:
             merged.setdefault("source_kind", "upper_computer_gps")
             if not payload.get("source_kind"):
                 merged["source_kind"] = "upper_computer_gps"
@@ -843,6 +855,19 @@ class DashboardState:
                 merged["source_status"] = "live"
             if not payload.get("source_label"):
                 merged["source_label"] = "Upper Computer GPS live feed"
+            if not payload.get("source_note"):
+                merged["source_note"] = "Upper-computer GPS live samples are currently driving the backend aircraft-position contract."
+            explicit_captured_at = payload.get("captured_at") not in (None, "") or (
+                isinstance(payload.get("sample"), dict) and payload["sample"].get("captured_at") not in (None, "")
+            )
+            if not explicit_captured_at:
+                sample["captured_at"] = merged["updated_at"]
+            explicit_sequence = payload.get("sequence") not in (None, "") or (
+                isinstance(payload.get("sample"), dict) and payload["sample"].get("sequence") not in (None, "")
+            )
+            if not explicit_sequence:
+                sample["sequence"] = self._safe_int(current.get("sample", {}).get("sequence"), default=0) + 1
+        merged["sample"] = sample
         return merged
 
     def current_aircraft_position(self) -> dict[str, Any]:
