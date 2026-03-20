@@ -10,6 +10,8 @@ PanelFrame {
     readonly property var launchConfig: DataUtils.objectOrEmpty((typeof launchOptions !== "undefined") ? launchOptions : null)
     readonly property bool softwareRenderEnabled: !!launchConfig["softwareRender"]
     readonly property var bridge: (typeof cockpitBridge !== "undefined" && cockpitBridge) ? cockpitBridge : null
+    readonly property int enabledActionCount: enabledActions()
+    readonly property int readonlyActionCount: Math.max(0, actions.length - enabledActionCount)
 
     panelColor: shellWindow ? shellWindow.cardColorSoft : "#08131b"
     borderTone: shellWindow ? shellWindow.borderSoft : "#1a3f61"
@@ -37,6 +39,16 @@ PanelFrame {
         return "#0d2234"
     }
 
+    function enabledActions() {
+        var total = 0
+        for (var index = 0; index < actions.length; ++index) {
+            var action = DataUtils.objectOrEmpty(actions[index])
+            if (!!action["enabled"])
+                total += 1
+        }
+        return total
+    }
+
     ColumnLayout {
         id: contentLayout
         anchors.fill: parent
@@ -47,13 +59,33 @@ PanelFrame {
             Layout.fillWidth: true
             radius: shellWindow ? shellWindow.cardRadius : 14
             gradient: Gradient {
-                GradientStop { position: 0.0; color: "#0f2c47" }
-                GradientStop { position: 0.5; color: "#091a2a" }
+                GradientStop { position: 0.0; color: "#123554" }
+                GradientStop { position: 0.5; color: "#0a1d2e" }
                 GradientStop { position: 1.0; color: "#06101a" }
             }
-            border.color: "#2b7eaf"
+            border.color: "#3190cb"
             border.width: 1
             implicitHeight: heroLayout.implicitHeight + ((shellWindow ? shellWindow.cardPadding : 12) * 2)
+
+            Rectangle {
+                width: parent.width * 0.38
+                height: parent.height * 0.9
+                radius: width / 2
+                color: "#4abfff"
+                opacity: 0.1
+                x: -width * 0.2
+                y: -height * 0.2
+            }
+
+            Rectangle {
+                anchors.fill: parent
+                anchors.margins: 1
+                radius: parent.radius - 1
+                color: "transparent"
+                border.color: "#143551"
+                border.width: 1
+                opacity: 0.82
+            }
 
             GridLayout {
                 id: heroLayout
@@ -76,11 +108,19 @@ PanelFrame {
                     }
 
                     Text {
-                        text: "执行控制"
+                        text: "执行控制舱"
                         color: shellWindow ? shellWindow.textStrong : "#f4fbff"
                         font.pixelSize: shellWindow ? shellWindow.sectionTitleSize : 20
                         font.bold: true
                         font.family: shellWindow ? shellWindow.displayFamily : "Noto Sans CJK SC"
+                    }
+
+                    Text {
+                        text: "EXECUTION CONTROL WINDOW"
+                        color: shellWindow ? shellWindow.textSecondary : "#83acc8"
+                        font.pixelSize: shellWindow ? shellWindow.captionSize : 11
+                        font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                        font.letterSpacing: shellWindow ? shellWindow.scaled(1) : 1
                     }
 
                     Text {
@@ -90,6 +130,44 @@ PanelFrame {
                         wrapMode: Text.WordWrap
                         font.pixelSize: shellWindow ? shellWindow.bodySize : 12
                         font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        radius: shellWindow ? shellWindow.edgeRadius : 10
+                        gradient: Gradient {
+                            GradientStop { position: 0.0; color: "#0b1b2d" }
+                            GradientStop { position: 1.0; color: "#091522" }
+                        }
+                        border.color: "#1f5a83"
+                        border.width: 1
+                        implicitHeight: doctrineColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(9) : 9) * 2)
+
+                        Column {
+                            id: doctrineColumn
+                            anchors.fill: parent
+                            anchors.margins: shellWindow ? shellWindow.scaled(9) : 9
+                            spacing: 2
+
+                            Text {
+                                text: "执行门控 / EXECUTION GATE"
+                                color: shellWindow ? shellWindow.accentCyan : "#72f3ff"
+                                font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                font.letterSpacing: shellWindow ? shellWindow.scaled(1) : 1
+                            }
+
+                            Text {
+                                width: parent.width
+                                text: enabledActionCount > 0
+                                    ? "可执行合同动作 " + String(enabledActionCount) + " 项，未开放动作保持只读。"
+                                    : "当前没有开放执行动作，动作区全部作为只读合同镜像。"
+                                color: shellWindow ? shellWindow.textSecondary : "#83acc8"
+                                font.pixelSize: shellWindow ? shellWindow.captionSize : 11
+                                font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                wrapMode: Text.WordWrap
+                            }
+                        }
                     }
                 }
 
@@ -103,6 +181,11 @@ PanelFrame {
                                 "label": "动作数",
                                 "value": String(actions.length),
                                 "tone": "neutral"
+                            },
+                            {
+                                "label": "可执行",
+                                "value": String(enabledActionCount),
+                                "tone": enabledActionCount > 0 ? "online" : "warning"
                             },
                             {
                                 "label": "重载",
@@ -119,11 +202,28 @@ PanelFrame {
                         delegate: Rectangle {
                             readonly property var chip: modelData
                             radius: shellWindow ? shellWindow.edgeRadius : 10
-                            color: root.toneFill(chip["tone"])
+                            gradient: Gradient {
+                                GradientStop { position: 0.0; color: Qt.lighter(root.toneFill(chip["tone"]), 1.14) }
+                                GradientStop { position: 1.0; color: root.toneFill(chip["tone"]) }
+                            }
                             border.color: root.toneColor(chip["tone"])
                             border.width: 1
                             height: chipColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(8) : 8) * 2)
                             width: Math.max(shellWindow ? shellWindow.scaled(140) : 140, chipColumn.implicitWidth + (shellWindow ? shellWindow.scaled(20) : 20))
+
+                            Rectangle {
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                height: shellWindow ? shellWindow.scaled(2) : 2
+                                gradient: Gradient {
+                                    GradientStop { position: 0.0; color: "transparent" }
+                                    GradientStop { position: 0.28; color: root.toneColor(chip["tone"]) }
+                                    GradientStop { position: 0.72; color: Qt.lighter(root.toneColor(chip["tone"]), 1.16) }
+                                    GradientStop { position: 1.0; color: "transparent" }
+                                }
+                                opacity: 0.74
+                            }
 
                             Column {
                                 id: chipColumn
@@ -134,7 +234,7 @@ PanelFrame {
                                     text: chip["label"]
                                     color: shellWindow ? shellWindow.textMuted : "#4e7392"
                                     font.pixelSize: shellWindow ? shellWindow.captionSize : 11
-                                    font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
                                 }
 
                                 Text {
@@ -147,6 +247,44 @@ PanelFrame {
                             }
                         }
                     }
+                }
+            }
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: shellWindow ? shellWindow.compactGap : 8
+
+            Text {
+                text: "动作窗口 / COMMAND WINDOWS"
+                color: shellWindow ? shellWindow.accentBlue : "#38b6ff"
+                font.pixelSize: shellWindow ? shellWindow.captionSize : 11
+                font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                font.letterSpacing: shellWindow ? shellWindow.scaled(1) : 1
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 1
+                color: "#18405f"
+                opacity: 0.92
+            }
+
+            Rectangle {
+                radius: shellWindow ? shellWindow.edgeRadius : 10
+                color: "#081625"
+                border.color: "#20577f"
+                border.width: 1
+                implicitWidth: actionCountText.implicitWidth + ((shellWindow ? shellWindow.scaled(12) : 12) * 2)
+                implicitHeight: actionCountText.implicitHeight + ((shellWindow ? shellWindow.scaled(5) : 5) * 2)
+
+                Text {
+                    id: actionCountText
+                    anchors.centerIn: parent
+                    text: String(actions.length) + " ACTIONS"
+                    color: shellWindow ? shellWindow.textPrimary : "#d5eeff"
+                    font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
                 }
             }
         }
@@ -196,6 +334,16 @@ PanelFrame {
                         implicitHeight: actionColumn.implicitHeight + ((shellWindow ? shellWindow.cardPadding : 12) * 2)
                         scale: actionCard.hovered ? 1.015 : 1.0
 
+                        Rectangle {
+                            anchors.fill: parent
+                            anchors.margins: 1
+                            radius: parent.radius - 1
+                            color: "transparent"
+                            border.color: actionCard.enabledAction ? "#143654" : "#112334"
+                            border.width: 1
+                            opacity: 0.74
+                        }
+
                         Behavior on scale {
                             NumberAnimation { duration: 120 }
                         }
@@ -233,6 +381,27 @@ PanelFrame {
                             radius: width / 2
                             color: root.toneColor(modelData["tone"])
                             opacity: actionCard.enabledAction ? 0.92 : 0.42
+                        }
+
+                        Rectangle {
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            anchors.margins: shellWindow ? shellWindow.scaled(10) : 10
+                            radius: shellWindow ? shellWindow.edgeRadius : 10
+                            color: root.toneFill(modelData["tone"])
+                            border.color: root.toneColor(modelData["tone"])
+                            border.width: 1
+                            implicitWidth: toneBadgeText.implicitWidth + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
+                            implicitHeight: toneBadgeText.implicitHeight + ((shellWindow ? shellWindow.scaled(5) : 5) * 2)
+
+                            Text {
+                                id: toneBadgeText
+                                anchors.centerIn: parent
+                                text: String(modelData["tone"] || "neutral").toUpperCase()
+                                color: shellWindow ? shellWindow.textPrimary : "#d5eeff"
+                                font.pixelSize: shellWindow ? shellWindow.captionSize : 9
+                                font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                            }
                         }
 
                         MouseArea {
@@ -364,21 +533,86 @@ PanelFrame {
         Rectangle {
             Layout.fillWidth: true
             radius: shellWindow ? shellWindow.edgeRadius : 10
-            color: "#081321"
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: "#0b1b2d" }
+                GradientStop { position: 1.0; color: "#091421" }
+            }
             border.color: "#1f557c"
             border.width: 1
-            implicitHeight: footerText.implicitHeight + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
+            implicitHeight: footerColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
 
-            Text {
-                id: footerText
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                height: shellWindow ? shellWindow.scaled(3) : 3
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: "transparent" }
+                    GradientStop { position: 0.22; color: shellWindow ? shellWindow.accentBlue : "#38b6ff" }
+                    GradientStop { position: 0.72; color: shellWindow ? shellWindow.accentCyan : "#72f3ff" }
+                    GradientStop { position: 1.0; color: "transparent" }
+                }
+                opacity: 0.76
+            }
+
+            RowLayout {
+                id: footerColumn
                 anchors.fill: parent
                 anchors.margins: shellWindow ? shellWindow.scaled(10) : 10
-                text: panel["footer_note"] || ""
-                color: shellWindow ? shellWindow.textMuted : "#4e7392"
-                wrapMode: Text.WordWrap
-                font.pixelSize: shellWindow ? shellWindow.captionSize : 11
-                font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
-                visible: text.length > 0
+                spacing: shellWindow ? shellWindow.compactGap : 8
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 2
+
+                    Text {
+                        text: "审计回路 / AUDIT LOOP"
+                        color: shellWindow ? shellWindow.accentBlue : "#38b6ff"
+                        font.pixelSize: shellWindow ? shellWindow.captionSize : 11
+                        font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                        font.letterSpacing: shellWindow ? shellWindow.scaled(1) : 1
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: panel["footer_note"] || "执行舱保持合同边界，只对已接线动作开放人工触发入口。"
+                        color: shellWindow ? shellWindow.textMuted : "#4e7392"
+                        wrapMode: Text.WordWrap
+                        font.pixelSize: shellWindow ? shellWindow.captionSize : 11
+                        font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                    }
+                }
+
+                Rectangle {
+                    Layout.alignment: Qt.AlignTop
+                    radius: shellWindow ? shellWindow.edgeRadius : 10
+                    color: "#091726"
+                    border.color: "#1c547c"
+                    border.width: 1
+                    implicitWidth: footerStampColumn.implicitWidth + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
+                    implicitHeight: footerStampColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(6) : 6) * 2)
+
+                    Column {
+                        id: footerStampColumn
+                        anchors.centerIn: parent
+                        spacing: 1
+
+                        Text {
+                            text: "READ ONLY"
+                            color: shellWindow ? shellWindow.textMuted : "#4e7392"
+                            font.pixelSize: shellWindow ? shellWindow.captionSize : 9
+                            font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                        }
+
+                        Text {
+                            text: String(readonlyActionCount)
+                            color: shellWindow ? shellWindow.textPrimary : "#d5eeff"
+                            font.pixelSize: shellWindow ? shellWindow.captionSize : 11
+                            font.bold: true
+                            font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                        }
+                    }
+                }
             }
         }
     }

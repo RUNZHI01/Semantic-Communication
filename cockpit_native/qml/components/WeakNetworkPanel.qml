@@ -62,13 +62,33 @@ PanelFrame {
             Layout.fillWidth: true
             radius: shellWindow ? shellWindow.cardRadius : 14
             gradient: Gradient {
-                GradientStop { position: 0.0; color: "#11324f" }
-                GradientStop { position: 0.5; color: "#091a2c" }
+                GradientStop { position: 0.0; color: "#123553" }
+                GradientStop { position: 0.5; color: "#0a1d30" }
                 GradientStop { position: 1.0; color: "#06101a" }
             }
-            border.color: "#2d83bc"
+            border.color: "#3191cf"
             border.width: 1
             implicitHeight: heroColumn.implicitHeight + ((shellWindow ? shellWindow.cardPadding : 14) * 2)
+
+            Rectangle {
+                width: parent.width * 0.42
+                height: parent.height * 0.88
+                radius: width / 2
+                color: "#46bbff"
+                opacity: 0.1
+                x: -width * 0.22
+                y: -height * 0.2
+            }
+
+            Rectangle {
+                anchors.fill: parent
+                anchors.margins: 1
+                radius: parent.radius - 1
+                color: "transparent"
+                border.color: "#13344f"
+                border.width: 1
+                opacity: 0.8
+            }
 
             Column {
                 id: heroColumn
@@ -90,6 +110,14 @@ PanelFrame {
                     font.pixelSize: shellWindow ? shellWindow.sectionTitleSize : 24
                     font.bold: true
                     font.family: shellWindow ? shellWindow.displayFamily : "Noto Sans CJK SC"
+                }
+
+                Text {
+                    text: "WEAK-LINK PLAYBOOK"
+                    color: shellWindow ? shellWindow.textSecondary : "#83acc8"
+                    font.pixelSize: shellWindow ? shellWindow.captionSize : 11
+                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                    font.letterSpacing: shellWindow ? shellWindow.scaled(1) : 1
                 }
 
                 Text {
@@ -127,11 +155,28 @@ PanelFrame {
                         delegate: Rectangle {
                             readonly property var chip: modelData
                             radius: shellWindow ? shellWindow.edgeRadius : 10
-                            color: root.toneFill(chip["tone"])
+                            gradient: Gradient {
+                                GradientStop { position: 0.0; color: Qt.lighter(root.toneFill(chip["tone"]), 1.14) }
+                                GradientStop { position: 1.0; color: root.toneFill(chip["tone"]) }
+                            }
                             border.color: root.toneColor(chip["tone"])
                             border.width: 1
                             height: chipColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(8) : 8) * 2)
                             width: Math.max(shellWindow ? shellWindow.scaled(154) : 154, chipColumn.implicitWidth + (shellWindow ? shellWindow.scaled(22) : 22))
+
+                            Rectangle {
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                height: shellWindow ? shellWindow.scaled(2) : 2
+                                gradient: Gradient {
+                                    GradientStop { position: 0.0; color: "transparent" }
+                                    GradientStop { position: 0.28; color: root.toneColor(chip["tone"]) }
+                                    GradientStop { position: 0.72; color: Qt.lighter(root.toneColor(chip["tone"]), 1.16) }
+                                    GradientStop { position: 1.0; color: "transparent" }
+                                }
+                                opacity: 0.74
+                            }
 
                             Column {
                                 id: chipColumn
@@ -142,7 +187,7 @@ PanelFrame {
                                     text: chip["label"]
                                     color: shellWindow ? shellWindow.textMuted : "#4e7392"
                                     font.pixelSize: shellWindow ? shellWindow.captionSize : 11
-                                    font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
                                 }
 
                                 Text {
@@ -163,10 +208,37 @@ PanelFrame {
         Rectangle {
             Layout.fillWidth: true
             radius: shellWindow ? shellWindow.cardRadius : 14
-            color: "#091321"
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: "#10253a" }
+                GradientStop { position: 1.0; color: "#091321" }
+            }
             border.color: root.toneColor(liveAnchor["tone"])
             border.width: 1
             implicitHeight: anchorColumn.implicitHeight + ((shellWindow ? shellWindow.cardPadding : 12) * 2)
+
+            Rectangle {
+                anchors.fill: parent
+                anchors.margins: 1
+                radius: parent.radius - 1
+                color: "transparent"
+                border.color: "#13334d"
+                border.width: 1
+                opacity: 0.8
+            }
+
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                height: shellWindow ? shellWindow.scaled(3) : 3
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: "transparent" }
+                    GradientStop { position: 0.22; color: root.toneColor(liveAnchor["tone"]) }
+                    GradientStop { position: 0.72; color: Qt.lighter(root.toneColor(liveAnchor["tone"]), 1.16) }
+                    GradientStop { position: 1.0; color: "transparent" }
+                }
+                opacity: 0.78
+            }
 
             Column {
                 id: anchorColumn
@@ -204,23 +276,101 @@ PanelFrame {
                     width: parent.width
                     spacing: shellWindow ? shellWindow.compactGap : 8
 
-                    Text {
+                    Rectangle {
                         Layout.fillWidth: true
-                        text: "当前 " + String(liveAnchor["current_completed"] || "--")
-                        color: shellWindow ? shellWindow.textPrimary : "#d5eeff"
-                        font.pixelSize: shellWindow ? shellWindow.captionSize : 11
-                        font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
-                        wrapMode: Text.WordWrap
+                        radius: shellWindow ? shellWindow.edgeRadius : 10
+                        color: "#091726"
+                        border.color: "#1d547c"
+                        border.width: 1
+                        implicitHeight: currentAnchorColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(7) : 7) * 2)
+
+                        Column {
+                            id: currentAnchorColumn
+                            anchors.centerIn: parent
+                            spacing: 1
+
+                            Text {
+                                text: "当前 / CURRENT"
+                                color: shellWindow ? shellWindow.textMuted : "#4e7392"
+                                font.pixelSize: shellWindow ? shellWindow.captionSize : 9
+                                font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                            }
+
+                            Text {
+                                text: String(liveAnchor["current_completed"] || "--")
+                                color: shellWindow ? shellWindow.textPrimary : "#d5eeff"
+                                font.pixelSize: shellWindow ? shellWindow.captionSize : 11
+                                font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                            }
+                        }
                     }
 
-                    Text {
+                    Rectangle {
                         Layout.fillWidth: true
-                        text: "基线 " + String(liveAnchor["baseline_completed"] || "--")
-                        color: shellWindow ? shellWindow.textPrimary : "#d5eeff"
-                        font.pixelSize: shellWindow ? shellWindow.captionSize : 11
-                        font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
-                        wrapMode: Text.WordWrap
+                        radius: shellWindow ? shellWindow.edgeRadius : 10
+                        color: "#091726"
+                        border.color: "#1d547c"
+                        border.width: 1
+                        implicitHeight: baselineAnchorColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(7) : 7) * 2)
+
+                        Column {
+                            id: baselineAnchorColumn
+                            anchors.centerIn: parent
+                            spacing: 1
+
+                            Text {
+                                text: "基线 / BASELINE"
+                                color: shellWindow ? shellWindow.textMuted : "#4e7392"
+                                font.pixelSize: shellWindow ? shellWindow.captionSize : 9
+                                font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                            }
+
+                            Text {
+                                text: String(liveAnchor["baseline_completed"] || "--")
+                                color: shellWindow ? shellWindow.textPrimary : "#d5eeff"
+                                font.pixelSize: shellWindow ? shellWindow.captionSize : 11
+                                font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                            }
+                        }
                     }
+                }
+            }
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: shellWindow ? shellWindow.compactGap : 8
+
+            Text {
+                text: "策略栈 / PLAYBOOK STACK"
+                color: shellWindow ? shellWindow.accentBlue : "#38b6ff"
+                font.pixelSize: shellWindow ? shellWindow.captionSize : 11
+                font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                font.letterSpacing: shellWindow ? shellWindow.scaled(1) : 1
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 1
+                color: "#18405f"
+                opacity: 0.92
+            }
+
+            Rectangle {
+                radius: shellWindow ? shellWindow.edgeRadius : 10
+                color: "#081625"
+                border.color: "#20577f"
+                border.width: 1
+                implicitWidth: scenarioCountText.implicitWidth + ((shellWindow ? shellWindow.scaled(12) : 12) * 2)
+                implicitHeight: scenarioCountText.implicitHeight + ((shellWindow ? shellWindow.scaled(5) : 5) * 2)
+
+                Text {
+                    id: scenarioCountText
+                    anchors.centerIn: parent
+                    text: String(scenarios.length) + " SCENARIOS"
+                    color: shellWindow ? shellWindow.textPrimary : "#d5eeff"
+                    font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
                 }
             }
         }
@@ -250,6 +400,41 @@ PanelFrame {
                         border.width: 1
                         border.color: highlighted ? "#3aaeff" : root.toneColor(scenario["tone"])
                         implicitHeight: cardColumn.implicitHeight + ((shellWindow ? shellWindow.cardPadding : 12) * 2)
+
+                        Rectangle {
+                            anchors.fill: parent
+                            anchors.margins: 1
+                            radius: parent.radius - 1
+                            color: "transparent"
+                            border.color: highlighted ? "#1e5b86" : "#112f49"
+                            border.width: 1
+                            opacity: 0.78
+                        }
+
+                        Rectangle {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            height: shellWindow ? shellWindow.scaled(3) : 3
+                            gradient: Gradient {
+                                GradientStop { position: 0.0; color: "transparent" }
+                                GradientStop { position: 0.22; color: highlighted ? "#3aaeff" : root.toneColor(scenario["tone"]) }
+                                GradientStop { position: 0.72; color: highlighted ? "#9ff1ff" : Qt.lighter(root.toneColor(scenario["tone"]), 1.16) }
+                                GradientStop { position: 1.0; color: "transparent" }
+                            }
+                            opacity: 0.78
+                        }
+
+                        Rectangle {
+                            anchors.left: parent.left
+                            anchors.top: parent.top
+                            anchors.bottom: parent.bottom
+                            anchors.margins: shellWindow ? shellWindow.scaled(10) : 10
+                            width: shellWindow ? shellWindow.scaled(4) : 4
+                            radius: width / 2
+                            color: highlighted ? "#72f3ff" : root.toneColor(scenario["tone"])
+                            opacity: 0.92
+                        }
 
                         Column {
                             id: cardColumn
@@ -288,6 +473,24 @@ PanelFrame {
                                         color: shellWindow ? shellWindow.textStrong : "#f4fbff"
                                         font.pixelSize: shellWindow ? shellWindow.captionSize : 10
                                         font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                    }
+                                }
+
+                                Rectangle {
+                                    radius: shellWindow ? shellWindow.edgeRadius : 10
+                                    color: "#091726"
+                                    border.color: "#1d547c"
+                                    border.width: 1
+                                    implicitWidth: scenarioIdText.implicitWidth + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
+                                    implicitHeight: scenarioIdText.implicitHeight + ((shellWindow ? shellWindow.scaled(5) : 5) * 2)
+
+                                    Text {
+                                        id: scenarioIdText
+                                        anchors.centerIn: parent
+                                        text: scenario["scenario_id"] || "--"
+                                        color: shellWindow ? shellWindow.textPrimary : "#d5eeff"
+                                        font.pixelSize: shellWindow ? shellWindow.captionSize : 9
+                                        font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
                                     }
                                 }
                             }
