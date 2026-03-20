@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import importlib.util
 import json
 from pathlib import Path
@@ -28,9 +29,16 @@ def write_text(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
+def make_workload_record(payload_json: str) -> str:
+    raw = (b"\x00" * 8) + payload_json.encode("utf-8")
+    encoded = base64.b64encode(raw).decode("ascii").rstrip("=")
+    return json.dumps(["123", encoded], ensure_ascii=False)
+
+
 def write_source_db(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
-    write_text(path / "database_workload.json", '{"workload":"baseline"}\n')
+    workload_payload = '{"root_index": 1, "nodes": []}'
+    write_text(path / "database_workload.json", make_workload_record(workload_payload) + "\n")
     write_text(path / "database_tuning_record.json", '{"record":"baseline"}\n')
 
 
@@ -259,6 +267,37 @@ class BuildBaselineExportBridgeTest(unittest.TestCase):
                 )
 
             self.assertIn("no local baseline lineage DB is available", str(ctx.exception))
+
+    def test_rejects_legacy_workload_json_format_before_rpc_tune(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir_raw:
+            project_root = Path(temp_dir_raw)
+            self.patch_project_root(project_root)
+
+            source_archive = project_root / "baseline_archive"
+            source_db = source_archive / "tuning_logs"
+            source_db.mkdir(parents=True, exist_ok=True)
+            write_text(
+                source_db / "database_workload.json",
+                '["123","7OQAAAAAAAB7CiAgInJvb3QiOiAxLCAKICAibm9kZXMiOiBbXX0="]\n',
+            )
+            write_text(source_db / "database_tuning_record.json", '{"record":"baseline"}\n')
+
+            onnx_model = project_root / "model.onnx"
+            write_text(onnx_model, "fake-onnx")
+            rebuild_env = project_root / "rebuild.env"
+            write_rebuild_env(rebuild_env, builder_python=sys.executable, onnx_model=onnx_model)
+
+            with self.assertRaises(SystemExit) as ctx:
+                module.main(
+                    [
+                        "--rebuild-env",
+                        str(rebuild_env),
+                        "--source-archive",
+                        str(source_archive),
+                    ]
+                )
+
+            self.assertIn("older JSON object-graph format", str(ctx.exception))
 
 
 if __name__ == "__main__":

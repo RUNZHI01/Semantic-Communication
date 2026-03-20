@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -187,6 +188,37 @@ def file_sha256(path: Path) -> str:
         for chunk in iter(lambda: infile.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def decode_workload_record_json(path: Path) -> str:
+    first_line = path.read_text(encoding="utf-8", errors="replace").splitlines()[0]
+    record = json.loads(first_line)
+    if not isinstance(record, list) or len(record) < 2 or not isinstance(record[1], str):
+        raise SystemExit(f"ERROR: unexpected workload record format in {path}")
+    payload = record[1]
+    padding = "=" * ((4 - len(payload) % 4) % 4)
+    raw = base64.b64decode(payload + padding)
+    if len(raw) < 8:
+        raise SystemExit(f"ERROR: decoded workload payload too short in {path}")
+    return raw[8:].decode("utf-8", errors="replace")
+
+
+def validate_source_db_compatibility(path: Path) -> None:
+    workload_path = path / "database_workload.json"
+    decoded = decode_workload_record_json(workload_path)
+    if '"root_index"' in decoded:
+        return
+    if '"root"' in decoded:
+        raise SystemExit(
+            "ERROR: baseline lineage DB uses an older JSON object-graph format "
+            "(decoded workload has `root` but not `root_index`), so current-safe "
+            "rpc_tune.py cannot consume it directly. You need a format bridge or a "
+            "different baseline export path before build_baseline_export_bridge.py can proceed."
+        )
+    raise SystemExit(
+        "ERROR: unable to confirm current-safe JSONDatabase compatibility for source DB "
+        f"{path}; decoded workload record lacks both `root_index` and legacy `root`."
+    )
 
 
 def extract_last_json_payload(path: Path) -> dict[str, object]:
@@ -456,6 +488,7 @@ def main(argv: list[str] | None = None) -> int:
     env_vars = parse_shell_env(rebuild_env)
 
     source_db_dir, source_archive = resolve_source_db(args, env_vars)
+    validate_source_db_compatibility(source_db_dir)
 
     local_builder_python = resolve_project_path(
         env_vars.get("LOCAL_TVM_PYTHON") or env_vars.get("TVM_PYTHON")
