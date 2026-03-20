@@ -12,6 +12,7 @@ PanelFrame {
     readonly property var bridge: (typeof cockpitBridge !== "undefined" && cockpitBridge) ? cockpitBridge : null
     readonly property int enabledActionCount: enabledActions()
     readonly property int readonlyActionCount: Math.max(0, actions.length - enabledActionCount)
+    readonly property string heroStampLabel: String(enabledActionCount) + " LIVE"
 
     panelColor: shellWindow ? shellWindow.panelColorRaised : "#08131b"
     borderTone: shellWindow ? shellWindow.panelTraceStrong : "#1a3f61"
@@ -99,12 +100,36 @@ PanelFrame {
                     Layout.fillWidth: true
                     spacing: shellWindow ? shellWindow.compactGap : 8
 
-                    Text {
-                        text: panel["title"] || "执行坞站 / Action Dock"
-                        color: shellWindow ? shellWindow.accentBlue : "#38b6ff"
-                        font.pixelSize: shellWindow ? shellWindow.eyebrowSize : 10
-                        font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
-                        font.letterSpacing: shellWindow ? shellWindow.scaled(1) : 1
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: shellWindow ? shellWindow.compactGap : 8
+
+                        Text {
+                            Layout.fillWidth: true
+                            text: panel["title"] || "执行坞站 / Action Dock"
+                            color: shellWindow ? shellWindow.accentBlue : "#38b6ff"
+                            font.pixelSize: shellWindow ? shellWindow.eyebrowSize : 10
+                            font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                            font.letterSpacing: shellWindow ? shellWindow.scaled(1) : 1
+                        }
+
+                        Rectangle {
+                            radius: shellWindow ? shellWindow.edgeRadius : 10
+                            color: "#091726"
+                            border.color: "#1d547c"
+                            border.width: 1
+                            implicitWidth: heroStamp.implicitWidth + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
+                            implicitHeight: heroStamp.implicitHeight + ((shellWindow ? shellWindow.scaled(5) : 5) * 2)
+
+                            Text {
+                                id: heroStamp
+                                anchors.centerIn: parent
+                                text: root.heroStampLabel
+                                color: shellWindow ? shellWindow.textPrimary : "#d5eeff"
+                                font.pixelSize: shellWindow ? shellWindow.captionSize : 9
+                                font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                            }
+                        }
                     }
 
                     Text {

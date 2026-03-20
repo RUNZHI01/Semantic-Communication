@@ -185,6 +185,60 @@ PanelFrame {
             "tone": String(liveAnchorData["tone"] || latestEventTone)
         }
     ]
+    readonly property var compactApertureModel: [
+        {
+            "label": "APERTURE",
+            "value": wallboardStatusLabel,
+            "detail": stagePriorityLabel,
+            "tone": wallboardStatusTone
+        },
+        {
+            "label": "HOTSPOTS",
+            "value": String(hotspotCountByTone("warning")) + " WARN",
+            "detail": String(wallboardHotspots.length) + " GRID",
+            "tone": hotspotCountByTone("warning") > 0 ? "warning" : "online"
+        },
+        {
+            "label": "ANCHOR",
+            "value": compactMessage(String(liveAnchorData["valid_instance"] || "--"), "--", 14),
+            "detail": compactMessage(String(liveAnchorData["board_status"] || sampleTimestamp), sampleTimestamp, 22),
+            "tone": String(liveAnchorData["tone"] || "neutral")
+        },
+        {
+            "label": "EVENT",
+            "value": compactMessage(latestEventValue, "--", 18),
+            "detail": compactMessage(lastJobLabel, "--", 18),
+            "tone": latestEventTone
+        }
+    ]
+    readonly property string projectionApertureLabel: wallboardStatusTone === "warning"
+        ? "GLOBAL RISK APERTURE"
+        : "GLOBAL DEFENSE APERTURE"
+    readonly property string projectionApertureDetail: wallboardStatusTone === "warning"
+        ? "弱网锚点与控制事件已经压入中心孔径。"
+        : "航迹、热点弧线与采样心跳在同一孔径内保持锁定。"
+    readonly property var apertureRibbonModel: [
+        {
+            "label": "GRID",
+            "value": String(wallboardHotspots.length) + " sectors",
+            "tone": "neutral"
+        },
+        {
+            "label": "WARN",
+            "value": String(hotspotCountByTone("warning")) + " hot",
+            "tone": hotspotCountByTone("warning") > 0 ? "warning" : "online"
+        },
+        {
+            "label": "ROUTE",
+            "value": String(Number(trackData.length || 0).toFixed(0)) + " nodes",
+            "tone": hasRealTrack() ? "online" : "neutral"
+        },
+        {
+            "label": "ANCHOR",
+            "value": compactMessage(String(liveAnchorData["valid_instance"] || "--"), "--", 14),
+            "tone": String(liveAnchorData["tone"] || "neutral")
+        }
+    ]
     readonly property var missionRibbonModel: [
         {
             "label": "源",
@@ -390,6 +444,38 @@ PanelFrame {
             "label": "HOTSPOTS",
             "value": String(warningHotspotCount) + " WARN / " + String(wallboardHotspots.length) + " TOTAL",
             "detail": String(onlineHotspotCount) + " stable meshes",
+            "tone": warningHotspotCount > 0 ? "warning" : "online"
+        }
+    ]
+    readonly property string stageCommandBridgeLabel: wallboardStatusTone === "warning"
+        ? "GLOBAL WATCH BRIDGE"
+        : "GLOBAL COMMAND BRIDGE"
+    readonly property string stageCommandBridgeDetail: wallboardStatusTone === "warning"
+        ? "把弱网、锚点与控制事件压进同一桥接层，中心主舞台优先追踪链路风险。"
+        : "把航迹、热点弧线与采样心跳锁进同一桥接层，中心主舞台保持稳定锁定。"
+    readonly property var stageBridgeModel: [
+        {
+            "label": "STATUS",
+            "value": wallboardStatusLabel,
+            "detail": missionModeEnglish,
+            "tone": wallboardStatusTone
+        },
+        {
+            "label": "ANCHOR",
+            "value": compactMessage(String(liveAnchorData["valid_instance"] || "--"), "--", 16),
+            "detail": compactMessage(String(liveAnchorData["board_status"] || sampleTimestamp), sampleTimestamp, 22),
+            "tone": String(liveAnchorData["tone"] || "neutral")
+        },
+        {
+            "label": "WATCH",
+            "value": compactMessage(latestEventValue, "--", 18),
+            "detail": recommendedScenarioId,
+            "tone": latestEventTone
+        },
+        {
+            "label": "HOT GRID",
+            "value": String(warningHotspotCount) + " WARN",
+            "detail": String(wallboardHotspots.length) + " sectors",
             "tone": warningHotspotCount > 0 ? "warning" : "online"
         }
     ]
@@ -635,6 +721,138 @@ PanelFrame {
                     elide: Text.ElideRight
                 }
 
+                Rectangle {
+                    Layout.fillWidth: true
+                    radius: shellWindow ? shellWindow.edgeRadius : 10
+                    gradient: Gradient {
+                        GradientStop { position: 0.0; color: "#0d1d2e" }
+                        GradientStop { position: 0.56; color: "#081422" }
+                        GradientStop { position: 1.0; color: "#06101a" }
+                    }
+                    border.color: root.traceStrong
+                    border.width: 1
+                    implicitHeight: compactApertureLayout.implicitHeight + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
+
+                    Rectangle {
+                        anchors.fill: parent
+                        anchors.margins: 1
+                        radius: parent.radius - 1
+                        color: "transparent"
+                        border.color: "#123551"
+                        border.width: 1
+                        opacity: 0.8
+                    }
+
+                    ColumnLayout {
+                        id: compactApertureLayout
+                        anchors.fill: parent
+                        anchors.margins: shellWindow ? shellWindow.scaled(10) : 10
+                        spacing: shellWindow ? shellWindow.scaled(6) : 6
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: shellWindow ? shellWindow.compactGap : 8
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: root.projectionApertureLabel
+                                color: shellWindow ? shellWindow.accentCyan : "#72f3ff"
+                                font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                font.letterSpacing: shellWindow ? shellWindow.scaled(1) : 1
+                            }
+
+                            Rectangle {
+                                radius: shellWindow ? shellWindow.edgeRadius : 10
+                                gradient: Gradient {
+                                    GradientStop { position: 0.0; color: Qt.lighter(root.toneFill(root.wallboardStatusTone), 1.12) }
+                                    GradientStop { position: 1.0; color: root.toneFill(root.wallboardStatusTone) }
+                                }
+                                border.color: root.toneColor(root.wallboardStatusTone)
+                                border.width: 1
+                                implicitWidth: compactStatusText.implicitWidth + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
+                                implicitHeight: compactStatusText.implicitHeight + ((shellWindow ? shellWindow.scaled(6) : 6) * 2)
+
+                                Text {
+                                    id: compactStatusText
+                                    anchors.centerIn: parent
+                                    text: root.wallboardStatusLabel
+                                    color: shellWindow ? shellWindow.textStrong : "#f4fbff"
+                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                    font.bold: true
+                                    font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                }
+                            }
+                        }
+
+                        Text {
+                            Layout.fillWidth: true
+                            text: root.projectionApertureDetail
+                            color: shellWindow ? shellWindow.textSecondary : "#83acc8"
+                            font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                            font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                            wrapMode: Text.WordWrap
+                        }
+
+                        GridLayout {
+                            Layout.fillWidth: true
+                            columns: compactCardLayout ? 2 : root.compactApertureModel.length
+                            columnSpacing: shellWindow ? shellWindow.compactGap : 8
+                            rowSpacing: shellWindow ? shellWindow.compactGap : 8
+
+                            Repeater {
+                                model: root.compactApertureModel
+
+                                delegate: Rectangle {
+                                    readonly property var metric: modelData
+                                    Layout.fillWidth: true
+                                    radius: shellWindow ? shellWindow.edgeRadius : 10
+                                    gradient: Gradient {
+                                        GradientStop { position: 0.0; color: Qt.lighter(root.toneFill(metric["tone"]), 1.14) }
+                                        GradientStop { position: 1.0; color: root.toneFill(metric["tone"]) }
+                                    }
+                                    border.color: root.toneColor(metric["tone"])
+                                    border.width: 1
+                                    implicitHeight: compactMetricColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(7) : 7) * 2)
+
+                                    Column {
+                                        id: compactMetricColumn
+                                        anchors.fill: parent
+                                        anchors.margins: shellWindow ? shellWindow.scaled(7) : 7
+                                        spacing: 1
+
+                                        Text {
+                                            text: metric["label"]
+                                            color: shellWindow ? shellWindow.textMuted : "#4e7392"
+                                            font.pixelSize: shellWindow ? shellWindow.captionSize : 9
+                                            font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                        }
+
+                                        Text {
+                                            width: parent.width
+                                            text: metric["value"]
+                                            color: shellWindow ? shellWindow.textStrong : "#f4fbff"
+                                            font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                            font.bold: true
+                                            font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                            wrapMode: Text.WrapAnywhere
+                                        }
+
+                                        Text {
+                                            width: parent.width
+                                            text: metric["detail"]
+                                            color: shellWindow ? shellWindow.textSecondary : "#83acc8"
+                                            font.pixelSize: shellWindow ? shellWindow.captionSize : 9
+                                            font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                            wrapMode: Text.WordWrap
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 Item {
                     Layout.fillWidth: true
                     implicitHeight: condensedDeckFlow.implicitHeight
@@ -761,6 +979,45 @@ PanelFrame {
                     opacity: 0.78
                 }
 
+                Rectangle {
+                    anchors.left: parent.left
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    anchors.margins: shellWindow ? shellWindow.scaled(12) : 12
+                    width: shellWindow ? shellWindow.scaled(4) : 4
+                    radius: width / 2
+                    gradient: Gradient {
+                        GradientStop { position: 0.0; color: "transparent" }
+                        GradientStop { position: 0.18; color: root.accentBlue }
+                        GradientStop { position: 0.82; color: root.accentCyan }
+                        GradientStop { position: 1.0; color: "transparent" }
+                    }
+                    opacity: 0.46
+                }
+
+                Rectangle {
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    anchors.margins: shellWindow ? shellWindow.scaled(12) : 12
+                    width: 1
+                    color: root.traceStrong
+                    opacity: 0.18
+                }
+
+                Rectangle {
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    height: shellWindow ? shellWindow.scaled(84) : 84
+                    gradient: Gradient {
+                        GradientStop { position: 0.0; color: "#03080d00" }
+                        GradientStop { position: 0.48; color: "#0814213a" }
+                        GradientStop { position: 1.0; color: "#0814227c" }
+                    }
+                    opacity: 0.92
+                }
+
                 Column {
                     id: heroColumn
                     anchors.fill: parent
@@ -822,6 +1079,185 @@ PanelFrame {
                         font.pixelSize: shellWindow ? shellWindow.bodySize : 13
                         font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
                         wrapMode: Text.WordWrap
+                    }
+
+                    Rectangle {
+                        width: parent.width
+                        radius: shellWindow ? shellWindow.edgeRadius : 10
+                        gradient: Gradient {
+                            GradientStop { position: 0.0; color: "#10273d" }
+                            GradientStop { position: 0.52; color: "#0b1726" }
+                            GradientStop { position: 1.0; color: "#08111d" }
+                        }
+                        border.color: root.traceStrong
+                        border.width: 1
+                        implicitHeight: theaterSpineLayout.implicitHeight + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
+
+                        Rectangle {
+                            anchors.fill: parent
+                            anchors.margins: 1
+                            radius: parent.radius - 1
+                            color: "transparent"
+                            border.color: "#123550"
+                            border.width: 1
+                            opacity: 0.82
+                        }
+
+                        Rectangle {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            height: shellWindow ? shellWindow.scaled(2) : 2
+                            gradient: Gradient {
+                                GradientStop { position: 0.0; color: "transparent" }
+                                GradientStop { position: 0.22; color: root.accentBlue }
+                                GradientStop { position: 0.72; color: root.accentCyan }
+                                GradientStop { position: 1.0; color: "transparent" }
+                            }
+                            opacity: 0.76
+                        }
+
+                        Column {
+                            id: theaterSpineLayout
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            anchors.margins: shellWindow ? shellWindow.scaled(10) : 10
+                            spacing: shellWindow ? shellWindow.scaled(6) : 6
+
+                            RowLayout {
+                                width: parent.width
+                                spacing: shellWindow ? shellWindow.compactGap : 8
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: "THEATER SPINE / COMMAND BUS"
+                                    color: shellWindow ? shellWindow.accentCyan : "#72f3ff"
+                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                    font.letterSpacing: shellWindow ? shellWindow.scaled(1) : 1
+                                }
+
+                                Rectangle {
+                                    radius: shellWindow ? shellWindow.edgeRadius : 10
+                                    gradient: Gradient {
+                                        GradientStop { position: 0.0; color: Qt.lighter(root.toneFill(root.wallboardStatusTone), 1.12) }
+                                        GradientStop { position: 1.0; color: root.toneFill(root.wallboardStatusTone) }
+                                    }
+                                    border.color: root.toneColor(root.wallboardStatusTone)
+                                    border.width: 1
+                                    implicitWidth: theaterSpineStamp.implicitWidth + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
+                                    implicitHeight: theaterSpineStamp.implicitHeight + ((shellWindow ? shellWindow.scaled(5) : 5) * 2)
+
+                                    Text {
+                                        id: theaterSpineStamp
+                                        anchors.centerIn: parent
+                                        text: root.stagePriorityLabel
+                                        color: shellWindow ? shellWindow.textStrong : "#f4fbff"
+                                        font.pixelSize: shellWindow ? shellWindow.captionSize : 9
+                                        font.bold: true
+                                        font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                    }
+                                }
+                            }
+
+                            GridLayout {
+                                width: parent.width
+                                columns: compactCardLayout ? 2 : root.stageTagModel.length
+                                columnSpacing: shellWindow ? shellWindow.compactGap : 8
+                                rowSpacing: shellWindow ? shellWindow.compactGap : 8
+
+                                Repeater {
+                                    model: root.stageTagModel
+
+                                    delegate: Rectangle {
+                                        readonly property var stageTagData: modelData
+                                        Layout.fillWidth: true
+                                        radius: shellWindow ? shellWindow.edgeRadius : 10
+                                        gradient: Gradient {
+                                            GradientStop { position: 0.0; color: "#0d2234" }
+                                            GradientStop { position: 1.0; color: "#091624" }
+                                        }
+                                        border.color: root.traceTone
+                                        border.width: 1
+                                        implicitHeight: stageTagColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(7) : 7) * 2)
+
+                                        Column {
+                                            id: stageTagColumn
+                                            anchors.fill: parent
+                                            anchors.margins: shellWindow ? shellWindow.scaled(7) : 7
+                                            spacing: 1
+
+                                            Text {
+                                                text: stageTagData["label"]
+                                                color: shellWindow ? shellWindow.textMuted : "#4e7392"
+                                                font.pixelSize: shellWindow ? shellWindow.captionSize : 9
+                                                font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                            }
+
+                                            Text {
+                                                width: parent.width
+                                                text: stageTagData["value"]
+                                                color: shellWindow ? shellWindow.textStrong : "#f4fbff"
+                                                font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                                font.bold: true
+                                                font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                                wrapMode: Text.WrapAnywhere
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            Item {
+                                width: parent.width
+                                implicitHeight: theaterSignalFlow.implicitHeight
+
+                                Flow {
+                                    id: theaterSignalFlow
+                                    width: parent.width
+                                    spacing: shellWindow ? shellWindow.compactGap : 8
+
+                                    Repeater {
+                                        model: root.theatreRibbonModel
+
+                                        delegate: Rectangle {
+                                            readonly property var signalData: modelData
+                                            radius: shellWindow ? shellWindow.edgeRadius : 10
+                                            gradient: Gradient {
+                                                GradientStop { position: 0.0; color: Qt.lighter(root.toneFill(signalData["tone"]), 1.14) }
+                                                GradientStop { position: 1.0; color: root.toneFill(signalData["tone"]) }
+                                            }
+                                            border.color: root.toneColor(signalData["tone"])
+                                            border.width: 1
+                                            height: theaterSignalColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(7) : 7) * 2)
+                                            width: Math.max(shellWindow ? shellWindow.scaled(118) : 118, theaterSignalColumn.implicitWidth + (shellWindow ? shellWindow.scaled(20) : 20))
+
+                                            Column {
+                                                id: theaterSignalColumn
+                                                anchors.centerIn: parent
+                                                spacing: 1
+
+                                                Text {
+                                                    text: signalData["label"]
+                                                    color: shellWindow ? shellWindow.textMuted : "#4e7392"
+                                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 9
+                                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                                }
+
+                                                Text {
+                                                    text: signalData["value"]
+                                                    color: shellWindow ? shellWindow.textStrong : "#f4fbff"
+                                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                                    font.bold: true
+                                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
 
                     Rectangle {
@@ -1844,6 +2280,159 @@ PanelFrame {
                             opacity: 0.74
                         }
 
+                        Rectangle {
+                            width: parent.width * 0.72
+                            height: parent.height * 0.6
+                            radius: width / 2
+                            anchors.centerIn: parent
+                            gradient: Gradient {
+                                GradientStop { position: 0.0; color: "#1a5a8d32" }
+                                GradientStop { position: 0.56; color: "#0d254028" }
+                                GradientStop { position: 1.0; color: "#04101a00" }
+                            }
+                            border.color: root.traceTone
+                            border.width: 1
+                            opacity: 0.48
+                        }
+
+                        Repeater {
+                            model: 3
+
+                            delegate: Rectangle {
+                                width: projectionChamber.width * (0.28 + (index * 0.14))
+                                height: width * 0.52
+                                radius: width / 2
+                                anchors.centerIn: parent
+                                color: "transparent"
+                                border.color: index === 1 ? root.accentCyan : root.traceTone
+                                border.width: 1
+                                opacity: index === 1 ? 0.24 : 0.16
+                            }
+                        }
+
+                        RowLayout {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            anchors.leftMargin: shellWindow ? shellWindow.scaled(22) : 22
+                            anchors.rightMargin: shellWindow ? shellWindow.scaled(22) : 22
+                            anchors.topMargin: shellWindow ? shellWindow.scaled(28) : 28
+                            spacing: shellWindow ? shellWindow.compactGap : 8
+
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: shellWindow ? shellWindow.scaled(2) : 2
+
+                                Text {
+                                    text: root.projectionApertureLabel
+                                    color: shellWindow ? shellWindow.accentCyan : "#72f3ff"
+                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                    font.letterSpacing: shellWindow ? shellWindow.scaled(1) : 1
+                                }
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: root.projectionApertureDetail
+                                    color: shellWindow ? shellWindow.textSecondary : "#83acc8"
+                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                    font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                    wrapMode: Text.WordWrap
+                                }
+                            }
+
+                            Item {
+                                Layout.fillWidth: true
+                                implicitHeight: apertureRibbonFlow.implicitHeight
+
+                                Flow {
+                                    id: apertureRibbonFlow
+                                    anchors.right: parent.right
+                                    width: parent.width
+                                    spacing: shellWindow ? shellWindow.compactGap : 8
+
+                                    Repeater {
+                                        model: root.apertureRibbonModel
+
+                                        delegate: Rectangle {
+                                            readonly property var ribbonData: modelData
+                                            radius: shellWindow ? shellWindow.edgeRadius : 10
+                                            gradient: Gradient {
+                                                GradientStop { position: 0.0; color: Qt.lighter(root.toneFill(ribbonData["tone"]), 1.14) }
+                                                GradientStop { position: 1.0; color: root.toneFill(ribbonData["tone"]) }
+                                            }
+                                            border.color: root.toneColor(ribbonData["tone"])
+                                            border.width: 1
+                                            implicitWidth: apertureRibbonColumn.implicitWidth + ((shellWindow ? shellWindow.scaled(12) : 12) * 2)
+                                            implicitHeight: apertureRibbonColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(6) : 6) * 2)
+
+                                            Column {
+                                                id: apertureRibbonColumn
+                                                anchors.centerIn: parent
+                                                spacing: 1
+
+                                                Text {
+                                                    text: ribbonData["label"]
+                                                    color: shellWindow ? shellWindow.textMuted : "#4e7392"
+                                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 9
+                                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                                }
+
+                                                Text {
+                                                    text: ribbonData["value"]
+                                                    color: shellWindow ? shellWindow.textStrong : "#f4fbff"
+                                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                                    font.bold: true
+                                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            anchors.leftMargin: shellWindow ? shellWindow.scaled(18) : 18
+                            anchors.rightMargin: shellWindow ? shellWindow.scaled(18) : 18
+                            anchors.bottomMargin: shellWindow ? shellWindow.scaled(18) : 18
+                            radius: shellWindow ? shellWindow.edgeRadius : 10
+                            gradient: Gradient {
+                                GradientStop { position: 0.0; color: "#0a1827" }
+                                GradientStop { position: 1.0; color: "#081320" }
+                            }
+                            border.color: root.traceTone
+                            border.width: 1
+                            implicitHeight: apertureFooterRow.implicitHeight + ((shellWindow ? shellWindow.scaled(8) : 8) * 2)
+                            opacity: 0.92
+
+                            RowLayout {
+                                id: apertureFooterRow
+                                anchors.fill: parent
+                                anchors.margins: shellWindow ? shellWindow.scaled(8) : 8
+                                spacing: shellWindow ? shellWindow.compactGap : 8
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: "APERTURE BUS / " + root.sampleSequenceLabel
+                                    color: shellWindow ? shellWindow.accentBlue : "#38b6ff"
+                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 9
+                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                    font.letterSpacing: shellWindow ? shellWindow.scaled(1) : 1
+                                }
+
+                                Text {
+                                    text: compactMessage(root.latestEventValue, root.sampleTimestamp, 28)
+                                    color: shellWindow ? shellWindow.textPrimary : "#d5eeff"
+                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                }
+                            }
+                        }
+
                         Repeater {
                             model: 7
 
@@ -2427,6 +3016,193 @@ PanelFrame {
                             }
                         }
 
+                        Rectangle {
+                            visible: parent.height >= (shellWindow ? shellWindow.scaled(188) : 188)
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            anchors.top: parent.top
+                            anchors.topMargin: shellWindow ? shellWindow.scaled(50) : 50
+                            width: Math.min(
+                                parent.width - ((shellWindow ? shellWindow.scaled(28) : 28) * 2),
+                                shellWindow ? shellWindow.scaled(540) : 540
+                            )
+                            radius: shellWindow ? shellWindow.edgeRadius : 10
+                            gradient: Gradient {
+                                GradientStop { position: 0.0; color: "#10283f" }
+                                GradientStop { position: 0.56; color: "#0a1726" }
+                                GradientStop { position: 1.0; color: "#07111b" }
+                            }
+                            border.color: root.traceStrong
+                            border.width: 1
+                            implicitHeight: stageBridgeLayout.implicitHeight + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
+                            opacity: 0.96
+
+                            Rectangle {
+                                anchors.fill: parent
+                                anchors.margins: 1
+                                radius: parent.radius - 1
+                                color: "transparent"
+                                border.color: "#12344f"
+                                border.width: 1
+                                opacity: 0.82
+                            }
+
+                            Rectangle {
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                height: shellWindow ? shellWindow.scaled(2) : 2
+                                gradient: Gradient {
+                                    GradientStop { position: 0.0; color: "transparent" }
+                                    GradientStop { position: 0.22; color: root.accentBlue }
+                                    GradientStop { position: 0.72; color: root.accentCyan }
+                                    GradientStop { position: 1.0; color: "transparent" }
+                                }
+                                opacity: 0.78
+                            }
+
+                            ColumnLayout {
+                                id: stageBridgeLayout
+                                anchors.fill: parent
+                                anchors.margins: shellWindow ? shellWindow.scaled(10) : 10
+                                spacing: shellWindow ? shellWindow.scaled(6) : 6
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: shellWindow ? shellWindow.compactGap : 8
+
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 1
+
+                                        Text {
+                                            text: root.stageCommandBridgeLabel
+                                            color: shellWindow ? shellWindow.accentCyan : "#72f3ff"
+                                            font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                            font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                            font.letterSpacing: shellWindow ? shellWindow.scaled(1) : 1
+                                        }
+
+                                        Text {
+                                            Layout.fillWidth: true
+                                            text: root.stageCommandBridgeDetail
+                                            color: shellWindow ? shellWindow.textSecondary : "#83acc8"
+                                            font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                            font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                            wrapMode: Text.WordWrap
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        Layout.alignment: Qt.AlignTop
+                                        radius: shellWindow ? shellWindow.edgeRadius : 10
+                                        gradient: Gradient {
+                                            GradientStop { position: 0.0; color: Qt.lighter(root.toneFill(root.wallboardStatusTone), 1.14) }
+                                            GradientStop { position: 1.0; color: root.toneFill(root.wallboardStatusTone) }
+                                        }
+                                        border.color: root.toneColor(root.wallboardStatusTone)
+                                        border.width: 1
+                                        implicitWidth: stageBridgeStatusColumn.implicitWidth + ((shellWindow ? shellWindow.scaled(12) : 12) * 2)
+                                        implicitHeight: stageBridgeStatusColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(8) : 8) * 2)
+
+                                        Column {
+                                            id: stageBridgeStatusColumn
+                                            anchors.centerIn: parent
+                                            spacing: 1
+
+                                            Text {
+                                                text: root.wallboardStatusLabel
+                                                color: shellWindow ? shellWindow.textStrong : "#f4fbff"
+                                                font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                                font.bold: true
+                                                font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                            }
+
+                                            Text {
+                                                text: root.trackAgeLabel
+                                                color: shellWindow ? shellWindow.textPrimary : "#d5eeff"
+                                                font.pixelSize: shellWindow ? shellWindow.captionSize : 9
+                                                font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                            }
+                                        }
+                                    }
+                                }
+
+                                GridLayout {
+                                    Layout.fillWidth: true
+                                    columns: 2
+                                    columnSpacing: shellWindow ? shellWindow.compactGap : 8
+                                    rowSpacing: shellWindow ? shellWindow.compactGap : 8
+
+                                    Repeater {
+                                        model: root.stageBridgeModel
+
+                                        delegate: Rectangle {
+                                            readonly property var bridgeMetric: modelData
+                                            Layout.fillWidth: true
+                                            radius: shellWindow ? shellWindow.edgeRadius : 10
+                                            gradient: Gradient {
+                                                GradientStop { position: 0.0; color: Qt.lighter(root.toneFill(bridgeMetric["tone"]), 1.12) }
+                                                GradientStop { position: 1.0; color: root.toneFill(bridgeMetric["tone"]) }
+                                            }
+                                            border.color: root.toneColor(bridgeMetric["tone"])
+                                            border.width: 1
+                                            implicitHeight: stageBridgeMetricColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(7) : 7) * 2)
+
+                                            Rectangle {
+                                                anchors.left: parent.left
+                                                anchors.right: parent.right
+                                                anchors.top: parent.top
+                                                height: shellWindow ? shellWindow.scaled(2) : 2
+                                                gradient: Gradient {
+                                                    GradientStop { position: 0.0; color: "transparent" }
+                                                    GradientStop { position: 0.28; color: root.toneColor(bridgeMetric["tone"]) }
+                                                    GradientStop { position: 0.72; color: Qt.lighter(root.toneColor(bridgeMetric["tone"]), 1.16) }
+                                                    GradientStop { position: 1.0; color: "transparent" }
+                                                }
+                                                opacity: 0.74
+                                            }
+
+                                            Column {
+                                                id: stageBridgeMetricColumn
+                                                anchors.fill: parent
+                                                anchors.margins: shellWindow ? shellWindow.scaled(7) : 7
+                                                spacing: 1
+
+                                                Text {
+                                                    text: bridgeMetric["label"]
+                                                    color: shellWindow ? shellWindow.textMuted : "#4e7392"
+                                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 9
+                                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                                    font.letterSpacing: shellWindow ? shellWindow.scaled(1) : 1
+                                                }
+
+                                                Text {
+                                                    width: parent.width
+                                                    text: bridgeMetric["value"]
+                                                    color: shellWindow ? shellWindow.textStrong : "#f4fbff"
+                                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                                    font.bold: true
+                                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                                    wrapMode: Text.WrapAnywhere
+                                                }
+
+                                                Text {
+                                                    width: parent.width
+                                                    text: bridgeMetric["detail"]
+                                                    color: shellWindow ? shellWindow.textSecondary : "#83acc8"
+                                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 9
+                                                    font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                                    wrapMode: Text.WordWrap
+                                                    maximumLineCount: 2
+                                                    elide: Text.ElideRight
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         GridLayout {
                             anchors.left: parent.left
                             anchors.right: parent.right
@@ -2505,6 +3281,35 @@ PanelFrame {
                                 }
                             }
                         }
+                    }
+
+                    Rectangle {
+                        visible: stageEnvelopeFrame.visible
+                        anchors.horizontalCenter: stageEnvelopeFrame.horizontalCenter
+                        anchors.top: root.stageCommandShelfVisible ? stageCommandShelf.bottom : stageTag.bottom
+                        anchors.bottom: stageEnvelopeFrame.top
+                        anchors.topMargin: shellWindow ? shellWindow.scaled(4) : 4
+                        width: shellWindow ? shellWindow.scaled(2) : 2
+                        gradient: Gradient {
+                            GradientStop { position: 0.0; color: root.accentCyan }
+                            GradientStop { position: 0.62; color: root.accentBlue }
+                            GradientStop { position: 1.0; color: "transparent" }
+                        }
+                        opacity: 0.74
+                    }
+
+                    Rectangle {
+                        visible: stageEnvelopeFrame.visible
+                        anchors.horizontalCenter: stageEnvelopeFrame.horizontalCenter
+                        anchors.bottom: stageEnvelopeFrame.top
+                        anchors.bottomMargin: shellWindow ? shellWindow.scaled(4) : 4
+                        width: shellWindow ? shellWindow.scaled(8) : 8
+                        height: width
+                        radius: width / 2
+                        color: root.accentCyan
+                        border.color: "#ffffff"
+                        border.width: 1
+                        opacity: 0.9
                     }
 
                     Rectangle {
