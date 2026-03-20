@@ -209,11 +209,19 @@ def validate_source_db_compatibility(path: Path) -> None:
     if '"root_index"' in decoded:
         return
     if '"root"' in decoded:
+        probe_script = (
+            PROJECT_ROOT
+            / "session_bootstrap"
+            / "scripts"
+            / "probe_legacy_baseline_db_bridge.py"
+        )
         raise SystemExit(
             "ERROR: baseline lineage DB uses an older JSON object-graph format "
             "(decoded workload has `root` but not `root_index`), so current-safe "
             "rpc_tune.py cannot consume it directly. You need a format bridge or a "
-            "different baseline export path before build_baseline_export_bridge.py can proceed."
+            "different baseline export path before build_baseline_export_bridge.py can proceed.\n"
+            f"Next: run /home/tianxing/.venvs/tvm-ms/bin/python {probe_script} "
+            f"--source-db {path}"
         )
     raise SystemExit(
         "ERROR: unable to confirm current-safe JSONDatabase compatibility for source DB "
