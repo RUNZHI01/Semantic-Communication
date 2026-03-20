@@ -303,6 +303,7 @@ def analyze_baseline_current_safe_probe(probe_log: Path | None) -> dict[str, obj
     if "missing_vm_load_executable" in text or re.search(
         r"AttributeError:\s*Module has no function ['\"]vm_load_executable['\"]",
         text,
+        re.MULTILINE,
     ):
         return {
             "source": to_abs_project_path(path),
