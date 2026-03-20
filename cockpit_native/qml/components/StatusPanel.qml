@@ -12,7 +12,26 @@ PanelFrame {
     accentTone: shellWindow ? shellWindow.accentBlue : "#38b6ff"
 
     readonly property var rows: DataUtils.arrayOrEmpty(panel["rows"])
+    readonly property bool hasRows: rows.length > 0
     readonly property bool dualColumn: width >= (shellWindow ? shellWindow.scaled(520) : 520)
+    readonly property string heroStampLabel: String(rows.length) + " ROWS"
+    readonly property var standbyModel: [
+        {
+            "label": "会话总线",
+            "value": rowValue("会话") || "等待会话回填",
+            "detail": "镜像总线保持在线"
+        },
+        {
+            "label": "板端事件",
+            "value": rowValue("最近事件") || "暂无板端事件",
+            "detail": "等待现场遥测写入"
+        },
+        {
+            "label": "心跳",
+            "value": rowValue("心跳") || "采样心跳待接入",
+            "detail": "软件渲染与合同镜像继续可用"
+        }
+    ]
 
     implicitHeight: contentLayout.implicitHeight + ((shellWindow ? shellWindow.panelPadding : 18) * 2)
 
@@ -81,12 +100,36 @@ PanelFrame {
                     Layout.fillWidth: true
                     spacing: shellWindow ? shellWindow.compactGap : 8
 
-                    Text {
-                        text: panel["title"] || "左舷系统轨 / Left System Rail"
-                        color: shellWindow ? shellWindow.accentBlue : "#38b6ff"
-                        font.pixelSize: shellWindow ? shellWindow.eyebrowSize : 10
-                        font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
-                        font.letterSpacing: shellWindow ? shellWindow.scaled(1) : 1
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: shellWindow ? shellWindow.compactGap : 8
+
+                        Text {
+                            Layout.fillWidth: true
+                            text: panel["title"] || "左舷系统轨 / Left System Rail"
+                            color: shellWindow ? shellWindow.accentBlue : "#38b6ff"
+                            font.pixelSize: shellWindow ? shellWindow.eyebrowSize : 10
+                            font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                            font.letterSpacing: shellWindow ? shellWindow.scaled(1) : 1
+                        }
+
+                        Rectangle {
+                            radius: shellWindow ? shellWindow.edgeRadius : 10
+                            color: "#091726"
+                            border.color: "#1d547c"
+                            border.width: 1
+                            implicitWidth: heroStamp.implicitWidth + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
+                            implicitHeight: heroStamp.implicitHeight + ((shellWindow ? shellWindow.scaled(5) : 5) * 2)
+
+                            Text {
+                                id: heroStamp
+                                anchors.centerIn: parent
+                                text: root.heroStampLabel
+                                color: shellWindow ? shellWindow.textPrimary : "#d5eeff"
+                                font.pixelSize: shellWindow ? shellWindow.captionSize : 9
+                                font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                            }
+                        }
                     }
 
                     Text {
@@ -112,6 +155,13 @@ PanelFrame {
                         font.pixelSize: shellWindow ? shellWindow.bodySize : 13
                         font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
                         wrapMode: Text.WordWrap
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 1
+                        color: "#18405f"
+                        opacity: 0.86
                     }
 
                     Flow {
@@ -374,6 +424,7 @@ PanelFrame {
         }
 
         GridLayout {
+            visible: root.hasRows
             Layout.fillWidth: true
             columns: dualColumn ? 2 : 1
             columnSpacing: shellWindow ? shellWindow.zoneGap : 12
@@ -481,12 +532,188 @@ PanelFrame {
         }
 
         Rectangle {
+            visible: !root.hasRows
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            Layout.minimumHeight: shellWindow ? shellWindow.scaled(230) : 230
+            radius: shellWindow ? shellWindow.cardRadius : 14
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: "#0d2033" }
+                GradientStop { position: 1.0; color: "#081321" }
+            }
+            border.color: "#245b84"
+            border.width: 1
+
+            Rectangle {
+                anchors.fill: parent
+                anchors.margins: 1
+                radius: parent.radius - 1
+                color: "transparent"
+                border.color: "#12324d"
+                border.width: 1
+                opacity: 0.82
+            }
+
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                height: shellWindow ? shellWindow.scaled(3) : 3
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: "transparent" }
+                    GradientStop { position: 0.24; color: shellWindow ? shellWindow.accentBlue : "#38b6ff" }
+                    GradientStop { position: 0.72; color: shellWindow ? shellWindow.accentCyan : "#72f3ff" }
+                    GradientStop { position: 1.0; color: "transparent" }
+                }
+                opacity: 0.76
+            }
+
+            Column {
+                id: standbyColumn
+                anchors.fill: parent
+                anchors.margins: shellWindow ? shellWindow.cardPadding : 14
+                spacing: shellWindow ? shellWindow.compactGap : 8
+
+                RowLayout {
+                    width: parent.width
+                    spacing: shellWindow ? shellWindow.compactGap : 8
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 2
+
+                        Text {
+                            text: "零数据待机 / STANDBY WALL"
+                            color: shellWindow ? shellWindow.accentBlue : "#38b6ff"
+                            font.pixelSize: shellWindow ? shellWindow.captionSize : 11
+                            font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                            font.letterSpacing: shellWindow ? shellWindow.scaled(1) : 1
+                        }
+
+                        Text {
+                            text: "左舷系统轨等待板端矩阵回填"
+                            color: shellWindow ? shellWindow.textStrong : "#f4fbff"
+                            font.pixelSize: shellWindow ? shellWindow.bodyEmphasisSize : 14
+                            font.bold: true
+                            font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                        }
+
+                        Text {
+                            width: parent.width
+                            text: "当前继续沿用已知合同字段与镜像会话，不虚构未抵达的板端统计；一旦数据回填，状态矩阵会直接接管这一段空间。"
+                            color: shellWindow ? shellWindow.textSecondary : "#83acc8"
+                            font.pixelSize: shellWindow ? shellWindow.captionSize : 11
+                            font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                            wrapMode: Text.WordWrap
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.alignment: Qt.AlignTop
+                        radius: shellWindow ? shellWindow.edgeRadius : 10
+                        color: "#091726"
+                        border.color: "#1d547c"
+                        border.width: 1
+                        implicitWidth: standbyStamp.implicitWidth + ((shellWindow ? shellWindow.scaled(12) : 12) * 2)
+                        implicitHeight: standbyStamp.implicitHeight + ((shellWindow ? shellWindow.scaled(6) : 6) * 2)
+
+                        Text {
+                            id: standbyStamp
+                            anchors.centerIn: parent
+                            text: "ARCHIVE BUS"
+                            color: shellWindow ? shellWindow.textPrimary : "#d5eeff"
+                            font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                            font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                        }
+                    }
+                }
+
+                Flow {
+                    width: parent.width
+                    spacing: shellWindow ? shellWindow.compactGap : 8
+
+                    Repeater {
+                        model: root.standbyModel
+
+                        delegate: Rectangle {
+                            readonly property var chip: modelData
+                            radius: shellWindow ? shellWindow.edgeRadius : 10
+                            gradient: Gradient {
+                                GradientStop { position: 0.0; color: "#102436" }
+                                GradientStop { position: 1.0; color: "#091522" }
+                            }
+                            border.color: "#245b84"
+                            border.width: 1
+                            height: standbyChipColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(8) : 8) * 2)
+                            width: Math.max(shellWindow ? shellWindow.scaled(170) : 170, standbyChipColumn.implicitWidth + (shellWindow ? shellWindow.scaled(22) : 22))
+
+                            Column {
+                                id: standbyChipColumn
+                                anchors.centerIn: parent
+                                spacing: 2
+
+                                Text {
+                                    text: chip["label"]
+                                    color: shellWindow ? shellWindow.textMuted : "#4e7392"
+                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                    font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                }
+
+                                Text {
+                                    text: chip["value"]
+                                    color: shellWindow ? shellWindow.textStrong : "#f4fbff"
+                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 11
+                                    font.bold: true
+                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                }
+
+                                Text {
+                                    text: chip["detail"]
+                                    color: shellWindow ? shellWindow.textSecondary : "#83acc8"
+                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 9
+                                    font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Rectangle {
             Layout.fillWidth: true
             radius: shellWindow ? shellWindow.cardRadius : 14
-            color: "#081321"
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: "#0b1b2d" }
+                GradientStop { position: 1.0; color: "#091421" }
+            }
             border.color: "#1f557c"
             border.width: 1
             implicitHeight: footerColumn.implicitHeight + ((shellWindow ? shellWindow.cardPadding : 14) * 2)
+
+            Rectangle {
+                anchors.fill: parent
+                anchors.margins: 1
+                radius: parent.radius - 1
+                color: "transparent"
+                border.color: "#12324d"
+                border.width: 1
+                opacity: 0.82
+            }
+
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                height: shellWindow ? shellWindow.scaled(3) : 3
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: "transparent" }
+                    GradientStop { position: 0.22; color: shellWindow ? shellWindow.accentBlue : "#38b6ff" }
+                    GradientStop { position: 0.72; color: shellWindow ? shellWindow.accentCyan : "#72f3ff" }
+                    GradientStop { position: 1.0; color: "transparent" }
+                }
+                opacity: 0.76
+            }
 
             Column {
                 id: footerColumn
@@ -494,11 +721,38 @@ PanelFrame {
                 anchors.margins: shellWindow ? shellWindow.cardPadding : 14
                 spacing: shellWindow ? shellWindow.scaled(4) : 4
 
-                Text {
-                    text: "真实性边界 / EVIDENCE BOUNDARY"
-                    color: shellWindow ? shellWindow.accentBlue : "#38b6ff"
-                    font.pixelSize: shellWindow ? shellWindow.captionSize : 11
-                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                RowLayout {
+                    width: parent.width
+                    spacing: shellWindow ? shellWindow.compactGap : 8
+
+                    Text {
+                        text: "真实性边界 / EVIDENCE BOUNDARY"
+                        color: shellWindow ? shellWindow.accentBlue : "#38b6ff"
+                        font.pixelSize: shellWindow ? shellWindow.captionSize : 11
+                        font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                    }
+
+                    Item {
+                        Layout.fillWidth: true
+                    }
+
+                    Rectangle {
+                        radius: shellWindow ? shellWindow.edgeRadius : 10
+                        color: "#091726"
+                        border.color: "#1d547c"
+                        border.width: 1
+                        implicitWidth: evidenceStamp.implicitWidth + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
+                        implicitHeight: evidenceStamp.implicitHeight + ((shellWindow ? shellWindow.scaled(5) : 5) * 2)
+
+                        Text {
+                            id: evidenceStamp
+                            anchors.centerIn: parent
+                            text: rowValue("会话") || "MIRROR ONLY"
+                            color: shellWindow ? shellWindow.textPrimary : "#d5eeff"
+                            font.pixelSize: shellWindow ? shellWindow.captionSize : 9
+                            font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                        }
+                    }
                 }
 
                 Text {

@@ -82,24 +82,28 @@ ApplicationWindow {
 
     readonly property int outerPadding: scaled(20)
     readonly property int shellPadding: scaled(26)
-    readonly property int zoneGap: scaled(20)
+    readonly property int zoneGap: scaled(18)
     readonly property int compactGap: scaled(10)
-    readonly property int panelPadding: scaled(20)
+    readonly property int panelPadding: scaled(18)
     readonly property int cardPadding: scaled(16)
     readonly property int panelRadius: scaled(24)
     readonly property int cardRadius: scaled(16)
     readonly property int edgeRadius: scaled(12)
-    readonly property int headerTitleSize: scaled(38)
-    readonly property int sectionTitleSize: scaled(26)
-    readonly property int bodyEmphasisSize: scaled(15)
-    readonly property int bodySize: scaled(14)
-    readonly property int captionSize: scaled(11)
+    readonly property int headerTitleSize: scaled(36)
+    readonly property int sectionTitleSize: scaled(24)
+    readonly property int bodyEmphasisSize: scaled(14)
+    readonly property int bodySize: scaled(13)
+    readonly property int captionSize: scaled(10)
     readonly property int eyebrowSize: scaled(10)
+    readonly property int headerPad: scaled(wideLayout ? 18 : 24)
+    readonly property int headerChipWidth: scaled(wideLayout ? 142 : 154)
+    readonly property int headerMirrorWidth: scaled(wideLayout ? 448 : 0)
 
     readonly property real contentWidth: Math.max(1, width - safeLeft - safeRight - (outerPadding * 2))
     readonly property bool wideLayout: contentWidth >= scaled(1380)
     readonly property bool mediumLayout: !wideLayout && contentWidth >= scaled(980)
     readonly property bool compactLayout: !wideLayout && !mediumLayout
+    readonly property bool splitHeaderLayout: !compactLayout && contentWidth >= scaled(1500)
     readonly property int dashboardColumns: wideLayout ? 16 : (mediumLayout ? 2 : 1)
     readonly property int wideLeftSpan: 3
     readonly property int wideCenterSpan: 10
@@ -171,6 +175,12 @@ ApplicationWindow {
             "value": String(meta["layout_strategy"] || "--"),
             "detail": "自适应壳体布局",
             "tone": "neutral"
+        },
+        {
+            "label": "主舞台",
+            "value": String(centerPanelData["mission_call_sign"] || "--"),
+            "detail": String(centerControlSummary["link_profile"] || "global wallboard"),
+            "tone": String(liveAnchor["tone"] || "neutral")
         },
         {
             "label": "数据源",
@@ -520,7 +530,7 @@ ApplicationWindow {
             }
             border.color: "#163f61"
             border.width: 1
-            height: root.scaled(root.wideLayout ? 164 : 124)
+            height: root.scaled(root.wideLayout ? 148 : 124)
             opacity: 0.78
         }
 
@@ -532,6 +542,84 @@ ApplicationWindow {
             border.color: "#102d45"
             border.width: 1
             opacity: 0.82
+        }
+
+        Rectangle {
+            anchors.horizontalCenter: centerStageBerth.horizontalCenter
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            width: Math.max(root.scaled(120), centerStageBerth.width * 0.18)
+            radius: width / 2
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: "#1b5a8600" }
+                GradientStop { position: 0.18; color: "#1a4c7420" }
+                GradientStop { position: 0.42; color: "#153a592e" }
+                GradientStop { position: 0.7; color: "#0c233848" }
+                GradientStop { position: 1.0; color: "#06101a00" }
+            }
+            opacity: 0.74
+        }
+
+        Rectangle {
+            visible: root.wideLayout
+            anchors.left: leftRailBerth.right
+            anchors.right: rightRailBerth.left
+            anchors.top: centerStageBerth.top
+            anchors.leftMargin: root.scaled(28)
+            anchors.rightMargin: root.scaled(28)
+            anchors.topMargin: root.scaled(38)
+            height: root.scaled(2)
+            gradient: Gradient {
+                orientation: Gradient.Horizontal
+                GradientStop { position: 0.0; color: "transparent" }
+                GradientStop { position: 0.16; color: root.accentBlueSoft }
+                GradientStop { position: 0.5; color: root.accentCyan }
+                GradientStop { position: 0.84; color: root.accentBlueSoft }
+                GradientStop { position: 1.0; color: "transparent" }
+            }
+            opacity: 0.42
+        }
+
+        Rectangle {
+            anchors.horizontalCenter: centerStageBerth.horizontalCenter
+            anchors.top: centerStageBerth.top
+            anchors.bottom: bottomActionBerth.top
+            anchors.topMargin: root.scaled(26)
+            anchors.bottomMargin: root.scaled(14)
+            width: root.scaled(2)
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: root.accentCyan }
+                GradientStop { position: 0.16; color: root.accentBlue }
+                GradientStop { position: 0.58; color: "#194b72" }
+                GradientStop { position: 1.0; color: "transparent" }
+            }
+            opacity: 0.34
+        }
+
+        Rectangle {
+            anchors.horizontalCenter: centerStageBerth.horizontalCenter
+            anchors.top: centerStageBerth.top
+            anchors.topMargin: root.scaled(30)
+            width: root.scaled(8)
+            height: width
+            radius: width / 2
+            color: root.accentCyan
+            border.color: "#ffffff"
+            border.width: 1
+            opacity: 0.92
+        }
+
+        Rectangle {
+            anchors.horizontalCenter: centerStageBerth.horizontalCenter
+            anchors.bottom: bottomActionBerth.top
+            anchors.bottomMargin: root.scaled(10)
+            width: root.scaled(8)
+            height: width
+            radius: width / 2
+            color: root.accentBlue
+            border.color: "#ffffff"
+            border.width: 1
+            opacity: 0.88
         }
 
         Item {
@@ -649,7 +737,7 @@ ApplicationWindow {
                 }
                 border.color: "#2d8bca"
                 border.width: 1
-                implicitHeight: headerLayout.implicitHeight + (root.shellPadding * 2)
+                implicitHeight: headerLayout.implicitHeight + (root.headerPad * 2)
 
                 Rectangle {
                     anchors.fill: parent
@@ -673,13 +761,17 @@ ApplicationWindow {
                 GridLayout {
                     id: headerLayout
                     anchors.fill: parent
-                    anchors.margins: root.shellPadding
-                    columns: root.compactLayout ? 1 : 2
+                    anchors.margins: root.headerPad
+                    columns: root.splitHeaderLayout ? 2 : 1
                     columnSpacing: root.zoneGap
                     rowSpacing: root.compactGap
 
                     ColumnLayout {
                         Layout.fillWidth: true
+                        Layout.minimumWidth: 0
+                        Layout.preferredWidth: root.splitHeaderLayout
+                            ? Math.max(root.scaled(540), headerLayout.width - root.headerMirrorWidth - root.zoneGap)
+                            : headerLayout.width
                         spacing: root.compactGap
 
                         Text {
@@ -719,6 +811,7 @@ ApplicationWindow {
 
                         Flow {
                             Layout.fillWidth: true
+                            width: parent.width
                             spacing: root.compactGap
 
                             Repeater {
@@ -734,7 +827,7 @@ ApplicationWindow {
                                     border.color: root.toneColor(chip["tone"])
                                     border.width: 1
                                     height: chipText.implicitHeight + chipValue.implicitHeight + root.scaled(20)
-                                    width: Math.max(root.scaled(154), chipText.implicitWidth + chipValue.implicitWidth + root.scaled(30))
+                                    width: Math.max(root.headerChipWidth, chipText.implicitWidth + chipValue.implicitWidth + root.scaled(30))
 
                                     Rectangle {
                                         anchors.left: parent.left
@@ -780,6 +873,10 @@ ApplicationWindow {
 
                     Rectangle {
                         Layout.fillWidth: true
+                        Layout.minimumWidth: 0
+                        Layout.alignment: Qt.AlignTop
+                        Layout.preferredWidth: root.splitHeaderLayout ? root.headerMirrorWidth : headerLayout.width
+                        Layout.maximumWidth: root.splitHeaderLayout ? root.headerMirrorWidth : Number.MAX_VALUE
                         radius: root.cardRadius
                         gradient: Gradient {
                             GradientStop { position: 0.0; color: "#11253b" }
@@ -1145,5 +1242,118 @@ ApplicationWindow {
                 }
             }
         }
+
+        Rectangle {
+            visible: leftRailBerth.visible
+            anchors.left: leftRailBerth.left
+            anchors.top: centerStageBerth.top
+            anchors.leftMargin: root.scaled(14)
+            anchors.topMargin: root.scaled(10)
+            radius: root.edgeRadius
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: "#12304a" }
+                GradientStop { position: 1.0; color: "#0b1726" }
+            }
+            border.color: "#1c5c86"
+            border.width: 1
+            implicitWidth: leftBerthColumn.implicitWidth + (root.scaled(12) * 2)
+            implicitHeight: leftBerthColumn.implicitHeight + (root.scaled(8) * 2)
+
+            Column {
+                id: leftBerthColumn
+                anchors.centerIn: parent
+                spacing: 1
+
+                Text {
+                    text: "LEFT SYSTEM RAIL"
+                    color: root.accentBlue
+                    font.pixelSize: root.captionSize
+                    font.family: root.monoFamily
+                    font.letterSpacing: root.scaled(1)
+                }
+
+                Text {
+                    text: "BOARD HEALTH BUS"
+                    color: root.textMuted
+                    font.pixelSize: root.captionSize
+                    font.family: root.uiFamily
+                }
+            }
+        }
+
+        Rectangle {
+            anchors.horizontalCenter: centerStageBerth.horizontalCenter
+            anchors.top: centerStageBerth.top
+            anchors.topMargin: root.scaled(10)
+            radius: root.edgeRadius
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: "#143553" }
+                GradientStop { position: 1.0; color: "#0b1726" }
+            }
+            border.color: "#1f668f"
+            border.width: 1
+            implicitWidth: centerBerthColumn.implicitWidth + (root.scaled(14) * 2)
+            implicitHeight: centerBerthColumn.implicitHeight + (root.scaled(8) * 2)
+
+            Column {
+                id: centerBerthColumn
+                anchors.centerIn: parent
+                spacing: 1
+
+                Text {
+                    text: "CENTER THEATER"
+                    color: root.accentCyan
+                    font.pixelSize: root.captionSize
+                    font.family: root.monoFamily
+                    font.letterSpacing: root.scaled(1)
+                }
+
+                Text {
+                    text: "GLOBAL WALLBOARD"
+                    color: root.textMuted
+                    font.pixelSize: root.captionSize
+                    font.family: root.uiFamily
+                }
+            }
+        }
+
+        Rectangle {
+            visible: rightRailBerth.visible
+            anchors.right: rightRailBerth.right
+            anchors.top: centerStageBerth.top
+            anchors.rightMargin: root.scaled(14)
+            anchors.topMargin: root.scaled(10)
+            radius: root.edgeRadius
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: "#12304a" }
+                GradientStop { position: 1.0; color: "#0b1726" }
+            }
+            border.color: "#1c5c86"
+            border.width: 1
+            implicitWidth: rightBerthColumn.implicitWidth + (root.scaled(12) * 2)
+            implicitHeight: rightBerthColumn.implicitHeight + (root.scaled(8) * 2)
+
+            Column {
+                id: rightBerthColumn
+                anchors.centerIn: parent
+                spacing: 1
+
+                Text {
+                    text: "RIGHT WEAK-LINK RAIL"
+                    color: root.accentCyan
+                    font.pixelSize: root.captionSize
+                    font.family: root.monoFamily
+                    font.letterSpacing: root.scaled(1)
+                }
+
+                Text {
+                    text: "PLAYBOOK + LIVE WATCH"
+                    color: root.textMuted
+                    font.pixelSize: root.captionSize
+                    font.family: root.uiFamily
+                }
+            }
+        }
+
     }
 }

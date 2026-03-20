@@ -9,6 +9,25 @@ PanelFrame {
     readonly property var panel: DataUtils.objectOrEmpty(panelData)
     readonly property var liveAnchor: DataUtils.objectOrEmpty(panel["live_anchor"])
     readonly property var scenarios: DataUtils.arrayOrEmpty(panel["scenarios"])
+    readonly property bool hasScenarios: scenarios.length > 0
+    readonly property string heroStampLabel: String(scenarios.length) + " SCENARIOS"
+    readonly property var standbyModel: [
+        {
+            "label": "推荐档",
+            "value": String(panel["recommended_scenario_id"] || "--"),
+            "detail": "继续沿用弱网镜像档位"
+        },
+        {
+            "label": "实时锚点",
+            "value": String(liveAnchor["board_status"] || "--"),
+            "detail": String(liveAnchor["valid_instance"] || "等待在线实例")
+        },
+        {
+            "label": "对照池",
+            "value": "0 scenarios",
+            "detail": "归档剧本尚未回填到右舷轨"
+        }
+    ]
 
     panelColor: shellWindow ? shellWindow.panelColorRaised : "#0a1728"
     borderTone: shellWindow ? shellWindow.panelTraceStrong : "#1a3f61"
@@ -96,12 +115,36 @@ PanelFrame {
                 anchors.margins: shellWindow ? shellWindow.cardPadding : 14
                 spacing: shellWindow ? shellWindow.compactGap : 8
 
-                Text {
-                    text: panel["title"] || "右舷弱网轨 / Right Weak-Link Rail"
-                    color: shellWindow ? shellWindow.accentBlue : "#38b6ff"
-                    font.pixelSize: shellWindow ? shellWindow.eyebrowSize : 10
-                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
-                    font.letterSpacing: shellWindow ? shellWindow.scaled(1) : 1
+                RowLayout {
+                    width: parent.width
+                    spacing: shellWindow ? shellWindow.compactGap : 8
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: panel["title"] || "右舷弱网轨 / Right Weak-Link Rail"
+                        color: shellWindow ? shellWindow.accentBlue : "#38b6ff"
+                        font.pixelSize: shellWindow ? shellWindow.eyebrowSize : 10
+                        font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                        font.letterSpacing: shellWindow ? shellWindow.scaled(1) : 1
+                    }
+
+                    Rectangle {
+                        radius: shellWindow ? shellWindow.edgeRadius : 10
+                        color: "#091726"
+                        border.color: "#1d547c"
+                        border.width: 1
+                        implicitWidth: heroStamp.implicitWidth + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
+                        implicitHeight: heroStamp.implicitHeight + ((shellWindow ? shellWindow.scaled(5) : 5) * 2)
+
+                        Text {
+                            id: heroStamp
+                            anchors.centerIn: parent
+                            text: root.heroStampLabel
+                            color: shellWindow ? shellWindow.textPrimary : "#d5eeff"
+                            font.pixelSize: shellWindow ? shellWindow.captionSize : 9
+                            font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                        }
+                    }
                 }
 
                 Text {
@@ -127,6 +170,13 @@ PanelFrame {
                     font.pixelSize: shellWindow ? shellWindow.bodySize : 13
                     font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
                     wrapMode: Text.WordWrap
+                }
+
+                Rectangle {
+                    width: parent.width
+                    height: 1
+                    color: "#18405f"
+                    opacity: 0.86
                 }
 
                 Flow {
@@ -377,6 +427,7 @@ PanelFrame {
 
         ScrollView {
             id: scenariosView
+            visible: root.hasScenarios
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
@@ -616,23 +667,239 @@ PanelFrame {
         }
 
         Rectangle {
+            visible: !root.hasScenarios
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            Layout.minimumHeight: shellWindow ? shellWindow.scaled(244) : 244
+            radius: shellWindow ? shellWindow.cardRadius : 12
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: "#0d2033" }
+                GradientStop { position: 1.0; color: "#081321" }
+            }
+            border.color: "#245b84"
+            border.width: 1
+
+            Rectangle {
+                anchors.fill: parent
+                anchors.margins: 1
+                radius: parent.radius - 1
+                color: "transparent"
+                border.color: "#12324d"
+                border.width: 1
+                opacity: 0.82
+            }
+
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                height: shellWindow ? shellWindow.scaled(3) : 3
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: "transparent" }
+                    GradientStop { position: 0.24; color: shellWindow ? shellWindow.accentBlue : "#38b6ff" }
+                    GradientStop { position: 0.72; color: shellWindow ? shellWindow.accentCyan : "#72f3ff" }
+                    GradientStop { position: 1.0; color: "transparent" }
+                }
+                opacity: 0.76
+            }
+
+            Column {
+                id: standbyColumn
+                anchors.fill: parent
+                anchors.margins: shellWindow ? shellWindow.cardPadding : 12
+                spacing: shellWindow ? shellWindow.compactGap : 8
+
+                RowLayout {
+                    width: parent.width
+                    spacing: shellWindow ? shellWindow.compactGap : 8
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 2
+
+                        Text {
+                            text: "PLAYBOOK STANDBY / 空剧本待机"
+                            color: shellWindow ? shellWindow.accentBlue : "#38b6ff"
+                            font.pixelSize: shellWindow ? shellWindow.captionSize : 11
+                            font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                            font.letterSpacing: shellWindow ? shellWindow.scaled(1) : 1
+                        }
+
+                        Text {
+                            text: "右舷弱网轨等待剧本对照回填"
+                            color: shellWindow ? shellWindow.textStrong : "#f4fbff"
+                            font.pixelSize: shellWindow ? shellWindow.bodyEmphasisSize : 14
+                            font.bold: true
+                            font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                        }
+
+                        Text {
+                            width: parent.width
+                            text: "当前继续显示推荐档位与在线锚点事实，不伪造不存在的弱网实验结果；一旦剧本接入，这个待机层会被真实对照卡片替换。"
+                            color: shellWindow ? shellWindow.textSecondary : "#83acc8"
+                            font.pixelSize: shellWindow ? shellWindow.captionSize : 11
+                            font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                            wrapMode: Text.WordWrap
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.alignment: Qt.AlignTop
+                        radius: shellWindow ? shellWindow.edgeRadius : 10
+                        color: "#091726"
+                        border.color: "#1d547c"
+                        border.width: 1
+                        implicitWidth: standbyStamp.implicitWidth + ((shellWindow ? shellWindow.scaled(12) : 12) * 2)
+                        implicitHeight: standbyStamp.implicitHeight + ((shellWindow ? shellWindow.scaled(6) : 6) * 2)
+
+                        Text {
+                            id: standbyStamp
+                            anchors.centerIn: parent
+                            text: "MIRROR ONLY"
+                            color: shellWindow ? shellWindow.textPrimary : "#d5eeff"
+                            font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                            font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                        }
+                    }
+                }
+
+                Flow {
+                    width: parent.width
+                    spacing: shellWindow ? shellWindow.compactGap : 8
+
+                    Repeater {
+                        model: root.standbyModel
+
+                        delegate: Rectangle {
+                            readonly property var chip: modelData
+                            radius: shellWindow ? shellWindow.edgeRadius : 10
+                            gradient: Gradient {
+                                GradientStop { position: 0.0; color: "#102436" }
+                                GradientStop { position: 1.0; color: "#091522" }
+                            }
+                            border.color: "#245b84"
+                            border.width: 1
+                            height: standbyChipColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(8) : 8) * 2)
+                            width: Math.max(shellWindow ? shellWindow.scaled(172) : 172, standbyChipColumn.implicitWidth + (shellWindow ? shellWindow.scaled(22) : 22))
+
+                            Column {
+                                id: standbyChipColumn
+                                anchors.centerIn: parent
+                                spacing: 2
+
+                                Text {
+                                    text: chip["label"]
+                                    color: shellWindow ? shellWindow.textMuted : "#4e7392"
+                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                    font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                }
+
+                                Text {
+                                    text: chip["value"]
+                                    color: shellWindow ? shellWindow.textStrong : "#f4fbff"
+                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 11
+                                    font.bold: true
+                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                }
+
+                                Text {
+                                    text: chip["detail"]
+                                    color: shellWindow ? shellWindow.textSecondary : "#83acc8"
+                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 9
+                                    font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Rectangle {
             Layout.fillWidth: true
             radius: shellWindow ? shellWindow.edgeRadius : 10
-            color: "#081321"
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: "#0b1b2d" }
+                GradientStop { position: 1.0; color: "#091421" }
+            }
             border.color: "#1f557c"
             border.width: 1
-            implicitHeight: truthText.implicitHeight + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
+            implicitHeight: truthColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
 
-            Text {
-                id: truthText
+            Rectangle {
+                anchors.fill: parent
+                anchors.margins: 1
+                radius: parent.radius - 1
+                color: "transparent"
+                border.color: "#12324d"
+                border.width: 1
+                opacity: 0.82
+            }
+
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                height: shellWindow ? shellWindow.scaled(3) : 3
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: "transparent" }
+                    GradientStop { position: 0.22; color: shellWindow ? shellWindow.accentBlue : "#38b6ff" }
+                    GradientStop { position: 0.72; color: shellWindow ? shellWindow.accentCyan : "#72f3ff" }
+                    GradientStop { position: 1.0; color: "transparent" }
+                }
+                opacity: 0.76
+            }
+
+            Column {
+                id: truthColumn
                 anchors.fill: parent
                 anchors.margins: shellWindow ? shellWindow.scaled(10) : 10
-                text: panel["truth_note"] || ""
-                color: shellWindow ? shellWindow.textMuted : "#4e7392"
-                wrapMode: Text.WordWrap
-                font.pixelSize: shellWindow ? shellWindow.captionSize : 11
-                font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
-                visible: text.length > 0
+                spacing: shellWindow ? shellWindow.scaled(3) : 3
+
+                RowLayout {
+                    width: parent.width
+                    spacing: shellWindow ? shellWindow.compactGap : 8
+
+                    Text {
+                        text: "真实性边界 / PLAYBOOK BOUNDARY"
+                        color: shellWindow ? shellWindow.accentBlue : "#38b6ff"
+                        font.pixelSize: shellWindow ? shellWindow.captionSize : 11
+                        font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                    }
+
+                    Item {
+                        Layout.fillWidth: true
+                    }
+
+                    Rectangle {
+                        radius: shellWindow ? shellWindow.edgeRadius : 10
+                        color: "#091726"
+                        border.color: "#1d547c"
+                        border.width: 1
+                        implicitWidth: truthStamp.implicitWidth + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
+                        implicitHeight: truthStamp.implicitHeight + ((shellWindow ? shellWindow.scaled(5) : 5) * 2)
+
+                        Text {
+                            id: truthStamp
+                            anchors.centerIn: parent
+                            text: panel["recommended_scenario_id"] || "NO PLAYBOOK"
+                            color: shellWindow ? shellWindow.textPrimary : "#d5eeff"
+                            font.pixelSize: shellWindow ? shellWindow.captionSize : 9
+                            font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                        }
+                    }
+                }
+
+                Text {
+                    id: truthText
+                    width: parent.width
+                    text: panel["truth_note"] || ""
+                    color: shellWindow ? shellWindow.textMuted : "#4e7392"
+                    wrapMode: Text.WordWrap
+                    font.pixelSize: shellWindow ? shellWindow.captionSize : 11
+                    font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                    visible: text.length > 0
+                }
             }
         }
     }
