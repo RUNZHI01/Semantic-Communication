@@ -1,13 +1,56 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import "DataUtils.js" as DataUtils
 
 PanelFrame {
     id: root
     property var panelData: ({})
-    panelColor: "#0b151f"
+    readonly property var panel: DataUtils.objectOrEmpty(panelData)
+    readonly property var liveAnchor: DataUtils.objectOrEmpty(panel["live_anchor"])
+    readonly property var scenarios: DataUtils.arrayOrEmpty(panel["scenarios"])
+
+    panelColor: shellWindow ? shellWindow.cardColorSoft : "#0a1728"
+    borderTone: shellWindow ? shellWindow.borderSoft : "#1a3f61"
+    accentTone: shellWindow ? shellWindow.accentCyan : "#72f3ff"
 
     implicitHeight: contentLayout.implicitHeight + ((shellWindow ? shellWindow.panelPadding : 18) * 2)
+
+    function toneColor(tone) {
+        if (shellWindow)
+            return shellWindow.toneColor(tone)
+        if (tone === "online")
+            return "#42f0bc"
+        if (tone === "warning" || tone === "degraded")
+            return "#ffbf52"
+        return "#38b6ff"
+    }
+
+    function toneFill(tone) {
+        if (tone === "online")
+            return "#0c2b29"
+        if (tone === "warning" || tone === "degraded")
+            return "#302311"
+        return "#0d2234"
+    }
+
+    function throughputText(scenario) {
+        var resolvedScenario = DataUtils.objectOrEmpty(scenario)
+        var comparison = DataUtils.objectOrEmpty(resolvedScenario["comparison"])
+        return Number(comparison["pipeline_images_per_sec"] || 0).toFixed(3) + " img/s"
+    }
+
+    function upliftText(scenario) {
+        var resolvedScenario = DataUtils.objectOrEmpty(scenario)
+        var comparison = DataUtils.objectOrEmpty(resolvedScenario["comparison"])
+        return Number(comparison["throughput_uplift_pct"] || 0).toFixed(3) + "%"
+    }
+
+    function savedSecondsText(scenario) {
+        var resolvedScenario = DataUtils.objectOrEmpty(scenario)
+        var comparison = DataUtils.objectOrEmpty(resolvedScenario["comparison"])
+        return Number(comparison["saved_seconds_per_batch"] || 0).toFixed(3) + " s"
+    }
 
     ColumnLayout {
         id: contentLayout
@@ -15,28 +58,113 @@ PanelFrame {
         anchors.margins: shellWindow ? shellWindow.panelPadding : 18
         spacing: shellWindow ? shellWindow.zoneGap : 12
 
-        Text {
-            text: panelData["title"] || "弱网对照 / Weak-Network"
-            color: "#d8f7ff"
-            font.pixelSize: shellWindow ? shellWindow.sectionTitleSize : 22
-            font.bold: true
-            font.family: shellWindow ? shellWindow.monoFamily : "DejaVu Sans Mono"
-        }
-
-        Text {
+        Rectangle {
             Layout.fillWidth: true
-            text: panelData["summary"] || ""
-            color: "#8fb8c6"
-            wrapMode: Text.WordWrap
-            font.pixelSize: shellWindow ? shellWindow.bodySize : 13
-            font.family: shellWindow ? shellWindow.monoFamily : "DejaVu Sans Mono"
+            radius: shellWindow ? shellWindow.cardRadius : 14
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: "#11324f" }
+                GradientStop { position: 0.5; color: "#091a2c" }
+                GradientStop { position: 1.0; color: "#06101a" }
+            }
+            border.color: "#2d83bc"
+            border.width: 1
+            implicitHeight: heroColumn.implicitHeight + ((shellWindow ? shellWindow.cardPadding : 14) * 2)
+
+            Column {
+                id: heroColumn
+                anchors.fill: parent
+                anchors.margins: shellWindow ? shellWindow.cardPadding : 14
+                spacing: shellWindow ? shellWindow.compactGap : 8
+
+                Text {
+                    text: panel["title"] || "弱网对照 / Weak-Network"
+                    color: shellWindow ? shellWindow.accentBlue : "#38b6ff"
+                    font.pixelSize: shellWindow ? shellWindow.eyebrowSize : 10
+                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                    font.letterSpacing: shellWindow ? shellWindow.scaled(1) : 1
+                }
+
+                Text {
+                    text: "弱网策略"
+                    color: shellWindow ? shellWindow.textStrong : "#f4fbff"
+                    font.pixelSize: shellWindow ? shellWindow.sectionTitleSize : 24
+                    font.bold: true
+                    font.family: shellWindow ? shellWindow.displayFamily : "Noto Sans CJK SC"
+                }
+
+                Text {
+                    width: parent.width
+                    text: panel["summary"] || ""
+                    color: shellWindow ? shellWindow.textSecondary : "#83acc8"
+                    font.pixelSize: shellWindow ? shellWindow.bodySize : 13
+                    font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                    wrapMode: Text.WordWrap
+                }
+
+                Flow {
+                    width: parent.width
+                    spacing: shellWindow ? shellWindow.compactGap : 8
+
+                    Repeater {
+                        model: [
+                            {
+                                "label": "推荐档",
+                                "value": String(panel["recommended_scenario_id"] || "--"),
+                                "tone": "warning"
+                            },
+                            {
+                                "label": "锚点",
+                                "value": String(liveAnchor["valid_instance"] || "--"),
+                                "tone": String(liveAnchor["tone"] || "online")
+                            },
+                            {
+                                "label": "板端",
+                                "value": String(liveAnchor["board_status"] || "--"),
+                                "tone": String(liveAnchor["tone"] || "online")
+                            }
+                        ]
+
+                        delegate: Rectangle {
+                            readonly property var chip: modelData
+                            radius: shellWindow ? shellWindow.edgeRadius : 10
+                            color: root.toneFill(chip["tone"])
+                            border.color: root.toneColor(chip["tone"])
+                            border.width: 1
+                            height: chipColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(8) : 8) * 2)
+                            width: Math.max(shellWindow ? shellWindow.scaled(154) : 154, chipColumn.implicitWidth + (shellWindow ? shellWindow.scaled(22) : 22))
+
+                            Column {
+                                id: chipColumn
+                                anchors.centerIn: parent
+                                spacing: 2
+
+                                Text {
+                                    text: chip["label"]
+                                    color: shellWindow ? shellWindow.textMuted : "#4e7392"
+                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 11
+                                    font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                }
+
+                                Text {
+                                    text: chip["value"]
+                                    color: shellWindow ? shellWindow.textStrong : "#f4fbff"
+                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 11
+                                    font.bold: true
+                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                    wrapMode: Text.WrapAnywhere
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         Rectangle {
             Layout.fillWidth: true
-            radius: shellWindow ? shellWindow.cardRadius : 12
-            color: "#102638"
-            border.color: "#29576b"
+            radius: shellWindow ? shellWindow.cardRadius : 14
+            color: "#091321"
+            border.color: root.toneColor(liveAnchor["tone"])
             border.width: 1
             implicitHeight: anchorColumn.implicitHeight + ((shellWindow ? shellWindow.cardPadding : 12) * 2)
 
@@ -44,53 +172,83 @@ PanelFrame {
                 id: anchorColumn
                 anchors.fill: parent
                 anchors.margins: shellWindow ? shellWindow.cardPadding : 12
-                spacing: shellWindow ? shellWindow.compactGap : 6
+                spacing: shellWindow ? shellWindow.scaled(5) : 5
 
                 Text {
-                    text: "实时锚点"
-                    color: "#68d7e5"
+                    text: "实时锚点 / Live Anchor"
+                    color: shellWindow ? shellWindow.accentCyan : "#72f3ff"
                     font.pixelSize: shellWindow ? shellWindow.captionSize : 11
-                    font.family: shellWindow ? shellWindow.monoFamily : "DejaVu Sans Mono"
+                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
                 }
 
                 Text {
                     width: parent.width
-                    text: ((panelData["live_anchor"] || {})["label"] || "") + " / " + ((panelData["live_anchor"] || {})["board_status"] || "")
-                    color: "#edfaff"
+                    text: String(liveAnchor["label"] || "") + " / " + String(liveAnchor["board_status"] || "")
+                    color: shellWindow ? shellWindow.textStrong : "#f4fbff"
                     font.pixelSize: shellWindow ? shellWindow.bodyEmphasisSize : 14
-                    font.family: shellWindow ? shellWindow.monoFamily : "DejaVu Sans Mono"
+                    font.bold: true
+                    font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
                     wrapMode: Text.WordWrap
                 }
 
                 Text {
                     width: parent.width
-                    text: (panelData["live_anchor"] || {})["probe_summary"] || ""
-                    color: "#c3ebf4"
-                    wrapMode: Text.WordWrap
+                    text: String(liveAnchor["probe_summary"] || "")
+                    color: shellWindow ? shellWindow.textSecondary : "#83acc8"
                     font.pixelSize: shellWindow ? shellWindow.captionSize : 11
-                    font.family: shellWindow ? shellWindow.monoFamily : "DejaVu Sans Mono"
+                    font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                    wrapMode: Text.WordWrap
+                }
+
+                RowLayout {
+                    width: parent.width
+                    spacing: shellWindow ? shellWindow.compactGap : 8
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: "当前 " + String(liveAnchor["current_completed"] || "--")
+                        color: shellWindow ? shellWindow.textPrimary : "#d5eeff"
+                        font.pixelSize: shellWindow ? shellWindow.captionSize : 11
+                        font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                        wrapMode: Text.WordWrap
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: "基线 " + String(liveAnchor["baseline_completed"] || "--")
+                        color: shellWindow ? shellWindow.textPrimary : "#d5eeff"
+                        font.pixelSize: shellWindow ? shellWindow.captionSize : 11
+                        font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                        wrapMode: Text.WordWrap
+                    }
                 }
             }
         }
 
         ScrollView {
+            id: scenariosView
             Layout.fillWidth: true
             Layout.fillHeight: true
             clip: true
 
             Column {
-                width: root.width - ((shellWindow ? shellWindow.panelPadding : 18) * 2)
+                width: Math.max(0, scenariosView.width - (shellWindow ? shellWindow.scaled(6) : 6))
                 spacing: shellWindow ? shellWindow.compactGap : 8
 
                 Repeater {
-                    model: panelData["scenarios"] || []
+                    model: scenarios
 
                     delegate: Rectangle {
+                        readonly property var scenario: modelData
+                        readonly property bool highlighted: String(scenario["scenario_id"] || "") === String(panel["recommended_scenario_id"] || "")
                         width: parent.width
                         radius: shellWindow ? shellWindow.cardRadius : 12
-                        color: modelData["scenario_id"] === panelData["recommended_scenario_id"] ? "#123247" : "#101e2a"
+                        gradient: Gradient {
+                            GradientStop { position: 0.0; color: highlighted ? "#12304a" : "#0c1a27" }
+                            GradientStop { position: 1.0; color: highlighted ? "#0a1622" : "#09131d" }
+                        }
                         border.width: 1
-                        border.color: modelData["recommended"] ? "#21b573" : "#29576b"
+                        border.color: highlighted ? "#3aaeff" : root.toneColor(scenario["tone"])
                         implicitHeight: cardColumn.implicitHeight + ((shellWindow ? shellWindow.cardPadding : 12) * 2)
 
                         Column {
@@ -101,50 +259,152 @@ PanelFrame {
                             anchors.margins: shellWindow ? shellWindow.cardPadding : 12
                             spacing: shellWindow ? shellWindow.compactGap : 6
 
-                            Row {
+                            RowLayout {
+                                width: parent.width
                                 spacing: shellWindow ? shellWindow.compactGap : 8
 
                                 Text {
-                                    text: modelData["label"] || ""
-                                    color: "#edfaff"
+                                    Layout.fillWidth: true
+                                    text: scenario["label"] || ""
+                                    color: shellWindow ? shellWindow.textStrong : "#f4fbff"
                                     font.pixelSize: shellWindow ? shellWindow.bodyEmphasisSize : 14
                                     font.bold: true
-                                    font.family: shellWindow ? shellWindow.monoFamily : "DejaVu Sans Mono"
+                                    font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                    wrapMode: Text.WordWrap
                                 }
 
                                 Rectangle {
-                                    width: shellWindow ? shellWindow.scaled(72) : 72
-                                    height: shellWindow ? shellWindow.scaled(20) : 20
                                     radius: height / 2
-                                    color: modelData["recommended"] ? "#1f7a58" : "#5f4b18"
+                                    color: scenario["recommended"] ? "#173f30" : "#1d2a36"
+                                    border.color: scenario["recommended"] ? "#42f0bc" : root.toneColor(scenario["tone"])
+                                    border.width: 1
+                                    implicitWidth: badgeText.implicitWidth + ((shellWindow ? shellWindow.scaled(12) : 12) * 2)
+                                    implicitHeight: badgeText.implicitHeight + ((shellWindow ? shellWindow.scaled(6) : 6) * 2)
 
                                     Text {
+                                        id: badgeText
                                         anchors.centerIn: parent
-                                        text: modelData["recommended"] ? "推荐" : "对照"
-                                        color: "#edfaff"
+                                        text: scenario["recommended"] ? "推荐" : "对照"
+                                        color: shellWindow ? shellWindow.textStrong : "#f4fbff"
                                         font.pixelSize: shellWindow ? shellWindow.captionSize : 10
-                                        font.family: shellWindow ? shellWindow.monoFamily : "DejaVu Sans Mono"
+                                        font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
                                     }
                                 }
                             }
 
                             Text {
                                 width: parent.width
-                                text: modelData["summary"] || ""
-                                color: "#c3ebf4"
+                                text: scenario["summary"] || ""
+                                color: shellWindow ? shellWindow.textSecondary : "#83acc8"
                                 wrapMode: Text.WordWrap
                                 font.pixelSize: shellWindow ? shellWindow.bodySize : 12
-                                font.family: shellWindow ? shellWindow.monoFamily : "DejaVu Sans Mono"
+                                font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                            }
+
+                            Flow {
+                                width: parent.width
+                                spacing: shellWindow ? shellWindow.compactGap : 8
+
+                                Repeater {
+                                    model: [
+                                        {
+                                            "label": "SNR",
+                                            "value": Number(((scenario["channel"] || {})["snr_db"] || 0)).toFixed(1) + " dB"
+                                        },
+                                        {
+                                            "label": "吞吐",
+                                            "value": root.throughputText(scenario)
+                                        },
+                                        {
+                                            "label": "提升",
+                                            "value": root.upliftText(scenario)
+                                        },
+                                        {
+                                            "label": "节省",
+                                            "value": root.savedSecondsText(scenario)
+                                        }
+                                    ]
+
+                                    delegate: Rectangle {
+                                        readonly property var chip: modelData
+                                        radius: shellWindow ? shellWindow.edgeRadius : 10
+                                        color: "#091a28"
+                                        border.color: "#1f557c"
+                                        border.width: 1
+                                        height: statColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(8) : 8) * 2)
+                                        width: Math.max(shellWindow ? shellWindow.scaled(108) : 108, statColumn.implicitWidth + (shellWindow ? shellWindow.scaled(18) : 18))
+
+                                        Column {
+                                            id: statColumn
+                                            anchors.centerIn: parent
+                                            spacing: 2
+
+                                            Text {
+                                                text: chip["label"]
+                                                color: shellWindow ? shellWindow.textMuted : "#4e7392"
+                                                font.pixelSize: shellWindow ? shellWindow.captionSize : 11
+                                                font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                            }
+
+                                            Text {
+                                                text: chip["value"]
+                                                color: shellWindow ? shellWindow.textStrong : "#f4fbff"
+                                                font.pixelSize: shellWindow ? shellWindow.captionSize : 11
+                                                font.bold: true
+                                                font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            Flow {
+                                width: parent.width
+                                spacing: shellWindow ? shellWindow.compactGap : 8
+
+                                Repeater {
+                                    model: scenario["stage_timings"] || []
+
+                                    delegate: Rectangle {
+                                        readonly property var stage: modelData
+                                        radius: shellWindow ? shellWindow.edgeRadius : 10
+                                        color: "#081422"
+                                        border.color: root.toneColor(stage["tone"])
+                                        border.width: 1
+                                        height: stageColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(8) : 8) * 2)
+                                        width: Math.max(shellWindow ? shellWindow.scaled(120) : 120, stageColumn.implicitWidth + (shellWindow ? shellWindow.scaled(20) : 20))
+
+                                        Column {
+                                            id: stageColumn
+                                            anchors.centerIn: parent
+                                            spacing: 2
+
+                                            Text {
+                                                text: stage["label"] || ""
+                                                color: shellWindow ? shellWindow.textPrimary : "#d5eeff"
+                                                font.pixelSize: shellWindow ? shellWindow.captionSize : 11
+                                                font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                            }
+
+                                            Text {
+                                                text: Number(stage["mean_ms"] || 0).toFixed(3) + " ms"
+                                                color: shellWindow ? shellWindow.textStrong : "#f4fbff"
+                                                font.pixelSize: shellWindow ? shellWindow.captionSize : 11
+                                                font.bold: true
+                                                font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                            }
+                                        }
+                                    }
+                                }
                             }
 
                             Text {
                                 width: parent.width
-                                text: "处理 " + Number(modelData["processed_count"] || 0).toFixed(0) +
-                                      " / 提升 " + Number(((modelData["comparison"] || {})["throughput_uplift_pct"] || 0)).toFixed(3) + "%"
-                                color: "#68d7e5"
-                                font.pixelSize: shellWindow ? shellWindow.captionSize : 11
-                                font.family: shellWindow ? shellWindow.monoFamily : "DejaVu Sans Mono"
+                                text: scenario["operator_note"] || ""
+                                color: shellWindow ? shellWindow.textSecondary : "#83acc8"
                                 wrapMode: Text.WordWrap
+                                font.pixelSize: shellWindow ? shellWindow.captionSize : 11
+                                font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
                             }
                         }
                     }
@@ -152,13 +412,25 @@ PanelFrame {
             }
         }
 
-        Text {
+        Rectangle {
             Layout.fillWidth: true
-            text: panelData["truth_note"] || ""
-            color: "#76b5c7"
-            wrapMode: Text.WordWrap
-            font.pixelSize: shellWindow ? shellWindow.captionSize : 11
-            font.family: shellWindow ? shellWindow.monoFamily : "DejaVu Sans Mono"
+            radius: shellWindow ? shellWindow.edgeRadius : 10
+            color: "#081321"
+            border.color: "#1f557c"
+            border.width: 1
+            implicitHeight: truthText.implicitHeight + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
+
+            Text {
+                id: truthText
+                anchors.fill: parent
+                anchors.margins: shellWindow ? shellWindow.scaled(10) : 10
+                text: panel["truth_note"] || ""
+                color: shellWindow ? shellWindow.textMuted : "#4e7392"
+                wrapMode: Text.WordWrap
+                font.pixelSize: shellWindow ? shellWindow.captionSize : 11
+                font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                visible: text.length > 0
+            }
         }
     }
 }
