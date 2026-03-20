@@ -30,16 +30,19 @@ class DemoRepoAdapterTest(unittest.TestCase):
 
     def test_ui_state_exposes_expected_zones(self) -> None:
         ui_state = self.adapter.load_contract_bundle().ui_state
+        center_panel = ui_state["zones"]["center_tactical_view"]
 
         self.assertIn("zones", ui_state)
         self.assertIn("left_status_panel", ui_state["zones"])
         self.assertIn("center_tactical_view", ui_state["zones"])
         self.assertIn("right_weak_network_panel", ui_state["zones"])
         self.assertIn("bottom_action_strip", ui_state["zones"])
-        self.assertEqual(
-            ui_state["zones"]["center_tactical_view"]["mission_call_sign"],
-            "M9-DEMO",
-        )
+        self.assertEqual(center_panel["mission_call_sign"], "M9-DEMO")
+        self.assertEqual(center_panel["feed_contract"]["api_path"], "/api/aircraft-position")
+        self.assertEqual(center_panel["feed_contract"]["active_source_kind"], "backend_stub")
+        self.assertGreater(len(center_panel["track"]), 0)
+        self.assertAlmostEqual(center_panel["position"]["latitude"], 30.572815)
+        self.assertAlmostEqual(center_panel["position"]["longitude"], 104.066801)
 
 
 if __name__ == "__main__":
