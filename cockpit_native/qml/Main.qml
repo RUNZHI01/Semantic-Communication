@@ -71,6 +71,11 @@ ApplicationWindow {
     readonly property color panelTraceStrong: "#1f5b86"
     readonly property color panelTrace: "#143754"
     readonly property color panelTraceSoft: "#0d2940"
+    readonly property color shellGlowOuter: "#2c89c6"
+    readonly property color shellGlowSoft: "#143754"
+    readonly property color shellFabricTop: "#14314c"
+    readonly property color shellFabricMid: "#0a1726"
+    readonly property color shellFabricBottom: "#06101a"
 
     readonly property real widthScale: Math.max(0.78, Math.min(1.18, Number(metrics["width"] || designWidth) / designWidth))
     readonly property real heightScale: Math.max(0.78, Math.min(1.18, Number(metrics["height"] || designHeight) / designHeight))
@@ -109,6 +114,7 @@ ApplicationWindow {
     readonly property int wideLeftSpan: 3
     readonly property int wideCenterSpan: 10
     readonly property int wideRightSpan: 3
+    readonly property string shellFabricLabel: wideLayout ? "TRIPLE RAIL COMMAND FABRIC" : "STACKED COMMAND FABRIC"
 
     readonly property string topTitle: primaryLabel(meta["title"] || "飞腾原生座舱 / Feiteng Native Cockpit")
     readonly property string topSubtitle: secondaryLabel(meta["title"] || "飞腾原生座舱 / Feiteng Native Cockpit")
@@ -510,14 +516,15 @@ ApplicationWindow {
             radius: root.cardRadius
             gradient: Gradient {
                 orientation: Gradient.Horizontal
-                GradientStop { position: 0.0; color: "#1e5f8d00" }
-                GradientStop { position: 0.2; color: "#174c741a" }
-                GradientStop { position: 0.54; color: "#10263d7a" }
+                GradientStop { position: 0.0; color: "#2a7fb300" }
+                GradientStop { position: 0.18; color: "#184a7216" }
+                GradientStop { position: 0.52; color: "#10263e92" }
+                GradientStop { position: 0.78; color: "#0b192800" }
                 GradientStop { position: 1.0; color: "#09142100" }
             }
-            border.color: "#163f61"
+            border.color: "#1c527b"
             border.width: 1
-            opacity: 0.78
+            opacity: 0.88
         }
 
         Rectangle {
@@ -543,13 +550,14 @@ ApplicationWindow {
             gradient: Gradient {
                 orientation: Gradient.Horizontal
                 GradientStop { position: 0.0; color: "#09142100" }
-                GradientStop { position: 0.46; color: "#10263d7a" }
-                GradientStop { position: 0.8; color: "#174c741a" }
-                GradientStop { position: 1.0; color: "#1e5f8d00" }
+                GradientStop { position: 0.24; color: "#0b192800" }
+                GradientStop { position: 0.48; color: "#10263e92" }
+                GradientStop { position: 0.82; color: "#184a7216" }
+                GradientStop { position: 1.0; color: "#2a7fb300" }
             }
-            border.color: "#163f61"
+            border.color: "#1c527b"
             border.width: 1
-            opacity: 0.78
+            opacity: 0.88
         }
 
         Rectangle {
@@ -576,14 +584,15 @@ ApplicationWindow {
             )
             radius: root.panelRadius
             gradient: Gradient {
-                GradientStop { position: 0.0; color: "#18486f22" }
-                GradientStop { position: 0.2; color: "#14375782" }
-                GradientStop { position: 0.52; color: "#0a17264c" }
+                GradientStop { position: 0.0; color: "#1b5a8922" }
+                GradientStop { position: 0.18; color: "#17486fa2" }
+                GradientStop { position: 0.48; color: "#0c1d2e56" }
+                GradientStop { position: 0.78; color: "#08131d12" }
                 GradientStop { position: 1.0; color: "#07111b00" }
             }
-            border.color: "#17486e"
+            border.color: "#1d5b87"
             border.width: 1
-            opacity: 0.72
+            opacity: 0.84
         }
 
         Rectangle {
@@ -685,14 +694,15 @@ ApplicationWindow {
             anchors.bottomMargin: root.scaled(18)
             radius: root.cardRadius
             gradient: Gradient {
-                GradientStop { position: 0.0; color: "#153a5a16" }
-                GradientStop { position: 0.28; color: "#10253c82" }
+                GradientStop { position: 0.0; color: "#1a4f771a" }
+                GradientStop { position: 0.24; color: "#12314d9a" }
+                GradientStop { position: 0.7; color: "#0a18268a" }
                 GradientStop { position: 1.0; color: "#07111c00" }
             }
-            border.color: "#163f61"
+            border.color: "#1c537c"
             border.width: 1
-            height: root.scaled(root.wideLayout ? 148 : 124)
-            opacity: 0.78
+            height: root.scaled(root.wideLayout ? 156 : 132)
+            opacity: 0.88
         }
 
         Rectangle {
@@ -703,6 +713,120 @@ ApplicationWindow {
             border.color: "#102d45"
             border.width: 1
             opacity: 0.82
+        }
+
+        Rectangle {
+            id: commandFabricBackdrop
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: shellHeaderCard.bottom
+            anchors.bottom: bottomActionBerth.top
+            anchors.leftMargin: root.scaled(root.wideLayout ? 26 : 12)
+            anchors.rightMargin: root.scaled(root.wideLayout ? 26 : 12)
+            anchors.topMargin: root.scaled(14)
+            anchors.bottomMargin: root.scaled(18)
+            radius: root.panelRadius
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: root.shellFabricTop }
+                GradientStop { position: 0.32; color: "#0d2032" }
+                GradientStop { position: 0.58; color: root.shellFabricMid }
+                GradientStop { position: 1.0; color: root.shellFabricBottom }
+            }
+            border.color: root.shellGlowSoft
+            border.width: 1
+            opacity: 0.22
+        }
+
+        Rectangle {
+            anchors.fill: commandFabricBackdrop
+            anchors.margins: root.scaled(10)
+            radius: Math.max(2, commandFabricBackdrop.radius - root.scaled(10))
+            color: "transparent"
+            border.color: "#123650"
+            border.width: 1
+            opacity: 0.46
+        }
+
+        Rectangle {
+            anchors.horizontalCenter: commandFabricBackdrop.horizontalCenter
+            anchors.top: commandFabricBackdrop.top
+            anchors.bottom: commandFabricBackdrop.bottom
+            width: 1
+            color: root.panelTraceStrong
+            opacity: 0.16
+        }
+
+        Rectangle {
+            visible: root.wideLayout
+            anchors.left: commandFabricBackdrop.left
+            anchors.right: commandFabricBackdrop.right
+            anchors.verticalCenter: commandFabricBackdrop.verticalCenter
+            height: 1
+            gradient: Gradient {
+                orientation: Gradient.Horizontal
+                GradientStop { position: 0.0; color: "transparent" }
+                GradientStop { position: 0.16; color: root.panelTraceSoft }
+                GradientStop { position: 0.5; color: root.panelTraceStrong }
+                GradientStop { position: 0.84; color: root.panelTraceSoft }
+                GradientStop { position: 1.0; color: "transparent" }
+            }
+            opacity: 0.16
+        }
+
+        Rectangle {
+            anchors.horizontalCenter: centerStageBerth.horizontalCenter
+            anchors.top: shellHeaderCard.bottom
+            anchors.bottom: centerStageBerth.top
+            anchors.topMargin: root.scaled(8)
+            anchors.bottomMargin: root.scaled(8)
+            width: root.scaled(2)
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: "transparent" }
+                GradientStop { position: 0.18; color: root.shellGlowOuter }
+                GradientStop { position: 0.78; color: root.panelGlowStrong }
+                GradientStop { position: 1.0; color: "transparent" }
+            }
+            opacity: 0.42
+        }
+
+        Rectangle {
+            visible: root.wideLayout
+            anchors.left: leftRailBerth.right
+            anchors.right: centerStageBerth.left
+            anchors.leftMargin: root.scaled(26)
+            anchors.rightMargin: root.scaled(20)
+            anchors.bottom: bottomActionBerth.top
+            anchors.bottomMargin: root.scaled(10)
+            height: root.scaled(16)
+            radius: height / 2
+            gradient: Gradient {
+                orientation: Gradient.Horizontal
+                GradientStop { position: 0.0; color: "transparent" }
+                GradientStop { position: 0.24; color: root.shellGlowSoft }
+                GradientStop { position: 0.76; color: root.panelGlowStrong }
+                GradientStop { position: 1.0; color: "transparent" }
+            }
+            opacity: 0.32
+        }
+
+        Rectangle {
+            visible: root.wideLayout
+            anchors.left: centerStageBerth.right
+            anchors.right: rightRailBerth.left
+            anchors.leftMargin: root.scaled(20)
+            anchors.rightMargin: root.scaled(26)
+            anchors.bottom: bottomActionBerth.top
+            anchors.bottomMargin: root.scaled(10)
+            height: root.scaled(16)
+            radius: height / 2
+            gradient: Gradient {
+                orientation: Gradient.Horizontal
+                GradientStop { position: 0.0; color: "transparent" }
+                GradientStop { position: 0.24; color: root.panelGlowStrong }
+                GradientStop { position: 0.76; color: root.shellGlowSoft }
+                GradientStop { position: 1.0; color: "transparent" }
+            }
+            opacity: 0.32
         }
 
         Rectangle {
@@ -1683,7 +1807,7 @@ ApplicationWindow {
 
                         Text {
                             Layout.fillWidth: true
-                            text: "THEATER SPINE / SHELL STRUCTURE BUS"
+                            text: "COMMAND FABRIC / SHELL STRUCTURE BUS"
                             color: root.accentCyan
                             font.pixelSize: root.captionSize
                             font.family: root.monoFamily
@@ -1691,7 +1815,7 @@ ApplicationWindow {
                         }
 
                         Text {
-                            text: root.wideLayout ? "CENTER LOCKED" : "STACKED ALIGNMENT"
+                            text: root.shellFabricLabel
                             color: root.textMuted
                             font.pixelSize: root.captionSize
                             font.family: root.monoFamily
@@ -1873,7 +1997,7 @@ ApplicationWindow {
                             spacing: root.scaled(2)
 
                             Text {
-                                text: "壳体总线 / SHELL BUS"
+                                text: "指挥连续体 / COMMAND CONTINUITY BUS"
                                 color: root.accentBlue
                                 font.pixelSize: root.captionSize
                                 font.family: root.monoFamily
