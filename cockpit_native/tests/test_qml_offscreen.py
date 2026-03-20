@@ -40,7 +40,12 @@ class OffscreenQmlLoadTest(unittest.TestCase):
             QTimer.singleShot(0, app.quit)
             app.exec()
 
-            errors = [message for message in messages if "ReferenceError" in message or "TypeError" in message]
+            markers = (
+                "ReferenceError",
+                "TypeError",
+                "Cannot anchor to an item that isn't a parent or sibling",
+            )
+            errors = [message for message in messages if any(marker in message for marker in markers)]
             print(json.dumps({"root_objects": len(engine.rootObjects()), "errors": errors}))
             """
         )
