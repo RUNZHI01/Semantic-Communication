@@ -159,6 +159,51 @@ PanelFrame {
 
                     Rectangle {
                         Layout.fillWidth: true
+                        radius: shellWindow ? shellWindow.edgeRadius : 10
+                        gradient: Gradient {
+                            GradientStop { position: 0.0; color: "#0b1a2a" }
+                            GradientStop { position: 1.0; color: "#091321" }
+                        }
+                        border.color: root.toneColor(root.rowTone("链路档位"))
+                        border.width: 1
+                        implicitHeight: postureColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(8) : 8) * 2)
+
+                        Column {
+                            id: postureColumn
+                            anchors.fill: parent
+                            anchors.margins: shellWindow ? shellWindow.scaled(8) : 8
+                            spacing: 2
+
+                            Text {
+                                text: "RAIL POSTURE / BOARD HEALTH"
+                                color: shellWindow ? shellWindow.accentCyan : "#72f3ff"
+                                font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                            }
+
+                            Text {
+                                width: parent.width
+                                text: (root.rowValue("链路档位") || "--") + " / " + (root.rowValue("心跳") || "--")
+                                color: shellWindow ? shellWindow.textStrong : "#f4fbff"
+                                font.pixelSize: shellWindow ? shellWindow.captionSize : 11
+                                font.bold: true
+                                font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                wrapMode: Text.WrapAnywhere
+                            }
+
+                            Text {
+                                width: parent.width
+                                text: root.rowValue("快照原因") || "只读镜像继续保持当前板态总线。"
+                                color: shellWindow ? shellWindow.textSecondary : "#83acc8"
+                                font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                wrapMode: Text.WordWrap
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
                         Layout.preferredHeight: 1
                         color: "#18405f"
                         opacity: 0.86

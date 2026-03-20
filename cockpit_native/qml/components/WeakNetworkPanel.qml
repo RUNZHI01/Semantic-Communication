@@ -174,6 +174,51 @@ PanelFrame {
 
                 Rectangle {
                     width: parent.width
+                    radius: shellWindow ? shellWindow.edgeRadius : 10
+                    gradient: Gradient {
+                        GradientStop { position: 0.0; color: "#0b1a2a" }
+                        GradientStop { position: 1.0; color: "#091321" }
+                    }
+                    border.color: root.toneColor(liveAnchor["tone"])
+                    border.width: 1
+                    implicitHeight: watchPostureColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(8) : 8) * 2)
+
+                    Column {
+                        id: watchPostureColumn
+                        anchors.fill: parent
+                        anchors.margins: shellWindow ? shellWindow.scaled(8) : 8
+                        spacing: 2
+
+                        Text {
+                            text: "WATCH POSTURE / LIVE + PLAYBOOK"
+                            color: shellWindow ? shellWindow.accentCyan : "#72f3ff"
+                            font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                            font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                        }
+
+                        Text {
+                            width: parent.width
+                            text: String(panel["recommended_scenario_id"] || "--") + " / " + String(liveAnchor["valid_instance"] || "--")
+                            color: shellWindow ? shellWindow.textStrong : "#f4fbff"
+                            font.pixelSize: shellWindow ? shellWindow.captionSize : 11
+                            font.bold: true
+                            font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                            wrapMode: Text.WrapAnywhere
+                        }
+
+                        Text {
+                            width: parent.width
+                            text: String(liveAnchor["board_status"] || liveAnchor["probe_summary"] || "保持归档对照与在线锚点同屏。")
+                            color: shellWindow ? shellWindow.textSecondary : "#83acc8"
+                            font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                            font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                            wrapMode: Text.WordWrap
+                        }
+                    }
+                }
+
+                Rectangle {
+                    width: parent.width
                     height: 1
                     color: "#18405f"
                     opacity: 0.86

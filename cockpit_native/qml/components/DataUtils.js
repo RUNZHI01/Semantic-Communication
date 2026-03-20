@@ -1,9 +1,15 @@
 .pragma library
 
 function isArray(value) {
-    if (Array.isArray)
-        return Array.isArray(value)
-    return Object.prototype.toString.call(value) === "[object Array]"
+    if (Array.isArray && Array.isArray(value))
+        return true
+    if (value === null || value === undefined)
+        return false
+    if (typeof value === "string" || typeof value === "function")
+        return false
+    if (Object.prototype.toString.call(value) === "[object Array]")
+        return true
+    return typeof value === "object" && typeof value.length === "number" && value.length >= 0
 }
 
 function isObject(value) {

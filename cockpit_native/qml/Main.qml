@@ -18,6 +18,7 @@ ApplicationWindow {
     readonly property var centerPanelData: DataUtils.objectOrEmpty(zones["center_tactical_view"])
     readonly property var rightPanelData: DataUtils.objectOrEmpty(zones["right_weak_network_panel"])
     readonly property var bottomPanelData: DataUtils.objectOrEmpty(zones["bottom_action_strip"])
+    readonly property var bottomActions: DataUtils.arrayOrEmpty(bottomPanelData["actions"])
     readonly property var meta: DataUtils.objectOrEmpty(uiState["meta"])
     readonly property var statusRows: DataUtils.arrayOrEmpty(leftPanelData["rows"])
     readonly property var centerControlSummary: DataUtils.objectOrEmpty(centerPanelData["control_summary"])
@@ -113,6 +114,7 @@ ApplicationWindow {
     readonly property string topSubtitle: secondaryLabel(meta["title"] || "飞腾原生座舱 / Feiteng Native Cockpit")
     readonly property var liveAnchor: DataUtils.objectOrEmpty(rightPanelData["live_anchor"])
     readonly property string recommendedScenarioId: String(rightPanelData["recommended_scenario_id"] || "--")
+    readonly property int enabledBottomActions: enabledActionTotal(bottomActions)
 
     readonly property var headerChipModel: [
         {
@@ -163,6 +165,32 @@ ApplicationWindow {
             "tone": String(liveAnchor["tone"] || "neutral")
         }
     ]
+    readonly property var headerZoneModel: [
+        {
+            "label": "RAIL-L",
+            "value": String((statusRow("心跳") || {})["value"] || "--"),
+            "detail": "BOARD HEALTH BUS",
+            "tone": String((statusRow("心跳") || {})["tone"] || "neutral")
+        },
+        {
+            "label": "CORE",
+            "value": String(centerPanelData["mission_call_sign"] || "--"),
+            "detail": String(centerControlSummary["link_profile"] || "GLOBAL WALLBOARD"),
+            "tone": String(liveAnchor["tone"] || "neutral")
+        },
+        {
+            "label": "RAIL-R",
+            "value": recommendedScenarioId,
+            "detail": "PLAYBOOK + LIVE WATCH",
+            "tone": "warning"
+        },
+        {
+            "label": "DOCK",
+            "value": String(enabledBottomActions) + " LIVE",
+            "detail": String(bottomActions.length) + " CONTRACTS",
+            "tone": enabledBottomActions > 0 ? "online" : "warning"
+        }
+    ]
     readonly property var shellFooterModel: [
         {
             "label": "会话",
@@ -201,6 +229,58 @@ ApplicationWindow {
             "tone": softwareRenderEnabled ? "warning" : "online"
         }
     ]
+    readonly property var shellSpineModel: [
+        {
+            "label": "CONTROL",
+            "value": String(centerPanelData["mission_call_sign"] || "--"),
+            "detail": String(centerControlSummary["link_profile"] || "global wallboard"),
+            "tone": String(liveAnchor["tone"] || "neutral")
+        },
+        {
+            "label": "ANCHOR",
+            "value": String(liveAnchor["valid_instance"] || "--"),
+            "detail": String(liveAnchor["board_status"] || "--"),
+            "tone": String(liveAnchor["tone"] || "neutral")
+        },
+        {
+            "label": "WATCH",
+            "value": String((statusRow("最近事件") || {})["value"] || "--"),
+            "detail": recommendedScenarioId,
+            "tone": String((statusRow("最近事件") || {})["tone"] || "neutral")
+        },
+        {
+            "label": "RENDER",
+            "value": softwareRenderEnabled ? "SOFTWARE SAFE" : "GPU PRIMARY",
+            "detail": String(meta["layout_strategy"] || "adaptive_zones"),
+            "tone": softwareRenderEnabled ? "warning" : "online"
+        }
+    ]
+    readonly property var headerMirrorLedgerModel: [
+        {
+            "label": "ACTIVE STAGE",
+            "value": String(centerPanelData["mission_call_sign"] || "--") + " / " + String(centerControlSummary["link_profile"] || "--"),
+            "detail": String(centerFeedContract["active_source_label"] || centerPanelData["source_label"] || "--"),
+            "tone": String(liveAnchor["tone"] || "neutral")
+        },
+        {
+            "label": "LIVE ANCHOR",
+            "value": String(liveAnchor["valid_instance"] || liveAnchor["label"] || "--"),
+            "detail": String(liveAnchor["board_status"] || liveAnchor["probe_summary"] || "--"),
+            "tone": String(liveAnchor["tone"] || "neutral")
+        },
+        {
+            "label": "LAST EVENT",
+            "value": String((statusRow("最近事件") || {})["value"] || "--"),
+            "detail": String(centerControlSummary["last_job_id"] || (statusRow("快照原因") || {})["value"] || "--"),
+            "tone": String((statusRow("最近事件") || {})["tone"] || "neutral")
+        },
+        {
+            "label": "RENDER PATH",
+            "value": softwareRenderEnabled ? "SOFTWARE SAFE" : "GPU PRIMARY",
+            "detail": String(centerSampleData["captured_at"] || meta["layout_strategy"] || "--"),
+            "tone": softwareRenderEnabled ? "warning" : "online"
+        }
+    ]
 
     minimumWidth: 920
     minimumHeight: 680
@@ -231,6 +311,17 @@ ApplicationWindow {
                 return row
         }
         return ({})
+    }
+
+    function enabledActionTotal(actionsModel) {
+        var actionList = DataUtils.arrayOrEmpty(actionsModel)
+        var total = 0
+        for (var index = 0; index < actionList.length; ++index) {
+            var action = DataUtils.objectOrEmpty(actionList[index])
+            if (!!action["enabled"])
+                total += 1
+        }
+        return total
     }
 
     function toneColor(tone) {
@@ -506,6 +597,76 @@ ApplicationWindow {
         }
 
         Rectangle {
+            visible: !root.compactLayout
+            anchors.horizontalCenter: centerStageBerth.horizontalCenter
+            anchors.top: centerStageBerth.top
+            anchors.topMargin: root.scaled(14)
+            width: Math.min(centerStageBerth.width * 0.42, root.scaled(280))
+            height: root.scaled(12)
+            radius: height / 2
+            gradient: Gradient {
+                orientation: Gradient.Horizontal
+                GradientStop { position: 0.0; color: "#00000000" }
+                GradientStop { position: 0.18; color: root.panelTraceSoft }
+                GradientStop { position: 0.5; color: root.panelGlowStrong }
+                GradientStop { position: 0.82; color: root.panelTraceSoft }
+                GradientStop { position: 1.0; color: "#00000000" }
+            }
+            opacity: 0.52
+        }
+
+        Rectangle {
+            id: centerStageHubNode
+            visible: !root.compactLayout
+            anchors.horizontalCenter: centerStageBerth.horizontalCenter
+            anchors.top: centerStageBerth.top
+            anchors.topMargin: root.scaled(28)
+            width: root.scaled(10)
+            height: width
+            radius: width / 2
+            color: root.accentCyan
+            border.color: "#ffffff"
+            border.width: 1
+            opacity: 0.94
+        }
+
+        Rectangle {
+            visible: root.wideLayout
+            anchors.left: leftRailBerth.right
+            anchors.right: centerStageHubNode.left
+            anchors.leftMargin: root.scaled(24)
+            anchors.rightMargin: root.scaled(12)
+            anchors.verticalCenter: centerStageHubNode.verticalCenter
+            height: root.scaled(2)
+            gradient: Gradient {
+                orientation: Gradient.Horizontal
+                GradientStop { position: 0.0; color: "transparent" }
+                GradientStop { position: 0.22; color: root.accentBlueSoft }
+                GradientStop { position: 0.7; color: root.accentCyan }
+                GradientStop { position: 1.0; color: "transparent" }
+            }
+            opacity: 0.56
+        }
+
+        Rectangle {
+            visible: root.wideLayout
+            anchors.left: centerStageHubNode.right
+            anchors.right: rightRailBerth.left
+            anchors.leftMargin: root.scaled(12)
+            anchors.rightMargin: root.scaled(24)
+            anchors.verticalCenter: centerStageHubNode.verticalCenter
+            height: root.scaled(2)
+            gradient: Gradient {
+                orientation: Gradient.Horizontal
+                GradientStop { position: 0.0; color: "transparent" }
+                GradientStop { position: 0.3; color: root.accentBlue }
+                GradientStop { position: 0.78; color: root.accentCyan }
+                GradientStop { position: 1.0; color: "transparent" }
+            }
+            opacity: 0.56
+        }
+
+        Rectangle {
             anchors.horizontalCenter: centerStageBerth.horizontalCenter
             anchors.top: centerStageBerth.top
             anchors.bottom: centerStageBerth.bottom
@@ -728,6 +889,7 @@ ApplicationWindow {
             spacing: root.zoneGap
 
             Rectangle {
+                id: shellHeaderCard
                 Layout.fillWidth: true
                 radius: root.panelRadius
                 gradient: Gradient {
@@ -802,7 +964,7 @@ ApplicationWindow {
                         }
 
                         Text {
-                            text: meta["subtitle"] || "Qt/QML 原生壳体继续沿用既有 TVM/OpenAMP 合同，以安全运营中台风格整合飞行、链路、弱网与锚点观测。"
+                            text: root.meta["subtitle"] || "Qt/QML 原生壳体继续沿用既有 TVM/OpenAMP 合同，以安全运营中台风格整合飞行、链路、弱网与锚点观测。"
                             color: root.textSecondary
                             font.pixelSize: root.bodySize
                             font.family: root.uiFamily
@@ -811,7 +973,6 @@ ApplicationWindow {
 
                         Flow {
                             Layout.fillWidth: true
-                            width: parent.width
                             spacing: root.compactGap
 
                             Repeater {
@@ -864,6 +1025,143 @@ ApplicationWindow {
                                             font.pixelSize: root.bodySize
                                             font.bold: true
                                             font.family: root.monoFamily
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            radius: root.edgeRadius
+                            gradient: Gradient {
+                                GradientStop { position: 0.0; color: "#0d1f31" }
+                                GradientStop { position: 0.52; color: "#091523" }
+                                GradientStop { position: 1.0; color: "#07111b" }
+                            }
+                            border.color: "#1f5a83"
+                            border.width: 1
+                            implicitHeight: zoneSpineLayout.implicitHeight + (root.scaled(12) * 2)
+
+                            Rectangle {
+                                anchors.fill: parent
+                                anchors.margins: 1
+                                radius: parent.radius - 1
+                                color: "transparent"
+                                border.color: "#123450"
+                                border.width: 1
+                                opacity: 0.82
+                            }
+
+                            Rectangle {
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                height: root.scaled(2)
+                                gradient: Gradient {
+                                    GradientStop { position: 0.0; color: "transparent" }
+                                    GradientStop { position: 0.24; color: root.accentBlue }
+                                    GradientStop { position: 0.74; color: root.accentCyan }
+                                    GradientStop { position: 1.0; color: "transparent" }
+                                }
+                                opacity: 0.76
+                            }
+
+                            ColumnLayout {
+                                id: zoneSpineLayout
+                                anchors.fill: parent
+                                anchors.margins: root.scaled(12)
+                                spacing: root.scaled(6)
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: root.compactGap
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: "ZONE SPINE / 壳体主脊"
+                                        color: root.accentCyan
+                                        font.pixelSize: root.captionSize
+                                        font.family: root.monoFamily
+                                        font.letterSpacing: root.scaled(1)
+                                    }
+
+                                    Text {
+                                        text: root.wideLayout ? "TRIPLE RAIL SHELL" : "STACKED CONTROL BUS"
+                                        color: root.textMuted
+                                        font.pixelSize: root.captionSize
+                                        font.family: root.monoFamily
+                                    }
+                                }
+
+                                GridLayout {
+                                    Layout.fillWidth: true
+                                    columns: root.compactLayout ? 2 : root.headerZoneModel.length
+                                    columnSpacing: root.compactGap
+                                    rowSpacing: root.compactGap
+
+                                    Repeater {
+                                        model: root.headerZoneModel.length
+
+                                        delegate: Rectangle {
+                                            readonly property var itemData: root.headerZoneModel[index]
+                                            Layout.fillWidth: true
+                                            radius: root.edgeRadius
+                                            gradient: Gradient {
+                                                GradientStop { position: 0.0; color: Qt.lighter(root.toneFill(itemData["tone"]), 1.14) }
+                                                GradientStop { position: 1.0; color: root.toneFill(itemData["tone"]) }
+                                            }
+                                            border.color: root.toneColor(itemData["tone"])
+                                            border.width: 1
+                                            implicitHeight: zoneCardColumn.implicitHeight + (root.scaled(8) * 2)
+
+                                            Rectangle {
+                                                anchors.left: parent.left
+                                                anchors.right: parent.right
+                                                anchors.top: parent.top
+                                                height: root.scaled(2)
+                                                gradient: Gradient {
+                                                    GradientStop { position: 0.0; color: "transparent" }
+                                                    GradientStop { position: 0.28; color: root.toneColor(itemData["tone"]) }
+                                                    GradientStop { position: 0.74; color: Qt.lighter(root.toneColor(itemData["tone"]), 1.16) }
+                                                    GradientStop { position: 1.0; color: "transparent" }
+                                                }
+                                                opacity: 0.76
+                                            }
+
+                                            Column {
+                                                id: zoneCardColumn
+                                                anchors.fill: parent
+                                                anchors.margins: root.scaled(8)
+                                                spacing: root.scaled(2)
+
+                                                Text {
+                                                    text: itemData["label"]
+                                                    color: root.textMuted
+                                                    font.pixelSize: root.captionSize
+                                                    font.family: root.monoFamily
+                                                    font.letterSpacing: root.scaled(1)
+                                                }
+
+                                                Text {
+                                                    width: parent.width
+                                                    text: itemData["value"]
+                                                    color: root.textStrong
+                                                    font.pixelSize: root.captionSize
+                                                    font.bold: true
+                                                    font.family: root.monoFamily
+                                                    wrapMode: Text.WrapAnywhere
+                                                }
+
+                                                Text {
+                                                    width: parent.width
+                                                    text: itemData["detail"]
+                                                    color: root.textSecondary
+                                                    font.pixelSize: root.captionSize
+                                                    font.family: root.uiFamily
+                                                    wrapMode: Text.WordWrap
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -943,21 +1241,140 @@ ApplicationWindow {
                                 wrapMode: Text.WordWrap
                             }
 
+                            Rectangle {
+                                width: parent.width
+                                radius: root.edgeRadius
+                                gradient: Gradient {
+                                    GradientStop { position: 0.0; color: "#11263b" }
+                                    GradientStop { position: 0.56; color: "#0b1828" }
+                                    GradientStop { position: 1.0; color: "#081320" }
+                                }
+                                border.color: "#2a78ab"
+                                border.width: 1
+                                implicitHeight: mirrorBusRow.implicitHeight + (root.scaled(10) * 2)
+
+                                Rectangle {
+                                    anchors.left: parent.left
+                                    anchors.top: parent.top
+                                    anchors.bottom: parent.bottom
+                                    anchors.margins: root.scaled(10)
+                                    width: root.scaled(4)
+                                    radius: width / 2
+                                    gradient: Gradient {
+                                        GradientStop { position: 0.0; color: "transparent" }
+                                        GradientStop { position: 0.18; color: root.accentBlue }
+                                        GradientStop { position: 0.78; color: root.accentCyan }
+                                        GradientStop { position: 1.0; color: "transparent" }
+                                    }
+                                    opacity: 0.56
+                                }
+
+                                RowLayout {
+                                    id: mirrorBusRow
+                                    anchors.fill: parent
+                                    anchors.margins: root.scaled(10)
+                                    spacing: root.compactGap
+
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        spacing: root.scaled(1)
+
+                                        Text {
+                                            text: "ACTIVE MIRROR / CURRENT STAGE BUS"
+                                            color: root.accentCyan
+                                            font.pixelSize: root.captionSize
+                                            font.family: root.monoFamily
+                                            font.letterSpacing: root.scaled(1)
+                                        }
+
+                                        Text {
+                                            Layout.fillWidth: true
+                                            text: String(root.centerPanelData["mission_call_sign"] || "--") + " / " + String(root.centerControlSummary["link_profile"] || "--")
+                                            color: root.textStrong
+                                            font.pixelSize: root.bodySize
+                                            font.bold: true
+                                            font.family: root.monoFamily
+                                            wrapMode: Text.WrapAnywhere
+                                        }
+
+                                        Text {
+                                            Layout.fillWidth: true
+                                            text: String(root.centerFeedContract["active_source_label"] || root.centerPanelData["source_label"] || "--")
+                                            color: root.textSecondary
+                                            font.pixelSize: root.captionSize
+                                            font.family: root.uiFamily
+                                            wrapMode: Text.WordWrap
+                                        }
+
+                                        Text {
+                                            Layout.fillWidth: true
+                                            text: String(root.liveAnchor["board_status"] || root.liveAnchor["probe_summary"] || "保持在线锚点与中心舞台同步。")
+                                            color: root.textMuted
+                                            font.pixelSize: root.captionSize
+                                            font.family: root.uiFamily
+                                            wrapMode: Text.WordWrap
+                                            visible: root.height >= 900
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        Layout.alignment: Qt.AlignTop
+                                        radius: root.edgeRadius
+                                        gradient: Gradient {
+                                            GradientStop { position: 0.0; color: Qt.lighter(root.toneFill(root.softwareRenderEnabled ? "warning" : "online"), 1.12) }
+                                            GradientStop { position: 1.0; color: root.toneFill(root.softwareRenderEnabled ? "warning" : "online") }
+                                        }
+                                        border.color: root.toneColor(root.softwareRenderEnabled ? "warning" : "online")
+                                        border.width: 1
+                                        implicitWidth: mirrorRenderColumn.implicitWidth + (root.scaled(10) * 2)
+                                        implicitHeight: mirrorRenderColumn.implicitHeight + (root.scaled(8) * 2)
+
+                                        Column {
+                                            id: mirrorRenderColumn
+                                            anchors.centerIn: parent
+                                            spacing: 1
+
+                                            Text {
+                                                text: "RENDER"
+                                                color: root.textMuted
+                                                font.pixelSize: root.captionSize
+                                                font.family: root.monoFamily
+                                            }
+
+                                            Text {
+                                                text: root.softwareRenderEnabled ? "SOFTWARE SAFE" : "GPU PRIMARY"
+                                                color: root.textStrong
+                                                font.pixelSize: root.captionSize
+                                                font.bold: true
+                                                font.family: root.monoFamily
+                                            }
+
+                                            Text {
+                                                text: String(root.meta["layout_strategy"] || "adaptive_zones")
+                                                color: root.textSecondary
+                                                font.pixelSize: root.captionSize
+                                                font.family: root.uiFamily
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
                             GridLayout {
                                 width: parent.width
-                                columns: root.compactLayout ? 1 : 2
+                                columns: root.compactLayout ? 1 : (root.splitHeaderLayout ? 2 : root.headerMirrorLedgerModel.length)
                                 columnSpacing: root.compactGap
                                 rowSpacing: root.compactGap
 
                                 Repeater {
-                                    model: root.headerMirrorModel.length
+                                    model: root.headerMirrorLedgerModel.length
 
                                     delegate: Rectangle {
-                                        readonly property var metric: root.headerMirrorModel[index]
+                                        readonly property var metric: root.headerMirrorLedgerModel[index]
                                         Layout.fillWidth: true
                                         radius: root.edgeRadius
                                         gradient: Gradient {
-                                            GradientStop { position: 0.0; color: Qt.lighter(root.toneFill(metric["tone"]), 1.1) }
+                                        GradientStop { position: 0.0; color: Qt.lighter(root.toneFill(metric["tone"]), 1.1) }
                                             GradientStop { position: 1.0; color: root.toneFill(metric["tone"]) }
                                         }
                                         border.color: root.toneColor(metric["tone"])
@@ -987,6 +1404,119 @@ ApplicationWindow {
                                                 font.family: root.monoFamily
                                                 wrapMode: Text.WrapAnywhere
                                             }
+
+                                            Text {
+                                                width: parent.width
+                                                text: metric["detail"]
+                                                color: root.textSecondary
+                                                font.pixelSize: root.captionSize
+                                                font.family: root.uiFamily
+                                                wrapMode: Text.WordWrap
+                                                maximumLineCount: 2
+                                                elide: Text.ElideRight
+                                                visible: root.height >= 900
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                visible: root.height >= 900
+                                width: parent.width
+                                radius: root.edgeRadius
+                                gradient: Gradient {
+                                    GradientStop { position: 0.0; color: "#0d1b2b" }
+                                    GradientStop { position: 0.58; color: "#091523" }
+                                    GradientStop { position: 1.0; color: "#08111b" }
+                                }
+                                border.color: "#1c5277"
+                                border.width: 1
+                                implicitHeight: mirrorTraceColumn.implicitHeight + (root.scaled(10) * 2)
+
+                                Rectangle {
+                                    anchors.fill: parent
+                                    anchors.margins: 1
+                                    radius: parent.radius - 1
+                                    color: "transparent"
+                                    border.color: "#11344e"
+                                    border.width: 1
+                                    opacity: 0.8
+                                }
+
+                                Column {
+                                    id: mirrorTraceColumn
+                                    anchors.fill: parent
+                                    anchors.margins: root.scaled(10)
+                                    spacing: root.scaled(6)
+
+                                    RowLayout {
+                                        width: parent.width
+                                        spacing: root.compactGap
+
+                                        Text {
+                                            Layout.fillWidth: true
+                                            text: "MIRROR TRACE / LINK WATCH CORRIDOR"
+                                            color: root.accentBlue
+                                            font.pixelSize: root.captionSize
+                                            font.family: root.monoFamily
+                                            font.letterSpacing: root.scaled(1)
+                                        }
+
+                                        Text {
+                                            text: root.recommendedScenarioId
+                                            color: root.textPrimary
+                                            font.pixelSize: root.captionSize
+                                            font.family: root.monoFamily
+                                        }
+                                    }
+
+                                    Item {
+                                        width: parent.width
+                                        implicitHeight: mirrorTraceFlow.implicitHeight
+
+                                        Flow {
+                                            id: mirrorTraceFlow
+                                            width: parent.width
+                                            spacing: root.compactGap
+
+                                            Repeater {
+                                                model: root.headerMirrorModel.length
+
+                                                delegate: Rectangle {
+                                                    readonly property var traceMetric: root.headerMirrorModel[index]
+                                                    radius: root.edgeRadius
+                                                    gradient: Gradient {
+                                                        GradientStop { position: 0.0; color: Qt.lighter(root.toneFill(traceMetric["tone"]), 1.14) }
+                                                        GradientStop { position: 1.0; color: root.toneFill(traceMetric["tone"]) }
+                                                    }
+                                                    border.color: root.toneColor(traceMetric["tone"])
+                                                    border.width: 1
+                                                    height: traceMetricColumn.implicitHeight + (root.scaled(8) * 2)
+                                                    width: Math.max(root.scaled(132), traceMetricColumn.implicitWidth + (root.scaled(20)))
+
+                                                    Column {
+                                                        id: traceMetricColumn
+                                                        anchors.centerIn: parent
+                                                        spacing: root.scaled(2)
+
+                                                        Text {
+                                                            text: traceMetric["label"]
+                                                            color: root.textMuted
+                                                            font.pixelSize: root.captionSize
+                                                            font.family: root.monoFamily
+                                                        }
+
+                                                        Text {
+                                                            text: traceMetric["value"]
+                                                            color: root.textStrong
+                                                            font.pixelSize: root.captionSize
+                                                            font.bold: true
+                                                            font.family: root.monoFamily
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -1003,17 +1533,55 @@ ApplicationWindow {
                                 border.width: 1
                                 implicitHeight: snapshotColumn.implicitHeight + (root.scaled(12) * 2)
 
+                                Rectangle {
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.top: parent.top
+                                    height: root.scaled(2)
+                                    gradient: Gradient {
+                                        GradientStop { position: 0.0; color: "transparent" }
+                                        GradientStop { position: 0.22; color: root.accentBlue }
+                                        GradientStop { position: 0.72; color: root.accentCyan }
+                                        GradientStop { position: 1.0; color: "transparent" }
+                                    }
+                                    opacity: 0.76
+                                }
+
                                 Column {
                                     id: snapshotColumn
                                     anchors.fill: parent
                                     anchors.margins: root.scaled(12)
                                     spacing: root.scaled(4)
 
-                                    Text {
-                                        text: "快照路径 / Snapshot Path"
-                                        color: root.accentBlue
-                                        font.pixelSize: root.captionSize
-                                        font.family: root.monoFamily
+                                    RowLayout {
+                                        width: parent.width
+                                        spacing: root.compactGap
+
+                                        Text {
+                                            Layout.fillWidth: true
+                                            text: "快照路径 / Snapshot Path"
+                                            color: root.accentBlue
+                                            font.pixelSize: root.captionSize
+                                            font.family: root.monoFamily
+                                        }
+
+                                        Rectangle {
+                                            radius: root.edgeRadius
+                                            color: "#091726"
+                                            border.color: "#1d547c"
+                                            border.width: 1
+                                            implicitWidth: archiveStamp.implicitWidth + (root.scaled(10) * 2)
+                                            implicitHeight: archiveStamp.implicitHeight + (root.scaled(5) * 2)
+
+                                            Text {
+                                                id: archiveStamp
+                                                anchors.centerIn: parent
+                                                text: "TRACE ARCHIVE"
+                                                color: root.textPrimary
+                                                font.pixelSize: root.captionSize
+                                                font.family: root.monoFamily
+                                            }
+                                        }
                                     }
 
                                     Text {
@@ -1023,6 +1591,179 @@ ApplicationWindow {
                                         font.pixelSize: root.captionSize
                                         font.family: root.monoFamily
                                         wrapMode: Text.WrapAnywhere
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+            }
+
+            Rectangle {
+                visible: root.height >= 920
+                Layout.fillWidth: true
+                radius: root.edgeRadius
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: "#11263c" }
+                    GradientStop { position: 0.48; color: "#0b1828" }
+                    GradientStop { position: 1.0; color: "#081220" }
+                }
+                border.color: "#2b79ae"
+                border.width: 1
+                implicitHeight: shellSpineLayout.implicitHeight + (root.scaled(10) * 2)
+
+                Rectangle {
+                    anchors.fill: parent
+                    anchors.margins: 1
+                    radius: parent.radius - 1
+                    color: "transparent"
+                    border.color: "#143754"
+                    border.width: 1
+                    opacity: 0.82
+                }
+
+                Rectangle {
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    height: root.scaled(3)
+                    gradient: Gradient {
+                        GradientStop { position: 0.0; color: "transparent" }
+                        GradientStop { position: 0.22; color: root.accentBlue }
+                        GradientStop { position: 0.72; color: root.accentCyan }
+                        GradientStop { position: 1.0; color: "transparent" }
+                    }
+                    opacity: 0.8
+                }
+
+                Rectangle {
+                    anchors.left: parent.left
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    anchors.margins: root.scaled(10)
+                    width: root.scaled(4)
+                    radius: width / 2
+                    gradient: Gradient {
+                        GradientStop { position: 0.0; color: "transparent" }
+                        GradientStop { position: 0.18; color: root.accentBlue }
+                        GradientStop { position: 0.82; color: root.accentCyan }
+                        GradientStop { position: 1.0; color: "transparent" }
+                    }
+                    opacity: 0.48
+                }
+
+                Rectangle {
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    anchors.margins: root.scaled(10)
+                    width: root.scaled(4)
+                    radius: width / 2
+                    gradient: Gradient {
+                        GradientStop { position: 0.0; color: "transparent" }
+                        GradientStop { position: 0.18; color: root.accentCyan }
+                        GradientStop { position: 0.82; color: root.accentBlue }
+                        GradientStop { position: 1.0; color: "transparent" }
+                    }
+                    opacity: 0.48
+                }
+
+                Column {
+                    id: shellSpineLayout
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.margins: root.scaled(10)
+                    spacing: root.compactGap
+
+                    RowLayout {
+                        width: parent.width
+                        spacing: root.compactGap
+
+                        Text {
+                            Layout.fillWidth: true
+                            text: "THEATER SPINE / SHELL STRUCTURE BUS"
+                            color: root.accentCyan
+                            font.pixelSize: root.captionSize
+                            font.family: root.monoFamily
+                            font.letterSpacing: root.scaled(1)
+                        }
+
+                        Text {
+                            text: root.wideLayout ? "CENTER LOCKED" : "STACKED ALIGNMENT"
+                            color: root.textMuted
+                            font.pixelSize: root.captionSize
+                            font.family: root.monoFamily
+                        }
+                    }
+
+                    GridLayout {
+                        width: parent.width
+                        columns: root.compactLayout ? 2 : root.shellSpineModel.length
+                        columnSpacing: root.compactGap
+                        rowSpacing: root.compactGap
+
+                        Repeater {
+                            model: root.shellSpineModel.length
+
+                            delegate: Rectangle {
+                                readonly property var spineData: root.shellSpineModel[index]
+                                Layout.fillWidth: true
+                                radius: root.edgeRadius
+                                gradient: Gradient {
+                                    GradientStop { position: 0.0; color: Qt.lighter(root.toneFill(spineData["tone"]), 1.14) }
+                                    GradientStop { position: 1.0; color: root.toneFill(spineData["tone"]) }
+                                }
+                                border.color: root.toneColor(spineData["tone"])
+                                border.width: 1
+                                implicitHeight: spineColumn.implicitHeight + (root.scaled(8) * 2)
+
+                                Rectangle {
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.top: parent.top
+                                    height: root.scaled(2)
+                                    gradient: Gradient {
+                                        GradientStop { position: 0.0; color: "transparent" }
+                                        GradientStop { position: 0.28; color: root.toneColor(spineData["tone"]) }
+                                        GradientStop { position: 0.74; color: Qt.lighter(root.toneColor(spineData["tone"]), 1.16) }
+                                        GradientStop { position: 1.0; color: "transparent" }
+                                    }
+                                    opacity: 0.76
+                                }
+
+                                Column {
+                                    id: spineColumn
+                                    anchors.fill: parent
+                                    anchors.margins: root.scaled(8)
+                                    spacing: root.scaled(2)
+
+                                    Text {
+                                        text: spineData["label"]
+                                        color: root.textMuted
+                                        font.pixelSize: root.captionSize
+                                        font.family: root.monoFamily
+                                        font.letterSpacing: root.scaled(1)
+                                    }
+
+                                    Text {
+                                        width: parent.width
+                                        text: spineData["value"]
+                                        color: root.textStrong
+                                        font.pixelSize: root.captionSize
+                                        font.bold: true
+                                        font.family: root.monoFamily
+                                        wrapMode: Text.WrapAnywhere
+                                    }
+
+                                    Text {
+                                        width: parent.width
+                                        text: spineData["detail"]
+                                        color: root.textSecondary
+                                        font.pixelSize: root.captionSize
+                                        font.family: root.uiFamily
+                                        wrapMode: Text.WordWrap
                                     }
                                 }
                             }
@@ -1244,6 +1985,34 @@ ApplicationWindow {
         }
 
         Rectangle {
+            anchors.horizontalCenter: centerStageBerth.horizontalCenter
+            anchors.bottom: centerBerthBadge.top
+            anchors.bottomMargin: root.scaled(8)
+            width: root.scaled(2)
+            height: root.scaled(44)
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: root.accentCyan }
+                GradientStop { position: 0.18; color: root.accentBlue }
+                GradientStop { position: 0.76; color: "#18496f" }
+                GradientStop { position: 1.0; color: "transparent" }
+            }
+            opacity: 0.42
+        }
+
+        Rectangle {
+            anchors.horizontalCenter: centerStageBerth.horizontalCenter
+            anchors.bottom: centerBerthBadge.top
+            anchors.bottomMargin: root.scaled(46)
+            width: root.scaled(8)
+            height: width
+            radius: width / 2
+            color: root.accentCyan
+            border.color: "#ffffff"
+            border.width: 1
+            opacity: 0.86
+        }
+
+        Rectangle {
             visible: leftRailBerth.visible
             anchors.left: leftRailBerth.left
             anchors.top: centerStageBerth.top
@@ -1282,6 +2051,7 @@ ApplicationWindow {
         }
 
         Rectangle {
+            id: centerBerthBadge
             anchors.horizontalCenter: centerStageBerth.horizontalCenter
             anchors.top: centerStageBerth.top
             anchors.topMargin: root.scaled(10)
@@ -1315,6 +2085,71 @@ ApplicationWindow {
                     font.family: root.uiFamily
                 }
             }
+        }
+
+        Rectangle {
+            id: actionDockBadge
+            anchors.horizontalCenter: bottomActionBerth.horizontalCenter
+            anchors.top: bottomActionBerth.top
+            anchors.topMargin: root.scaled(10)
+            radius: root.edgeRadius
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: "#143553" }
+                GradientStop { position: 1.0; color: "#0b1726" }
+            }
+            border.color: "#1f668f"
+            border.width: 1
+            implicitWidth: actionDockColumn.implicitWidth + (root.scaled(14) * 2)
+            implicitHeight: actionDockColumn.implicitHeight + (root.scaled(8) * 2)
+
+            Column {
+                id: actionDockColumn
+                anchors.centerIn: parent
+                spacing: 1
+
+                Text {
+                    text: "ACTION DOCK"
+                    color: root.accentBlue
+                    font.pixelSize: root.captionSize
+                    font.family: root.monoFamily
+                    font.letterSpacing: root.scaled(1)
+                }
+
+                Text {
+                    text: "EXECUTION BUS"
+                    color: root.textMuted
+                    font.pixelSize: root.captionSize
+                    font.family: root.uiFamily
+                }
+            }
+        }
+
+        Rectangle {
+            anchors.horizontalCenter: actionDockBadge.horizontalCenter
+            anchors.top: centerStageBerth.bottom
+            anchors.bottom: actionDockBadge.top
+            anchors.topMargin: root.scaled(8)
+            anchors.bottomMargin: root.scaled(8)
+            width: root.scaled(2)
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: root.accentBlue }
+                GradientStop { position: 0.3; color: root.accentCyan }
+                GradientStop { position: 1.0; color: "transparent" }
+            }
+            opacity: 0.32
+        }
+
+        Rectangle {
+            anchors.horizontalCenter: actionDockBadge.horizontalCenter
+            anchors.top: actionDockBadge.top
+            anchors.topMargin: -root.scaled(10)
+            width: root.scaled(8)
+            height: width
+            radius: width / 2
+            color: root.accentBlue
+            border.color: "#ffffff"
+            border.width: 1
+            opacity: 0.84
         }
 
         Rectangle {
