@@ -7,8 +7,8 @@ PanelFrame {
     property var panelData: ({})
     readonly property var panel: DataUtils.objectOrEmpty(panelData)
 
-    panelColor: shellWindow ? shellWindow.panelColor : "#091422"
-    borderTone: shellWindow ? shellWindow.borderSoft : "#1a3f61"
+    panelColor: shellWindow ? shellWindow.panelColorRaised : "#091422"
+    borderTone: shellWindow ? shellWindow.panelTraceStrong : "#1a3f61"
     accentTone: shellWindow ? shellWindow.accentBlue : "#38b6ff"
 
     readonly property var rows: DataUtils.arrayOrEmpty(panel["rows"])
@@ -51,11 +51,11 @@ PanelFrame {
             Layout.fillWidth: true
             radius: shellWindow ? shellWindow.cardRadius : 14
             gradient: Gradient {
-                GradientStop { position: 0.0; color: "#14385c" }
-                GradientStop { position: 0.48; color: "#0b1d31" }
-                GradientStop { position: 1.0; color: "#07111c" }
+                GradientStop { position: 0.0; color: shellWindow ? shellWindow.shellDockTop : "#14385c" }
+                GradientStop { position: 0.48; color: shellWindow ? shellWindow.shellDockMid : "#0b1d31" }
+                GradientStop { position: 1.0; color: shellWindow ? shellWindow.shellDockBottom : "#07111c" }
             }
-            border.color: "#3292cf"
+            border.color: shellWindow ? shellWindow.panelGlowStrong : "#3292cf"
             border.width: 1
             implicitHeight: heroLayout.implicitHeight + ((shellWindow ? shellWindow.cardPadding : 14) * 2)
 
@@ -82,7 +82,7 @@ PanelFrame {
                     spacing: shellWindow ? shellWindow.compactGap : 8
 
                     Text {
-                        text: panel["title"] || "系统 / 板态"
+                        text: panel["title"] || "左舷系统轨 / Left System Rail"
                         color: shellWindow ? shellWindow.accentBlue : "#38b6ff"
                         font.pixelSize: shellWindow ? shellWindow.eyebrowSize : 10
                         font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
@@ -90,7 +90,7 @@ PanelFrame {
                     }
 
                     Text {
-                        text: "系统态势总览"
+                        text: "左舷系统轨"
                         color: shellWindow ? shellWindow.textStrong : "#f4fbff"
                         font.pixelSize: shellWindow ? shellWindow.sectionTitleSize : 24
                         font.bold: true
@@ -98,7 +98,7 @@ PanelFrame {
                     }
 
                     Text {
-                        text: "SYSTEM STATE INDEX / BOARD HEALTH"
+                        text: "LEFT SYSTEM RAIL / BOARD HEALTH"
                         color: shellWindow ? shellWindow.textSecondary : "#83acc8"
                         font.pixelSize: shellWindow ? shellWindow.captionSize : 11
                         font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
@@ -235,7 +235,7 @@ PanelFrame {
 
                             Text {
                                 Layout.fillWidth: true
-                                text: "板端监视 / Monitor Rail"
+                                text: "板端监视 / Left Monitor Rail"
                                 color: shellWindow ? shellWindow.accentCyan : "#72f3ff"
                                 font.pixelSize: shellWindow ? shellWindow.captionSize : 11
                                 font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"

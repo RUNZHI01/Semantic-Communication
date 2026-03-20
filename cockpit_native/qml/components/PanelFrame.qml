@@ -11,9 +11,12 @@ Rectangle {
     readonly property int headerBandHeight: shellWindow ? shellWindow.scaled(34) : 34
     readonly property int rimInset: shellWindow ? shellWindow.scaled(20) : 20
     readonly property int traceInset: shellWindow ? shellWindow.scaled(26) : 26
-    readonly property color glowTone: Qt.lighter(frame.accentTone, 1.28)
+    readonly property color glowTone: shellWindow ? shellWindow.panelGlowStrong : Qt.lighter(frame.accentTone, 1.28)
     readonly property color shadowTone: Qt.darker(frame.panelColor, 1.22)
-    readonly property color ambientTone: Qt.lighter(frame.borderTone, 1.12)
+    readonly property color ambientTone: shellWindow ? shellWindow.panelTraceStrong : Qt.lighter(frame.borderTone, 1.12)
+    readonly property color traceTone: shellWindow ? shellWindow.panelTrace : "#143754"
+    readonly property color traceToneSoft: shellWindow ? shellWindow.panelTraceSoft : "#0d2940"
+    readonly property color capTone: shellWindow ? shellWindow.shellDockTop : Qt.lighter(frame.panelColor, 1.08)
 
     radius: shellWindow ? shellWindow.panelRadius : 18
     color: "transparent"
@@ -24,7 +27,7 @@ Rectangle {
         anchors.fill: parent
         radius: parent.radius
         gradient: Gradient {
-            GradientStop { position: 0.0; color: Qt.lighter(frame.panelColor, 1.18) }
+            GradientStop { position: 0.0; color: Qt.lighter(frame.capTone, 1.08) }
             GradientStop { position: 0.18; color: Qt.lighter(frame.panelColor, 1.08) }
             GradientStop { position: 0.42; color: Qt.lighter(frame.panelColor, 1.02) }
             GradientStop { position: 0.62; color: frame.panelColor }
@@ -77,11 +80,29 @@ Rectangle {
         anchors.top: parent.top
         height: frame.headerBandHeight
         gradient: Gradient {
-            GradientStop { position: 0.0; color: "#1a446620" }
-            GradientStop { position: 0.58; color: "#0b172400" }
+            GradientStop { position: 0.0; color: "#1a4b7228" }
+            GradientStop { position: 0.46; color: "#0f274014" }
             GradientStop { position: 1.0; color: "#03070c00" }
         }
         opacity: 0.9
+    }
+
+    Rectangle {
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.top: parent.top
+        anchors.topMargin: frame.chromeInset - 1
+        width: parent.width * 0.34
+        height: shellWindow ? shellWindow.scaled(8) : 8
+        radius: height / 2
+        gradient: Gradient {
+            orientation: Gradient.Horizontal
+            GradientStop { position: 0.0; color: "#00000000" }
+            GradientStop { position: 0.18; color: frame.traceToneSoft }
+            GradientStop { position: 0.52; color: frame.glowTone }
+            GradientStop { position: 0.82; color: frame.traceToneSoft }
+            GradientStop { position: 1.0; color: "#00000000" }
+        }
+        opacity: 0.72
     }
 
     Rectangle {
@@ -147,7 +168,7 @@ Rectangle {
         anchors.margins: frame.traceInset
         radius: Math.max(2, parent.radius - frame.traceInset)
         color: "transparent"
-        border.color: "#153a58"
+        border.color: frame.traceTone
         border.width: 1
         opacity: 0.32
     }
@@ -157,7 +178,7 @@ Rectangle {
         anchors.margins: frame.innerInset
         radius: Math.max(2, parent.radius - frame.innerInset)
         color: "transparent"
-        border.color: "#12324b"
+        border.color: frame.traceToneSoft
         border.width: 1
         opacity: 0.54
     }
@@ -383,6 +404,24 @@ Rectangle {
             GradientStop { position: 1.0; color: "#00000000" }
         }
         opacity: 0.58
+    }
+
+    Rectangle {
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: frame.chromeInset
+        width: parent.width * 0.38
+        height: shellWindow ? shellWindow.scaled(7) : 7
+        radius: height / 2
+        gradient: Gradient {
+            orientation: Gradient.Horizontal
+            GradientStop { position: 0.0; color: "#00000000" }
+            GradientStop { position: 0.22; color: frame.traceToneSoft }
+            GradientStop { position: 0.5; color: frame.glowTone }
+            GradientStop { position: 0.78; color: frame.traceToneSoft }
+            GradientStop { position: 1.0; color: "#00000000" }
+        }
+        opacity: 0.5
     }
 
     Rectangle {

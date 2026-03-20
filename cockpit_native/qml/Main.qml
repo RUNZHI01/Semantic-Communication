@@ -60,6 +60,16 @@ ApplicationWindow {
     readonly property color textTertiary: "#4b667d"
     readonly property color gridLine: "#132b42"
     readonly property color gridLineStrong: "#24567d"
+    readonly property color shellStageTop: "#153f67"
+    readonly property color shellStageMid: "#0a1d31"
+    readonly property color shellStageBottom: "#05101a"
+    readonly property color shellDockTop: "#112c47"
+    readonly property color shellDockMid: "#0a1828"
+    readonly property color shellDockBottom: "#06101a"
+    readonly property color panelGlowStrong: "#6fdcff"
+    readonly property color panelTraceStrong: "#1f5b86"
+    readonly property color panelTrace: "#143754"
+    readonly property color panelTraceSoft: "#0d2940"
 
     readonly property real widthScale: Math.max(0.78, Math.min(1.18, Number(metrics["width"] || designWidth) / designWidth))
     readonly property real heightScale: Math.max(0.78, Math.min(1.18, Number(metrics["height"] || designHeight) / designHeight))
@@ -389,6 +399,7 @@ ApplicationWindow {
         }
 
         Rectangle {
+            id: leftRailBerth
             visible: root.wideLayout
             anchors.left: parent.left
             anchors.top: parent.top
@@ -398,14 +409,29 @@ ApplicationWindow {
             radius: root.cardRadius
             gradient: Gradient {
                 orientation: Gradient.Horizontal
-                GradientStop { position: 0.0; color: "#1f5d8900" }
-                GradientStop { position: 0.42; color: "#1a4f7718" }
-                GradientStop { position: 1.0; color: "#0a192600" }
+                GradientStop { position: 0.0; color: "#1e5f8d00" }
+                GradientStop { position: 0.2; color: "#174c741a" }
+                GradientStop { position: 0.54; color: "#10263d7a" }
+                GradientStop { position: 1.0; color: "#09142100" }
             }
-            opacity: 0.62
+            border.color: "#163f61"
+            border.width: 1
+            opacity: 0.78
         }
 
         Rectangle {
+            anchors.fill: leftRailBerth
+            visible: leftRailBerth.visible
+            anchors.margins: 1
+            radius: Math.max(2, leftRailBerth.radius - 1)
+            color: "transparent"
+            border.color: "#102d45"
+            border.width: 1
+            opacity: 0.82
+        }
+
+        Rectangle {
+            id: rightRailBerth
             visible: root.wideLayout
             anchors.right: parent.right
             anchors.top: parent.top
@@ -415,11 +441,97 @@ ApplicationWindow {
             radius: root.cardRadius
             gradient: Gradient {
                 orientation: Gradient.Horizontal
-                GradientStop { position: 0.0; color: "#0a192600" }
-                GradientStop { position: 0.58; color: "#16476918" }
-                GradientStop { position: 1.0; color: "#1a597f00" }
+                GradientStop { position: 0.0; color: "#09142100" }
+                GradientStop { position: 0.46; color: "#10263d7a" }
+                GradientStop { position: 0.8; color: "#174c741a" }
+                GradientStop { position: 1.0; color: "#1e5f8d00" }
             }
-            opacity: 0.6
+            border.color: "#163f61"
+            border.width: 1
+            opacity: 0.78
+        }
+
+        Rectangle {
+            anchors.fill: rightRailBerth
+            visible: rightRailBerth.visible
+            anchors.margins: 1
+            radius: Math.max(2, rightRailBerth.radius - 1)
+            color: "transparent"
+            border.color: "#102d45"
+            border.width: 1
+            opacity: 0.82
+        }
+
+        Rectangle {
+            id: centerStageBerth
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            anchors.topMargin: root.scaled(130)
+            anchors.bottomMargin: root.scaled(root.wideLayout ? 116 : 92)
+            width: Math.max(
+                root.scaled(root.wideLayout ? 588 : (root.mediumLayout ? 540 : 320)),
+                parent.width * (root.wideLayout ? 0.39 : (root.mediumLayout ? 0.58 : 0.78))
+            )
+            radius: root.panelRadius
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: "#18486f22" }
+                GradientStop { position: 0.2; color: "#14375782" }
+                GradientStop { position: 0.52; color: "#0a17264c" }
+                GradientStop { position: 1.0; color: "#07111b00" }
+            }
+            border.color: "#17486e"
+            border.width: 1
+            opacity: 0.72
+        }
+
+        Rectangle {
+            anchors.fill: centerStageBerth
+            anchors.margins: root.scaled(12)
+            radius: Math.max(2, centerStageBerth.radius - root.scaled(12))
+            color: "transparent"
+            border.color: "#11334e"
+            border.width: 1
+            opacity: 0.58
+        }
+
+        Rectangle {
+            anchors.horizontalCenter: centerStageBerth.horizontalCenter
+            anchors.top: centerStageBerth.top
+            anchors.bottom: centerStageBerth.bottom
+            width: 1
+            color: "#17476b"
+            opacity: 0.18
+        }
+
+        Rectangle {
+            id: bottomActionBerth
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            anchors.leftMargin: root.scaled(20)
+            anchors.rightMargin: root.scaled(20)
+            anchors.bottomMargin: root.scaled(18)
+            radius: root.cardRadius
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: "#153a5a16" }
+                GradientStop { position: 0.28; color: "#10253c82" }
+                GradientStop { position: 1.0; color: "#07111c00" }
+            }
+            border.color: "#163f61"
+            border.width: 1
+            height: root.scaled(root.wideLayout ? 164 : 124)
+            opacity: 0.78
+        }
+
+        Rectangle {
+            anchors.fill: bottomActionBerth
+            anchors.margins: 1
+            radius: Math.max(2, bottomActionBerth.radius - 1)
+            color: "transparent"
+            border.color: "#102d45"
+            border.width: 1
+            opacity: 0.82
         }
 
         Item {
