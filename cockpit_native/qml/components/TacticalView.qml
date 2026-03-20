@@ -481,6 +481,38 @@ PanelFrame {
             "tone": warningHotspotCount > 0 ? "warning" : "online"
         }
     ]
+    readonly property string stageOperationsRibbonLabel: wallboardStatusTone === "warning"
+        ? "THREAT ORCHESTRATION RIBBON"
+        : "DEFENSE ORCHESTRATION RIBBON"
+    readonly property string stageOperationsRibbonDetail: wallboardStatusTone === "warning"
+        ? "把链路风险、在线锚点与高风险网格压成统一运营带，确保中心墙板先看最危险的事实。"
+        : "把航迹、防护网格、采样心跳与锚点状态压成统一运营带，确保中心墙板保持稳态锁定。"
+    readonly property var stageOperationsRibbonModel: [
+        {
+            "label": "POSTURE",
+            "value": threatPostureEnglish,
+            "detail": compactMessage(threatPostureLabel, "防护稳态", 28),
+            "tone": wallboardStatusTone
+        },
+        {
+            "label": "ANCHOR BUS",
+            "value": compactMessage(String(liveAnchorData["valid_instance"] || "--"), "--", 16),
+            "detail": compactMessage(String(liveAnchorData["board_status"] || sampleTimestamp), sampleTimestamp, 24),
+            "tone": String(liveAnchorData["tone"] || "neutral")
+        },
+        {
+            "label": "HOT GRID",
+            "value": String(warningHotspotCount) + " warn / " + String(wallboardHotspots.length),
+            "detail": String(onlineHotspotCount) + " stable meshes",
+            "tone": warningHotspotCount > 0 ? "warning" : "online"
+        },
+        {
+            "label": "SOURCE",
+            "value": compactMessage(root.sourceStatusLabel(), "--", 16),
+            "detail": compactMessage(sampleSequenceLabel + " / " + sampleTransportLabel, sampleTimestamp, 26),
+            "tone": "neutral"
+        }
+    ]
     readonly property string threatPostureLabel: wallboardStatusTone === "warning"
         ? "链路风险、弱网锚点与控制事件进入压制优先级。"
         : "航迹链、热点网格与在线锚点保持稳态防护锁定。"
@@ -2441,6 +2473,7 @@ PanelFrame {
                         }
 
                         Rectangle {
+                            id: threatFabricCard
                             visible: !compactCardLayout
                             anchors.left: parent.left
                             anchors.top: parent.top
@@ -2534,6 +2567,7 @@ PanelFrame {
                         }
 
                         Rectangle {
+                            id: controlMeshCard
                             visible: !compactCardLayout
                             anchors.right: parent.right
                             anchors.top: parent.top
@@ -3251,6 +3285,7 @@ PanelFrame {
                         }
 
                         Rectangle {
+                            id: stageBridgeCard
                             visible: parent.height >= (shellWindow ? shellWindow.scaled(188) : 188)
                             anchors.horizontalCenter: parent.horizontalCenter
                             anchors.top: parent.top
@@ -3437,7 +3472,236 @@ PanelFrame {
                             }
                         }
 
+                        Rectangle {
+                            id: stageOperationsRibbon
+                            readonly property real sideGap: shellWindow ? shellWindow.scaled(16) : 16
+                            readonly property real verticalGap: shellWindow ? shellWindow.scaled(14) : 14
+                            readonly property real resolvedLeftEdge: threatFabricCard.x + threatFabricCard.width + sideGap
+                            readonly property real resolvedTopEdge: stageBridgeCard.y + stageBridgeCard.height + verticalGap
+                            x: resolvedLeftEdge
+                            y: resolvedTopEdge
+                            width: Math.max(1, controlMeshCard.x - resolvedLeftEdge - sideGap)
+                            height: Math.max(1, stageEnvelopeFloor.y - resolvedTopEdge - verticalGap)
+                            visible: stageBridgeCard.visible
+                                && parent.height >= (shellWindow ? shellWindow.scaled(268) : 268)
+                                && parent.width >= (shellWindow ? shellWindow.scaled(640) : 640)
+                                && width >= (shellWindow ? shellWindow.scaled(240) : 240)
+                                && height >= (shellWindow ? shellWindow.scaled(112) : 112)
+                            radius: shellWindow ? shellWindow.edgeRadius : 10
+                            gradient: Gradient {
+                                GradientStop { position: 0.0; color: "#112a40" }
+                                GradientStop { position: 0.54; color: "#0a1827" }
+                                GradientStop { position: 1.0; color: "#07111b" }
+                            }
+                            border.color: root.traceStrong
+                            border.width: 1
+                            implicitHeight: stageOperationsRibbonLayout.implicitHeight + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
+                            opacity: 0.97
+
+                            Rectangle {
+                                anchors.fill: parent
+                                anchors.margins: 1
+                                radius: parent.radius - 1
+                                color: "transparent"
+                                border.color: "#12344f"
+                                border.width: 1
+                                opacity: 0.82
+                            }
+
+                            Rectangle {
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                height: shellWindow ? shellWindow.scaled(2) : 2
+                                gradient: Gradient {
+                                    GradientStop { position: 0.0; color: "transparent" }
+                                    GradientStop { position: 0.2; color: root.accentBlue }
+                                    GradientStop { position: 0.5; color: root.panelGlowStrong }
+                                    GradientStop { position: 0.8; color: root.accentCyan }
+                                    GradientStop { position: 1.0; color: "transparent" }
+                                }
+                                opacity: 0.82
+                            }
+
+                            ColumnLayout {
+                                id: stageOperationsRibbonLayout
+                                anchors.fill: parent
+                                anchors.margins: shellWindow ? shellWindow.scaled(10) : 10
+                                spacing: shellWindow ? shellWindow.scaled(6) : 6
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: shellWindow ? shellWindow.compactGap : 8
+
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 1
+
+                                        Text {
+                                            text: root.stageOperationsRibbonLabel
+                                            color: shellWindow ? shellWindow.accentCyan : "#72f3ff"
+                                            font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                            font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                            font.letterSpacing: shellWindow ? shellWindow.scaled(1) : 1
+                                        }
+
+                                        Text {
+                                            Layout.fillWidth: true
+                                            text: root.stageOperationsRibbonDetail
+                                            color: shellWindow ? shellWindow.textSecondary : "#83acc8"
+                                            font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                            font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                            wrapMode: Text.WordWrap
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        Layout.alignment: Qt.AlignTop
+                                        radius: shellWindow ? shellWindow.edgeRadius : 10
+                                        gradient: Gradient {
+                                            GradientStop { position: 0.0; color: Qt.lighter(root.toneFill(root.wallboardStatusTone), 1.14) }
+                                            GradientStop { position: 1.0; color: root.toneFill(root.wallboardStatusTone) }
+                                        }
+                                        border.color: root.toneColor(root.wallboardStatusTone)
+                                        border.width: 1
+                                        implicitWidth: stageOperationsStamp.implicitWidth + ((shellWindow ? shellWindow.scaled(12) : 12) * 2)
+                                        implicitHeight: stageOperationsStamp.implicitHeight + ((shellWindow ? shellWindow.scaled(8) : 8) * 2)
+
+                                        Text {
+                                            id: stageOperationsStamp
+                                            anchors.centerIn: parent
+                                            text: root.stageEnvelopeStamp
+                                            color: shellWindow ? shellWindow.textStrong : "#f4fbff"
+                                            font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                            font.bold: true
+                                            font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                        }
+                                    }
+                                }
+
+                                GridLayout {
+                                    Layout.fillWidth: true
+                                    columns: 2
+                                    columnSpacing: shellWindow ? shellWindow.compactGap : 8
+                                    rowSpacing: shellWindow ? shellWindow.compactGap : 8
+
+                                    Repeater {
+                                        model: root.stageOperationsRibbonModel
+
+                                        delegate: Rectangle {
+                                            readonly property var ribbonMetric: modelData
+                                            Layout.fillWidth: true
+                                            radius: shellWindow ? shellWindow.edgeRadius : 10
+                                            gradient: Gradient {
+                                                GradientStop { position: 0.0; color: Qt.lighter(root.toneFill(ribbonMetric["tone"]), 1.12) }
+                                                GradientStop { position: 1.0; color: root.toneFill(ribbonMetric["tone"]) }
+                                            }
+                                            border.color: root.toneColor(ribbonMetric["tone"])
+                                            border.width: 1
+                                            implicitHeight: stageOperationsMetricColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(7) : 7) * 2)
+
+                                            Rectangle {
+                                                anchors.left: parent.left
+                                                anchors.right: parent.right
+                                                anchors.top: parent.top
+                                                height: shellWindow ? shellWindow.scaled(2) : 2
+                                                gradient: Gradient {
+                                                    GradientStop { position: 0.0; color: "transparent" }
+                                                    GradientStop { position: 0.26; color: root.toneColor(ribbonMetric["tone"]) }
+                                                    GradientStop { position: 0.72; color: Qt.lighter(root.toneColor(ribbonMetric["tone"]), 1.14) }
+                                                    GradientStop { position: 1.0; color: "transparent" }
+                                                }
+                                                opacity: 0.74
+                                            }
+
+                                            Column {
+                                                id: stageOperationsMetricColumn
+                                                anchors.fill: parent
+                                                anchors.margins: shellWindow ? shellWindow.scaled(7) : 7
+                                                spacing: 1
+
+                                                Text {
+                                                    text: ribbonMetric["label"]
+                                                    color: shellWindow ? shellWindow.textMuted : "#4e7392"
+                                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 9
+                                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                                    font.letterSpacing: shellWindow ? shellWindow.scaled(1) : 1
+                                                }
+
+                                                Text {
+                                                    width: parent.width
+                                                    text: ribbonMetric["value"]
+                                                    color: shellWindow ? shellWindow.textStrong : "#f4fbff"
+                                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                                    font.bold: true
+                                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                                    wrapMode: Text.WrapAnywhere
+                                                }
+
+                                                Text {
+                                                    width: parent.width
+                                                    text: ribbonMetric["detail"]
+                                                    color: shellWindow ? shellWindow.textSecondary : "#83acc8"
+                                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 9
+                                                    font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                                    wrapMode: Text.WordWrap
+                                                    maximumLineCount: 2
+                                                    elide: Text.ElideRight
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            visible: stageOperationsRibbon.visible
+                            anchors.horizontalCenter: stageOperationsRibbon.horizontalCenter
+                            anchors.bottom: stageOperationsRibbon.top
+                            width: shellWindow ? shellWindow.scaled(2) : 2
+                            height: shellWindow ? shellWindow.scaled(12) : 12
+                            gradient: Gradient {
+                                GradientStop { position: 0.0; color: "transparent" }
+                                GradientStop { position: 0.26; color: root.panelGlowStrong }
+                                GradientStop { position: 1.0; color: root.accentCyan }
+                            }
+                            opacity: 0.72
+                        }
+
+                        Rectangle {
+                            visible: stageOperationsRibbon.visible
+                            width: shellWindow ? shellWindow.scaled(8) : 8
+                            height: width
+                            radius: width / 2
+                            color: root.accentCyan
+                            border.color: "#ffffff"
+                            border.width: 1
+                            anchors.horizontalCenter: stageOperationsRibbon.horizontalCenter
+                            anchors.bottom: stageOperationsRibbon.top
+                            anchors.bottomMargin: shellWindow ? shellWindow.scaled(4) : 4
+                            opacity: 0.94
+                        }
+
+                        Rectangle {
+                            visible: stageOperationsRibbon.visible
+                            width: shellWindow ? shellWindow.scaled(2) : 2
+                            x: stageOperationsRibbon.x + (stageOperationsRibbon.width / 2) - (width / 2)
+                            y: stageOperationsRibbon.y + stageOperationsRibbon.height + (shellWindow ? shellWindow.scaled(6) : 6)
+                            height: Math.max(
+                                0,
+                                stageEnvelopeFloor.y - y - (shellWindow ? shellWindow.scaled(6) : 6)
+                            )
+                            gradient: Gradient {
+                                GradientStop { position: 0.0; color: root.accentCyan }
+                                GradientStop { position: 0.4; color: root.panelGlowStrong }
+                                GradientStop { position: 1.0; color: "transparent" }
+                            }
+                            opacity: 0.58
+                        }
+
                         GridLayout {
+                            id: stageEnvelopeFloor
                             anchors.left: parent.left
                             anchors.right: parent.right
                             anchors.bottom: parent.bottom
@@ -4398,6 +4662,58 @@ PanelFrame {
                             ctx.strokeStyle = "rgba(114,243,255,0.34)"
                             ctx.lineWidth = 1.4
                             ctx.stroke()
+
+                            for (var apertureIndex = 0; apertureIndex < 3; ++apertureIndex) {
+                                var apertureRadius = 28 + (apertureIndex * 18)
+                                ctx.beginPath()
+                                ctx.arc(
+                                    aircraftX,
+                                    aircraftY,
+                                    apertureRadius,
+                                    (-135 * Math.PI) / 180,
+                                    (35 * Math.PI) / 180
+                                )
+                                ctx.strokeStyle = apertureIndex === 0
+                                    ? "rgba(159,241,255,0.38)"
+                                    : "rgba(47,143,202,0.2)"
+                                ctx.lineWidth = apertureIndex === 0 ? 1.6 : 1.0
+                                ctx.stroke()
+                            }
+
+                            for (var spokeIndex = 0; spokeIndex < 6; ++spokeIndex) {
+                                var spokeAngle = ((root.headingDeg - 90) + (spokeIndex * 60)) * Math.PI / 180
+                                var innerRadius = 24
+                                var outerRadius = 68
+                                ctx.beginPath()
+                                ctx.moveTo(
+                                    aircraftX + (Math.cos(spokeAngle) * innerRadius),
+                                    aircraftY + (Math.sin(spokeAngle) * innerRadius)
+                                )
+                                ctx.lineTo(
+                                    aircraftX + (Math.cos(spokeAngle) * outerRadius),
+                                    aircraftY + (Math.sin(spokeAngle) * outerRadius)
+                                )
+                                ctx.strokeStyle = spokeIndex === 0
+                                    ? "rgba(159,241,255,0.46)"
+                                    : "rgba(47,143,202,0.24)"
+                                ctx.lineWidth = spokeIndex === 0 ? 1.4 : 1.0
+                                ctx.stroke()
+                            }
+
+                            var headingRadians = (root.headingDeg - 90) * Math.PI / 180
+                            var vectorX = aircraftX + (Math.cos(headingRadians) * 94)
+                            var vectorY = aircraftY + (Math.sin(headingRadians) * 94)
+                            ctx.beginPath()
+                            ctx.moveTo(aircraftX, aircraftY)
+                            ctx.lineTo(vectorX, vectorY)
+                            ctx.strokeStyle = "rgba(159,241,255,0.56)"
+                            ctx.lineWidth = 1.2
+                            ctx.stroke()
+
+                            ctx.beginPath()
+                            ctx.arc(vectorX, vectorY, 3.2, 0, Math.PI * 2)
+                            ctx.fillStyle = "rgba(159,241,255,0.82)"
+                            ctx.fill()
 
                             ctx.save()
                             ctx.translate(aircraftX, aircraftY)

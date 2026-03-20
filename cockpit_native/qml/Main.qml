@@ -715,6 +715,65 @@ ApplicationWindow {
             opacity: 0.82
         }
 
+        Rectangle {
+            anchors.left: bottomActionBerth.left
+            anchors.right: bottomActionBerth.right
+            anchors.top: bottomActionBerth.top
+            anchors.leftMargin: root.scaled(18)
+            anchors.rightMargin: root.scaled(18)
+            anchors.topMargin: root.scaled(10)
+            height: root.scaled(4)
+            radius: height / 2
+            gradient: Gradient {
+                orientation: Gradient.Horizontal
+                GradientStop { position: 0.0; color: "transparent" }
+                GradientStop { position: 0.14; color: root.panelTraceSoft }
+                GradientStop { position: 0.5; color: root.panelGlowStrong }
+                GradientStop { position: 0.86; color: root.panelTraceSoft }
+                GradientStop { position: 1.0; color: "transparent" }
+            }
+            opacity: 0.76
+        }
+
+        Rectangle {
+            visible: root.wideLayout
+            width: root.scaled(12)
+            height: width
+            radius: width / 2
+            color: root.accentBlue
+            border.color: "#ffffff"
+            border.width: 1
+            x: leftRailBerth.x + (leftRailBerth.width / 2) - (width / 2)
+            y: bottomActionBerth.y - (height / 2)
+            opacity: 0.88
+        }
+
+        Rectangle {
+            visible: !root.compactLayout
+            width: root.scaled(12)
+            height: width
+            radius: width / 2
+            color: root.accentCyan
+            border.color: "#ffffff"
+            border.width: 1
+            x: centerStageBerth.x + (centerStageBerth.width / 2) - (width / 2)
+            y: bottomActionBerth.y - (height / 2)
+            opacity: 0.9
+        }
+
+        Rectangle {
+            visible: root.wideLayout
+            width: root.scaled(12)
+            height: width
+            radius: width / 2
+            color: root.accentBlue
+            border.color: "#ffffff"
+            border.width: 1
+            x: rightRailBerth.x + (rightRailBerth.width / 2) - (width / 2)
+            y: bottomActionBerth.y - (height / 2)
+            opacity: 0.88
+        }
+
         Item {
             id: shellHeaderAnchorProxy
             x: shellContentLayout.x + shellHeaderCard.x
@@ -754,6 +813,137 @@ ApplicationWindow {
             border.color: "#123650"
             border.width: 1
             opacity: 0.46
+        }
+
+        Rectangle {
+            visible: root.wideLayout
+            anchors.left: leftRailBerth.left
+            anchors.right: leftRailBerth.right
+            anchors.top: commandFabricBackdrop.top
+            anchors.bottom: bottomActionBerth.top
+            anchors.leftMargin: root.scaled(10)
+            anchors.rightMargin: root.scaled(10)
+            anchors.topMargin: root.scaled(16)
+            anchors.bottomMargin: root.scaled(12)
+            radius: root.cardRadius
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: "#153a5c30" }
+                GradientStop { position: 0.28; color: "#0f29404a" }
+                GradientStop { position: 0.72; color: "#0a182844" }
+                GradientStop { position: 1.0; color: "#07111b10" }
+            }
+            border.color: "#174664"
+            border.width: 1
+            opacity: 0.2
+        }
+
+        Rectangle {
+            visible: !root.compactLayout
+            anchors.left: centerStageBerth.left
+            anchors.right: centerStageBerth.right
+            anchors.top: shellHeaderAnchorProxy.bottom
+            anchors.bottom: bottomActionBerth.top
+            anchors.leftMargin: root.scaled(10)
+            anchors.rightMargin: root.scaled(10)
+            anchors.topMargin: root.scaled(8)
+            anchors.bottomMargin: root.scaled(12)
+            radius: root.panelRadius
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: "#1d5d8d24" }
+                GradientStop { position: 0.18; color: "#15406154" }
+                GradientStop { position: 0.48; color: "#0d22354a" }
+                GradientStop { position: 0.82; color: "#08131f20" }
+                GradientStop { position: 1.0; color: "#06101a00" }
+            }
+            border.color: "#17486b"
+            border.width: 1
+            opacity: 0.28
+        }
+
+        Rectangle {
+            visible: root.wideLayout
+            anchors.left: rightRailBerth.left
+            anchors.right: rightRailBerth.right
+            anchors.top: commandFabricBackdrop.top
+            anchors.bottom: bottomActionBerth.top
+            anchors.leftMargin: root.scaled(10)
+            anchors.rightMargin: root.scaled(10)
+            anchors.topMargin: root.scaled(16)
+            anchors.bottomMargin: root.scaled(12)
+            radius: root.cardRadius
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: "#153a5c30" }
+                GradientStop { position: 0.28; color: "#0f29404a" }
+                GradientStop { position: 0.72; color: "#0a182844" }
+                GradientStop { position: 1.0; color: "#07111b10" }
+            }
+            border.color: "#174664"
+            border.width: 1
+            opacity: 0.2
+        }
+
+        Rectangle {
+            visible: !root.compactLayout
+            anchors.left: commandFabricBackdrop.left
+            anchors.right: commandFabricBackdrop.right
+            anchors.top: commandFabricBackdrop.top
+            anchors.leftMargin: root.scaled(18)
+            anchors.rightMargin: root.scaled(18)
+            anchors.topMargin: root.scaled(18)
+            height: root.scaled(20)
+            radius: height / 2
+            gradient: Gradient {
+                orientation: Gradient.Horizontal
+                GradientStop { position: 0.0; color: "transparent" }
+                GradientStop { position: 0.14; color: root.panelTraceSoft }
+                GradientStop { position: 0.34; color: root.shellGlowSoft }
+                GradientStop { position: 0.5; color: root.panelGlowStrong }
+                GradientStop { position: 0.66; color: root.shellGlowSoft }
+                GradientStop { position: 0.86; color: root.panelTraceSoft }
+                GradientStop { position: 1.0; color: "transparent" }
+            }
+            opacity: 0.34
+        }
+
+        Rectangle {
+            visible: !root.compactLayout
+            anchors.left: commandFabricBackdrop.left
+            anchors.right: commandFabricBackdrop.right
+            anchors.bottom: commandFabricBackdrop.bottom
+            anchors.leftMargin: root.scaled(18)
+            anchors.rightMargin: root.scaled(18)
+            anchors.bottomMargin: root.scaled(16)
+            height: root.scaled(16)
+            radius: height / 2
+            gradient: Gradient {
+                orientation: Gradient.Horizontal
+                GradientStop { position: 0.0; color: "transparent" }
+                GradientStop { position: 0.18; color: root.panelTraceSoft }
+                GradientStop { position: 0.5; color: root.panelGlowStrong }
+                GradientStop { position: 0.82; color: root.panelTraceSoft }
+                GradientStop { position: 1.0; color: "transparent" }
+            }
+            opacity: 0.26
+        }
+
+        Row {
+            visible: !root.compactLayout
+            anchors.horizontalCenter: commandFabricBackdrop.horizontalCenter
+            anchors.top: commandFabricBackdrop.top
+            anchors.topMargin: root.scaled(24)
+            spacing: root.scaled(10)
+
+            Repeater {
+                model: 5
+
+                delegate: Rectangle {
+                    width: (root.scaled(24) - (index * root.scaled(2)))
+                    height: root.scaled(2)
+                    radius: height / 2
+                    color: index === 2 ? root.panelGlowStrong : root.shellGlowSoft
+                    opacity: index === 2 ? 0.86 : (0.48 - (index * 0.06))
+                }
+            }
         }
 
         Rectangle {
