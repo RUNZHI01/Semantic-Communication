@@ -17,8 +17,21 @@ Item {
     readonly property color goldAccent: shellWindow ? shellWindow.accentGold : "#c6ab7d"
     readonly property color iceAccent: shellWindow ? shellWindow.accentIce : "#86c7d4"
     readonly property color railAccent: landingPage ? iceAccent : goldAccent
+    readonly property var landingHeroStatusModel: shellWindow ? [
+        { "label": "会话", "value": shellWindow.systemSessionValue, "tone": "neutral" },
+        {
+            "label": "在线锚点",
+            "value": String(shellWindow.liveAnchor["valid_instance"] || "--"),
+            "tone": shellWindow.liveAnchorTone
+        },
+        {
+            "label": "渲染模式",
+            "value": shellWindow.softwareRenderEnabled ? "软件安全" : "图形优先",
+            "tone": shellWindow.softwareRenderEnabled ? "warning" : "online"
+        }
+    ] : []
     readonly property var landingCommandRailModel: shellWindow && landingPage
-        ? shellWindow.previewItems(commandRailModel, compactTopRail ? 2 : 3)
+        ? shellWindow.previewItems(landingHeroStatusModel, 3)
         : commandRailModel
     readonly property string leadText: shellWindow
         ? (landingPage
@@ -40,6 +53,22 @@ Item {
         ? ("0" + String(currentIndex + 1)).slice(-2) + " / " + ("0" + String(shellWindow.navigationModel.length)).slice(-2)
         : "01 / 05"
     readonly property var commandRailModel: shellWindow ? shellWindow.topStatusModel : []
+    readonly property bool showLandingMissionPlate: landingPage && (shellWindow ? shellWindow.viewportWidth >= 700 : width >= 700)
+    readonly property string landingMissionTitle: shellWindow
+        ? shellWindow.missionCallSignValue + " · " + shellWindow.aircraftIdValue
+        : "M9-DEMO · FT-AIR-01"
+    readonly property string landingMissionDetail: shellWindow
+        ? shellWindow.compactMessage(
+            shellWindow.activeSourceLabel + " · " + (shellWindow.softwareRenderEnabled ? "软件安全" : "图形优先"),
+            compactTopRail ? 34 : 48
+        )
+        : ""
+    readonly property string landingMissionSupport: shellWindow
+        ? shellWindow.compactMessage(
+            shellWindow.snapshotReasonValue + " · " + shellWindow.eventTimeValue,
+            compactTopRail ? 34 : 44
+        )
+        : ""
 
     signal pageRequested(int index)
 
@@ -184,6 +213,7 @@ Item {
                                 }
 
                                 Text {
+                                    visible: !root.showLandingMissionPlate
                                     text: root.pageIndicator
                                     color: shellWindow ? shellWindow.textStrong : "#f5efe4"
                                     font.pixelSize: shellWindow ? shellWindow.captionSize : 10
@@ -210,7 +240,7 @@ Item {
                                 color: shellWindow ? shellWindow.textSecondary : "#9aa8b1"
                                 font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
                                 font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
-                                maximumLineCount: root.landingPage ? 1 : 2
+                                maximumLineCount: root.landingPage ? (root.showLandingMissionPlate ? 1 : 2) : 2
                                 elide: Text.ElideRight
                             }
 
@@ -241,6 +271,105 @@ Item {
                                         value: String(modelData["value"] || "--")
                                         tone: String(modelData["tone"] || "neutral")
                                     }
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            visible: root.showLandingMissionPlate
+                            Layout.alignment: Qt.AlignTop
+                            Layout.preferredWidth: shellWindow ? shellWindow.scaled(216) : 216
+                            radius: shellWindow ? shellWindow.edgeRadius + shellWindow.scaled(1) : 13
+                            color: shellWindow ? Qt.rgba(shellWindow.surfaceRaised.r, shellWindow.surfaceRaised.g, shellWindow.surfaceRaised.b, 0.94) : "#152029"
+                            border.color: shellWindow ? Qt.rgba(iceAccent.r, iceAccent.g, iceAccent.b, 0.54) : "#86c7d4"
+                            border.width: 1
+                            implicitHeight: landingMissionColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
+
+                            Rectangle {
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                anchors.leftMargin: shellWindow ? shellWindow.scaled(10) : 10
+                                anchors.rightMargin: shellWindow ? shellWindow.scaled(10) : 10
+                                height: shellWindow ? shellWindow.scaled(2) : 2
+                                radius: height / 2
+                                gradient: Gradient {
+                                    orientation: Gradient.Horizontal
+                                    GradientStop { position: 0.0; color: "transparent" }
+                                    GradientStop { position: 0.16; color: Qt.rgba(goldAccent.r, goldAccent.g, goldAccent.b, 0.18) }
+                                    GradientStop { position: 0.5; color: Qt.rgba(iceAccent.r, iceAccent.g, iceAccent.b, 0.9) }
+                                    GradientStop { position: 0.84; color: Qt.rgba(iceAccent.r, iceAccent.g, iceAccent.b, 0.24) }
+                                    GradientStop { position: 1.0; color: "transparent" }
+                                }
+                                opacity: 0.92
+                            }
+
+                            ColumnLayout {
+                                id: landingMissionColumn
+                                anchors.fill: parent
+                                anchors.margins: shellWindow ? shellWindow.scaled(10) : 10
+                                spacing: shellWindow ? shellWindow.scaled(3) : 3
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: shellWindow ? shellWindow.compactGap : 8
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: "MAP-FIRST MISSION"
+                                        color: iceAccent
+                                        font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                        font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                        font.letterSpacing: shellWindow ? shellWindow.scaled(0.7) : 0.7
+                                        elide: Text.ElideRight
+                                    }
+
+                                    Rectangle {
+                                        radius: shellWindow ? shellWindow.edgeRadius : 12
+                                        color: shellWindow ? shellWindow.toneFill("online") : "#0b2432"
+                                        border.color: iceAccent
+                                        border.width: 1
+                                        implicitWidth: landingMissionPill.implicitWidth + ((shellWindow ? shellWindow.scaled(8) : 8) * 2)
+                                        implicitHeight: landingMissionPill.implicitHeight + ((shellWindow ? shellWindow.scaled(4) : 4) * 2)
+
+                                        Text {
+                                            id: landingMissionPill
+                                            anchors.centerIn: parent
+                                            text: root.pageIndicator
+                                            color: shellWindow ? shellWindow.textStrong : "#f5efe4"
+                                            font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                            font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                            font.letterSpacing: shellWindow ? shellWindow.scaled(0.5) : 0.5
+                                        }
+                                    }
+                                }
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: root.landingMissionTitle
+                                    color: shellWindow ? shellWindow.textStrong : "#f5efe4"
+                                    font.pixelSize: shellWindow ? shellWindow.bodyEmphasisSize + shellWindow.scaled(1) : 15
+                                    font.weight: Font.DemiBold
+                                    font.family: shellWindow ? shellWindow.displayFamily : "Noto Serif CJK SC"
+                                    elide: Text.ElideRight
+                                }
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: root.landingMissionDetail
+                                    color: shellWindow ? shellWindow.textPrimary : "#d7dde2"
+                                    font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
+                                    font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                    elide: Text.ElideRight
+                                }
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: root.landingMissionSupport
+                                    color: shellWindow ? shellWindow.textMuted : "#6f7f8a"
+                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                    elide: Text.ElideRight
                                 }
                             }
                         }

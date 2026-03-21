@@ -300,10 +300,10 @@ ApplicationWindow {
         { "label": "链路档位", "value": compactMessage(linkProfileValue, compactLayout ? 14 : 20), "tone": "neutral" }
     ]
     readonly property bool landingStageMinimalChrome: true
-    readonly property bool landingStageTopBadgesVisible: false
-    readonly property int landingStageBannerChipLimit: 0
-    readonly property int landingStageBannerTextLimit: compactLayout ? 28 : 40
-    readonly property int landingStageBannerTitleLimit: compactLayout ? 20 : 30
+    readonly property bool landingStageTopBadgesVisible: true
+    readonly property int landingStageBannerChipLimit: compactLayout ? 1 : 2
+    readonly property int landingStageBannerTextLimit: compactLayout ? 44 : 56
+    readonly property int landingStageBannerTitleLimit: compactLayout ? 24 : 34
     readonly property int flightStageBannerChipLimit: 3
 
     readonly property var systemPageChipModel: [

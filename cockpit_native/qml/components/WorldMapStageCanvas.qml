@@ -31,12 +31,17 @@ Item {
     readonly property int mapInset: shellWindow ? shellWindow.scaled(landingMode ? 12 : 20) : (landingMode ? 12 : 20)
     readonly property int overlayMargin: shellWindow ? shellWindow.scaled(landingMode ? 10 : 16) : (landingMode ? 10 : 16)
     readonly property bool minimalBanner: landingMode && bannerEyebrow.length === 0
+    readonly property bool landingMicroBadge: landingMode && minimalBanner
     readonly property int bannerPadding: shellWindow
         ? shellWindow.scaled(minimalBanner ? 8 : (landingMode ? 10 : 11))
         : (minimalBanner ? 8 : (landingMode ? 10 : 11))
     readonly property int bannerGap: shellWindow
         ? shellWindow.scaled(minimalBanner ? 4 : (landingMode ? 6 : 6))
         : (minimalBanner ? 4 : (landingMode ? 6 : 6))
+    readonly property int bannerAccentOffset: landingMode
+        ? (shellWindow ? shellWindow.scaled(minimalBanner ? 8 : 10) : (minimalBanner ? 8 : 10))
+        : 0
+    readonly property int badgePadding: shellWindow ? shellWindow.scaled(landingMicroBadge ? 8 : 9) : (landingMicroBadge ? 8 : 9)
     readonly property color oceanTop: landingMode ? "#173b52" : "#17304b"
     readonly property color oceanBottom: landingMode ? "#060e15" : "#050d15"
     readonly property color landFill: landingMode ? "#4f6f83" : "#53758f"
@@ -665,32 +670,47 @@ Item {
             : root.mapGlow
         border.width: 1
         implicitWidth: stageLabelColumn.implicitWidth + ((shellWindow ? shellWindow.scaled(12) : 12) * 2)
-        implicitHeight: stageLabelColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(9) : 9) * 2)
+        implicitHeight: stageLabelColumn.implicitHeight + (root.badgePadding * 2)
+        clip: true
+
+        Rectangle {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.leftMargin: shellWindow ? shellWindow.scaled(8) : 8
+            anchors.rightMargin: shellWindow ? shellWindow.scaled(8) : 8
+            height: shellWindow ? shellWindow.scaled(1) : 1
+            color: Qt.rgba(root.mapGlow.r, root.mapGlow.g, root.mapGlow.b, root.landingMicroBadge ? 0.42 : 0.62)
+            opacity: 0.88
+        }
 
         Column {
             id: stageLabelColumn
             anchors.centerIn: parent
-            spacing: shellWindow ? shellWindow.scaled(2) : 2
+            spacing: shellWindow ? shellWindow.scaled(root.landingMicroBadge ? 1 : 2) : (root.landingMicroBadge ? 1 : 2)
 
             Text {
-                text: root.landingMode ? "全球主墙板 / GLOBAL WALLBOARD" : "世界态势地图 / WORLD MAP"
+                text: root.landingMicroBadge
+                    ? "GLOBAL WALLBOARD"
+                    : (root.landingMode ? "全球主墙板 / GLOBAL WALLBOARD" : "世界态势地图 / WORLD MAP")
                 color: root.mapGlow
-                font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
+                font.pixelSize: shellWindow ? (root.landingMicroBadge ? shellWindow.captionSize : shellWindow.captionSize + 1) : (root.landingMicroBadge ? 10 : 11)
                 font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
-                font.letterSpacing: shellWindow ? shellWindow.scaled(1) : 1
+                font.letterSpacing: shellWindow ? shellWindow.scaled(root.landingMicroBadge ? 0.7 : 1) : (root.landingMicroBadge ? 0.7 : 1)
                 opacity: root.landingMode ? 0.94 : 1.0
             }
 
             Text {
                 text: root.externalBackdropActive
-                    ? root.projectionLabel + " / LOCAL ASSET"
-                    : root.projectionLabel
+                    ? (root.landingMicroBadge ? "WGS84 · LOCAL ASSET" : root.projectionLabel + " / LOCAL ASSET")
+                    : (root.landingMicroBadge ? "WGS84 · " + root.trackNodeLabel : root.projectionLabel)
                 color: shellWindow ? shellWindow.textSecondary : "#88abc5"
                 font.pixelSize: shellWindow ? shellWindow.captionSize : 10
                 font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
             }
 
             Text {
+                visible: !root.landingMicroBadge
                 text: root.trackNodeLabel + "  ·  锚点 " + root.infoRailAnchorText
                 color: shellWindow ? shellWindow.textMuted : "#68859d"
                 font.pixelSize: shellWindow ? shellWindow.captionSize : 10
@@ -714,22 +734,36 @@ Item {
         border.color: toneColor(scenarioTone)
         border.width: 1
         implicitWidth: scenarioColumn.implicitWidth + ((shellWindow ? shellWindow.scaled(12) : 12) * 2)
-        implicitHeight: scenarioColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(9) : 9) * 2)
+        implicitHeight: scenarioColumn.implicitHeight + (root.badgePadding * 2)
+        clip: true
+
+        Rectangle {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.leftMargin: shellWindow ? shellWindow.scaled(8) : 8
+            anchors.rightMargin: shellWindow ? shellWindow.scaled(8) : 8
+            height: shellWindow ? shellWindow.scaled(1) : 1
+            color: Qt.rgba(toneColor(scenarioTone).r, toneColor(scenarioTone).g, toneColor(scenarioTone).b, root.landingMicroBadge ? 0.42 : 0.58)
+            opacity: 0.92
+        }
 
         Column {
             id: scenarioColumn
             anchors.fill: parent
-            anchors.margins: shellWindow ? shellWindow.scaled(9) : 9
-            spacing: shellWindow ? shellWindow.scaled(2) : 2
+            anchors.margins: root.badgePadding
+            spacing: shellWindow ? shellWindow.scaled(root.landingMicroBadge ? 1 : 2) : (root.landingMicroBadge ? 1 : 2)
 
             Text {
                 width: parent.width
-                text: root.compactStage
-                    ? (root.landingMode ? "场景焦点" : "当前关注")
-                    : (root.landingMode ? "场景焦点 / Focus" : "当前关注 / Focus")
+                text: root.landingMicroBadge
+                    ? "RECOMMENDED PROFILE"
+                    : (root.compactStage
+                        ? (root.landingMode ? "场景焦点" : "当前关注")
+                        : (root.landingMode ? "场景焦点 / Focus" : "当前关注 / Focus"))
                 color: shellWindow ? shellWindow.textMuted : "#68859d"
                 font.pixelSize: shellWindow ? shellWindow.captionSize : 10
-                font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                font.family: shellWindow ? (root.landingMicroBadge ? shellWindow.monoFamily : shellWindow.uiFamily) : (root.landingMicroBadge ? "JetBrains Mono" : "Noto Sans CJK SC")
                 elide: Text.ElideRight
             }
 
@@ -737,7 +771,7 @@ Item {
                 width: parent.width
                 text: scenarioLabel && scenarioLabel.length > 0 ? scenarioLabel : "全球链路稳态"
                 color: toneColor(scenarioTone)
-                font.pixelSize: shellWindow ? shellWindow.bodyEmphasisSize : 14
+                font.pixelSize: shellWindow ? (root.landingMicroBadge ? shellWindow.bodySize + 1 : shellWindow.bodyEmphasisSize) : (root.landingMicroBadge ? 13 : 14)
                 font.bold: true
                 font.family: shellWindow ? shellWindow.displayFamily : "Noto Sans CJK SC"
                 elide: Text.ElideRight
@@ -745,7 +779,7 @@ Item {
 
             Text {
                 width: parent.width
-                text: root.currentDetailText
+                text: root.landingMicroBadge ? root.anchorDetailText : root.currentDetailText
                 color: shellWindow ? shellWindow.textSecondary : "#88abc5"
                 font.pixelSize: shellWindow ? shellWindow.captionSize : 10
                 font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
@@ -787,8 +821,8 @@ Item {
         }
 
         Rectangle {
-            visible: root.landingMode && !root.minimalBanner
-            width: shellWindow ? shellWindow.scaled(3) : 3
+            visible: root.landingMode
+            width: shellWindow ? shellWindow.scaled(root.minimalBanner ? 2 : 3) : (root.minimalBanner ? 2 : 3)
             anchors.left: parent.left
             anchors.top: parent.top
             anchors.bottom: parent.bottom
@@ -847,7 +881,7 @@ Item {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
-            anchors.leftMargin: root.bannerPadding + ((root.landingMode && !root.minimalBanner) ? (shellWindow ? shellWindow.scaled(10) : 10) : 0)
+            anchors.leftMargin: root.bannerPadding + root.bannerAccentOffset
             anchors.rightMargin: root.bannerPadding
             anchors.topMargin: root.bannerPadding
             anchors.bottomMargin: root.bannerPadding
