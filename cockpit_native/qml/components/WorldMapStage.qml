@@ -14,19 +14,23 @@ Item {
     property string scenarioLabel: ""
     property string scenarioTone: "neutral"
 
-    readonly property int mapInset: shellWindow ? shellWindow.scaled(24) : 24
-    readonly property color oceanTop: "#113a5c"
-    readonly property color oceanBottom: "#06111a"
-    readonly property color landFill: "#1a4a67"
-    readonly property color landFillBright: "#285f82"
+    readonly property int mapInset: shellWindow ? shellWindow.scaled(20) : 20
+    readonly property int overlayMargin: shellWindow ? shellWindow.scaled(16) : 16
+    readonly property color oceanTop: "#183250"
+    readonly property color oceanBottom: "#071019"
+    readonly property color landFill: "#456a82"
+    readonly property color landFillBright: "#6388a2"
     readonly property color coastlineColor: shellWindow ? Qt.lighter(shellWindow.accentCyan, 1.04) : "#8fe6ff"
     readonly property color gridMinor: shellWindow ? shellWindow.gridLine : "#123147"
     readonly property color gridMajor: shellWindow ? shellWindow.gridLineStrong : "#245b80"
-    readonly property color labelColor: shellWindow ? shellWindow.textMuted : "#68859d"
+    readonly property color labelColor: shellWindow ? Qt.lighter(shellWindow.textSecondary, 1.08) : "#8fa7bb"
     readonly property color mapGlow: shellWindow ? shellWindow.panelGlowStrong : "#78d8ff"
     readonly property color markerColor: shellWindow ? shellWindow.accentCyan : "#8fe6ff"
     readonly property color emphasisColor: shellWindow ? shellWindow.accentAmber : "#ffbf55"
+    readonly property color overlayCardColor: "#de0a1320"
+    readonly property color overlayCardColorSoft: "#bc09111b"
     readonly property bool hasCurrentPoint: isFinite(Number(currentPoint["longitude"])) && isFinite(Number(currentPoint["latitude"]))
+    readonly property bool compactStage: width < (shellWindow ? shellWindow.scaled(620) : 620)
     readonly property real markerX: hasCurrentPoint ? projectX(Number(currentPoint["longitude"])) : width * 0.5
     readonly property real markerY: hasCurrentPoint ? projectY(Number(currentPoint["latitude"])) : height * 0.5
     readonly property bool leftCallout: markerX > width * 0.64
@@ -37,7 +41,7 @@ Item {
         : "锚点待命"
     readonly property string currentDetailText: currentDetail && currentDetail.length > 0
         ? currentDetail
-        : "世界地图主舞台"
+        : "世界地图主墙板"
     readonly property var continentPolygons: [
         [
             [-168, 72], [-156, 67], [-149, 60], [-141, 58], [-132, 52], [-124, 48],
@@ -143,8 +147,16 @@ Item {
                 else
                     ctx.lineTo(x, y)
             }
-            ctx.strokeStyle = "rgba(143,230,255,0.92)"
-            ctx.lineWidth = 2.4
+            ctx.strokeStyle = "rgba(4,11,18,0.78)"
+            ctx.lineWidth = 7.2
+            ctx.stroke()
+
+            ctx.strokeStyle = "rgba(255,255,255,0.18)"
+            ctx.lineWidth = 4.2
+            ctx.stroke()
+
+            ctx.strokeStyle = "rgba(143,230,255,0.94)"
+            ctx.lineWidth = 2.6
             ctx.stroke()
 
             ctx.beginPath()
@@ -171,6 +183,12 @@ Item {
             ctx.stroke()
 
             ctx.beginPath()
+            ctx.arc(cx, cy, 56, 0, Math.PI * 2)
+            ctx.strokeStyle = "rgba(143,230,255,0.12)"
+            ctx.lineWidth = 1.2
+            ctx.stroke()
+
+            ctx.beginPath()
             ctx.arc(cx, cy, 38, (-140 * Math.PI) / 180, (40 * Math.PI) / 180)
             ctx.strokeStyle = "rgba(255,191,85,0.34)"
             ctx.lineWidth = 1.2
@@ -182,6 +200,11 @@ Item {
             ctx.strokeStyle = "rgba(255,255,255,0.62)"
             ctx.lineWidth = 1.4
             ctx.stroke()
+
+            ctx.beginPath()
+            ctx.arc(cx, cy, 6.5, 0, Math.PI * 2)
+            ctx.fillStyle = "rgba(255,255,255,0.92)"
+            ctx.fill()
         }
         ctx.restore()
     }
@@ -208,7 +231,7 @@ Item {
             ctx.closePath()
             ctx.fillStyle = fillColor
             ctx.strokeStyle = strokeColor
-            ctx.lineWidth = 1.15
+            ctx.lineWidth = 1.25
             ctx.fill()
             ctx.stroke()
         }
@@ -220,17 +243,33 @@ Item {
 
             var ocean = ctx.createLinearGradient(0, 0, 0, height)
             ocean.addColorStop(0.0, root.oceanTop)
-            ocean.addColorStop(0.58, "#0a1f31")
+            ocean.addColorStop(0.48, "#10253a")
             ocean.addColorStop(1.0, root.oceanBottom)
             ctx.fillStyle = ocean
             ctx.fillRect(0, 0, width, height)
 
             var beam = ctx.createRadialGradient(width * 0.72, height * 0.32, 0, width * 0.72, height * 0.32, width * 0.55)
-            beam.addColorStop(0.0, "rgba(120,216,255,0.17)")
-            beam.addColorStop(0.52, "rgba(120,216,255,0.06)")
+            beam.addColorStop(0.0, "rgba(120,216,255,0.18)")
+            beam.addColorStop(0.52, "rgba(120,216,255,0.07)")
             beam.addColorStop(1.0, "rgba(120,216,255,0.0)")
             ctx.fillStyle = beam
             ctx.fillRect(0, 0, width, height)
+
+            var haze = ctx.createRadialGradient(width * 0.22, height * 0.78, 0, width * 0.22, height * 0.78, width * 0.42)
+            haze.addColorStop(0.0, "rgba(240,185,124,0.12)")
+            haze.addColorStop(0.5, "rgba(240,185,124,0.04)")
+            haze.addColorStop(1.0, "rgba(240,185,124,0.0)")
+            ctx.fillStyle = haze
+            ctx.fillRect(0, 0, width, height)
+
+            if (root.hasCurrentPoint) {
+                var spotlight = ctx.createRadialGradient(root.markerX, root.markerY, 0, root.markerX, root.markerY, Math.min(width, height) * 0.38)
+                spotlight.addColorStop(0.0, "rgba(255,255,255,0.04)")
+                spotlight.addColorStop(0.3, "rgba(172,236,255,0.09)")
+                spotlight.addColorStop(1.0, "rgba(172,236,255,0.0)")
+                ctx.fillStyle = spotlight
+                ctx.fillRect(0, 0, width, height)
+            }
 
             ctx.save()
             ctx.beginPath()
@@ -242,7 +281,7 @@ Item {
                 ctx.beginPath()
                 ctx.moveTo(root.mapInset, latitudeY)
                 ctx.lineTo(width - root.mapInset, latitudeY)
-                ctx.strokeStyle = latitude === 0 ? "rgba(111,191,255,0.34)" : "rgba(36,91,128,0.28)"
+                ctx.strokeStyle = latitude === 0 ? "rgba(132,191,255,0.36)" : "rgba(68,98,126,0.24)"
                 ctx.lineWidth = latitude === 0 ? 1.4 : 1.0
                 ctx.stroke()
             }
@@ -252,7 +291,7 @@ Item {
                 ctx.beginPath()
                 ctx.moveTo(longitudeX, root.mapInset)
                 ctx.lineTo(longitudeX, height - root.mapInset)
-                ctx.strokeStyle = longitude === 0 ? "rgba(111,191,255,0.34)" : "rgba(18,49,71,0.38)"
+                ctx.strokeStyle = longitude === 0 ? "rgba(132,191,255,0.36)" : "rgba(31,49,69,0.32)"
                 ctx.lineWidth = longitude === 0 ? 1.4 : 1.0
                 ctx.stroke()
             }
@@ -262,16 +301,16 @@ Item {
                 var shadowPolygon = root.continentPolygons[polygonIndex]
                 ctx.save()
                 ctx.translate(0, 3)
-                drawPolygon(ctx, shadowPolygon, "rgba(5,13,22,0.42)", "rgba(0,0,0,0)")
+                drawPolygon(ctx, shadowPolygon, "rgba(5,13,22,0.34)", "rgba(0,0,0,0)")
                 ctx.restore()
 
                 var fillColor = polygonIndex % 2 === 0 ? root.landFill : root.landFillBright
-                drawPolygon(ctx, polygon, fillColor, "rgba(143,230,255,0.46)")
+                drawPolygon(ctx, polygon, fillColor, "rgba(172,236,255,0.54)")
             }
 
             ctx.beginPath()
             ctx.rect(root.mapInset, root.mapInset, root.plotWidth, root.plotHeight)
-            ctx.strokeStyle = "rgba(143,230,255,0.32)"
+            ctx.strokeStyle = "rgba(172,236,255,0.28)"
             ctx.lineWidth = 1
             ctx.stroke()
 
@@ -306,18 +345,42 @@ Item {
         opacity: 0.62
     }
 
+    Rectangle {
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        height: parent.height * 0.2
+        gradient: Gradient {
+            GradientStop { position: 0.0; color: "#7a07111c" }
+            GradientStop { position: 0.4; color: "#3207111c" }
+            GradientStop { position: 1.0; color: "#0007111c" }
+        }
+    }
+
+    Rectangle {
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        height: parent.height * 0.26
+        gradient: Gradient {
+            GradientStop { position: 0.0; color: "#0007111c" }
+            GradientStop { position: 0.4; color: "#2407111c" }
+            GradientStop { position: 1.0; color: "#98061018" }
+        }
+    }
+
     Repeater {
         model: root.continentLabels
 
         delegate: Text {
             text: modelData["label"]
             color: root.labelColor
-            font.pixelSize: shellWindow ? shellWindow.captionSize : 10
-            font.family: shellWindow ? shellWindow.uiFamily : "Ubuntu Sans"
+            font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
+            font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
             font.weight: Font.DemiBold
             x: root.projectX(modelData["lon"]) - (width / 2)
             y: root.projectY(modelData["lat"]) - (height / 2)
-            opacity: 0.9
+            opacity: 0.94
         }
     }
 
@@ -328,10 +391,10 @@ Item {
             text: String(modelData) + "°"
             color: root.labelColor
             font.pixelSize: shellWindow ? shellWindow.captionSize : 10
-            font.family: shellWindow ? shellWindow.monoFamily : "Ubuntu Sans Mono"
+            font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
             x: root.mapInset + (shellWindow ? shellWindow.scaled(8) : 8)
             y: root.projectY(modelData) - (height / 2)
-            opacity: 0.76
+            opacity: 0.7
         }
     }
 
@@ -342,20 +405,23 @@ Item {
             text: (modelData > 0 ? "+" : "") + String(modelData) + "°"
             color: root.labelColor
             font.pixelSize: shellWindow ? shellWindow.captionSize : 10
-            font.family: shellWindow ? shellWindow.monoFamily : "Ubuntu Sans Mono"
+            font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
             x: root.projectX(modelData) - (width / 2)
             y: height - root.mapInset + (shellWindow ? shellWindow.scaled(6) : 6)
-            opacity: 0.76
+            opacity: 0.7
         }
     }
 
     Rectangle {
         anchors.left: parent.left
         anchors.top: parent.top
-        anchors.margins: shellWindow ? shellWindow.scaled(16) : 16
+        anchors.margins: root.overlayMargin
         radius: shellWindow ? shellWindow.edgeRadius : 12
-        color: "#071522d6"
-        border.color: "#578fe6ff"
+        gradient: Gradient {
+            GradientStop { position: 0.0; color: root.overlayCardColor }
+            GradientStop { position: 1.0; color: root.overlayCardColorSoft }
+        }
+        border.color: root.mapGlow
         border.width: 1
         implicitWidth: stageLabelColumn.implicitWidth + ((shellWindow ? shellWindow.scaled(14) : 14) * 2)
         implicitHeight: stageLabelColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
@@ -368,8 +434,8 @@ Item {
             Text {
                 text: "世界态势地图 / WORLD MAP"
                 color: root.mapGlow
-                font.pixelSize: shellWindow ? shellWindow.captionSize : 10
-                font.family: shellWindow ? shellWindow.monoFamily : "Ubuntu Sans Mono"
+                font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
+                font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
                 font.letterSpacing: shellWindow ? shellWindow.scaled(1) : 1
             }
 
@@ -377,7 +443,7 @@ Item {
                 text: root.projectionLabel
                 color: shellWindow ? shellWindow.textSecondary : "#88abc5"
                 font.pixelSize: shellWindow ? shellWindow.captionSize : 10
-                font.family: shellWindow ? shellWindow.uiFamily : "Ubuntu Sans"
+                font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
             }
         }
     }
@@ -385,9 +451,12 @@ Item {
     Rectangle {
         anchors.right: parent.right
         anchors.top: parent.top
-        anchors.margins: shellWindow ? shellWindow.scaled(16) : 16
+        anchors.margins: root.overlayMargin
         radius: shellWindow ? shellWindow.edgeRadius : 12
-        color: "#071522d6"
+        gradient: Gradient {
+            GradientStop { position: 0.0; color: root.overlayCardColor }
+            GradientStop { position: 1.0; color: root.overlayCardColorSoft }
+        }
         border.color: toneColor(scenarioTone)
         border.width: 1
         implicitWidth: scenarioColumn.implicitWidth + ((shellWindow ? shellWindow.scaled(14) : 14) * 2)
@@ -399,10 +468,10 @@ Item {
             spacing: shellWindow ? shellWindow.scaled(2) : 2
 
             Text {
-                text: "主舞台关注"
+                text: root.compactStage ? "当前关注" : "当前关注 / Focus"
                 color: shellWindow ? shellWindow.textMuted : "#68859d"
                 font.pixelSize: shellWindow ? shellWindow.captionSize : 10
-                font.family: shellWindow ? shellWindow.uiFamily : "Ubuntu Sans"
+                font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
             }
 
             Text {
@@ -410,7 +479,7 @@ Item {
                 color: toneColor(scenarioTone)
                 font.pixelSize: shellWindow ? shellWindow.bodyEmphasisSize : 14
                 font.bold: true
-                font.family: shellWindow ? shellWindow.displayFamily : "Ubuntu Sans"
+                font.family: shellWindow ? shellWindow.displayFamily : "Noto Sans CJK SC"
             }
         }
     }
@@ -489,7 +558,10 @@ Item {
             : Math.min(root.width - width - (shellWindow ? shellWindow.scaled(16) : 16), root.markerX + (shellWindow ? shellWindow.scaled(22) : 22))
         y: preferredY
         radius: shellWindow ? shellWindow.edgeRadius : 12
-        color: "#071522e6"
+        gradient: Gradient {
+            GradientStop { position: 0.0; color: root.overlayCardColor }
+            GradientStop { position: 1.0; color: root.overlayCardColorSoft }
+        }
         border.color: root.markerColor
         border.width: 1
         implicitWidth: currentCalloutColumn.implicitWidth + ((shellWindow ? shellWindow.scaled(16) : 16) * 2)
@@ -513,7 +585,7 @@ Item {
                 text: root.currentLabel
                 color: root.markerColor
                 font.pixelSize: shellWindow ? shellWindow.captionSize : 10
-                font.family: shellWindow ? shellWindow.monoFamily : "Ubuntu Sans Mono"
+                font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
                 font.letterSpacing: shellWindow ? shellWindow.scaled(1) : 1
             }
 
@@ -522,14 +594,14 @@ Item {
                 color: shellWindow ? shellWindow.textStrong : "#f1f7ff"
                 font.pixelSize: shellWindow ? shellWindow.bodyEmphasisSize : 14
                 font.bold: true
-                font.family: shellWindow ? shellWindow.displayFamily : "Ubuntu Sans"
+                font.family: shellWindow ? shellWindow.displayFamily : "Noto Sans CJK SC"
             }
 
             Text {
                 text: root.anchorDetailText
                 color: shellWindow ? shellWindow.textSecondary : "#88abc5"
                 font.pixelSize: shellWindow ? shellWindow.captionSize : 10
-                font.family: shellWindow ? shellWindow.uiFamily : "Ubuntu Sans"
+                font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
             }
         }
     }
