@@ -7,8 +7,8 @@ import "components/DataUtils.js" as DataUtils
 
 ApplicationWindow {
     id: root
-    readonly property var bridge: (typeof cockpitBridge !== "undefined" && cockpitBridge) ? cockpitBridge : null
-    readonly property var uiState: DataUtils.objectOrEmpty(bridge ? bridge.state : null)
+    readonly property bool bridgeAvailable: (typeof cockpitBridgeAvailable !== "undefined") && !!cockpitBridgeAvailable
+    readonly property var uiState: DataUtils.jsonObjectOrEmpty((typeof cockpitUiStateJson !== "undefined") ? cockpitUiStateJson : "{}")
     readonly property var zones: DataUtils.objectOrEmpty(uiState["zones"])
     readonly property var metrics: DataUtils.objectOrEmpty((typeof screenMetrics !== "undefined") ? screenMetrics : null)
     readonly property var insets: DataUtils.objectOrEmpty((typeof safeAreaInsets !== "undefined") ? safeAreaInsets : null)
@@ -99,12 +99,12 @@ ApplicationWindow {
     readonly property bool showDashboardDeckMetrics: viewportHeight >= 940
     readonly property bool showFooterBus: viewportHeight >= 1000
 
-    readonly property int outerPadding: scaled(shortViewport ? 16 : 20)
-    readonly property int shellPadding: scaled(shortViewport ? 20 : 26)
-    readonly property int zoneGap: scaled(shortViewport ? 14 : 18)
+    readonly property int outerPadding: scaled(shortViewport ? 14 : 18)
+    readonly property int shellPadding: scaled(shortViewport ? 18 : 24)
+    readonly property int zoneGap: scaled(shortViewport ? 12 : 16)
     readonly property int compactGap: scaled(shortViewport ? 8 : 10)
-    readonly property int panelPadding: scaled(shortViewport ? 16 : 18)
-    readonly property int cardPadding: scaled(shortViewport ? 14 : 16)
+    readonly property int panelPadding: scaled(shortViewport ? 14 : 16)
+    readonly property int cardPadding: scaled(shortViewport ? 12 : 14)
     readonly property int panelRadius: scaled(24)
     readonly property int cardRadius: scaled(16)
     readonly property int edgeRadius: scaled(12)
@@ -114,19 +114,21 @@ ApplicationWindow {
     readonly property int bodySize: scaled(13)
     readonly property int captionSize: scaled(10)
     readonly property int eyebrowSize: scaled(10)
-    readonly property int headerPad: scaled(splitHeaderLayout ? (shortViewport ? 14 : 18) : (shortViewport ? 16 : 24))
-    readonly property int headerChipWidth: scaled(splitHeaderLayout ? 128 : (wideLayout ? 142 : 154))
-    readonly property int headerMirrorWidth: scaled(splitHeaderLayout ? (shortViewport ? 392 : 436) : 0)
+    readonly property int headerPad: scaled(splitHeaderLayout ? (shortViewport ? 12 : 16) : (shortViewport ? 14 : 18))
+    readonly property int headerChipWidth: scaled(splitHeaderLayout ? 120 : (wideLayout ? 132 : 144))
+    readonly property int headerMirrorWidth: scaled(splitHeaderLayout ? (shortViewport ? 360 : 392) : 0)
 
     readonly property real contentWidth: Math.max(1, width - safeLeft - safeRight - (outerPadding * 2))
     readonly property bool wideLayout: contentWidth >= scaled(1380)
     readonly property bool mediumLayout: !wideLayout && contentWidth >= scaled(980)
     readonly property bool compactLayout: !wideLayout && !mediumLayout
     readonly property bool splitHeaderLayout: !compactLayout && (wideLayout || contentWidth >= scaled(1240))
-    readonly property int dashboardColumns: wideLayout ? 16 : (mediumLayout ? 2 : 1)
+    readonly property int dashboardColumns: wideLayout ? 18 : (mediumLayout ? 2 : 1)
     readonly property int wideLeftSpan: 3
-    readonly property int wideCenterSpan: 10
+    readonly property int wideCenterSpan: 12
     readonly property int wideRightSpan: 3
+    readonly property bool condensedShellOverview: compactLayout || shortViewport
+    readonly property bool centeredCommandStage: wideLayout || mediumLayout
     readonly property string shellFabricLabel: wideLayout ? "TRIPLE RAIL COMMAND FABRIC" : "STACKED COMMAND FABRIC"
 
     readonly property string topTitle: primaryLabel(meta["title"] || "飞腾原生座舱 / Feiteng Native Cockpit")
@@ -298,6 +300,65 @@ ApplicationWindow {
             "value": softwareRenderEnabled ? "软件回退" : "图形加速",
             "detail": String(meta["layout_strategy"] || "adaptive_zones"),
             "tone": softwareRenderEnabled ? "warning" : "online"
+        }
+    ]
+    readonly property string commandStageTone: String(liveAnchor["tone"] || (centerSampleData["captured_at"] ? "online" : "neutral"))
+    readonly property string commandStageLabel: commandStageTone === "warning"
+        ? "风险优先中心墙板"
+        : "完成态中心墙板"
+    readonly property string commandStageDetail: commandStageTone === "warning"
+        ? "把弱网策略、在线锚点与最新控制事件直接压进中心指挥台，演示时先给出最危险且最真实的现场事实。"
+        : "把航迹、采样时钟、锚点与执行门控压成同一张 command stage，让整个 native cockpit 更像可上台演示的完成态产品壳。"
+    readonly property var commandStageFocusModel: [
+        {
+            "label": "MISSION",
+            "value": String(centerPanelData["mission_call_sign"] || "--"),
+            "detail": String(centerControlSummary["link_profile"] || "GLOBAL WALLBOARD"),
+            "tone": commandStageTone
+        },
+        {
+            "label": "SOURCE",
+            "value": String(centerFeedContract["active_source_label"] || centerPanelData["source_label"] || "--"),
+            "detail": String(centerSampleData["captured_at"] || "--"),
+            "tone": "neutral"
+        },
+        {
+            "label": "ANCHOR",
+            "value": String(liveAnchor["valid_instance"] || liveAnchor["label"] || "--"),
+            "detail": String(liveAnchor["board_status"] || liveAnchor["probe_summary"] || "--"),
+            "tone": String(liveAnchor["tone"] || "neutral")
+        },
+        {
+            "label": "RENDER",
+            "value": softwareRenderEnabled ? "软件回退" : "图形加速",
+            "detail": String(meta["layout_strategy"] || "adaptive_zones"),
+            "tone": softwareRenderEnabled ? "warning" : "online"
+        }
+    ]
+    readonly property var commandShellRelayModel: [
+        {
+            "label": "LEFT RAIL",
+            "value": String((statusRow("心跳") || {})["value"] || "--"),
+            "detail": String((statusRow("链路档位") || {})["value"] || "BOARD HEALTH"),
+            "tone": String((statusRow("心跳") || {})["tone"] || "neutral")
+        },
+        {
+            "label": "CENTER",
+            "value": String(centerPanelData["mission_call_sign"] || "--"),
+            "detail": String(centerControlSummary["link_profile"] || "GLOBAL WALLBOARD"),
+            "tone": commandStageTone
+        },
+        {
+            "label": "RIGHT RAIL",
+            "value": recommendedScenarioId,
+            "detail": String(liveAnchor["valid_instance"] || liveAnchor["board_status"] || "--"),
+            "tone": String(liveAnchor["tone"] || "warning")
+        },
+        {
+            "label": "DOCK",
+            "value": String(enabledBottomActions) + " LIVE",
+            "detail": String(bottomActions.length) + " CONTRACTS",
+            "tone": enabledBottomActions > 0 ? "online" : "warning"
         }
     ]
     readonly property var headerMirrorLedgerModel: [
@@ -551,7 +612,7 @@ ApplicationWindow {
             anchors.top: parent.top
             anchors.bottom: parent.bottom
             anchors.margins: root.scaled(20)
-            width: Math.max(root.scaled(212), parent.width * 0.17)
+            width: Math.max(root.scaled(204), parent.width * 0.16)
             radius: root.cardRadius
             gradient: Gradient {
                 orientation: Gradient.Horizontal
@@ -584,7 +645,7 @@ ApplicationWindow {
             anchors.top: parent.top
             anchors.bottom: parent.bottom
             anchors.margins: root.scaled(20)
-            width: Math.max(root.scaled(212), parent.width * 0.17)
+            width: Math.max(root.scaled(204), parent.width * 0.16)
             radius: root.cardRadius
             gradient: Gradient {
                 orientation: Gradient.Horizontal
@@ -615,11 +676,11 @@ ApplicationWindow {
             anchors.horizontalCenter: parent.horizontalCenter
             anchors.top: parent.top
             anchors.bottom: parent.bottom
-            anchors.topMargin: root.scaled(130)
+            anchors.topMargin: root.scaled(122)
             anchors.bottomMargin: root.scaled(root.wideLayout ? 116 : 92)
             width: Math.max(
-                root.scaled(root.wideLayout ? 588 : (root.mediumLayout ? 540 : 320)),
-                parent.width * (root.wideLayout ? 0.39 : (root.mediumLayout ? 0.58 : 0.78))
+                root.scaled(root.wideLayout ? 620 : (root.mediumLayout ? 560 : 320)),
+                parent.width * (root.wideLayout ? 0.44 : (root.mediumLayout ? 0.62 : 0.78))
             )
             radius: root.panelRadius
             gradient: Gradient {
@@ -1751,7 +1812,7 @@ ApplicationWindow {
                             id: summaryColumn
                             anchors.fill: parent
                             anchors.margins: root.cardPadding
-                            spacing: root.compactGap
+                            spacing: root.compactLayout ? root.scaled(6) : root.compactGap
 
                             Text {
                                 text: "态势镜像 / Mission Control Mirror"
@@ -1780,7 +1841,7 @@ ApplicationWindow {
                                 font.pixelSize: root.bodySize
                                 font.family: root.uiFamily
                                 wrapMode: Text.WordWrap
-                                maximumLineCount: root.showHeaderNarrative ? 2 : 1
+                                maximumLineCount: root.compactLayout ? 1 : (root.showHeaderNarrative ? 2 : 1)
                                 elide: Text.ElideRight
                             }
 
@@ -2476,7 +2537,7 @@ ApplicationWindow {
 
                     Flow {
                         Layout.fillWidth: true
-                        visible: root.showDashboardDeckMetrics && !root.compactLayout
+                        visible: root.showDashboardDeckMetrics && root.wideLayout
                         spacing: root.compactGap
 
                         Repeater {
@@ -2535,6 +2596,411 @@ ApplicationWindow {
                                         color: root.textSecondary
                                         font.pixelSize: root.captionSize
                                         font.family: root.uiFamily
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.alignment: root.centeredCommandStage ? Qt.AlignHCenter : 0
+                        Layout.preferredWidth: root.centeredCommandStage
+                            ? Math.min(root.scaled(root.wideLayout ? 1120 : 920), dashboardDeckLayout.width)
+                            : dashboardDeckLayout.width
+                        Layout.maximumWidth: root.centeredCommandStage
+                            ? Math.min(root.scaled(root.wideLayout ? 1120 : 920), dashboardDeckLayout.width)
+                            : Number.MAX_VALUE
+                        radius: root.cardRadius
+                        gradient: Gradient {
+                            GradientStop { position: 0.0; color: "#13314c" }
+                            GradientStop { position: 0.28; color: "#10253a" }
+                            GradientStop { position: 0.62; color: "#0a1827" }
+                            GradientStop { position: 1.0; color: "#07111b" }
+                        }
+                        border.color: root.toneColor(root.commandStageTone)
+                        border.width: 1
+                        implicitHeight: commandStageColumn.implicitHeight + (root.cardPadding * 2)
+
+                        Rectangle {
+                            anchors.fill: parent
+                            anchors.margins: 1
+                            radius: parent.radius - 1
+                            color: "transparent"
+                            border.color: "#143754"
+                            border.width: 1
+                            opacity: 0.82
+                        }
+
+                        Rectangle {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            height: root.scaled(3)
+                            gradient: Gradient {
+                                GradientStop { position: 0.0; color: "transparent" }
+                                GradientStop { position: 0.18; color: root.accentBlue }
+                                GradientStop { position: 0.5; color: root.panelGlowStrong }
+                                GradientStop { position: 0.82; color: root.accentCyan }
+                                GradientStop { position: 1.0; color: "transparent" }
+                            }
+                            opacity: 0.86
+                        }
+
+                        Rectangle {
+                            anchors.left: parent.left
+                            anchors.top: parent.top
+                            anchors.bottom: parent.bottom
+                            anchors.margins: root.scaled(12)
+                            width: root.scaled(4)
+                            radius: width / 2
+                            gradient: Gradient {
+                                GradientStop { position: 0.0; color: "transparent" }
+                                GradientStop { position: 0.18; color: root.accentBlue }
+                                GradientStop { position: 0.52; color: root.panelGlowStrong }
+                                GradientStop { position: 0.86; color: root.accentCyan }
+                                GradientStop { position: 1.0; color: "transparent" }
+                            }
+                            opacity: 0.54
+                        }
+
+                        ColumnLayout {
+                            id: commandStageColumn
+                            anchors.fill: parent
+                            anchors.margins: root.compactLayout ? root.scaled(12) : root.cardPadding
+                            spacing: root.compactLayout ? root.scaled(6) : root.compactGap
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: root.compactGap
+
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: root.scaled(2)
+
+                                    Text {
+                                        text: "中心指挥台 / GLOBAL WALLBOARD COMMAND STAGE"
+                                        color: root.accentCyan
+                                        font.pixelSize: root.captionSize
+                                        font.family: root.monoFamily
+                                        font.letterSpacing: root.scaled(1)
+                                    }
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: root.commandStageLabel
+                                        color: root.textStrong
+                                        font.pixelSize: root.sectionTitleSize
+                                        font.bold: true
+                                        font.family: root.displayFamily
+                                        wrapMode: Text.WordWrap
+                                    }
+                                }
+
+                                Rectangle {
+                                    Layout.alignment: Qt.AlignTop
+                                    radius: root.edgeRadius
+                                    gradient: Gradient {
+                                        GradientStop { position: 0.0; color: Qt.lighter(root.toneFill(root.commandStageTone), 1.12) }
+                                        GradientStop { position: 1.0; color: root.toneFill(root.commandStageTone) }
+                                    }
+                                    border.color: root.toneColor(root.commandStageTone)
+                                    border.width: 1
+                                    implicitWidth: stageStampColumn.implicitWidth + (root.scaled(12) * 2)
+                                    implicitHeight: stageStampColumn.implicitHeight + (root.scaled(8) * 2)
+
+                                    Column {
+                                        id: stageStampColumn
+                                        anchors.centerIn: parent
+                                        spacing: 1
+
+                                        Text {
+                                            text: "COMMAND STAGE"
+                                            color: root.textMuted
+                                            font.pixelSize: root.captionSize
+                                            font.family: root.monoFamily
+                                        }
+
+                                        Text {
+                                            text: root.commandStageTone === "warning" ? "THREAT PRIORITY" : "PRODUCT FINISH"
+                                            color: root.textStrong
+                                            font.pixelSize: root.captionSize
+                                            font.bold: true
+                                            font.family: root.monoFamily
+                                        }
+                                    }
+                                }
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: root.commandStageDetail
+                                color: root.textSecondary
+                                font.pixelSize: root.bodySize
+                                font.family: root.uiFamily
+                                wrapMode: Text.WordWrap
+                                visible: !root.condensedShellOverview
+                            }
+
+                            GridLayout {
+                                Layout.fillWidth: true
+                                columns: root.compactLayout ? 2 : root.commandStageFocusModel.length
+                                columnSpacing: root.compactGap
+                                rowSpacing: root.compactGap
+
+                                Repeater {
+                                    model: root.commandStageFocusModel.length
+
+                                    delegate: Rectangle {
+                                        readonly property var focusData: root.commandStageFocusModel[index]
+                                        Layout.fillWidth: true
+                                        radius: root.edgeRadius
+                                        gradient: Gradient {
+                                            GradientStop { position: 0.0; color: Qt.lighter(root.toneFill(focusData["tone"]), 1.14) }
+                                            GradientStop { position: 1.0; color: root.toneFill(focusData["tone"]) }
+                                        }
+                                        border.color: root.toneColor(focusData["tone"])
+                                        border.width: 1
+                                        implicitHeight: focusColumn.implicitHeight + (root.scaled(8) * 2)
+
+                                        Rectangle {
+                                            anchors.left: parent.left
+                                            anchors.right: parent.right
+                                            anchors.top: parent.top
+                                            height: root.scaled(2)
+                                            gradient: Gradient {
+                                                GradientStop { position: 0.0; color: "transparent" }
+                                                GradientStop { position: 0.28; color: root.toneColor(focusData["tone"]) }
+                                                GradientStop { position: 0.74; color: Qt.lighter(root.toneColor(focusData["tone"]), 1.16) }
+                                                GradientStop { position: 1.0; color: "transparent" }
+                                            }
+                                            opacity: 0.76
+                                        }
+
+                                        Column {
+                                            id: focusColumn
+                                            anchors.fill: parent
+                                            anchors.margins: root.scaled(8)
+                                            spacing: root.scaled(2)
+
+                                            Text {
+                                                text: focusData["label"]
+                                                color: root.textMuted
+                                                font.pixelSize: root.captionSize
+                                                font.family: root.monoFamily
+                                                font.letterSpacing: root.scaled(1)
+                                            }
+
+                                            Text {
+                                                width: parent.width
+                                                text: focusData["value"]
+                                                color: root.textStrong
+                                                font.pixelSize: root.captionSize
+                                                font.bold: true
+                                                font.family: root.monoFamily
+                                                wrapMode: Text.WrapAnywhere
+                                            }
+
+                                            Text {
+                                                width: parent.width
+                                                text: focusData["detail"]
+                                                color: root.textSecondary
+                                                font.pixelSize: root.captionSize
+                                                font.family: root.uiFamily
+                                                wrapMode: Text.WordWrap
+                                                maximumLineCount: root.compactLayout ? 1 : 2
+                                                elide: Text.ElideRight
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                visible: !root.condensedShellOverview
+                                Layout.fillWidth: true
+                                radius: root.edgeRadius
+                                gradient: Gradient {
+                                    GradientStop { position: 0.0; color: "#102134" }
+                                    GradientStop { position: 0.52; color: "#0a1827" }
+                                    GradientStop { position: 1.0; color: "#08111b" }
+                                }
+                                border.color: "#1d5a84"
+                                border.width: 1
+                                implicitHeight: relayColumn.implicitHeight + (root.scaled(10) * 2)
+
+                                ColumnLayout {
+                                    id: relayColumn
+                                    anchors.fill: parent
+                                    anchors.margins: root.scaled(10)
+                                    spacing: root.compactGap
+
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: root.compactGap
+
+                                        Text {
+                                            Layout.fillWidth: true
+                                            text: "壳体连续体 / SHELL HANDOFF BUS"
+                                            color: root.accentBlue
+                                            font.pixelSize: root.captionSize
+                                            font.family: root.monoFamily
+                                            font.letterSpacing: root.scaled(1)
+                                        }
+
+                                        Text {
+                                            text: root.wideLayout ? "LEFT -> CENTER -> RIGHT -> DOCK" : "RAIL + STAGE + DOCK"
+                                            color: root.textMuted
+                                            font.pixelSize: root.captionSize
+                                            font.family: root.monoFamily
+                                        }
+                                    }
+
+                                    GridLayout {
+                                        Layout.fillWidth: true
+                                        columns: root.compactLayout ? 1 : (root.mediumLayout ? 2 : root.commandShellRelayModel.length)
+                                        columnSpacing: root.compactGap
+                                        rowSpacing: root.compactGap
+
+                                        Repeater {
+                                            model: root.commandShellRelayModel.length
+
+                                            delegate: Rectangle {
+                                                readonly property var relayData: root.commandShellRelayModel[index]
+                                                Layout.fillWidth: true
+                                                radius: root.edgeRadius
+                                                gradient: Gradient {
+                                                    GradientStop { position: 0.0; color: Qt.lighter(root.toneFill(relayData["tone"]), 1.12) }
+                                                    GradientStop { position: 1.0; color: root.toneFill(relayData["tone"]) }
+                                                }
+                                                border.color: root.toneColor(relayData["tone"])
+                                                border.width: 1
+                                                implicitHeight: relayMetricColumn.implicitHeight + (root.scaled(8) * 2)
+
+                                                Column {
+                                                    id: relayMetricColumn
+                                                    anchors.fill: parent
+                                                    anchors.margins: root.scaled(8)
+                                                    spacing: root.scaled(2)
+
+                                                    Text {
+                                                        text: relayData["label"]
+                                                        color: root.textMuted
+                                                        font.pixelSize: root.captionSize
+                                                        font.family: root.monoFamily
+                                                        font.letterSpacing: root.scaled(1)
+                                                    }
+
+                                                    Text {
+                                                        width: parent.width
+                                                        text: relayData["value"]
+                                                        color: root.textStrong
+                                                        font.pixelSize: root.captionSize
+                                                        font.bold: true
+                                                        font.family: root.monoFamily
+                                                        wrapMode: Text.WrapAnywhere
+                                                    }
+
+                                                    Text {
+                                                        width: parent.width
+                                                        text: relayData["detail"]
+                                                        color: root.textSecondary
+                                                        font.pixelSize: root.captionSize
+                                                        font.family: root.uiFamily
+                                                        wrapMode: Text.WordWrap
+                                                        maximumLineCount: 2
+                                                        elide: Text.ElideRight
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            Item {
+                                visible: root.condensedShellOverview
+                                Layout.fillWidth: true
+                                implicitHeight: compactRelayFlow.implicitHeight
+
+                                Flow {
+                                    id: compactRelayFlow
+                                    width: parent.width
+                                    spacing: root.compactGap
+
+                                    Repeater {
+                                        model: root.commandShellRelayModel.length
+
+                                        delegate: Rectangle {
+                                            readonly property var relayChip: root.commandShellRelayModel[index]
+                                            radius: root.edgeRadius
+                                            gradient: Gradient {
+                                                GradientStop { position: 0.0; color: Qt.lighter(root.toneFill(relayChip["tone"]), 1.12) }
+                                                GradientStop { position: 1.0; color: root.toneFill(relayChip["tone"]) }
+                                            }
+                                            border.color: root.toneColor(relayChip["tone"])
+                                            border.width: 1
+                                            height: compactRelayColumn.implicitHeight + (root.scaled(8) * 2)
+                                            width: Math.max(
+                                                root.scaled(148),
+                                                (compactRelayFlow.width - (root.compactGap * Math.max(0, root.commandShellRelayModel.length - 1)))
+                                                    / Math.max(1, root.commandShellRelayModel.length)
+                                            )
+
+                                            Rectangle {
+                                                anchors.left: parent.left
+                                                anchors.right: parent.right
+                                                anchors.top: parent.top
+                                                height: root.scaled(2)
+                                                gradient: Gradient {
+                                                    GradientStop { position: 0.0; color: "transparent" }
+                                                    GradientStop { position: 0.28; color: root.toneColor(relayChip["tone"]) }
+                                                    GradientStop { position: 0.74; color: Qt.lighter(root.toneColor(relayChip["tone"]), 1.16) }
+                                                    GradientStop { position: 1.0; color: "transparent" }
+                                                }
+                                                opacity: 0.76
+                                            }
+
+                                            Column {
+                                                id: compactRelayColumn
+                                                anchors.left: parent.left
+                                                anchors.right: parent.right
+                                                anchors.top: parent.top
+                                                anchors.leftMargin: root.scaled(8)
+                                                anchors.rightMargin: root.scaled(8)
+                                                anchors.topMargin: root.scaled(8)
+                                                spacing: root.scaled(2)
+
+                                                Text {
+                                                    text: relayChip["label"]
+                                                    color: root.textMuted
+                                                    font.pixelSize: root.captionSize
+                                                    font.family: root.monoFamily
+                                                    font.letterSpacing: root.scaled(1)
+                                                }
+
+                                                Text {
+                                                    width: parent.width
+                                                    text: relayChip["value"]
+                                                    color: root.textStrong
+                                                    font.pixelSize: root.captionSize
+                                                    font.bold: true
+                                                    font.family: root.monoFamily
+                                                    wrapMode: Text.WrapAnywhere
+                                                }
+
+                                                Text {
+                                                    width: parent.width
+                                                    text: relayChip["detail"]
+                                                    color: root.textSecondary
+                                                    font.pixelSize: root.captionSize
+                                                    font.family: root.uiFamily
+                                                    maximumLineCount: 1
+                                                    elide: Text.ElideRight
+                                                    wrapMode: Text.WordWrap
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }

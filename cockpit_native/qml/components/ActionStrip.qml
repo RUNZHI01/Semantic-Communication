@@ -9,10 +9,47 @@ PanelFrame {
     readonly property var actions: DataUtils.arrayOrEmpty(panel["actions"])
     readonly property var launchConfig: DataUtils.objectOrEmpty((typeof launchOptions !== "undefined") ? launchOptions : null)
     readonly property bool softwareRenderEnabled: !!launchConfig["softwareRender"]
-    readonly property var bridge: (typeof cockpitBridge !== "undefined" && cockpitBridge) ? cockpitBridge : null
+    readonly property bool bridgeAvailable: (typeof cockpitBridgeAvailable !== "undefined") && !!cockpitBridgeAvailable
     readonly property int enabledActionCount: enabledActions()
     readonly property int readonlyActionCount: Math.max(0, actions.length - enabledActionCount)
     readonly property string heroStampLabel: String(enabledActionCount) + " LIVE"
+    readonly property var centerStagePanel: shellWindow ? DataUtils.objectOrEmpty(shellWindow.centerPanelData) : ({})
+    readonly property var centerStageControl: shellWindow ? DataUtils.objectOrEmpty(shellWindow.centerControlSummary) : ({})
+    readonly property var rightRailPanel: shellWindow ? DataUtils.objectOrEmpty(shellWindow.rightPanelData) : ({})
+    readonly property var rightRailAnchor: DataUtils.objectOrEmpty(rightRailPanel["live_anchor"])
+    readonly property var shellMeta: shellWindow ? DataUtils.objectOrEmpty(shellWindow.meta) : ({})
+    readonly property string dockHandoffLabel: enabledActionCount > 0
+        ? "执行坞站已经接上主舞台门控"
+        : "执行坞站保持只读镜像门控"
+    readonly property string dockHandoffDetail: enabledActionCount > 0
+        ? "可执行动作继续沿用中心墙板与右舷剧本给出的事实边界，坞站不再像原型按钮区。"
+        : "当前没有开放动作，但坞站仍保持与中心主舞台相同的合同语义和只读审计视图。"
+    readonly property var dockHandoffModel: [
+        {
+            "label": "主舞台",
+            "value": String(centerStagePanel["mission_call_sign"] || "--"),
+            "detail": String(centerStageControl["link_profile"] || "GLOBAL WALLBOARD"),
+            "tone": "neutral"
+        },
+        {
+            "label": "弱网策略",
+            "value": String(rightRailPanel["recommended_scenario_id"] || "--"),
+            "detail": String(rightRailAnchor["valid_instance"] || rightRailAnchor["board_status"] || "--"),
+            "tone": "warning"
+        },
+        {
+            "label": "门控",
+            "value": String(enabledActionCount) + " LIVE",
+            "detail": String(readonlyActionCount) + " READ ONLY",
+            "tone": enabledActionCount > 0 ? "online" : "warning"
+        },
+        {
+            "label": "渲染",
+            "value": softwareRenderEnabled ? "软件回退" : "图形加速",
+            "detail": String(shellMeta["layout_strategy"] || "--"),
+            "tone": softwareRenderEnabled ? "warning" : "online"
+        }
+    ]
 
     panelColor: shellWindow ? shellWindow.panelColorRaised : "#08131b"
     borderTone: shellWindow ? shellWindow.panelTraceStrong : "#1a3f61"
@@ -273,6 +310,161 @@ PanelFrame {
                         }
                     }
                 }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.columnSpan: heroLayout.columns
+                    radius: shellWindow ? shellWindow.edgeRadius : 10
+                    gradient: Gradient {
+                        GradientStop { position: 0.0; color: "#10253a" }
+                        GradientStop { position: 0.5; color: "#0b1828" }
+                        GradientStop { position: 1.0; color: "#081321" }
+                    }
+                    border.color: root.toneColor(enabledActionCount > 0 ? "online" : "warning")
+                    border.width: 1
+                    implicitHeight: handoffColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
+
+                    Rectangle {
+                        anchors.fill: parent
+                        anchors.margins: 1
+                        radius: parent.radius - 1
+                        color: "transparent"
+                        border.color: "#13344f"
+                        border.width: 1
+                        opacity: 0.8
+                    }
+
+                    Rectangle {
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        height: shellWindow ? shellWindow.scaled(3) : 3
+                        gradient: Gradient {
+                            GradientStop { position: 0.0; color: "transparent" }
+                            GradientStop { position: 0.22; color: root.toneColor(enabledActionCount > 0 ? "online" : "warning") }
+                            GradientStop { position: 0.72; color: Qt.lighter(root.toneColor(enabledActionCount > 0 ? "online" : "warning"), 1.16) }
+                            GradientStop { position: 1.0; color: "transparent" }
+                        }
+                        opacity: 0.78
+                    }
+
+                    ColumnLayout {
+                        id: handoffColumn
+                        anchors.fill: parent
+                        anchors.margins: shellWindow ? shellWindow.scaled(10) : 10
+                        spacing: shellWindow ? shellWindow.compactGap : 8
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: shellWindow ? shellWindow.compactGap : 8
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: "执行联动 / COMMAND HANDOFF BUS"
+                                color: shellWindow ? shellWindow.accentCyan : "#72f3ff"
+                                font.pixelSize: shellWindow ? shellWindow.captionSize : 11
+                                font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                font.letterSpacing: shellWindow ? shellWindow.scaled(1) : 1
+                            }
+
+                            Rectangle {
+                                radius: shellWindow ? shellWindow.edgeRadius : 10
+                                color: "#091726"
+                                border.color: "#1d547c"
+                                border.width: 1
+                                implicitWidth: handoffStamp.implicitWidth + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
+                                implicitHeight: handoffStamp.implicitHeight + ((shellWindow ? shellWindow.scaled(5) : 5) * 2)
+
+                                Text {
+                                    id: handoffStamp
+                                    anchors.centerIn: parent
+                                    text: "CENTER -> DOCK"
+                                    color: shellWindow ? shellWindow.textPrimary : "#d5eeff"
+                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 9
+                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                }
+                            }
+                        }
+
+                        Text {
+                            Layout.fillWidth: true
+                            text: root.dockHandoffLabel
+                            color: shellWindow ? shellWindow.textStrong : "#f4fbff"
+                            font.pixelSize: shellWindow ? shellWindow.bodyEmphasisSize : 14
+                            font.bold: true
+                            font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                            wrapMode: Text.WordWrap
+                        }
+
+                        Text {
+                            Layout.fillWidth: true
+                            text: root.dockHandoffDetail
+                            color: shellWindow ? shellWindow.textSecondary : "#83acc8"
+                            font.pixelSize: shellWindow ? shellWindow.captionSize : 11
+                            font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                            wrapMode: Text.WordWrap
+                        }
+
+                        GridLayout {
+                            Layout.fillWidth: true
+                            columns: actionFlow.columns >= 4 ? 4 : 2
+                            columnSpacing: shellWindow ? shellWindow.compactGap : 8
+                            rowSpacing: shellWindow ? shellWindow.compactGap : 8
+
+                            Repeater {
+                                model: root.dockHandoffModel.length
+
+                                delegate: Rectangle {
+                                    readonly property var handoffData: root.dockHandoffModel[index]
+                                    Layout.fillWidth: true
+                                    radius: shellWindow ? shellWindow.edgeRadius : 10
+                                    gradient: Gradient {
+                                        GradientStop { position: 0.0; color: Qt.lighter(root.toneFill(handoffData["tone"]), 1.14) }
+                                        GradientStop { position: 1.0; color: root.toneFill(handoffData["tone"]) }
+                                    }
+                                    border.color: root.toneColor(handoffData["tone"])
+                                    border.width: 1
+                                    implicitHeight: handoffMetricColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(8) : 8) * 2)
+
+                                    Column {
+                                        id: handoffMetricColumn
+                                        anchors.fill: parent
+                                        anchors.margins: shellWindow ? shellWindow.scaled(8) : 8
+                                        spacing: 2
+
+                                        Text {
+                                            text: handoffData["label"]
+                                            color: shellWindow ? shellWindow.textMuted : "#4e7392"
+                                            font.pixelSize: shellWindow ? shellWindow.captionSize : 11
+                                            font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                        }
+
+                                        Text {
+                                            width: parent.width
+                                            text: handoffData["value"]
+                                            color: shellWindow ? shellWindow.textStrong : "#f4fbff"
+                                            font.pixelSize: shellWindow ? shellWindow.captionSize : 11
+                                            font.bold: true
+                                            font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                            wrapMode: Text.WrapAnywhere
+                                        }
+
+                                        Text {
+                                            width: parent.width
+                                            text: handoffData["detail"]
+                                            color: shellWindow ? shellWindow.textSecondary : "#83acc8"
+                                            font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                            font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                            wrapMode: Text.WordWrap
+                                            maximumLineCount: 2
+                                            elide: Text.ElideRight
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -436,8 +628,8 @@ PanelFrame {
                             hoverEnabled: actionCard.enabledAction
                             cursorShape: actionCard.enabledAction ? Qt.PointingHandCursor : Qt.ArrowCursor
                             onClicked: {
-                                if (modelData["action_id"] === "reload_contracts" && bridge)
-                                    bridge.reload()
+                                if (modelData["action_id"] === "reload_contracts" && bridgeAvailable)
+                                    cockpitBridge.reload()
                             }
                         }
 

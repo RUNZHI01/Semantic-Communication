@@ -11,6 +11,9 @@ PanelFrame {
     readonly property var scenarios: DataUtils.arrayOrEmpty(panel["scenarios"])
     readonly property bool hasScenarios: scenarios.length > 0
     readonly property string heroStampLabel: String(scenarios.length) + " SCENARIOS"
+    readonly property var centerStagePanel: shellWindow ? DataUtils.objectOrEmpty(shellWindow.centerPanelData) : ({})
+    readonly property var centerStageControl: shellWindow ? DataUtils.objectOrEmpty(shellWindow.centerControlSummary) : ({})
+    readonly property var shellMeta: shellWindow ? DataUtils.objectOrEmpty(shellWindow.meta) : ({})
     readonly property var standbyModel: [
         {
             "label": "推荐档",
@@ -26,6 +29,38 @@ PanelFrame {
             "label": "对照池",
             "value": "0 scenarios",
             "detail": "归档剧本尚未回填到右舷轨"
+        }
+    ]
+    readonly property string stageEscalationLabel: String(liveAnchor["tone"] || "neutral") === "warning"
+        ? "右舷弱网轨已经接管风险升级"
+        : "右舷弱网轨维持策略伴飞"
+    readonly property string stageEscalationDetail: String(liveAnchor["tone"] || "neutral") === "warning"
+        ? "把推荐剧本、在线锚点与执行坞站门控汇成同一条风险升级走廊，右舷不再只是单列对照卡片。"
+        : "把推荐档位、实时锚点与中心主舞台保持同节奏联动，让右舷轨更像整壳的一段联动 rail。"
+    readonly property var stageEscalationModel: [
+        {
+            "label": "主舞台",
+            "value": String(centerStagePanel["mission_call_sign"] || "--"),
+            "detail": String(centerStageControl["link_profile"] || "GLOBAL WALLBOARD"),
+            "tone": String(liveAnchor["tone"] || "neutral")
+        },
+        {
+            "label": "推荐档",
+            "value": String(panel["recommended_scenario_id"] || "--"),
+            "detail": String(liveAnchor["valid_instance"] || "等待锚点"),
+            "tone": "warning"
+        },
+        {
+            "label": "锚点",
+            "value": String(liveAnchor["board_status"] || "--"),
+            "detail": String(liveAnchor["probe_summary"] || "--"),
+            "tone": String(liveAnchor["tone"] || "neutral")
+        },
+        {
+            "label": "执行",
+            "value": shellWindow ? String(shellWindow.enabledBottomActions) + " LIVE" : "--",
+            "detail": shellWindow ? (String(shellWindow.bottomActions.length) + " CONTRACTS / " + String(shellMeta["layout_strategy"] || "--")) : "--",
+            "tone": shellWindow && shellWindow.enabledBottomActions > 0 ? "online" : "warning"
         }
     ]
 
@@ -292,6 +327,160 @@ PanelFrame {
                                     font.bold: true
                                     font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
                                     wrapMode: Text.WrapAnywhere
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    width: parent.width
+                    radius: shellWindow ? shellWindow.edgeRadius : 10
+                    gradient: Gradient {
+                        GradientStop { position: 0.0; color: "#10253a" }
+                        GradientStop { position: 0.52; color: "#0b1828" }
+                        GradientStop { position: 1.0; color: "#081321" }
+                    }
+                    border.color: root.toneColor(liveAnchor["tone"])
+                    border.width: 1
+                    implicitHeight: stageEscalationColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
+
+                    Rectangle {
+                        anchors.fill: parent
+                        anchors.margins: 1
+                        radius: parent.radius - 1
+                        color: "transparent"
+                        border.color: "#13344f"
+                        border.width: 1
+                        opacity: 0.8
+                    }
+
+                    Rectangle {
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        height: shellWindow ? shellWindow.scaled(3) : 3
+                        gradient: Gradient {
+                            GradientStop { position: 0.0; color: "transparent" }
+                            GradientStop { position: 0.22; color: root.toneColor(liveAnchor["tone"]) }
+                            GradientStop { position: 0.72; color: Qt.lighter(root.toneColor(liveAnchor["tone"]), 1.16) }
+                            GradientStop { position: 1.0; color: "transparent" }
+                        }
+                        opacity: 0.78
+                    }
+
+                    ColumnLayout {
+                        id: stageEscalationColumn
+                        anchors.fill: parent
+                        anchors.margins: shellWindow ? shellWindow.scaled(10) : 10
+                        spacing: shellWindow ? shellWindow.compactGap : 8
+
+                        RowLayout {
+                            width: parent.width
+                            spacing: shellWindow ? shellWindow.compactGap : 8
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: "联动走廊 / STAGE ESCALATION BUS"
+                                color: shellWindow ? shellWindow.accentCyan : "#72f3ff"
+                                font.pixelSize: shellWindow ? shellWindow.captionSize : 11
+                                font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                font.letterSpacing: shellWindow ? shellWindow.scaled(1) : 1
+                            }
+
+                            Rectangle {
+                                radius: shellWindow ? shellWindow.edgeRadius : 10
+                                color: "#091726"
+                                border.color: "#1d547c"
+                                border.width: 1
+                                implicitWidth: escalationStamp.implicitWidth + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
+                                implicitHeight: escalationStamp.implicitHeight + ((shellWindow ? shellWindow.scaled(5) : 5) * 2)
+
+                                Text {
+                                    id: escalationStamp
+                                    anchors.centerIn: parent
+                                    text: "RIGHT -> CENTER -> DOCK"
+                                    color: shellWindow ? shellWindow.textPrimary : "#d5eeff"
+                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 9
+                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                }
+                            }
+                        }
+
+                        Text {
+                            width: parent.width
+                            text: root.stageEscalationLabel
+                            color: shellWindow ? shellWindow.textStrong : "#f4fbff"
+                            font.pixelSize: shellWindow ? shellWindow.bodyEmphasisSize : 14
+                            font.bold: true
+                            font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                            wrapMode: Text.WordWrap
+                        }
+
+                        Text {
+                            width: parent.width
+                            text: root.stageEscalationDetail
+                            color: shellWindow ? shellWindow.textSecondary : "#83acc8"
+                            font.pixelSize: shellWindow ? shellWindow.captionSize : 11
+                            font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                            wrapMode: Text.WordWrap
+                        }
+
+                        GridLayout {
+                            width: parent.width
+                            columns: shellWindow && shellWindow.compactLayout ? 1 : 2
+                            columnSpacing: shellWindow ? shellWindow.compactGap : 8
+                            rowSpacing: shellWindow ? shellWindow.compactGap : 8
+
+                            Repeater {
+                                model: root.stageEscalationModel.length
+
+                                delegate: Rectangle {
+                                    readonly property var escalationData: root.stageEscalationModel[index]
+                                    Layout.fillWidth: true
+                                    radius: shellWindow ? shellWindow.edgeRadius : 10
+                                    gradient: Gradient {
+                                        GradientStop { position: 0.0; color: Qt.lighter(root.toneFill(escalationData["tone"]), 1.14) }
+                                        GradientStop { position: 1.0; color: root.toneFill(escalationData["tone"]) }
+                                    }
+                                    border.color: root.toneColor(escalationData["tone"])
+                                    border.width: 1
+                                    implicitHeight: escalationMetricColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(8) : 8) * 2)
+
+                                    Column {
+                                        id: escalationMetricColumn
+                                        anchors.fill: parent
+                                        anchors.margins: shellWindow ? shellWindow.scaled(8) : 8
+                                        spacing: 2
+
+                                        Text {
+                                            text: escalationData["label"]
+                                            color: shellWindow ? shellWindow.textMuted : "#4e7392"
+                                            font.pixelSize: shellWindow ? shellWindow.captionSize : 11
+                                            font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                        }
+
+                                        Text {
+                                            width: parent.width
+                                            text: escalationData["value"]
+                                            color: shellWindow ? shellWindow.textStrong : "#f4fbff"
+                                            font.pixelSize: shellWindow ? shellWindow.captionSize : 11
+                                            font.bold: true
+                                            font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                            wrapMode: Text.WrapAnywhere
+                                        }
+
+                                        Text {
+                                            width: parent.width
+                                            text: escalationData["detail"]
+                                            color: shellWindow ? shellWindow.textSecondary : "#83acc8"
+                                            font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                            font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                            wrapMode: Text.WordWrap
+                                            maximumLineCount: 2
+                                            elide: Text.ElideRight
+                                        }
+                                    }
                                 }
                             }
                         }
