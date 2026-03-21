@@ -24,7 +24,6 @@ ApplicationWindow {
     readonly property var statusRows: DataUtils.arrayOrEmpty(leftPanelData["rows"])
     readonly property var centerControlSummary: DataUtils.objectOrEmpty(centerPanelData["control_summary"])
     readonly property var centerFeedContract: DataUtils.objectOrEmpty(centerPanelData["feed_contract"])
-    readonly property var centerSampleData: DataUtils.objectOrEmpty(centerPanelData["sample"])
     readonly property var trackData: DataUtils.arrayOrEmpty(centerPanelData["track"])
     readonly property var currentPosition: DataUtils.objectOrEmpty(centerPanelData["position"])
     readonly property var kinematics: DataUtils.objectOrEmpty(centerPanelData["kinematics"])
@@ -33,8 +32,6 @@ ApplicationWindow {
     readonly property var rightScenarios: DataUtils.arrayOrEmpty(rightPanelData["scenarios"])
     readonly property var recommendedScenario: recommendedScenarioObject(rightScenarios)
     readonly property var recommendedComparison: DataUtils.objectOrEmpty(recommendedScenario["comparison"])
-    readonly property var recommendedCommands: DataUtils.objectOrEmpty(recommendedScenario["commands"])
-    readonly property var recommendedEvidence: DataUtils.arrayOrEmpty(recommendedScenario["evidence"])
     readonly property string recommendedScenarioId: String(rightPanelData["recommended_scenario_id"] || "--")
     readonly property int enabledBottomActions: enabledActionTotal(bottomActions)
     readonly property bool softwareRenderEnabled: !!options["softwareRender"]
@@ -46,55 +43,38 @@ ApplicationWindow {
     readonly property string uiFamily: "Noto Sans CJK SC"
     readonly property string monoFamily: "JetBrains Mono"
 
-    readonly property color bgColorTop: "#09111c"
-    readonly property color bgColorMid: "#0b1522"
-    readonly property color bgColorBottom: "#050910"
-    readonly property color hazeBlue: "#153250"
-    readonly property color hazeAmber: "#6a371a"
-    readonly property color shellColor: "#0f1724"
-    readonly property color shellColorRaised: "#131f31"
-    readonly property color shellColorInset: "#0b1522"
-    readonly property color shellColorGlass: "#182537"
-    readonly property color panelColor: "#121d2d"
-    readonly property color panelColorRaised: "#162336"
-    readonly property color panelColorSoft: "#0d1624"
-    readonly property color cardColor: "#172435"
-    readonly property color cardColorSoft: "#101926"
-    readonly property color borderSoft: "#31465f"
-    readonly property color borderStrong: "#73b6ff"
-    readonly property color accentBlue: "#73b6ff"
-    readonly property color accentBlueSoft: "#4d86bc"
-    readonly property color accentCyan: "#acecff"
-    readonly property color accentGreen: "#79deb2"
-    readonly property color accentAmber: "#f0b97c"
-    readonly property color accentRed: "#ff8c95"
-    readonly property color textStrong: "#f5f7fb"
-    readonly property color textPrimary: "#dce6f2"
-    readonly property color textSecondary: "#9aa9bd"
-    readonly property color textMuted: "#76859a"
-    readonly property color textTertiary: "#536277"
-    readonly property color gridLine: "#162231"
-    readonly property color gridLineStrong: "#26364c"
-    readonly property color shellStageTop: "#22364b"
-    readonly property color shellStageMid: "#141f2e"
-    readonly property color shellStageBottom: "#0b1119"
-    readonly property color shellDockTop: "#1b293b"
-    readonly property color shellDockMid: "#121c2a"
-    readonly property color shellDockBottom: "#0a1018"
-    readonly property color panelGlowStrong: "#84bfff"
-    readonly property color panelTraceStrong: "#3d5572"
-    readonly property color panelTrace: "#1d2c40"
-    readonly property color panelTraceSoft: "#121b28"
-    readonly property color shellGlowOuter: "#71b0ff"
-    readonly property color shellGlowSoft: "#1b2940"
-    readonly property color shellFabricTop: "#182638"
-    readonly property color shellFabricMid: "#0f1826"
-    readonly property color shellFabricBottom: "#09111a"
+    readonly property color bgColorTop: "#070d16"
+    readonly property color bgColorMid: "#0a111c"
+    readonly property color bgColorBottom: "#05080f"
+    readonly property color hazeBlue: "#14365c"
+    readonly property color hazeAmber: "#65401c"
+    readonly property color shellColor: "#0c131d"
     readonly property color shellCanopyTop: "#23374b"
-    readonly property color shellCanopyMid: "#121d2b"
-    readonly property color shellCanopyBottom: "#091019"
-    readonly property color shellCanopyEdge: "#30465c"
-    readonly property color shellDeckAura: "#233a52"
+    readonly property color shellCanopyMid: "#111b29"
+    readonly property color shellCanopyBottom: "#081018"
+    readonly property color shellCanopyEdge: "#3b566f"
+    readonly property color panelColor: "#101928"
+    readonly property color panelColorRaised: "#132032"
+    readonly property color panelColorSoft: "#0b131e"
+    readonly property color cardColor: "#141f30"
+    readonly property color borderSoft: "#2c4058"
+    readonly property color borderStrong: "#72b6ff"
+    readonly property color accentBlue: "#72b6ff"
+    readonly property color accentCyan: "#aeeaff"
+    readonly property color accentGreen: "#75dbb0"
+    readonly property color accentAmber: "#efb97d"
+    readonly property color accentRed: "#ff8b94"
+    readonly property color textStrong: "#f5f7fb"
+    readonly property color textPrimary: "#dbe5f1"
+    readonly property color textSecondary: "#97a8bc"
+    readonly property color textMuted: "#718296"
+    readonly property color gridLine: "#162230"
+    readonly property color gridLineStrong: "#263648"
+    readonly property color shellDockTop: "#1b2a3c"
+    readonly property color shellDockMid: "#101a28"
+    readonly property color shellDockBottom: "#081018"
+    readonly property color panelGlowStrong: "#85c0ff"
+    readonly property color panelTraceStrong: "#38516d"
 
     readonly property real widthScale: Math.max(0.72, Math.min(1.16, Number(metrics["width"] || designWidth) / designWidth))
     readonly property real heightScale: Math.max(0.72, Math.min(1.16, Number(metrics["height"] || designHeight) / designHeight))
@@ -111,18 +91,17 @@ ApplicationWindow {
     readonly property bool mediumLayout: !wideLayout && contentWidth >= scaled(980)
     readonly property bool compactLayout: !wideLayout && !mediumLayout
     readonly property bool shortViewport: viewportHeight < 780
-    readonly property bool tallViewport: viewportHeight >= 960
 
     readonly property int outerPadding: scaled(compactLayout ? 14 : 18)
-    readonly property int shellPadding: scaled(compactLayout ? 18 : 24)
+    readonly property int shellPadding: scaled(compactLayout ? 16 : 22)
     readonly property int zoneGap: scaled(compactLayout ? 12 : 16)
     readonly property int compactGap: scaled(8)
-    readonly property int panelPadding: scaled(compactLayout ? 16 : 18)
-    readonly property int cardPadding: scaled(compactLayout ? 12 : 14)
+    readonly property int panelPadding: scaled(compactLayout ? 14 : 18)
+    readonly property int cardPadding: scaled(compactLayout ? 11 : 14)
     readonly property int panelRadius: scaled(22)
     readonly property int cardRadius: scaled(16)
     readonly property int edgeRadius: scaled(12)
-    readonly property int headerTitleSize: scaled(compactLayout ? 30 : 36)
+    readonly property int headerTitleSize: scaled(compactLayout ? 28 : 34)
     readonly property int sectionTitleSize: scaled(compactLayout ? 22 : 26)
     readonly property int bodyEmphasisSize: scaled(compactLayout ? 14 : 15)
     readonly property int bodySize: scaled(13)
@@ -145,6 +124,17 @@ ApplicationWindow {
     readonly property string eventTimeValue: String((statusRow("事件时间") || {})["value"] || "--")
     readonly property string launchHint: String(meta["launch_hint"] || "bash ./session_bootstrap/scripts/run_cockpit_native.sh")
     readonly property string snapshotRelativePath: String(leftPanelData["snapshot_path"] || "--")
+    readonly property string aircraftIdValue: String(centerPanelData["aircraft_id"] || "FT-AIR-01")
+    readonly property string missionCallSignValue: String(centerPanelData["mission_call_sign"] || "M9-DEMO")
+    readonly property string liveAnchorTone: String(liveAnchor["tone"] || "neutral")
+    readonly property string currentPageSummary: currentPage === 0
+        ? "借用 cluster 的座舱外壳和 QDashBoard 的分区导航，让首屏收敛为地图主舞台加两侧支援导轨。"
+        : String(DataUtils.objectOrEmpty(navigationModel[currentPage])["summary"] || "")
+    readonly property string landingSummaryTitle: recentEventTone === "warning"
+        ? "首屏改为问题导向的世界态势墙板"
+        : "首屏改为地图主导的命令中心壳体"
+    readonly property string landingSummaryText: String(centerControlSummary["last_event_message"] || rightPanelData["summary"] || topSubtitle)
+    readonly property string footerNote: String(bottomPanelData["footer_note"] || "默认执行仓库内软件渲染安全启动路径。")
 
     property int currentPage: 0
 
@@ -153,8 +143,8 @@ ApplicationWindow {
             "index": 0,
             "label": "总览",
             "english": "Landing",
-            "detail": "中心墙板",
-            "summary": "首屏只保留世界地图主墙板、精简摘要与跳转入口。"
+            "detail": "地图主墙板",
+            "summary": "借用 cluster 座舱骨架后的首屏主壳。"
         },
         {
             "index": 1,
@@ -186,30 +176,25 @@ ApplicationWindow {
         }
     ]
 
-    readonly property var landingBadgeModel: [
+    readonly property var topStatusModel: [
         {
             "label": "会话",
             "value": systemSessionValue,
             "tone": "neutral"
         },
         {
-            "label": "最近事件",
-            "value": recentEventValue,
-            "tone": recentEventTone
+            "label": "心跳",
+            "value": heartbeatValue,
+            "tone": heartbeatTone
         },
         {
             "label": "在线锚点",
             "value": String(liveAnchor["valid_instance"] || "--"),
-            "tone": String(liveAnchor["tone"] || "neutral")
+            "tone": liveAnchorTone
         },
         {
-            "label": "链路档位",
-            "value": linkProfileValue,
-            "tone": heartbeatTone
-        },
-        {
-            "label": "渲染路径",
-            "value": softwareRenderEnabled ? "软件安全渲染" : "GPU 优先渲染",
+            "label": "渲染",
+            "value": softwareRenderEnabled ? "软件安全" : "图形优先",
             "tone": softwareRenderEnabled ? "warning" : "online"
         }
     ]
@@ -276,10 +261,62 @@ ApplicationWindow {
         }
     ]
 
-    readonly property string landingSummaryTitle: recentEventTone === "warning"
-        ? "首屏改为问题导向的世界态势墙板"
-        : "首屏改为地图主导的命令中心壳体"
-    readonly property string landingSummaryText: String(centerControlSummary["last_event_message"] || rightPanelData["summary"] || topSubtitle)
+    readonly property var landingWeakMetricModel: [
+        {
+            "label": "推荐档",
+            "value": recommendedScenarioId,
+            "detail": compactMessage(String(recommendedScenario["summary"] || "延续仓库现有弱网推荐剧本。"), compactLayout ? 24 : 44),
+            "tone": "warning"
+        },
+        {
+            "label": "吞吐",
+            "value": formattedMetric(recommendedComparison["pipeline_images_per_sec"], 3, "img/s"),
+            "detail": "pipeline 对照",
+            "tone": "online"
+        },
+        {
+            "label": "提升",
+            "value": formattedMetric(recommendedComparison["throughput_uplift_pct"], 3, "%"),
+            "detail": "弱网 uplift",
+            "tone": "warning"
+        },
+        {
+            "label": "锚点",
+            "value": String(liveAnchor["valid_instance"] || "--"),
+            "detail": String(liveAnchor["board_status"] || "等待在线锚点"),
+            "tone": liveAnchorTone
+        }
+    ]
+
+    readonly property var systemPageChipModel: [
+        { "label": "会话", "value": systemSessionValue, "tone": "neutral" },
+        { "label": "心跳", "value": heartbeatValue, "tone": heartbeatTone },
+        { "label": "最近事件", "value": recentEventValue, "tone": recentEventTone },
+        { "label": "链路", "value": linkProfileValue, "tone": "neutral" }
+    ]
+
+    readonly property var flightPageChipModel: [
+        { "label": "任务", "value": missionCallSignValue, "tone": "neutral" },
+        { "label": "机号", "value": aircraftIdValue, "tone": "neutral" },
+        { "label": "源", "value": activeSourceLabel, "tone": "online" },
+        { "label": "航迹", "value": String(trackData.length) + " 节点", "tone": trackData.length > 1 ? "online" : "neutral" }
+    ]
+
+    readonly property var weakPageChipModel: [
+        { "label": "推荐档", "value": recommendedScenarioId, "tone": "warning" },
+        { "label": "吞吐", "value": formattedMetric(recommendedComparison["pipeline_images_per_sec"], 3, "img/s"), "tone": "online" },
+        { "label": "提升", "value": formattedMetric(recommendedComparison["throughput_uplift_pct"], 3, "%"), "tone": "warning" },
+        { "label": "锚点", "value": String(liveAnchor["valid_instance"] || "--"), "tone": liveAnchorTone }
+    ]
+
+    readonly property var actionPageChipModel: [
+        { "label": "动作", "value": String(bottomActions.length), "tone": "neutral" },
+        { "label": "可执行", "value": String(enabledBottomActions), "tone": enabledBottomActions > 0 ? "online" : "warning" },
+        { "label": "桥接", "value": bridgeAvailable ? "仓库在线" : "桥接缺失", "tone": bridgeAvailable ? "online" : "warning" },
+        { "label": "渲染", "value": softwareRenderEnabled ? "软件安全" : "图形优先", "tone": softwareRenderEnabled ? "warning" : "online" }
+    ]
+
+    readonly property var dockPreviewActions: previewActions(bottomActions)
 
     minimumWidth: 760
     minimumHeight: 600
@@ -295,12 +332,6 @@ ApplicationWindow {
         var raw = String(text || "")
         var slash = raw.indexOf("/")
         return slash >= 0 ? raw.slice(0, slash).trim() : raw
-    }
-
-    function secondaryLabel(text) {
-        var raw = String(text || "")
-        var slash = raw.indexOf("/")
-        return slash >= 0 ? raw.slice(slash + 1).trim() : ""
     }
 
     function statusRow(label) {
@@ -340,7 +371,7 @@ ApplicationWindow {
             return "#281f17"
         if (tone === "danger")
             return "#29161a"
-        return "#121b28"
+        return "#111a27"
     }
 
     function formattedMetric(value, decimals, suffix) {
@@ -369,6 +400,21 @@ ApplicationWindow {
         return scenarioList.length > 0 ? DataUtils.objectOrEmpty(scenarioList[0]) : ({})
     }
 
+    function compactMessage(text, limit) {
+        var resolved = String(text || "")
+        var maxLength = Math.max(8, Number(limit || 40))
+        if (resolved.length <= maxLength)
+            return resolved
+        return resolved.slice(0, maxLength - 1) + "…"
+    }
+
+    function previewActions(actionsModel) {
+        var resolved = DataUtils.arrayOrEmpty(actionsModel)
+        if (resolved.length <= 4)
+            return resolved
+        return resolved.slice(0, 4)
+    }
+
     Component.onCompleted: {
         var availableWidth = Math.max(minimumWidth, Number(metrics["width"] || designWidth))
         var availableHeight = Math.max(minimumHeight, Number(metrics["height"] || designHeight))
@@ -380,45 +426,35 @@ ApplicationWindow {
         anchors.fill: parent
         gradient: Gradient {
             GradientStop { position: 0.0; color: root.bgColorTop }
-            GradientStop { position: 0.42; color: root.bgColorMid }
+            GradientStop { position: 0.48; color: root.bgColorMid }
             GradientStop { position: 1.0; color: root.bgColorBottom }
         }
     }
 
     Rectangle {
         width: root.width * 0.72
-        height: root.height * 0.68
+        height: root.height * 0.7
         radius: width / 2
         color: root.hazeBlue
-        opacity: 0.16
-        x: -width * 0.24
-        y: -height * 0.08
+        opacity: 0.18
+        x: -width * 0.22
+        y: -height * 0.12
     }
 
     Rectangle {
-        width: root.width * 0.46
-        height: root.height * 0.4
+        width: root.width * 0.44
+        height: root.height * 0.42
         radius: width / 2
         color: root.hazeAmber
         opacity: 0.1
-        x: root.width - (width * 0.76)
-        y: -height * 0.18
-    }
-
-    Rectangle {
-        width: root.width * 1.1
-        height: root.scaled(180)
-        rotation: -6
-        color: "#17304b"
-        opacity: 0.16
-        x: -root.width * 0.05
-        y: root.height * 0.32
+        x: root.width - (width * 0.78)
+        y: root.height * 0.08
     }
 
     Item {
         id: backdropGrid
         anchors.fill: parent
-        opacity: 0.18
+        opacity: 0.14
 
         Repeater {
             model: 12
@@ -450,9 +486,9 @@ ApplicationWindow {
         anchors.topMargin: root.safeTop + root.outerPadding
         anchors.rightMargin: root.safeRight + root.outerPadding
         anchors.bottomMargin: root.safeBottom + root.outerPadding
-        radius: root.panelRadius + root.scaled(6)
+        radius: root.panelRadius + root.scaled(8)
         color: root.shellColor
-        border.color: "#31455d"
+        border.color: root.shellCanopyEdge
         border.width: 1
         clip: true
 
@@ -460,74 +496,54 @@ ApplicationWindow {
             anchors.fill: parent
             radius: parent.radius
             gradient: Gradient {
-                GradientStop { position: 0.0; color: root.shellColorGlass }
-                GradientStop { position: 0.28; color: root.shellColorRaised }
-                GradientStop { position: 0.58; color: root.shellColorInset }
-                GradientStop { position: 1.0; color: "#070c13" }
+                GradientStop { position: 0.0; color: root.shellCanopyTop }
+                GradientStop { position: 0.18; color: root.shellCanopyMid }
+                GradientStop { position: 0.42; color: root.shellColor }
+                GradientStop { position: 1.0; color: root.shellCanopyBottom }
             }
         }
 
         Rectangle {
-            anchors.fill: parent
-            radius: parent.radius
-            gradient: Gradient {
-                GradientStop { position: 0.0; color: "#0affffff" }
-                GradientStop { position: 0.2; color: "#04ffffff" }
-                GradientStop { position: 0.5; color: "transparent" }
-                GradientStop { position: 1.0; color: "#26000000" }
-            }
+            anchors.left: parent.left
+            anchors.top: parent.top
+            width: parent.width * 0.26
+            height: root.scaled(108)
+            radius: root.edgeRadius
+            rotation: -9
+            color: "#081018"
+            opacity: 0.92
+            x: -width * 0.12
+            y: -height * 0.38
         }
 
         Rectangle {
+            anchors.right: parent.right
+            anchors.top: parent.top
             width: parent.width * 0.26
-            height: root.scaled(88)
+            height: root.scaled(108)
             radius: root.edgeRadius
-            color: "#09111a"
-            opacity: 0.88
-            rotation: -11
-            x: -width * 0.16
-            y: -height * 0.42
-        }
-
-        Rectangle {
-            width: parent.width * 0.26
-            height: root.scaled(88)
-            radius: root.edgeRadius
-            color: "#09111a"
-            opacity: 0.88
-            rotation: 11
-            x: parent.width - (width * 0.84)
-            y: -height * 0.42
+            rotation: 9
+            color: "#081018"
+            opacity: 0.92
+            x: parent.width - (width * 0.88)
+            y: -height * 0.38
         }
 
         Rectangle {
             anchors.top: parent.top
             anchors.horizontalCenter: parent.horizontalCenter
-            width: Math.min(parent.width * 0.42, root.scaled(560))
-            height: root.scaled(28)
+            width: Math.min(parent.width * 0.46, root.scaled(560))
+            height: root.scaled(30)
             radius: height / 2
             gradient: Gradient {
                 orientation: Gradient.Horizontal
                 GradientStop { position: 0.0; color: "transparent" }
-                GradientStop { position: 0.2; color: "#14ffffff" }
-                GradientStop { position: 0.5; color: "#22ffffff" }
-                GradientStop { position: 0.8; color: "#14ffffff" }
+                GradientStop { position: 0.2; color: "#10ffffff" }
+                GradientStop { position: 0.5; color: "#24ffffff" }
+                GradientStop { position: 0.8; color: "#10ffffff" }
                 GradientStop { position: 1.0; color: "transparent" }
             }
-            opacity: 0.72
-        }
-
-        Rectangle {
-            anchors.left: parent.left
-            anchors.right: parent.right
-            anchors.bottom: parent.bottom
-            height: parent.height * 0.18
-            radius: parent.radius
-            gradient: Gradient {
-                GradientStop { position: 0.0; color: "#00000000" }
-                GradientStop { position: 0.48; color: "#18000000" }
-                GradientStop { position: 1.0; color: "#4c060c14" }
-            }
+            opacity: 0.82
         }
 
         Rectangle {
@@ -538,12 +554,49 @@ ApplicationWindow {
             gradient: Gradient {
                 orientation: Gradient.Horizontal
                 GradientStop { position: 0.0; color: "transparent" }
-                GradientStop { position: 0.18; color: root.accentBlueSoft }
-                GradientStop { position: 0.5; color: root.accentBlue }
-                GradientStop { position: 0.82; color: root.accentCyan }
+                GradientStop { position: 0.2; color: root.accentBlue }
+                GradientStop { position: 0.5; color: root.accentCyan }
+                GradientStop { position: 0.8; color: root.accentBlue }
                 GradientStop { position: 1.0; color: "transparent" }
             }
             opacity: 0.88
+        }
+
+        Rectangle {
+            anchors.left: parent.left
+            anchors.bottom: parent.bottom
+            width: parent.width * 0.2
+            height: parent.height * 0.56
+            color: root.accentBlue
+            opacity: 0.035
+            radius: width / 2
+            x: -width * 0.22
+            y: parent.height - (height * 0.72)
+        }
+
+        Rectangle {
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            width: parent.width * 0.2
+            height: parent.height * 0.56
+            color: root.accentCyan
+            opacity: 0.03
+            radius: width / 2
+            x: parent.width - (width * 0.78)
+            y: parent.height - (height * 0.72)
+        }
+
+        Rectangle {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            height: parent.height * 0.18
+            radius: parent.radius
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: "#00000000" }
+                GradientStop { position: 0.42; color: "#16000000" }
+                GradientStop { position: 1.0; color: "#42060d15" }
+            }
         }
 
         Rectangle {
@@ -551,9 +604,9 @@ ApplicationWindow {
             anchors.margins: 3
             radius: parent.radius - 3
             color: "transparent"
-            border.color: "#3f546d"
+            border.color: "#385069"
             border.width: 1
-            opacity: 0.85
+            opacity: 0.88
         }
 
         ColumnLayout {
@@ -564,61 +617,204 @@ ApplicationWindow {
             PanelFrame {
                 shellWindow: root
                 panelColor: root.panelColorSoft
-                borderTone: root.borderSoft
+                borderTone: root.borderStrong
                 accentTone: root.accentBlue
                 Layout.fillWidth: true
-                implicitHeight: headerContent.implicitHeight + (root.panelPadding * 2)
+                implicitHeight: canopyLayout.implicitHeight + (root.panelPadding * 2)
 
                 GridLayout {
-                    id: headerContent
+                    id: canopyLayout
                     anchors.fill: parent
                     anchors.margins: root.panelPadding
-                    columns: root.compactLayout ? 1 : 2
+                    columns: root.compactLayout ? 1 : 3
                     columnSpacing: root.zoneGap
                     rowSpacing: root.compactGap
 
-                    ColumnLayout {
+                    Rectangle {
                         Layout.fillWidth: true
-                        spacing: root.compactGap
-
-                        Text {
-                            text: "飞腾派命令中心 / Native Command Center"
-                            color: root.accentBlue
-                            font.pixelSize: root.eyebrowSize
-                            font.family: root.monoFamily
-                            font.letterSpacing: root.scaled(1)
+                        radius: root.cardRadius
+                        gradient: Gradient {
+                            GradientStop { position: 0.0; color: "#18314e" }
+                            GradientStop { position: 0.5; color: "#0f1d2d" }
+                            GradientStop { position: 1.0; color: "#09111a" }
                         }
+                        border.color: root.accentBlue
+                        border.width: 1
+                        implicitHeight: brandColumn.implicitHeight + (root.cardPadding * 2)
 
-                        Text {
-                            text: root.topTitle
-                            color: root.textStrong
-                            font.pixelSize: root.headerTitleSize
-                            font.bold: true
-                            font.family: root.displayFamily
+                        ColumnLayout {
+                            id: brandColumn
+                            anchors.fill: parent
+                            anchors.margins: root.cardPadding
+                            spacing: root.scaled(3)
+
+                            Text {
+                                text: "飞腾派原生座舱 / Native Cockpit"
+                                color: root.accentBlue
+                                font.pixelSize: root.eyebrowSize
+                                font.family: root.monoFamily
+                                font.letterSpacing: root.scaled(1)
+                            }
+
+                            Text {
+                                text: root.topTitle
+                                color: root.textStrong
+                                font.pixelSize: root.headerTitleSize
+                                font.bold: true
+                                font.family: root.displayFamily
+                                wrapMode: Text.WordWrap
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: root.topSubtitle
+                                color: root.textSecondary
+                                font.pixelSize: root.bodySize
+                                font.family: root.uiFamily
+                                wrapMode: Text.WordWrap
+                            }
                         }
+                    }
 
-                        Text {
-                            Layout.fillWidth: true
-                            text: root.currentPage === 0
-                                ? "首屏收敛为地图主墙板，系统板态、飞行合同、弱网策略和执行坞站全部转入独立页面。"
-                                : String(DataUtils.objectOrEmpty(root.navigationModel[root.currentPage])["summary"] || "")
-                            color: root.textSecondary
-                            font.pixelSize: root.bodySize
-                            font.family: root.uiFamily
-                            wrapMode: Text.WordWrap
-                        }
+                    Rectangle {
+                        Layout.fillWidth: true
+                        radius: root.cardRadius
+                        color: "#0c1520"
+                        border.color: "#2f4460"
+                        border.width: 1
+                        implicitHeight: navColumn.implicitHeight + (root.cardPadding * 2)
 
-                        Item {
-                            Layout.fillWidth: true
-                            implicitHeight: badgeFlow.implicitHeight
+                        ColumnLayout {
+                            id: navColumn
+                            anchors.fill: parent
+                            anchors.margins: root.cardPadding
+                            spacing: root.compactGap
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: root.compactGap
+
+                                Text {
+                                    text: "导航甲板 / Zone Deck"
+                                    color: root.accentCyan
+                                    font.pixelSize: root.eyebrowSize
+                                    font.family: root.monoFamily
+                                    font.letterSpacing: root.scaled(1)
+                                }
+
+                                Item {
+                                    Layout.fillWidth: true
+                                }
+
+                                Text {
+                                    text: root.currentPage === 0 ? "页 1 / 5" : "页 " + String(root.currentPage + 1) + " / 5"
+                                    color: root.textMuted
+                                    font.pixelSize: root.captionSize
+                                    font.family: root.monoFamily
+                                }
+                            }
 
                             Flow {
-                                id: badgeFlow
+                                Layout.fillWidth: true
                                 width: parent.width
                                 spacing: root.compactGap
 
                                 Repeater {
-                                    model: root.landingBadgeModel
+                                    model: root.navigationModel
+
+                                    delegate: Rectangle {
+                                        property var itemData: modelData
+                                        readonly property bool active: root.currentPage === Number(itemData["index"])
+                                        radius: root.edgeRadius
+                                        color: active ? "#18283b" : "#0d1520"
+                                        border.color: active ? root.accentBlue : "#29405a"
+                                        border.width: 1
+                                        implicitWidth: navTabColumn.implicitWidth + (root.scaled(14) * 2)
+                                        implicitHeight: navTabColumn.implicitHeight + (root.scaled(9) * 2)
+
+                                        Column {
+                                            id: navTabColumn
+                                            anchors.centerIn: parent
+                                            spacing: 1
+
+                                            Text {
+                                                text: itemData["label"]
+                                                color: active ? root.textStrong : root.textPrimary
+                                                font.pixelSize: root.bodySize
+                                                font.bold: true
+                                                font.family: root.uiFamily
+                                            }
+
+                                            Text {
+                                                text: itemData["english"] + " / " + itemData["detail"]
+                                                color: active ? root.accentBlue : root.textMuted
+                                                font.pixelSize: root.captionSize
+                                                font.family: root.monoFamily
+                                            }
+                                        }
+
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: root.currentPage = Number(parent.itemData["index"])
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        radius: root.cardRadius
+                        gradient: Gradient {
+                            GradientStop { position: 0.0; color: "#121f30" }
+                            GradientStop { position: 1.0; color: "#09111a" }
+                        }
+                        border.color: root.accentAmber
+                        border.width: 1
+                        implicitHeight: statusColumn.implicitHeight + (root.cardPadding * 2)
+
+                        ColumnLayout {
+                            id: statusColumn
+                            anchors.fill: parent
+                            anchors.margins: root.cardPadding
+                            spacing: root.compactGap
+
+                            Text {
+                                text: "跳转摘要 / Current Zone"
+                                color: root.accentAmber
+                                font.pixelSize: root.eyebrowSize
+                                font.family: root.monoFamily
+                                font.letterSpacing: root.scaled(1)
+                            }
+
+                            Text {
+                                text: root.currentPage === 0 ? root.landingSummaryTitle : DataUtils.objectOrEmpty(root.navigationModel[root.currentPage])["label"]
+                                color: root.textStrong
+                                font.pixelSize: root.sectionTitleSize
+                                font.bold: true
+                                font.family: root.displayFamily
+                                wrapMode: Text.WordWrap
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: root.currentPageSummary
+                                color: root.textSecondary
+                                font.pixelSize: root.bodySize
+                                font.family: root.uiFamily
+                                wrapMode: Text.WordWrap
+                            }
+
+                            Flow {
+                                Layout.fillWidth: true
+                                width: parent.width
+                                spacing: root.compactGap
+
+                                Repeater {
+                                    model: root.topStatusModel
 
                                     delegate: Rectangle {
                                         property var itemData: modelData
@@ -626,13 +822,13 @@ ApplicationWindow {
                                         color: root.toneFill(String(itemData["tone"] || "neutral"))
                                         border.color: root.toneColor(String(itemData["tone"] || "neutral"))
                                         border.width: 1
-                                        implicitWidth: badgeRow.implicitWidth + (root.scaled(12) * 2)
-                                        implicitHeight: badgeRow.implicitHeight + (root.scaled(8) * 2)
+                                        implicitWidth: statusPillRow.implicitWidth + (root.scaled(10) * 2)
+                                        implicitHeight: statusPillRow.implicitHeight + (root.scaled(7) * 2)
 
                                         Row {
-                                            id: badgeRow
+                                            id: statusPillRow
                                             anchors.centerIn: parent
-                                            spacing: root.scaled(10)
+                                            spacing: root.scaled(8)
 
                                             Text {
                                                 text: itemData["label"]
@@ -654,62 +850,481 @@ ApplicationWindow {
                             }
                         }
                     }
+                }
+            }
 
-                    Item {
-                        Layout.fillWidth: true
-                        implicitHeight: navColumn.implicitHeight
+            StackLayout {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                currentIndex: root.currentPage
 
-                        Column {
-                            id: navColumn
-                            anchors.right: parent.right
-                            anchors.left: root.compactLayout ? parent.left : undefined
-                            spacing: root.compactGap
+                Item {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
 
-                            Text {
-                                text: "页面导航"
-                                color: root.textMuted
-                                font.pixelSize: root.captionSize
-                                font.family: root.monoFamily
-                            }
+                    GridLayout {
+                        anchors.fill: parent
+                        columns: root.wideLayout ? 12 : (root.mediumLayout ? 2 : 1)
+                        columnSpacing: root.zoneGap
+                        rowSpacing: root.zoneGap
 
-                            Flow {
-                                width: root.compactLayout ? parent.width : Math.max(root.scaled(420), implicitWidth)
+                        PanelFrame {
+                            shellWindow: root
+                            panelColor: root.panelColor
+                            borderTone: root.borderSoft
+                            accentTone: root.accentBlue
+                            Layout.row: root.wideLayout ? 0 : 1
+                            Layout.column: 0
+                            Layout.columnSpan: 1
+                            Layout.fillWidth: true
+                            Layout.fillHeight: root.wideLayout
+                            Layout.minimumWidth: root.scaled(214)
+                            implicitHeight: leftRailColumn.implicitHeight + (root.panelPadding * 2)
+
+                            ColumnLayout {
+                                id: leftRailColumn
+                                anchors.fill: parent
+                                anchors.margins: root.panelPadding
                                 spacing: root.compactGap
 
+                                Text {
+                                    text: "左导轨 / Mission Rail"
+                                    color: root.accentBlue
+                                    font.pixelSize: root.eyebrowSize
+                                    font.family: root.monoFamily
+                                    font.letterSpacing: root.scaled(1)
+                                }
+
+                                Text {
+                                    text: root.landingSummaryTitle
+                                    color: root.textStrong
+                                    font.pixelSize: root.sectionTitleSize
+                                    font.bold: true
+                                    font.family: root.displayFamily
+                                    wrapMode: Text.WordWrap
+                                }
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: root.landingSummaryText
+                                    color: root.textSecondary
+                                    font.pixelSize: root.bodySize
+                                    font.family: root.uiFamily
+                                    wrapMode: Text.WordWrap
+                                }
+
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 1
+                                    color: "#243548"
+                                }
+
                                 Repeater {
-                                    model: root.navigationModel
+                                    model: root.landingTelemetryModel
 
                                     delegate: Rectangle {
                                         property var itemData: modelData
-                                        readonly property bool active: root.currentPage === Number(itemData["index"])
+                                        Layout.fillWidth: true
                                         radius: root.edgeRadius
-                                        color: active ? "#18283c" : "#0f1723"
-                                        border.color: active
-                                            ? root.accentBlue
-                                            : "#2b3d54"
+                                        color: "#0d1520"
+                                        border.color: root.toneColor(String(itemData["tone"] || "neutral"))
                                         border.width: 1
-                                        implicitWidth: navButtonColumn.implicitWidth + (root.scaled(16) * 2)
-                                        implicitHeight: navButtonColumn.implicitHeight + (root.scaled(10) * 2)
+                                        implicitHeight: telemetryColumn.implicitHeight + (root.scaled(9) * 2)
 
                                         Column {
-                                            id: navButtonColumn
-                                            anchors.centerIn: parent
-                                            spacing: 1
+                                            id: telemetryColumn
+                                            anchors.fill: parent
+                                            anchors.margins: root.scaled(9)
+                                            spacing: root.scaled(2)
 
                                             Text {
                                                 text: itemData["label"]
-                                                color: active ? root.textStrong : root.textPrimary
-                                                font.pixelSize: root.bodySize
-                                                font.bold: true
-                                                font.family: root.uiFamily
+                                                color: root.textMuted
+                                                font.pixelSize: root.captionSize
+                                                font.family: root.monoFamily
                                             }
 
                                             Text {
-                                                visible: !root.compactLayout
+                                                width: parent.width
+                                                text: itemData["value"]
+                                                color: root.textStrong
+                                                font.pixelSize: root.bodyEmphasisSize
+                                                font.bold: true
+                                                font.family: root.uiFamily
+                                                wrapMode: Text.WrapAnywhere
+                                            }
+
+                                            Text {
+                                                width: parent.width
                                                 text: itemData["detail"]
-                                                color: active ? root.accentBlue : root.textMuted
+                                                color: root.textSecondary
                                                 font.pixelSize: root.captionSize
+                                                font.family: root.uiFamily
+                                                wrapMode: Text.WordWrap
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        PanelFrame {
+                            shellWindow: root
+                            panelColor: root.cardColor
+                            borderTone: root.borderStrong
+                            accentTone: root.accentCyan
+                            Layout.row: 0
+                            Layout.column: root.wideLayout ? 1 : 0
+                            Layout.columnSpan: root.wideLayout ? 10 : (root.mediumLayout ? 2 : 1)
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            Layout.minimumHeight: root.scaled(root.wideLayout ? 480 : (root.mediumLayout ? 410 : 320))
+
+                            Item {
+                                anchors.fill: parent
+                                anchors.margins: root.scaled(12)
+
+                                ColumnLayout {
+                                    anchors.fill: parent
+                                    spacing: root.compactGap
+
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: root.zoneGap
+
+                                        ColumnLayout {
+                                            Layout.fillWidth: true
+                                            spacing: root.scaled(2)
+
+                                            Text {
+                                                text: "中心主舞台 / Main Bay"
+                                                color: root.accentBlue
+                                                font.pixelSize: root.eyebrowSize
                                                 font.family: root.monoFamily
+                                                font.letterSpacing: root.scaled(1)
+                                            }
+
+                                            Text {
+                                                text: "全球态势主屏"
+                                                color: root.textStrong
+                                                font.pixelSize: root.sectionTitleSize + (root.wideLayout ? root.scaled(4) : 0)
+                                                font.bold: true
+                                                font.family: root.displayFamily
+                                            }
+
+                                            Text {
+                                                Layout.fillWidth: true
+                                                text: root.missionCallSignValue + " · " + root.aircraftIdValue + " · " + root.linkProfileValue
+                                                color: root.textSecondary
+                                                font.pixelSize: root.bodySize
+                                                font.family: root.uiFamily
+                                                wrapMode: Text.WordWrap
+                                            }
+                                        }
+
+                                        Flow {
+                                            Layout.preferredWidth: root.wideLayout ? root.scaled(420) : root.scaled(250)
+                                            width: implicitWidth
+                                            spacing: root.compactGap
+
+                                            Repeater {
+                                                model: [
+                                                    { "label": "数据源", "value": root.activeSourceLabel, "tone": "online" },
+                                                    { "label": "链路", "value": root.linkProfileValue, "tone": "neutral" },
+                                                    { "label": "锚点", "value": String(root.liveAnchor["valid_instance"] || "--"), "tone": root.liveAnchorTone }
+                                                ]
+
+                                                delegate: Rectangle {
+                                                    property var itemData: modelData
+                                                    radius: root.edgeRadius
+                                                    color: root.toneFill(String(itemData["tone"] || "neutral"))
+                                                    border.color: root.toneColor(String(itemData["tone"] || "neutral"))
+                                                    border.width: 1
+                                                    implicitWidth: stageChipColumn.implicitWidth + (root.scaled(10) * 2)
+                                                    implicitHeight: stageChipColumn.implicitHeight + (root.scaled(7) * 2)
+
+                                                    Column {
+                                                        id: stageChipColumn
+                                                        anchors.centerIn: parent
+                                                        spacing: 1
+
+                                                        Text {
+                                                            text: itemData["label"]
+                                                            color: root.textMuted
+                                                            font.pixelSize: root.captionSize
+                                                            font.family: root.monoFamily
+                                                        }
+
+                                                        Text {
+                                                            text: itemData["value"]
+                                                            color: root.textStrong
+                                                            font.pixelSize: root.captionSize
+                                                            font.bold: true
+                                                            font.family: root.uiFamily
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        id: landingMapViewport
+                                        Layout.fillWidth: true
+                                        Layout.fillHeight: true
+                                        radius: root.cardRadius
+                                        clip: true
+                                        gradient: Gradient {
+                                            GradientStop { position: 0.0; color: "#10263b" }
+                                            GradientStop { position: 0.34; color: "#0b1827" }
+                                            GradientStop { position: 1.0; color: "#071018" }
+                                        }
+                                        border.color: "#355674"
+                                        border.width: 1
+
+                                        WorldMapStage {
+                                            anchors.fill: parent
+                                            anchors.margins: 2
+                                            shellWindow: root
+                                            trackData: root.trackData
+                                            currentPoint: root.currentPosition
+                                            headingDeg: Number(root.kinematics["heading_deg"] || 0)
+                                            currentLabel: root.missionCallSignValue + " 实时航迹"
+                                            currentDetail: root.activeSourceLabel + " / " + root.linkProfileValue
+                                            anchorLabel: String(root.liveAnchor["valid_instance"] || "--")
+                                            projectionLabel: "等经纬投影 / Equirectangular"
+                                            scenarioLabel: root.recommendedScenarioId
+                                            scenarioTone: root.liveAnchorTone
+                                        }
+
+                                        Column {
+                                            visible: !root.compactLayout
+                                            anchors.right: parent.right
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            anchors.rightMargin: root.scaled(14)
+                                            spacing: root.compactGap
+
+                                            Repeater {
+                                                model: root.landingJumpModel
+
+                                                delegate: Rectangle {
+                                                    property var itemData: modelData
+                                                    radius: root.edgeRadius
+                                                    color: "#c40a121c"
+                                                    border.color: root.toneColor(String(itemData["tone"] || "neutral"))
+                                                    border.width: 1
+                                                    implicitWidth: stageJumpRow.implicitWidth + (root.scaled(12) * 2)
+                                                    implicitHeight: stageJumpRow.implicitHeight + (root.scaled(8) * 2)
+
+                                                    Row {
+                                                        id: stageJumpRow
+                                                        anchors.centerIn: parent
+                                                        spacing: root.scaled(8)
+
+                                                        Text {
+                                                            text: itemData["label"]
+                                                            color: root.textStrong
+                                                            font.pixelSize: root.bodySize
+                                                            font.bold: true
+                                                            font.family: root.uiFamily
+                                                        }
+
+                                                        Text {
+                                                            text: ">"
+                                                            color: root.toneColor(String(itemData["tone"] || "neutral"))
+                                                            font.pixelSize: root.bodyEmphasisSize
+                                                            font.bold: true
+                                                            font.family: root.monoFamily
+                                                        }
+                                                    }
+
+                                                    MouseArea {
+                                                        anchors.fill: parent
+                                                        hoverEnabled: true
+                                                        cursorShape: Qt.PointingHandCursor
+                                                        onClicked: root.currentPage = Number(parent.itemData["index"])
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        Row {
+                                            anchors.left: parent.left
+                                            anchors.bottom: parent.bottom
+                                            anchors.margins: root.scaled(14)
+                                            spacing: root.compactGap
+
+                                            Repeater {
+                                                model: [
+                                                    { "label": "世界底图", "tone": "online" },
+                                                    { "label": "飞机合同", "tone": "neutral" },
+                                                    { "label": "弱网对照", "tone": "warning" }
+                                                ]
+
+                                                delegate: Rectangle {
+                                                    radius: root.edgeRadius
+                                                    color: "#b6091119"
+                                                    border.color: root.toneColor(String(modelData["tone"] || "neutral"))
+                                                    border.width: 1
+                                                    implicitWidth: legendText.implicitWidth + (root.scaled(10) * 2)
+                                                    implicitHeight: legendText.implicitHeight + (root.scaled(6) * 2)
+
+                                                    Text {
+                                                        id: legendText
+                                                        anchors.centerIn: parent
+                                                        text: modelData["label"]
+                                                        color: root.textPrimary
+                                                        font.pixelSize: root.captionSize
+                                                        font.family: root.uiFamily
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        Rectangle {
+                                            anchors.right: parent.right
+                                            anchors.bottom: parent.bottom
+                                            anchors.margins: root.scaled(14)
+                                            radius: root.edgeRadius
+                                            color: "#de09131f"
+                                            border.color: root.accentBlue
+                                            border.width: 1
+                                            implicitWidth: mapCtaRow.implicitWidth + (root.scaled(14) * 2)
+                                            implicitHeight: mapCtaRow.implicitHeight + (root.scaled(8) * 2)
+
+                                            Row {
+                                                id: mapCtaRow
+                                                anchors.centerIn: parent
+                                                spacing: root.scaled(8)
+
+                                                Text {
+                                                    text: "进入飞行合同"
+                                                    color: root.textStrong
+                                                    font.pixelSize: root.bodySize
+                                                    font.bold: true
+                                                    font.family: root.uiFamily
+                                                }
+
+                                                Text {
+                                                    text: ">"
+                                                    color: root.accentBlue
+                                                    font.pixelSize: root.bodyEmphasisSize
+                                                    font.bold: true
+                                                    font.family: root.monoFamily
+                                                }
+                                            }
+
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: root.currentPage = 2
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        PanelFrame {
+                            shellWindow: root
+                            panelColor: root.panelColor
+                            borderTone: root.borderSoft
+                            accentTone: root.accentAmber
+                            Layout.row: root.wideLayout ? 0 : (root.mediumLayout ? 1 : 2)
+                            Layout.column: root.wideLayout ? 11 : (root.mediumLayout ? 1 : 0)
+                            Layout.columnSpan: 1
+                            Layout.fillWidth: true
+                            Layout.fillHeight: root.wideLayout
+                            Layout.minimumWidth: root.scaled(236)
+                            implicitHeight: rightRailColumn.implicitHeight + (root.panelPadding * 2)
+
+                            ColumnLayout {
+                                id: rightRailColumn
+                                anchors.fill: parent
+                                anchors.margins: root.panelPadding
+                                spacing: root.compactGap
+
+                                Text {
+                                    text: "右导轨 / Jump Rail"
+                                    color: root.accentAmber
+                                    font.pixelSize: root.eyebrowSize
+                                    font.family: root.monoFamily
+                                    font.letterSpacing: root.scaled(1)
+                                }
+
+                                Text {
+                                    text: "显式跳转与弱网摘要"
+                                    color: root.textStrong
+                                    font.pixelSize: root.sectionTitleSize
+                                    font.bold: true
+                                    font.family: root.displayFamily
+                                    wrapMode: Text.WordWrap
+                                }
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: "借用 QDashBoard 的分区导航思路，把系统、飞行、弱网和执行都收口为明确的跳转轨。"
+                                    color: root.textSecondary
+                                    font.pixelSize: root.bodySize
+                                    font.family: root.uiFamily
+                                    wrapMode: Text.WordWrap
+                                }
+
+                                Repeater {
+                                    model: root.landingJumpModel
+
+                                    delegate: Rectangle {
+                                        property var itemData: modelData
+                                        radius: root.edgeRadius
+                                        color: "#0d1520"
+                                        border.color: root.toneColor(String(itemData["tone"] || "neutral"))
+                                        border.width: 1
+                                        implicitHeight: jumpColumn.implicitHeight + (root.scaled(9) * 2)
+
+                                        Column {
+                                            id: jumpColumn
+                                            anchors.fill: parent
+                                            anchors.margins: root.scaled(9)
+                                            spacing: root.scaled(2)
+
+                                            Row {
+                                                width: parent.width
+                                                spacing: root.scaled(6)
+
+                                                Text {
+                                                    text: itemData["label"]
+                                                    color: root.textStrong
+                                                    font.pixelSize: root.bodySize
+                                                    font.bold: true
+                                                    font.family: root.uiFamily
+                                                }
+
+                                                Text {
+                                                    text: itemData["english"]
+                                                    color: root.textMuted
+                                                    font.pixelSize: root.captionSize
+                                                    font.family: root.monoFamily
+                                                }
+                                            }
+
+                                            Text {
+                                                width: parent.width
+                                                text: itemData["summary"]
+                                                color: root.textSecondary
+                                                font.pixelSize: root.captionSize
+                                                font.family: root.uiFamily
+                                                wrapMode: Text.WordWrap
+                                            }
+
+                                            Text {
+                                                width: parent.width
+                                                text: itemData["value"] + "  ·  进入 >"
+                                                color: root.toneColor(String(itemData["tone"] || "neutral"))
+                                                font.pixelSize: root.captionSize
+                                                font.bold: true
+                                                font.family: root.monoFamily
+                                                wrapMode: Text.WrapAnywhere
                                             }
                                         }
 
@@ -721,426 +1336,54 @@ ApplicationWindow {
                                         }
                                     }
                                 }
-                            }
-                        }
-                    }
-                }
-            }
-
-            StackLayout {
-                id: pageStack
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-                currentIndex: root.currentPage
-
-                Item {
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-
-                    GridLayout {
-                        anchors.fill: parent
-                        columns: root.wideLayout ? 12 : 1
-                        columnSpacing: root.zoneGap
-                        rowSpacing: root.zoneGap
-
-                        PanelFrame {
-                            shellWindow: root
-                            panelColor: root.cardColor
-                            borderTone: root.borderStrong
-                            accentTone: root.accentBlue
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            Layout.columnSpan: root.wideLayout ? 9 : 1
-                            Layout.minimumHeight: root.scaled(root.wideLayout ? 420 : (root.mediumLayout ? 340 : 260))
-                            Layout.preferredHeight: root.scaled(root.wideLayout ? 560 : (root.mediumLayout ? 410 : 300))
-
-                            Item {
-                                anchors.fill: parent
-                                anchors.margins: root.scaled(14)
 
                                 Rectangle {
-                                    id: landingMapViewport
-                                    anchors.fill: parent
-                                    radius: root.cardRadius
-                                    clip: true
-                                    gradient: Gradient {
-                                        GradientStop { position: 0.0; color: "#132a41" }
-                                        GradientStop { position: 0.32; color: "#0d1d2c" }
-                                        GradientStop { position: 1.0; color: "#071019" }
-                                    }
-                                    border.color: "#385877"
-                                    border.width: 1
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 1
+                                    color: "#243548"
                                 }
 
-                                Rectangle {
-                                    anchors.fill: landingMapViewport
-                                    anchors.margins: 1
-                                    radius: landingMapViewport.radius - 1
-                                    color: "transparent"
-                                    border.color: "#132f45"
-                                    border.width: 1
-                                }
+                                Repeater {
+                                    model: root.landingWeakMetricModel
 
-                                WorldMapStage {
-                                    anchors.fill: landingMapViewport
-                                    anchors.margins: 2
-                                    shellWindow: root
-                                    trackData: root.trackData
-                                    currentPoint: root.currentPosition
-                                    headingDeg: Number(root.kinematics["heading_deg"] || 0)
-                                    currentLabel: String(root.centerPanelData["mission_call_sign"] || "M9-DEMO") + " 实时航迹"
-                                    currentDetail: root.activeSourceLabel + " / " + root.linkProfileValue
-                                    anchorLabel: String(root.liveAnchor["valid_instance"] || "--")
-                                    projectionLabel: "等经纬投影 / Equirectangular"
-                                    scenarioLabel: root.recommendedScenarioId
-                                    scenarioTone: String(root.liveAnchor["tone"] || "neutral")
-                                }
+                                    delegate: Rectangle {
+                                        property var itemData: modelData
+                                        radius: root.edgeRadius
+                                        color: root.toneFill(String(itemData["tone"] || "neutral"))
+                                        border.color: root.toneColor(String(itemData["tone"] || "neutral"))
+                                        border.width: 1
+                                        implicitHeight: weakColumn.implicitHeight + (root.scaled(9) * 2)
 
-                                Rectangle {
-                                    anchors.right: parent.right
-                                    anchors.bottom: parent.bottom
-                                    anchors.margins: root.scaled(16)
-                                    radius: root.edgeRadius
-                                    gradient: Gradient {
-                                        GradientStop { position: 0.0; color: "#de0a1320" }
-                                        GradientStop { position: 1.0; color: "#bc09111b" }
-                                    }
-                                    border.color: root.accentBlue
-                                    border.width: 1
-                                    implicitWidth: mapActionRow.implicitWidth + (root.scaled(14) * 2)
-                                    implicitHeight: mapActionRow.implicitHeight + (root.scaled(10) * 2)
+                                        Column {
+                                            id: weakColumn
+                                            anchors.fill: parent
+                                            anchors.margins: root.scaled(9)
+                                            spacing: root.scaled(2)
 
-                                    Row {
-                                        id: mapActionRow
-                                        anchors.centerIn: parent
-                                        spacing: root.scaled(8)
-
-                                        Text {
-                                            text: "进入飞行合同"
-                                            color: root.textStrong
-                                            font.pixelSize: root.bodySize
-                                            font.bold: true
-                                            font.family: root.uiFamily
-                                        }
-
-                                        Text {
-                                            text: ">"
-                                            color: root.accentBlue
-                                            font.pixelSize: root.bodyEmphasisSize
-                                            font.bold: true
-                                            font.family: root.monoFamily
-                                        }
-                                    }
-
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        hoverEnabled: true
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: root.currentPage = 2
-                                    }
-                                }
-                            }
-                        }
-
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            Layout.columnSpan: root.wideLayout ? 3 : 1
-                            spacing: root.zoneGap
-
-                            PanelFrame {
-                                shellWindow: root
-                                panelColor: root.panelColor
-                                borderTone: root.borderSoft
-                                accentTone: root.accentAmber
-                                Layout.fillWidth: true
-                                Layout.fillHeight: root.wideLayout
-                                implicitHeight: landingCommandColumn.implicitHeight + (root.panelPadding * 2)
-
-                                ColumnLayout {
-                                    id: landingCommandColumn
-                                    anchors.fill: parent
-                                    anchors.margins: root.panelPadding
-                                    spacing: root.compactGap
-
-                                    Text {
-                                        text: "命令摘要 / Command Brief"
-                                        color: root.accentAmber
-                                        font.pixelSize: root.eyebrowSize
-                                        font.family: root.monoFamily
-                                        font.letterSpacing: root.scaled(1)
-                                    }
-
-                                    Text {
-                                        text: root.landingSummaryTitle
-                                        color: root.textStrong
-                                        font.pixelSize: root.sectionTitleSize
-                                        font.bold: true
-                                        font.family: root.displayFamily
-                                        wrapMode: Text.WordWrap
-                                    }
-
-                                    Text {
-                                        Layout.fillWidth: true
-                                        text: root.landingSummaryText
-                                        color: root.textSecondary
-                                        font.pixelSize: root.bodySize
-                                        font.family: root.uiFamily
-                                        wrapMode: Text.WordWrap
-                                    }
-
-                                    Rectangle {
-                                        Layout.fillWidth: true
-                                        Layout.preferredHeight: 1
-                                        color: "#28384d"
-                                    }
-
-                                    GridLayout {
-                                        Layout.fillWidth: true
-                                        columns: 2
-                                        columnSpacing: root.compactGap
-                                        rowSpacing: root.compactGap
-
-                                        Repeater {
-                                            model: [
-                                                {
-                                                    "label": "会话",
-                                                    "value": root.systemSessionValue,
-                                                    "tone": "neutral"
-                                                },
-                                                {
-                                                    "label": "事件时间",
-                                                    "value": root.eventTimeValue,
-                                                    "tone": "neutral"
-                                                },
-                                                {
-                                                    "label": "在线锚点",
-                                                    "value": String(root.liveAnchor["board_status"] || "--"),
-                                                    "tone": String(root.liveAnchor["tone"] || "neutral")
-                                                },
-                                                {
-                                                    "label": "快照原因",
-                                                    "value": root.snapshotReasonValue,
-                                                    "tone": "warning"
-                                                }
-                                            ]
-
-                                            delegate: Rectangle {
-                                                property var itemData: modelData
-                                                Layout.fillWidth: true
-                                                radius: root.edgeRadius
-                                                color: root.toneFill(String(itemData["tone"] || "neutral"))
-                                                border.color: root.toneColor(String(itemData["tone"] || "neutral"))
-                                                border.width: 1
-                                                implicitHeight: summaryStat.implicitHeight + (root.scaled(10) * 2)
-
-                                                Column {
-                                                    id: summaryStat
-                                                    anchors.fill: parent
-                                                    anchors.margins: root.scaled(10)
-                                                    spacing: root.scaled(2)
-
-                                                    Text {
-                                                        text: itemData["label"]
-                                                        color: root.textMuted
-                                                        font.pixelSize: root.captionSize
-                                                        font.family: root.monoFamily
-                                                    }
-
-                                                    Text {
-                                                        width: parent.width
-                                                        text: itemData["value"]
-                                                        color: root.textStrong
-                                                        font.pixelSize: root.captionSize
-                                                        font.bold: true
-                                                        font.family: root.uiFamily
-                                                        wrapMode: Text.WrapAnywhere
-                                                    }
-                                                }
+                                            Text {
+                                                text: itemData["label"]
+                                                color: root.textMuted
+                                                font.pixelSize: root.captionSize
+                                                font.family: root.monoFamily
                                             }
-                                        }
-                                    }
 
-                                    Text {
-                                        Layout.fillWidth: true
-                                        text: "快照路径: " + root.snapshotRelativePath
-                                        color: root.textMuted
-                                        font.pixelSize: root.captionSize
-                                        font.family: root.monoFamily
-                                        wrapMode: Text.WrapAnywhere
-                                    }
-
-                                    Rectangle {
-                                        Layout.fillWidth: true
-                                        Layout.preferredHeight: 1
-                                        color: "#28384d"
-                                    }
-
-                                    Text {
-                                        text: "飞行读数 / Flight Deck"
-                                        color: root.accentBlue
-                                        font.pixelSize: root.eyebrowSize
-                                        font.family: root.monoFamily
-                                        font.letterSpacing: root.scaled(1)
-                                    }
-
-                                    Text {
-                                        Layout.fillWidth: true
-                                        text: "把高度、地速、航向和定位读数移出地图表面，首屏主墙板只保留必要标注。"
-                                        color: root.textSecondary
-                                        font.pixelSize: root.bodySize
-                                        font.family: root.uiFamily
-                                        wrapMode: Text.WordWrap
-                                    }
-
-                                    GridLayout {
-                                        Layout.fillWidth: true
-                                        columns: 2
-                                        columnSpacing: root.compactGap
-                                        rowSpacing: root.compactGap
-
-                                        Repeater {
-                                            model: root.landingTelemetryModel
-
-                                            delegate: Rectangle {
-                                                property var itemData: modelData
-                                                Layout.fillWidth: true
-                                                radius: root.edgeRadius
-                                                color: "#101925"
-                                                border.color: root.toneColor(String(itemData["tone"] || "neutral"))
-                                                border.width: 1
-                                                implicitHeight: landingTelemetryColumn.implicitHeight + (root.scaled(10) * 2)
-
-                                                Column {
-                                                    id: landingTelemetryColumn
-                                                    anchors.fill: parent
-                                                    anchors.margins: root.scaled(10)
-                                                    spacing: root.scaled(2)
-
-                                                    Text {
-                                                        text: itemData["label"]
-                                                        color: root.textMuted
-                                                        font.pixelSize: root.captionSize
-                                                        font.family: root.monoFamily
-                                                    }
-
-                                                    Text {
-                                                        width: parent.width
-                                                        text: itemData["value"]
-                                                        color: root.textStrong
-                                                        font.pixelSize: root.bodyEmphasisSize
-                                                        font.bold: true
-                                                        font.family: root.uiFamily
-                                                        elide: Text.ElideRight
-                                                    }
-
-                                                    Text {
-                                                        width: parent.width
-                                                        text: itemData["detail"]
-                                                        color: root.textSecondary
-                                                        font.pixelSize: root.captionSize
-                                                        font.family: root.uiFamily
-                                                        wrapMode: Text.WordWrap
-                                                    }
-                                                }
+                                            Text {
+                                                width: parent.width
+                                                text: itemData["value"]
+                                                color: root.textStrong
+                                                font.pixelSize: root.bodyEmphasisSize
+                                                font.bold: true
+                                                font.family: root.uiFamily
+                                                wrapMode: Text.WrapAnywhere
                                             }
-                                        }
-                                    }
 
-                                    Rectangle {
-                                        Layout.fillWidth: true
-                                        Layout.preferredHeight: 1
-                                        color: "#28384d"
-                                    }
-
-                                    Text {
-                                        text: "页面分区 / Zone Routing"
-                                        color: root.accentBlue
-                                        font.pixelSize: root.eyebrowSize
-                                        font.family: root.monoFamily
-                                        font.letterSpacing: root.scaled(1)
-                                    }
-
-                                    Text {
-                                        Layout.fillWidth: true
-                                        text: "参考 cluster 与 Tesla/QDashBoard 的分区做法，把系统、飞行、弱网和执行移到独立页面，首屏只保留中心主屏、摘要和跳转。"
-                                        color: root.textSecondary
-                                        font.pixelSize: root.bodySize
-                                        font.family: root.uiFamily
-                                        wrapMode: Text.WordWrap
-                                    }
-
-                                    GridLayout {
-                                        Layout.fillWidth: true
-                                        columns: root.wideLayout ? 1 : 2
-                                        columnSpacing: root.compactGap
-                                        rowSpacing: root.compactGap
-
-                                        Repeater {
-                                            model: root.landingJumpModel
-
-                                            delegate: Rectangle {
-                                                property var itemData: modelData
-                                                Layout.fillWidth: true
-                                                radius: root.edgeRadius
-                                                color: "#0d1623"
-                                                border.color: root.toneColor(String(itemData["tone"] || "neutral"))
-                                                border.width: 1
-                                                implicitHeight: jumpCardColumn.implicitHeight + (root.scaled(10) * 2)
-
-                                                Column {
-                                                    id: jumpCardColumn
-                                                    anchors.fill: parent
-                                                    anchors.margins: root.scaled(10)
-                                                    spacing: root.scaled(2)
-
-                                                    Row {
-                                                        width: parent.width
-                                                        spacing: root.scaled(6)
-
-                                                        Text {
-                                                            text: itemData["label"]
-                                                            color: root.textStrong
-                                                            font.pixelSize: root.bodySize
-                                                            font.bold: true
-                                                            font.family: root.uiFamily
-                                                        }
-
-                                                        Text {
-                                                            text: itemData["english"]
-                                                            color: root.textMuted
-                                                            font.pixelSize: root.captionSize
-                                                            font.family: root.monoFamily
-                                                        }
-                                                    }
-
-                                                    Text {
-                                                        width: parent.width
-                                                        text: itemData["summary"]
-                                                        visible: !root.compactLayout
-                                                        color: root.textSecondary
-                                                        font.pixelSize: root.captionSize
-                                                        font.family: root.uiFamily
-                                                        wrapMode: Text.WordWrap
-                                                    }
-
-                                                    Text {
-                                                        width: parent.width
-                                                        text: itemData["value"] + "  ·  进入 >"
-                                                        color: root.toneColor(String(itemData["tone"] || "neutral"))
-                                                        font.pixelSize: root.captionSize
-                                                        font.bold: true
-                                                        font.family: root.monoFamily
-                                                        wrapMode: Text.WrapAnywhere
-                                                    }
-                                                }
-
-                                                MouseArea {
-                                                    anchors.fill: parent
-                                                    hoverEnabled: true
-                                                    cursorShape: Qt.PointingHandCursor
-                                                    onClicked: root.currentPage = Number(parent.itemData["index"])
-                                                }
+                                            Text {
+                                                width: parent.width
+                                                text: itemData["detail"]
+                                                color: root.textSecondary
+                                                font.pixelSize: root.captionSize
+                                                font.family: root.uiFamily
+                                                wrapMode: Text.WordWrap
                                             }
                                         }
                                     }
@@ -1171,71 +1414,117 @@ ApplicationWindow {
                                 borderTone: root.borderSoft
                                 accentTone: root.accentBlue
                                 Layout.fillWidth: true
-                                implicitHeight: systemHeaderRow.implicitHeight + (root.panelPadding * 2)
+                                implicitHeight: systemHeader.implicitHeight + (root.panelPadding * 2)
 
-                                RowLayout {
-                                    id: systemHeaderRow
+                                ColumnLayout {
+                                    id: systemHeader
                                     anchors.fill: parent
                                     anchors.margins: root.panelPadding
-                                    spacing: root.zoneGap
+                                    spacing: root.compactGap
 
-                                    Rectangle {
-                                        radius: root.edgeRadius
-                                        color: "#0d1623"
-                                        border.color: root.accentBlue
-                                        border.width: 1
-                                        implicitWidth: systemBackRow.implicitWidth + (root.scaled(14) * 2)
-                                        implicitHeight: systemBackRow.implicitHeight + (root.scaled(10) * 2)
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: root.zoneGap
 
-                                        Row {
-                                            id: systemBackRow
-                                            anchors.centerIn: parent
-                                            spacing: root.scaled(6)
+                                        Rectangle {
+                                            radius: root.edgeRadius
+                                            color: "#0d1520"
+                                            border.color: root.accentBlue
+                                            border.width: 1
+                                            implicitWidth: systemBackRow.implicitWidth + (root.scaled(12) * 2)
+                                            implicitHeight: systemBackRow.implicitHeight + (root.scaled(8) * 2)
 
-                                            Text {
-                                                text: "<"
-                                                color: root.accentBlue
-                                                font.pixelSize: root.bodySize
-                                                font.bold: true
-                                                font.family: root.monoFamily
+                                            Row {
+                                                id: systemBackRow
+                                                anchors.centerIn: parent
+                                                spacing: root.scaled(6)
+
+                                                Text {
+                                                    text: "<"
+                                                    color: root.accentBlue
+                                                    font.pixelSize: root.bodySize
+                                                    font.bold: true
+                                                    font.family: root.monoFamily
+                                                }
+
+                                                Text {
+                                                    text: "返回总览"
+                                                    color: root.textStrong
+                                                    font.pixelSize: root.bodySize
+                                                    font.bold: true
+                                                    font.family: root.uiFamily
+                                                }
                                             }
 
-                                            Text {
-                                                text: "返回总览"
-                                                color: root.textStrong
-                                                font.pixelSize: root.bodySize
-                                                font.bold: true
-                                                font.family: root.uiFamily
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: root.currentPage = 0
                                             }
                                         }
 
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            hoverEnabled: true
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: root.currentPage = 0
+                                        ColumnLayout {
+                                            Layout.fillWidth: true
+                                            spacing: root.scaled(2)
+
+                                            Text {
+                                                text: "系统板态 / System Evidence"
+                                                color: root.textStrong
+                                                font.pixelSize: root.sectionTitleSize
+                                                font.bold: true
+                                                font.family: root.displayFamily
+                                            }
+
+                                            Text {
+                                                Layout.fillWidth: true
+                                                text: "集中查看会话、心跳、快照原因和模式边界说明。首屏不再把这些高密度证据与世界地图抢同一块空间。"
+                                                color: root.textSecondary
+                                                font.pixelSize: root.bodySize
+                                                font.family: root.uiFamily
+                                                wrapMode: Text.WordWrap
+                                            }
                                         }
                                     }
 
-                                    ColumnLayout {
+                                    Flow {
                                         Layout.fillWidth: true
-                                        spacing: root.scaled(2)
+                                        width: parent.width
+                                        spacing: root.compactGap
 
-                                        Text {
-                                            text: "系统板态 / System Evidence"
-                                            color: root.textStrong
-                                            font.pixelSize: root.sectionTitleSize
-                                            font.bold: true
-                                            font.family: root.displayFamily
-                                        }
+                                        Repeater {
+                                            model: root.systemPageChipModel
 
-                                        Text {
-                                            Layout.fillWidth: true
-                                            text: "集中查看会话、心跳、快照原因和模式边界说明。这个页面保留高密度证据视图，总览页不再同时展开。"
-                                            color: root.textSecondary
-                                            font.pixelSize: root.bodySize
-                                            font.family: root.uiFamily
-                                            wrapMode: Text.WordWrap
+                                            delegate: Rectangle {
+                                                property var itemData: modelData
+                                                radius: root.edgeRadius
+                                                color: root.toneFill(String(itemData["tone"] || "neutral"))
+                                                border.color: root.toneColor(String(itemData["tone"] || "neutral"))
+                                                border.width: 1
+                                                implicitWidth: pageChipRow.implicitWidth + (root.scaled(10) * 2)
+                                                implicitHeight: pageChipRow.implicitHeight + (root.scaled(7) * 2)
+
+                                                Row {
+                                                    id: pageChipRow
+                                                    anchors.centerIn: parent
+                                                    spacing: root.scaled(8)
+
+                                                    Text {
+                                                        text: itemData["label"]
+                                                        color: root.textMuted
+                                                        font.pixelSize: root.captionSize
+                                                        font.family: root.monoFamily
+                                                    }
+
+                                                    Text {
+                                                        text: itemData["value"]
+                                                        color: root.textStrong
+                                                        font.pixelSize: root.captionSize
+                                                        font.bold: true
+                                                        font.family: root.uiFamily
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -1265,10 +1554,10 @@ ApplicationWindow {
                                         borderTone: root.borderSoft
                                         accentTone: root.accentAmber
                                         Layout.fillWidth: true
-                                        implicitHeight: systemNoteColumn.implicitHeight + (root.panelPadding * 2)
+                                        implicitHeight: truthColumn.implicitHeight + (root.panelPadding * 2)
 
                                         ColumnLayout {
-                                            id: systemNoteColumn
+                                            id: truthColumn
                                             anchors.fill: parent
                                             anchors.margins: root.panelPadding
                                             spacing: root.compactGap
@@ -1281,12 +1570,11 @@ ApplicationWindow {
                                             }
 
                                             Text {
-                                                text: "把真值说明和快照来源放到单独页面，避免首屏信息竞争。"
+                                                text: "真值说明与快照来源"
                                                 color: root.textStrong
                                                 font.pixelSize: root.bodyEmphasisSize
                                                 font.bold: true
                                                 font.family: root.uiFamily
-                                                wrapMode: Text.WordWrap
                                             }
 
                                             Text {
@@ -1315,53 +1603,40 @@ ApplicationWindow {
                                         borderTone: root.borderSoft
                                         accentTone: root.accentBlue
                                         Layout.fillWidth: true
-                                        implicitHeight: systemQuickGrid.implicitHeight + (root.panelPadding * 2)
+                                        implicitHeight: systemFactsColumn.implicitHeight + (root.panelPadding * 2)
 
-                                        GridLayout {
-                                            id: systemQuickGrid
+                                        ColumnLayout {
+                                            id: systemFactsColumn
                                             anchors.fill: parent
                                             anchors.margins: root.panelPadding
-                                            columns: 2
-                                            columnSpacing: root.compactGap
-                                            rowSpacing: root.compactGap
+                                            spacing: root.compactGap
+
+                                            Text {
+                                                text: "系统摘要 / Snapshot Facts"
+                                                color: root.accentBlue
+                                                font.pixelSize: root.eyebrowSize
+                                                font.family: root.monoFamily
+                                            }
 
                                             Repeater {
                                                 model: [
-                                                    {
-                                                        "label": "会话",
-                                                        "value": root.systemSessionValue,
-                                                        "tone": "neutral"
-                                                    },
-                                                    {
-                                                        "label": "心跳",
-                                                        "value": root.heartbeatValue,
-                                                        "tone": root.heartbeatTone
-                                                    },
-                                                    {
-                                                        "label": "最近事件",
-                                                        "value": root.recentEventValue,
-                                                        "tone": root.recentEventTone
-                                                    },
-                                                    {
-                                                        "label": "快照原因",
-                                                        "value": root.snapshotReasonValue,
-                                                        "tone": "warning"
-                                                    }
+                                                    { "label": "事件时间", "value": root.eventTimeValue, "tone": "neutral" },
+                                                    { "label": "快照原因", "value": root.snapshotReasonValue, "tone": "warning" },
+                                                    { "label": "板端锚点", "value": String(root.liveAnchor["board_status"] || "--"), "tone": root.liveAnchorTone }
                                                 ]
 
                                                 delegate: Rectangle {
                                                     property var itemData: modelData
-                                                    Layout.fillWidth: true
                                                     radius: root.edgeRadius
                                                     color: root.toneFill(String(itemData["tone"] || "neutral"))
                                                     border.color: root.toneColor(String(itemData["tone"] || "neutral"))
                                                     border.width: 1
-                                                    implicitHeight: systemQuickColumn.implicitHeight + (root.scaled(10) * 2)
+                                                    implicitHeight: factColumn.implicitHeight + (root.scaled(8) * 2)
 
                                                     Column {
-                                                        id: systemQuickColumn
+                                                        id: factColumn
                                                         anchors.fill: parent
-                                                        anchors.margins: root.scaled(10)
+                                                        anchors.margins: root.scaled(8)
                                                         spacing: root.scaled(2)
 
                                                         Text {
@@ -1412,262 +1687,167 @@ ApplicationWindow {
                                 borderTone: root.borderSoft
                                 accentTone: root.accentBlue
                                 Layout.fillWidth: true
-                                implicitHeight: flightHeaderRow.implicitHeight + (root.panelPadding * 2)
-
-                                RowLayout {
-                                    id: flightHeaderRow
-                                    anchors.fill: parent
-                                    anchors.margins: root.panelPadding
-                                    spacing: root.zoneGap
-
-                                    Rectangle {
-                                        radius: root.edgeRadius
-                                        color: "#0d1623"
-                                        border.color: root.accentBlue
-                                        border.width: 1
-                                        implicitWidth: flightBackRow.implicitWidth + (root.scaled(14) * 2)
-                                        implicitHeight: flightBackRow.implicitHeight + (root.scaled(10) * 2)
-
-                                        Row {
-                                            id: flightBackRow
-                                            anchors.centerIn: parent
-                                            spacing: root.scaled(6)
-
-                                            Text {
-                                                text: "<"
-                                                color: root.accentBlue
-                                                font.pixelSize: root.bodySize
-                                                font.bold: true
-                                                font.family: root.monoFamily
-                                            }
-
-                                            Text {
-                                                text: "返回总览"
-                                                color: root.textStrong
-                                                font.pixelSize: root.bodySize
-                                                font.bold: true
-                                                font.family: root.uiFamily
-                                            }
-                                        }
-
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            hoverEnabled: true
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: root.currentPage = 0
-                                        }
-                                    }
-
-                                    ColumnLayout {
-                                        Layout.fillWidth: true
-                                        spacing: root.scaled(2)
-
-                                        Text {
-                                            text: "飞行合同 / Flight Contract"
-                                            color: root.textStrong
-                                            font.pixelSize: root.sectionTitleSize
-                                            font.bold: true
-                                            font.family: root.displayFamily
-                                        }
-
-                                        Text {
-                                            Layout.fillWidth: true
-                                            text: "集中查看世界地图、航迹、遥测指标和数据合同说明，让中心地图真正承担主舞台。"
-                                            color: root.textSecondary
-                                            font.pixelSize: root.bodySize
-                                            font.family: root.uiFamily
-                                            wrapMode: Text.WordWrap
-                                        }
-                                    }
-                                }
-                            }
-
-                            GridLayout {
-                                Layout.fillWidth: true
-                                columns: root.wideLayout ? 12 : 1
-                                columnSpacing: root.zoneGap
-                                rowSpacing: root.zoneGap
-
-                                PanelFrame {
-                                    shellWindow: root
-                                    panelColor: root.cardColor
-                                    borderTone: root.borderStrong
-                                    accentTone: root.accentBlue
-                                    Layout.fillWidth: true
-                                    Layout.columnSpan: root.wideLayout ? 7 : 1
-                                    Layout.minimumHeight: root.scaled(root.shortViewport ? 360 : 430)
-                                    Layout.preferredHeight: root.scaled(root.wideLayout ? 520 : 460)
-
-                                    Item {
-                                        anchors.fill: parent
-                                        anchors.margins: root.scaled(14)
-
-                                        WorldMapStage {
-                                            anchors.fill: parent
-                                            shellWindow: root
-                                            trackData: root.trackData
-                                            currentPoint: root.currentPosition
-                                            headingDeg: Number(root.kinematics["heading_deg"] || 0)
-                                            currentLabel: String(root.centerPanelData["mission_call_sign"] || "M9-DEMO") + " 飞行合同"
-                                            currentDetail: root.activeSourceLabel + " / " + root.linkProfileValue
-                                            anchorLabel: String(root.liveAnchor["valid_instance"] || "--")
-                                            projectionLabel: "世界地图合同 / Equirectangular"
-                                            scenarioLabel: root.recommendedScenarioId
-                                            scenarioTone: String(root.liveAnchor["tone"] || "neutral")
-                                        }
-                                    }
-                                }
+                                implicitHeight: flightHeader.implicitHeight + (root.panelPadding * 2)
 
                                 ColumnLayout {
-                                    Layout.fillWidth: true
-                                    Layout.columnSpan: root.wideLayout ? 5 : 1
-                                    spacing: root.zoneGap
+                                    id: flightHeader
+                                    anchors.fill: parent
+                                    anchors.margins: root.panelPadding
+                                    spacing: root.compactGap
 
-                                    PanelFrame {
-                                        shellWindow: root
-                                        panelColor: root.panelColor
-                                        borderTone: root.borderSoft
-                                        accentTone: root.accentBlue
+                                    RowLayout {
                                         Layout.fillWidth: true
-                                        implicitHeight: flightMetricGrid.implicitHeight + (root.panelPadding * 2)
+                                        spacing: root.zoneGap
 
-                                        GridLayout {
-                                            id: flightMetricGrid
-                                            anchors.fill: parent
-                                            anchors.margins: root.panelPadding
-                                            columns: 2
-                                            columnSpacing: root.compactGap
-                                            rowSpacing: root.compactGap
+                                        Rectangle {
+                                            radius: root.edgeRadius
+                                            color: "#0d1520"
+                                            border.color: root.accentBlue
+                                            border.width: 1
+                                            implicitWidth: flightBackRow.implicitWidth + (root.scaled(12) * 2)
+                                            implicitHeight: flightBackRow.implicitHeight + (root.scaled(8) * 2)
 
-                                            Repeater {
-                                                model: [
-                                                    {
-                                                        "label": "任务代号",
-                                                        "value": String(root.centerPanelData["mission_call_sign"] || "--"),
-                                                        "tone": "neutral"
-                                                    },
-                                                    {
-                                                        "label": "飞机编号",
-                                                        "value": String(root.centerPanelData["aircraft_id"] || "--"),
-                                                        "tone": "neutral"
-                                                    },
-                                                    {
-                                                        "label": "当前坐标",
-                                                        "value": root.coordinatePair(root.currentPosition),
-                                                        "tone": "online"
-                                                    },
-                                                    {
-                                                        "label": "飞行高度",
-                                                        "value": root.formattedMetric(root.kinematics["altitude_m"], 0, "m"),
-                                                        "tone": "online"
-                                                    },
-                                                    {
-                                                        "label": "地速",
-                                                        "value": root.formattedMetric(root.kinematics["ground_speed_kph"], 0, "km/h"),
-                                                        "tone": "neutral"
-                                                    },
-                                                    {
-                                                        "label": "航向",
-                                                        "value": root.formattedMetric(root.kinematics["heading_deg"], 0, "°"),
-                                                        "tone": "neutral"
+                                            Row {
+                                                id: flightBackRow
+                                                anchors.centerIn: parent
+                                                spacing: root.scaled(6)
+
+                                                Text {
+                                                    text: "<"
+                                                    color: root.accentBlue
+                                                    font.pixelSize: root.bodySize
+                                                    font.bold: true
+                                                    font.family: root.monoFamily
+                                                }
+
+                                                Text {
+                                                    text: "返回总览"
+                                                    color: root.textStrong
+                                                    font.pixelSize: root.bodySize
+                                                    font.bold: true
+                                                    font.family: root.uiFamily
+                                                }
+                                            }
+
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: root.currentPage = 0
+                                            }
+                                        }
+
+                                        ColumnLayout {
+                                            Layout.fillWidth: true
+                                            spacing: root.scaled(2)
+
+                                            Text {
+                                                text: "飞行合同 / Flight Contract"
+                                                color: root.textStrong
+                                                font.pixelSize: root.sectionTitleSize
+                                                font.bold: true
+                                                font.family: root.displayFamily
+                                            }
+
+                                            Text {
+                                                Layout.fillWidth: true
+                                                text: "保留完整飞行遥测、世界地图与板端联动细节。Landing 页只借用其世界地图主舞台，不再把整页内容全部塞回首屏。"
+                                                color: root.textSecondary
+                                                font.pixelSize: root.bodySize
+                                                font.family: root.uiFamily
+                                                wrapMode: Text.WordWrap
+                                            }
+                                        }
+                                    }
+
+                                    Flow {
+                                        Layout.fillWidth: true
+                                        width: parent.width
+                                        spacing: root.compactGap
+
+                                        Repeater {
+                                            model: root.flightPageChipModel
+
+                                            delegate: Rectangle {
+                                                property var itemData: modelData
+                                                radius: root.edgeRadius
+                                                color: root.toneFill(String(itemData["tone"] || "neutral"))
+                                                border.color: root.toneColor(String(itemData["tone"] || "neutral"))
+                                                border.width: 1
+                                                implicitWidth: flightChipRow.implicitWidth + (root.scaled(10) * 2)
+                                                implicitHeight: flightChipRow.implicitHeight + (root.scaled(7) * 2)
+
+                                                Row {
+                                                    id: flightChipRow
+                                                    anchors.centerIn: parent
+                                                    spacing: root.scaled(8)
+
+                                                    Text {
+                                                        text: itemData["label"]
+                                                        color: root.textMuted
+                                                        font.pixelSize: root.captionSize
+                                                        font.family: root.monoFamily
                                                     }
-                                                ]
 
-                                                delegate: Rectangle {
-                                                    property var itemData: modelData
-                                                    Layout.fillWidth: true
-                                                    radius: root.edgeRadius
-                                                    color: root.toneFill(String(itemData["tone"] || "neutral"))
-                                                    border.color: root.toneColor(String(itemData["tone"] || "neutral"))
-                                                    border.width: 1
-                                                    implicitHeight: flightMetricColumn.implicitHeight + (root.scaled(10) * 2)
-
-                                                    Column {
-                                                        id: flightMetricColumn
-                                                        anchors.fill: parent
-                                                        anchors.margins: root.scaled(10)
-                                                        spacing: root.scaled(2)
-
-                                                        Text {
-                                                            text: itemData["label"]
-                                                            color: root.textMuted
-                                                            font.pixelSize: root.captionSize
-                                                            font.family: root.monoFamily
-                                                        }
-
-                                                        Text {
-                                                            width: parent.width
-                                                            text: itemData["value"]
-                                                            color: root.textStrong
-                                                            font.pixelSize: root.captionSize
-                                                            font.bold: true
-                                                            font.family: root.uiFamily
-                                                            wrapMode: Text.WrapAnywhere
-                                                        }
+                                                    Text {
+                                                        text: itemData["value"]
+                                                        color: root.textStrong
+                                                        font.pixelSize: root.captionSize
+                                                        font.bold: true
+                                                        font.family: root.uiFamily
                                                     }
                                                 }
                                             }
                                         }
                                     }
+                                }
+                            }
 
-                                    PanelFrame {
-                                        shellWindow: root
-                                        panelColor: root.panelColor
-                                        borderTone: root.borderSoft
-                                        accentTone: root.accentAmber
+                            TacticalView {
+                                shellWindow: root
+                                panelData: root.centerPanelData
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: root.scaled(root.wideLayout ? 940 : 780)
+                            }
+
+                            PanelFrame {
+                                shellWindow: root
+                                panelColor: root.panelColor
+                                borderTone: root.borderSoft
+                                accentTone: root.accentAmber
+                                Layout.fillWidth: true
+                                implicitHeight: flightNoteColumn.implicitHeight + (root.panelPadding * 2)
+
+                                ColumnLayout {
+                                    id: flightNoteColumn
+                                    anchors.fill: parent
+                                    anchors.margins: root.panelPadding
+                                    spacing: root.compactGap
+
+                                    Text {
+                                        text: "源与回退 / Feed Routing"
+                                        color: root.accentAmber
+                                        font.pixelSize: root.eyebrowSize
+                                        font.family: root.monoFamily
+                                    }
+
+                                    Text {
                                         Layout.fillWidth: true
-                                        implicitHeight: flightContractColumn.implicitHeight + (root.panelPadding * 2)
+                                        text: "数据源: " + root.activeSourceLabel
+                                        color: root.textStrong
+                                        font.pixelSize: root.bodyEmphasisSize
+                                        font.bold: true
+                                        font.family: root.uiFamily
+                                        wrapMode: Text.WordWrap
+                                    }
 
-                                        ColumnLayout {
-                                            id: flightContractColumn
-                                            anchors.fill: parent
-                                            anchors.margins: root.panelPadding
-                                            spacing: root.compactGap
-
-                                            Text {
-                                                text: "数据合同 / Contract Detail"
-                                                color: root.accentAmber
-                                                font.pixelSize: root.eyebrowSize
-                                                font.family: root.monoFamily
-                                            }
-
-                                            Text {
-                                                Layout.fillWidth: true
-                                                text: String(root.centerFeedContract["summary"] || root.centerPanelData["fallback_note"] || "--")
-                                                color: root.textStrong
-                                                font.pixelSize: root.bodyEmphasisSize
-                                                font.bold: true
-                                                font.family: root.uiFamily
-                                                wrapMode: Text.WordWrap
-                                            }
-
-                                            Text {
-                                                Layout.fillWidth: true
-                                                text: "API: " + String(root.centerFeedContract["api_path"] || root.centerPanelData["source_api_path"] || "--")
-                                                color: root.textSecondary
-                                                font.pixelSize: root.bodySize
-                                                font.family: root.monoFamily
-                                                wrapMode: Text.WrapAnywhere
-                                            }
-
-                                            Text {
-                                                Layout.fillWidth: true
-                                                text: "采样时间: " + String(root.centerSampleData["captured_at"] || "--")
-                                                color: root.textSecondary
-                                                font.pixelSize: root.bodySize
-                                                font.family: root.uiFamily
-                                                wrapMode: Text.WordWrap
-                                            }
-
-                                            Text {
-                                                Layout.fillWidth: true
-                                                text: String(root.centerPanelData["ownership_note"] || "")
-                                                color: root.textMuted
-                                                font.pixelSize: root.bodySize
-                                                font.family: root.uiFamily
-                                                wrapMode: Text.WordWrap
-                                            }
-                                        }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: compactMessage(String(root.centerPanelData["fallback_note"] || root.centerPanelData["ownership_note"] || "继续沿用仓库合同给出的 feed routing 说明。"), root.compactLayout ? 88 : 180)
+                                        color: root.textSecondary
+                                        font.pixelSize: root.bodySize
+                                        font.family: root.uiFamily
+                                        wrapMode: Text.WordWrap
                                     }
                                 }
                             }
@@ -1696,292 +1876,126 @@ ApplicationWindow {
                                 borderTone: root.borderSoft
                                 accentTone: root.accentAmber
                                 Layout.fillWidth: true
-                                implicitHeight: weakHeaderRow.implicitHeight + (root.panelPadding * 2)
+                                implicitHeight: weakHeader.implicitHeight + (root.panelPadding * 2)
 
-                                RowLayout {
-                                    id: weakHeaderRow
+                                ColumnLayout {
+                                    id: weakHeader
                                     anchors.fill: parent
                                     anchors.margins: root.panelPadding
-                                    spacing: root.zoneGap
+                                    spacing: root.compactGap
 
-                                    Rectangle {
-                                        radius: root.edgeRadius
-                                        color: "#0d1623"
-                                        border.color: root.accentAmber
-                                        border.width: 1
-                                        implicitWidth: weakBackRow.implicitWidth + (root.scaled(14) * 2)
-                                        implicitHeight: weakBackRow.implicitHeight + (root.scaled(10) * 2)
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: root.zoneGap
 
-                                        Row {
-                                            id: weakBackRow
-                                            anchors.centerIn: parent
-                                            spacing: root.scaled(6)
+                                        Rectangle {
+                                            radius: root.edgeRadius
+                                            color: "#0d1520"
+                                            border.color: root.accentAmber
+                                            border.width: 1
+                                            implicitWidth: weakBackRow.implicitWidth + (root.scaled(12) * 2)
+                                            implicitHeight: weakBackRow.implicitHeight + (root.scaled(8) * 2)
 
-                                            Text {
-                                                text: "<"
-                                                color: root.accentAmber
-                                                font.pixelSize: root.bodySize
-                                                font.bold: true
-                                                font.family: root.monoFamily
+                                            Row {
+                                                id: weakBackRow
+                                                anchors.centerIn: parent
+                                                spacing: root.scaled(6)
+
+                                                Text {
+                                                    text: "<"
+                                                    color: root.accentAmber
+                                                    font.pixelSize: root.bodySize
+                                                    font.bold: true
+                                                    font.family: root.monoFamily
+                                                }
+
+                                                Text {
+                                                    text: "返回总览"
+                                                    color: root.textStrong
+                                                    font.pixelSize: root.bodySize
+                                                    font.bold: true
+                                                    font.family: root.uiFamily
+                                                }
                                             }
 
-                                            Text {
-                                                text: "返回总览"
-                                                color: root.textStrong
-                                                font.pixelSize: root.bodySize
-                                                font.bold: true
-                                                font.family: root.uiFamily
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: root.currentPage = 0
                                             }
                                         }
 
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            hoverEnabled: true
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: root.currentPage = 0
+                                        ColumnLayout {
+                                            Layout.fillWidth: true
+                                            spacing: root.scaled(2)
+
+                                            Text {
+                                                text: "弱网策略 / Weak-Link Strategy"
+                                                color: root.textStrong
+                                                font.pixelSize: root.sectionTitleSize
+                                                font.bold: true
+                                                font.family: root.displayFamily
+                                            }
+
+                                            Text {
+                                                Layout.fillWidth: true
+                                                text: "完整保留后端驱动的弱网 compare、在线锚点与推荐剧本。Landing 页只露出跳转轨与缩略指标，不稀释这里的对照细节。"
+                                                color: root.textSecondary
+                                                font.pixelSize: root.bodySize
+                                                font.family: root.uiFamily
+                                                wrapMode: Text.WordWrap
+                                            }
                                         }
                                     }
 
-                                    ColumnLayout {
+                                    Flow {
                                         Layout.fillWidth: true
-                                        spacing: root.scaled(2)
+                                        width: parent.width
+                                        spacing: root.compactGap
 
-                                        Text {
-                                            text: "弱网策略 / Weak-Link Strategy"
-                                            color: root.textStrong
-                                            font.pixelSize: root.sectionTitleSize
-                                            font.bold: true
-                                            font.family: root.displayFamily
-                                        }
+                                        Repeater {
+                                            model: root.weakPageChipModel
 
-                                        Text {
-                                            Layout.fillWidth: true
-                                            text: "这个页面专门承载推荐弱网档、在线锚点和吞吐证据，不再挤在首屏右侧。"
-                                            color: root.textSecondary
-                                            font.pixelSize: root.bodySize
-                                            font.family: root.uiFamily
-                                            wrapMode: Text.WordWrap
+                                            delegate: Rectangle {
+                                                property var itemData: modelData
+                                                radius: root.edgeRadius
+                                                color: root.toneFill(String(itemData["tone"] || "neutral"))
+                                                border.color: root.toneColor(String(itemData["tone"] || "neutral"))
+                                                border.width: 1
+                                                implicitWidth: weakChipRow.implicitWidth + (root.scaled(10) * 2)
+                                                implicitHeight: weakChipRow.implicitHeight + (root.scaled(7) * 2)
+
+                                                Row {
+                                                    id: weakChipRow
+                                                    anchors.centerIn: parent
+                                                    spacing: root.scaled(8)
+
+                                                    Text {
+                                                        text: itemData["label"]
+                                                        color: root.textMuted
+                                                        font.pixelSize: root.captionSize
+                                                        font.family: root.monoFamily
+                                                    }
+
+                                                    Text {
+                                                        text: itemData["value"]
+                                                        color: root.textStrong
+                                                        font.pixelSize: root.captionSize
+                                                        font.bold: true
+                                                        font.family: root.uiFamily
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 }
                             }
 
-                            GridLayout {
+                            WeakNetworkPanel {
+                                shellWindow: root
+                                panelData: root.rightPanelData
                                 Layout.fillWidth: true
-                                columns: root.wideLayout ? 12 : 1
-                                columnSpacing: root.zoneGap
-                                rowSpacing: root.zoneGap
-
-                                WeakNetworkPanel {
-                                    shellWindow: root
-                                    panelData: root.rightPanelData
-                                    Layout.fillWidth: true
-                                    Layout.columnSpan: root.wideLayout ? 8 : 1
-                                }
-
-                                ColumnLayout {
-                                    Layout.fillWidth: true
-                                    Layout.columnSpan: root.wideLayout ? 4 : 1
-                                    spacing: root.zoneGap
-
-                                    PanelFrame {
-                                        shellWindow: root
-                                        panelColor: root.panelColor
-                                        borderTone: root.borderSoft
-                                        accentTone: root.accentBlue
-                                        Layout.fillWidth: true
-                                        implicitHeight: anchorColumn.implicitHeight + (root.panelPadding * 2)
-
-                                        ColumnLayout {
-                                            id: anchorColumn
-                                            anchors.fill: parent
-                                            anchors.margins: root.panelPadding
-                                            spacing: root.compactGap
-
-                                            Text {
-                                                text: "在线锚点 / Live Anchor"
-                                                color: root.accentBlue
-                                                font.pixelSize: root.eyebrowSize
-                                                font.family: root.monoFamily
-                                            }
-
-                                            Text {
-                                                Layout.fillWidth: true
-                                                text: String(root.liveAnchor["board_status"] || "--")
-                                                color: root.textStrong
-                                                font.pixelSize: root.bodyEmphasisSize
-                                                font.bold: true
-                                                font.family: root.uiFamily
-                                                wrapMode: Text.WordWrap
-                                            }
-
-                                            Text {
-                                                Layout.fillWidth: true
-                                                text: String(root.liveAnchor["probe_summary"] || "--")
-                                                color: root.textSecondary
-                                                font.pixelSize: root.bodySize
-                                                font.family: root.uiFamily
-                                                wrapMode: Text.WordWrap
-                                            }
-
-                                            Repeater {
-                                                model: DataUtils.arrayOrEmpty(root.liveAnchor["links"])
-
-                                                delegate: Rectangle {
-                                                    property var itemData: modelData
-                                                    Layout.fillWidth: true
-                                                    radius: root.edgeRadius
-                                                    color: "#0d1623"
-                                                    border.color: "#30445c"
-                                                    border.width: 1
-                                                    implicitHeight: anchorLinkColumn.implicitHeight + (root.scaled(10) * 2)
-
-                                                    Column {
-                                                        id: anchorLinkColumn
-                                                        anchors.fill: parent
-                                                        anchors.margins: root.scaled(10)
-                                                        spacing: root.scaled(2)
-
-                                                        Text {
-                                                            width: parent.width
-                                                            text: itemData["label"]
-                                                            color: root.textStrong
-                                                            font.pixelSize: root.captionSize
-                                                            font.bold: true
-                                                            font.family: root.uiFamily
-                                                            wrapMode: Text.WordWrap
-                                                        }
-
-                                                        Text {
-                                                            width: parent.width
-                                                            text: itemData["path"]
-                                                            color: root.textMuted
-                                                            font.pixelSize: root.captionSize
-                                                            font.family: root.monoFamily
-                                                            wrapMode: Text.WrapAnywhere
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    PanelFrame {
-                                        shellWindow: root
-                                        panelColor: root.panelColor
-                                        borderTone: root.borderSoft
-                                        accentTone: root.accentAmber
-                                        Layout.fillWidth: true
-                                        implicitHeight: weakScenarioColumn.implicitHeight + (root.panelPadding * 2)
-
-                                        ColumnLayout {
-                                            id: weakScenarioColumn
-                                            anchors.fill: parent
-                                            anchors.margins: root.panelPadding
-                                            spacing: root.compactGap
-
-                                            Text {
-                                                text: "推荐档 / Recommended Scenario"
-                                                color: root.accentAmber
-                                                font.pixelSize: root.eyebrowSize
-                                                font.family: root.monoFamily
-                                            }
-
-                                            Text {
-                                                text: String(root.recommendedScenario["label"] || root.recommendedScenarioId)
-                                                color: root.textStrong
-                                                font.pixelSize: root.bodyEmphasisSize
-                                                font.bold: true
-                                                font.family: root.uiFamily
-                                                wrapMode: Text.WordWrap
-                                            }
-
-                                            Text {
-                                                Layout.fillWidth: true
-                                                text: String(root.recommendedScenario["summary"] || "--")
-                                                color: root.textSecondary
-                                                font.pixelSize: root.bodySize
-                                                font.family: root.uiFamily
-                                                wrapMode: Text.WordWrap
-                                            }
-
-                                            GridLayout {
-                                                Layout.fillWidth: true
-                                                columns: 2
-                                                columnSpacing: root.compactGap
-                                                rowSpacing: root.compactGap
-
-                                                Repeater {
-                                                    model: [
-                                                        {
-                                                            "label": "Pipeline",
-                                                            "value": root.formattedMetric(root.recommendedComparison["pipeline_images_per_sec"], 3, "img/s"),
-                                                            "tone": "online"
-                                                        },
-                                                        {
-                                                            "label": "提升",
-                                                            "value": root.formattedMetric(root.recommendedComparison["throughput_uplift_pct"], 3, "%"),
-                                                            "tone": "warning"
-                                                        },
-                                                        {
-                                                            "label": "批次节省",
-                                                            "value": root.formattedMetric(root.recommendedComparison["saved_seconds_per_batch"], 3, "s"),
-                                                            "tone": "warning"
-                                                        },
-                                                        {
-                                                            "label": "推荐档",
-                                                            "value": root.recommendedScenarioId,
-                                                            "tone": "neutral"
-                                                        }
-                                                    ]
-
-                                                    delegate: Rectangle {
-                                                        property var itemData: modelData
-                                                        Layout.fillWidth: true
-                                                        radius: root.edgeRadius
-                                                        color: root.toneFill(String(itemData["tone"] || "neutral"))
-                                                        border.color: root.toneColor(String(itemData["tone"] || "neutral"))
-                                                        border.width: 1
-                                                        implicitHeight: weakStatColumn.implicitHeight + (root.scaled(10) * 2)
-
-                                                        Column {
-                                                            id: weakStatColumn
-                                                            anchors.fill: parent
-                                                            anchors.margins: root.scaled(10)
-                                                            spacing: root.scaled(2)
-
-                                                            Text {
-                                                                text: itemData["label"]
-                                                                color: root.textMuted
-                                                                font.pixelSize: root.captionSize
-                                                                font.family: root.monoFamily
-                                                            }
-
-                                                            Text {
-                                                                width: parent.width
-                                                                text: itemData["value"]
-                                                                color: root.textStrong
-                                                                font.pixelSize: root.captionSize
-                                                                font.bold: true
-                                                                font.family: root.uiFamily
-                                                                wrapMode: Text.WrapAnywhere
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-
-                                            Text {
-                                                Layout.fillWidth: true
-                                                text: "Pipeline 命令: " + String(root.recommendedCommands["pipeline"] || "--")
-                                                color: root.textMuted
-                                                font.pixelSize: root.captionSize
-                                                font.family: root.monoFamily
-                                                wrapMode: Text.WrapAnywhere
-                                            }
-                                        }
-                                    }
-                                }
                             }
                         }
                     }
@@ -2006,149 +2020,74 @@ ApplicationWindow {
                                 shellWindow: root
                                 panelColor: root.panelColorSoft
                                 borderTone: root.borderSoft
-                                accentTone: root.accentGreen
+                                accentTone: root.accentCyan
                                 Layout.fillWidth: true
-                                implicitHeight: actionHeaderRow.implicitHeight + (root.panelPadding * 2)
-
-                                RowLayout {
-                                    id: actionHeaderRow
-                                    anchors.fill: parent
-                                    anchors.margins: root.panelPadding
-                                    spacing: root.zoneGap
-
-                                    Rectangle {
-                                        radius: root.edgeRadius
-                                        color: "#0d1623"
-                                        border.color: root.accentGreen
-                                        border.width: 1
-                                        implicitWidth: actionBackRow.implicitWidth + (root.scaled(14) * 2)
-                                        implicitHeight: actionBackRow.implicitHeight + (root.scaled(10) * 2)
-
-                                        Row {
-                                            id: actionBackRow
-                                            anchors.centerIn: parent
-                                            spacing: root.scaled(6)
-
-                                            Text {
-                                                text: "<"
-                                                color: root.accentGreen
-                                                font.pixelSize: root.bodySize
-                                                font.bold: true
-                                                font.family: root.monoFamily
-                                            }
-
-                                            Text {
-                                                text: "返回总览"
-                                                color: root.textStrong
-                                                font.pixelSize: root.bodySize
-                                                font.bold: true
-                                                font.family: root.uiFamily
-                                            }
-                                        }
-
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            hoverEnabled: true
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: root.currentPage = 0
-                                        }
-                                    }
-
-                                    ColumnLayout {
-                                        Layout.fillWidth: true
-                                        spacing: root.scaled(2)
-
-                                        Text {
-                                            text: "执行坞站 / Action Dock"
-                                            color: root.textStrong
-                                            font.pixelSize: root.sectionTitleSize
-                                            font.bold: true
-                                            font.family: root.displayFamily
-                                        }
-
-                                        Text {
-                                            Layout.fillWidth: true
-                                            text: "把合同动作、软件渲染安全路径和启动命令集中在这个页面，首屏只保留跳转入口。"
-                                            color: root.textSecondary
-                                            font.pixelSize: root.bodySize
-                                            font.family: root.uiFamily
-                                            wrapMode: Text.WordWrap
-                                        }
-                                    }
-                                }
-                            }
-
-                            GridLayout {
-                                Layout.fillWidth: true
-                                columns: root.wideLayout ? 12 : 1
-                                columnSpacing: root.zoneGap
-                                rowSpacing: root.zoneGap
-
-                                ActionStrip {
-                                    shellWindow: root
-                                    panelData: root.bottomPanelData
-                                    Layout.fillWidth: true
-                                    Layout.columnSpan: root.wideLayout ? 8 : 1
-                                }
+                                implicitHeight: actionHeader.implicitHeight + (root.panelPadding * 2)
 
                                 ColumnLayout {
-                                    Layout.fillWidth: true
-                                    Layout.columnSpan: root.wideLayout ? 4 : 1
-                                    spacing: root.zoneGap
+                                    id: actionHeader
+                                    anchors.fill: parent
+                                    anchors.margins: root.panelPadding
+                                    spacing: root.compactGap
 
-                                    PanelFrame {
-                                        shellWindow: root
-                                        panelColor: root.panelColor
-                                        borderTone: root.borderSoft
-                                        accentTone: root.accentGreen
+                                    RowLayout {
                                         Layout.fillWidth: true
-                                        implicitHeight: actionLaunchColumn.implicitHeight + (root.panelPadding * 2)
+                                        spacing: root.zoneGap
+
+                                        Rectangle {
+                                            radius: root.edgeRadius
+                                            color: "#0d1520"
+                                            border.color: root.accentCyan
+                                            border.width: 1
+                                            implicitWidth: actionBackRow.implicitWidth + (root.scaled(12) * 2)
+                                            implicitHeight: actionBackRow.implicitHeight + (root.scaled(8) * 2)
+
+                                            Row {
+                                                id: actionBackRow
+                                                anchors.centerIn: parent
+                                                spacing: root.scaled(6)
+
+                                                Text {
+                                                    text: "<"
+                                                    color: root.accentCyan
+                                                    font.pixelSize: root.bodySize
+                                                    font.bold: true
+                                                    font.family: root.monoFamily
+                                                }
+
+                                                Text {
+                                                    text: "返回总览"
+                                                    color: root.textStrong
+                                                    font.pixelSize: root.bodySize
+                                                    font.bold: true
+                                                    font.family: root.uiFamily
+                                                }
+                                            }
+
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: root.currentPage = 0
+                                            }
+                                        }
 
                                         ColumnLayout {
-                                            id: actionLaunchColumn
-                                            anchors.fill: parent
-                                            anchors.margins: root.panelPadding
-                                            spacing: root.compactGap
+                                            Layout.fillWidth: true
+                                            spacing: root.scaled(2)
 
                                             Text {
-                                                text: "启动与渲染 / Launch Path"
-                                                color: root.accentGreen
-                                                font.pixelSize: root.eyebrowSize
-                                                font.family: root.monoFamily
-                                            }
-
-                                            Text {
-                                                Layout.fillWidth: true
-                                                text: softwareRenderEnabled ? "当前窗口已走软件安全渲染路径。" : "当前窗口处于 GPU 优先模式。"
+                                                text: "执行坞站 / Action Dock"
                                                 color: root.textStrong
-                                                font.pixelSize: root.bodyEmphasisSize
+                                                font.pixelSize: root.sectionTitleSize
                                                 font.bold: true
-                                                font.family: root.uiFamily
-                                                wrapMode: Text.WordWrap
+                                                font.family: root.displayFamily
                                             }
 
                                             Text {
                                                 Layout.fillWidth: true
-                                                text: "启动命令: " + root.launchHint
+                                                text: "保持与首屏底部坞站一致的合同动作语义，但这里展开完整门控与说明。软件渲染安全启动入口继续保留。"
                                                 color: root.textSecondary
-                                                font.pixelSize: root.bodySize
-                                                font.family: root.monoFamily
-                                                wrapMode: Text.WrapAnywhere
-                                            }
-
-                                            Text {
-                                                Layout.fillWidth: true
-                                                text: "离屏截图: bash ./session_bootstrap/scripts/run_cockpit_native_capture.sh"
-                                                color: root.textSecondary
-                                                font.pixelSize: root.bodySize
-                                                font.family: root.monoFamily
-                                                wrapMode: Text.WrapAnywhere
-                                            }
-
-                                            Text {
-                                                Layout.fillWidth: true
-                                                text: String(root.bottomPanelData["footer_note"] || "")
-                                                color: root.textMuted
                                                 font.pixelSize: root.bodySize
                                                 font.family: root.uiFamily
                                                 wrapMode: Text.WordWrap
@@ -2156,83 +2095,248 @@ ApplicationWindow {
                                         }
                                     }
 
-                                    PanelFrame {
-                                        shellWindow: root
-                                        panelColor: root.panelColor
-                                        borderTone: root.borderSoft
-                                        accentTone: root.accentAmber
+                                    Flow {
                                         Layout.fillWidth: true
-                                        implicitHeight: actionStateGrid.implicitHeight + (root.panelPadding * 2)
+                                        width: parent.width
+                                        spacing: root.compactGap
 
-                                        GridLayout {
-                                            id: actionStateGrid
-                                            anchors.fill: parent
-                                            anchors.margins: root.panelPadding
-                                            columns: 2
-                                            columnSpacing: root.compactGap
-                                            rowSpacing: root.compactGap
+                                        Repeater {
+                                            model: root.actionPageChipModel
 
-                                            Repeater {
-                                                model: [
-                                                    {
-                                                        "label": "合同动作",
-                                                        "value": String(root.bottomActions.length),
-                                                        "tone": "neutral"
-                                                    },
-                                                    {
-                                                        "label": "可执行",
-                                                        "value": String(root.enabledBottomActions),
-                                                        "tone": root.enabledBottomActions > 0 ? "online" : "warning"
-                                                    },
-                                                    {
-                                                        "label": "只读",
-                                                        "value": String(Math.max(0, root.bottomActions.length - root.enabledBottomActions)),
-                                                        "tone": "warning"
-                                                    },
-                                                    {
-                                                        "label": "推荐档",
-                                                        "value": root.recommendedScenarioId,
-                                                        "tone": "warning"
+                                            delegate: Rectangle {
+                                                property var itemData: modelData
+                                                radius: root.edgeRadius
+                                                color: root.toneFill(String(itemData["tone"] || "neutral"))
+                                                border.color: root.toneColor(String(itemData["tone"] || "neutral"))
+                                                border.width: 1
+                                                implicitWidth: actionChipRow.implicitWidth + (root.scaled(10) * 2)
+                                                implicitHeight: actionChipRow.implicitHeight + (root.scaled(7) * 2)
+
+                                                Row {
+                                                    id: actionChipRow
+                                                    anchors.centerIn: parent
+                                                    spacing: root.scaled(8)
+
+                                                    Text {
+                                                        text: itemData["label"]
+                                                        color: root.textMuted
+                                                        font.pixelSize: root.captionSize
+                                                        font.family: root.monoFamily
                                                     }
-                                                ]
 
-                                                delegate: Rectangle {
-                                                    property var itemData: modelData
-                                                    Layout.fillWidth: true
-                                                    radius: root.edgeRadius
-                                                    color: root.toneFill(String(itemData["tone"] || "neutral"))
-                                                    border.color: root.toneColor(String(itemData["tone"] || "neutral"))
-                                                    border.width: 1
-                                                    implicitHeight: actionStateColumn.implicitHeight + (root.scaled(10) * 2)
-
-                                                    Column {
-                                                        id: actionStateColumn
-                                                        anchors.fill: parent
-                                                        anchors.margins: root.scaled(10)
-                                                        spacing: root.scaled(2)
-
-                                                        Text {
-                                                            text: itemData["label"]
-                                                            color: root.textMuted
-                                                            font.pixelSize: root.captionSize
-                                                            font.family: root.monoFamily
-                                                        }
-
-                                                        Text {
-                                                            width: parent.width
-                                                            text: itemData["value"]
-                                                            color: root.textStrong
-                                                            font.pixelSize: root.captionSize
-                                                            font.bold: true
-                                                            font.family: root.uiFamily
-                                                            wrapMode: Text.WrapAnywhere
-                                                        }
+                                                    Text {
+                                                        text: itemData["value"]
+                                                        color: root.textStrong
+                                                        font.pixelSize: root.captionSize
+                                                        font.bold: true
+                                                        font.family: root.uiFamily
                                                     }
                                                 }
                                             }
                                         }
                                     }
                                 }
+                            }
+
+                            ActionStrip {
+                                shellWindow: root
+                                panelData: root.bottomPanelData
+                                Layout.fillWidth: true
+                            }
+                        }
+                    }
+                }
+            }
+
+            PanelFrame {
+                shellWindow: root
+                panelColor: root.panelColorSoft
+                borderTone: root.borderSoft
+                accentTone: root.accentAmber
+                Layout.fillWidth: true
+                implicitHeight: dockLayout.implicitHeight + (root.panelPadding * 2)
+
+                GridLayout {
+                    id: dockLayout
+                    anchors.fill: parent
+                    anchors.margins: root.panelPadding
+                    columns: root.compactLayout ? 1 : (root.mediumLayout ? 2 : 3)
+                    columnSpacing: root.zoneGap
+                    rowSpacing: root.compactGap
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: root.compactGap
+
+                        Text {
+                            text: "底部坞站 / Compact Action Dock"
+                            color: root.accentAmber
+                            font.pixelSize: root.eyebrowSize
+                            font.family: root.monoFamily
+                            font.letterSpacing: root.scaled(1)
+                        }
+
+                        Text {
+                            text: "持续可见的执行收口"
+                            color: root.textStrong
+                            font.pixelSize: root.bodyEmphasisSize
+                            font.bold: true
+                            font.family: root.uiFamily
+                        }
+
+                        Text {
+                            Layout.fillWidth: true
+                            text: root.footerNote
+                            color: root.textSecondary
+                            font.pixelSize: root.bodySize
+                            font.family: root.uiFamily
+                            wrapMode: Text.WordWrap
+                        }
+
+                        Text {
+                            Layout.fillWidth: true
+                            text: root.launchHint
+                            color: root.textPrimary
+                            font.pixelSize: root.captionSize
+                            font.family: root.monoFamily
+                            wrapMode: Text.WrapAnywhere
+                        }
+                    }
+
+                    Item {
+                        Layout.fillWidth: true
+                        implicitHeight: dockActionFlow.implicitHeight
+
+                        Flow {
+                            id: dockActionFlow
+                            width: parent.width
+                            spacing: root.compactGap
+
+                            Repeater {
+                                model: root.dockPreviewActions
+
+                                delegate: Rectangle {
+                                    property var itemData: modelData
+                                    radius: root.edgeRadius
+                                    color: itemData["enabled"] ? root.toneFill(String(itemData["tone"] || "neutral")) : "#0d1520"
+                                    border.color: itemData["enabled"]
+                                        ? root.toneColor(String(itemData["tone"] || "neutral"))
+                                        : "#2c3c50"
+                                    border.width: 1
+                                    width: Math.max(root.scaled(150), dockActionColumn.implicitWidth + (root.scaled(18) * 2))
+                                    height: dockActionColumn.implicitHeight + (root.scaled(10) * 2)
+
+                                    Column {
+                                        id: dockActionColumn
+                                        anchors.centerIn: parent
+                                        spacing: root.scaled(2)
+
+                                        Text {
+                                            text: itemData["label"]
+                                            color: root.textStrong
+                                            font.pixelSize: root.bodySize
+                                            font.bold: true
+                                            font.family: root.uiFamily
+                                        }
+
+                                        Text {
+                                            width: parent.width
+                                            text: itemData["enabled"] ? "可执行 / live" : compactMessage(String(itemData["note"] || "只读合同"), 24)
+                                            color: itemData["enabled"] ? root.toneColor(String(itemData["tone"] || "neutral")) : root.textMuted
+                                            font.pixelSize: root.captionSize
+                                            font.family: root.monoFamily
+                                            wrapMode: Text.WrapAnywhere
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: root.compactGap
+
+                        Flow {
+                            Layout.fillWidth: true
+                            width: parent.width
+                            spacing: root.compactGap
+
+                            Repeater {
+                                model: [
+                                    { "label": "页面", "value": DataUtils.objectOrEmpty(root.navigationModel[root.currentPage])["label"], "tone": "neutral" },
+                                    { "label": "动作", "value": String(root.enabledBottomActions) + " live", "tone": root.enabledBottomActions > 0 ? "online" : "warning" },
+                                    { "label": "桥接", "value": root.bridgeAvailable ? "online" : "offline", "tone": root.bridgeAvailable ? "online" : "warning" }
+                                ]
+
+                                delegate: Rectangle {
+                                    property var itemData: modelData
+                                    radius: root.edgeRadius
+                                    color: root.toneFill(String(itemData["tone"] || "neutral"))
+                                    border.color: root.toneColor(String(itemData["tone"] || "neutral"))
+                                    border.width: 1
+                                    implicitWidth: dockStatRow.implicitWidth + (root.scaled(10) * 2)
+                                    implicitHeight: dockStatRow.implicitHeight + (root.scaled(7) * 2)
+
+                                    Row {
+                                        id: dockStatRow
+                                        anchors.centerIn: parent
+                                        spacing: root.scaled(8)
+
+                                        Text {
+                                            text: itemData["label"]
+                                            color: root.textMuted
+                                            font.pixelSize: root.captionSize
+                                            font.family: root.monoFamily
+                                        }
+
+                                        Text {
+                                            text: itemData["value"]
+                                            color: root.textStrong
+                                            font.pixelSize: root.captionSize
+                                            font.bold: true
+                                            font.family: root.uiFamily
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            radius: root.edgeRadius
+                            color: "#0d1520"
+                            border.color: root.accentCyan
+                            border.width: 1
+                            implicitWidth: dockCtaRow.implicitWidth + (root.scaled(14) * 2)
+                            implicitHeight: dockCtaRow.implicitHeight + (root.scaled(9) * 2)
+
+                            Row {
+                                id: dockCtaRow
+                                anchors.centerIn: parent
+                                spacing: root.scaled(8)
+
+                                Text {
+                                    text: "进入执行坞站"
+                                    color: root.textStrong
+                                    font.pixelSize: root.bodySize
+                                    font.bold: true
+                                    font.family: root.uiFamily
+                                }
+
+                                Text {
+                                    text: ">"
+                                    color: root.accentCyan
+                                    font.pixelSize: root.bodyEmphasisSize
+                                    font.bold: true
+                                    font.family: root.monoFamily
+                                }
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.currentPage = 4
                             }
                         }
                     }
