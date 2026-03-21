@@ -90,6 +90,38 @@ PanelFrame {
         : (hasRealTrack()
             ? "真实航迹、热点弧线与采样心跳已经并入同一主舞台。"
             : "当前以前端合同镜像维持中心舞台，不推断不存在的实时链路。")
+    readonly property string wallboardNarrativeLabel: wallboardStatusTone === "warning"
+        ? "中心墙板进入风险优先态"
+        : "中心墙板进入稳态锁定态"
+    readonly property string wallboardNarrativeDetail: wallboardStatusTone === "warning"
+        ? "把弱网风险、在线锚点与控制事件先压到中心墙板，整个 global wallboard 更像可落地的运营主屏。"
+        : "把航迹链、在线锚点、热点网格与采样时钟压成一张成品级中心墙板，整个主舞台读起来更完整。"
+    readonly property string projectionVaultLabel: wallboardStatusTone === "warning"
+        ? "中央压制桥 / THREAT COMMAND VAULT"
+        : "中央防护桥 / CENTRAL COMMAND VAULT"
+    readonly property string projectionVaultDetail: wallboardStatusTone === "warning"
+        ? "把高风险链路、弱网档位与在线锚点压成同一条中心指挥带，先呈现最危险的真实事实。"
+        : "把航迹锁定、在线锚点与采样时钟压成同一条中心指挥带，让 wallboard 更像一块完成态运营产品。"
+    readonly property var projectionVaultModel: [
+        {
+            "label": "姿态",
+            "value": wallboardStatusLabel,
+            "detail": compactMessage(threatPostureLabel, "防护稳态", 28),
+            "tone": wallboardStatusTone
+        },
+        {
+            "label": "源",
+            "value": compactMessage(root.sourceStatusLabel(), "--", 16),
+            "detail": compactMessage(sampleSequenceLabel + " / " + sampleTransportLabel, sampleTimestamp, 24),
+            "tone": "neutral"
+        },
+        {
+            "label": "锚点",
+            "value": compactMessage(String(liveAnchorData["valid_instance"] || "--"), "--", 16),
+            "detail": compactMessage(String(liveAnchorData["board_status"] || sampleTimestamp), sampleTimestamp, 24),
+            "tone": String(liveAnchorData["tone"] || "neutral")
+        }
+    ]
     readonly property var mapHudMetrics: [
         { "label": "定位 Fix", "value": fixLabel, "tone": "neutral" },
         { "label": "航向 Heading", "value": headingLabel, "tone": "warning" },
@@ -1817,7 +1849,7 @@ PanelFrame {
                         }
 
                         Text {
-                            text: "全球防护网投影"
+                            text: "全球指挥墙板"
                             color: shellWindow ? shellWindow.textStrong : "#f4fbff"
                             font.pixelSize: shellWindow ? shellWindow.sectionTitleSize : 24
                             font.bold: true
@@ -1825,7 +1857,16 @@ PanelFrame {
                         }
 
                         Text {
-                            text: "以 DDoS / 安全运营主舞台的层次组织中心视野，把真实机位、弱网档位、在线锚点、控制事件与采样时钟收敛到同一投影。"
+                            text: root.wallboardNarrativeLabel
+                            color: shellWindow ? shellWindow.textPrimary : "#d5eeff"
+                            font.pixelSize: shellWindow ? shellWindow.bodyEmphasisSize : 14
+                            font.bold: true
+                            font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                            wrapMode: Text.WordWrap
+                        }
+
+                        Text {
+                            text: root.wallboardNarrativeDetail
                             color: shellWindow ? shellWindow.textSecondary : "#83acc8"
                             font.pixelSize: shellWindow ? shellWindow.bodySize : 13
                             font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
@@ -1844,13 +1885,50 @@ PanelFrame {
                         implicitWidth: statusColumn.implicitWidth + ((shellWindow ? shellWindow.scaled(16) : 16) * 2)
                         implicitHeight: statusColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
 
+                        Rectangle {
+                            anchors.fill: parent
+                            anchors.margins: 1
+                            radius: parent.radius - 1
+                            color: "transparent"
+                            border.color: "#12344f"
+                            border.width: 1
+                            opacity: 0.84
+                        }
+
+                        Rectangle {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            height: shellWindow ? shellWindow.scaled(2) : 2
+                            gradient: Gradient {
+                                GradientStop { position: 0.0; color: "transparent" }
+                                GradientStop { position: 0.22; color: root.toneColor(root.wallboardStatusTone) }
+                                GradientStop { position: 0.72; color: Qt.lighter(root.toneColor(root.wallboardStatusTone), 1.16) }
+                                GradientStop { position: 1.0; color: "transparent" }
+                            }
+                            opacity: 0.78
+                        }
+
+                        Rectangle {
+                            anchors.left: parent.left
+                            anchors.top: parent.top
+                            anchors.bottom: parent.bottom
+                            anchors.margins: shellWindow ? shellWindow.scaled(10) : 10
+                            width: shellWindow ? shellWindow.scaled(4) : 4
+                            radius: width / 2
+                            color: root.toneColor(root.wallboardStatusTone)
+                            opacity: 0.88
+                        }
+
                         Column {
                             id: statusColumn
-                            anchors.centerIn: parent
-                            spacing: shellWindow ? shellWindow.scaled(3) : 3
+                            anchors.fill: parent
+                            anchors.margins: shellWindow ? shellWindow.scaled(12) : 12
+                            anchors.leftMargin: (shellWindow ? shellWindow.scaled(12) : 12) + (shellWindow ? shellWindow.scaled(10) : 10)
+                            spacing: shellWindow ? shellWindow.scaled(4) : 4
 
                             Text {
-                                text: "态势状态 / WALLBOARD STATUS"
+                                text: "中心态势 / WALLBOARD STATUS"
                                 color: shellWindow ? shellWindow.textMuted : "#4e7392"
                                 font.pixelSize: shellWindow ? shellWindow.captionSize : 11
                                 font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
@@ -1872,11 +1950,35 @@ PanelFrame {
                                 wrapMode: Text.WordWrap
                             }
 
+                            RowLayout {
+                                width: parent.width
+                                spacing: shellWindow ? shellWindow.compactGap : 8
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: "MISSION  " + String(panel["mission_call_sign"] || "M9-DEMO")
+                                    color: shellWindow ? shellWindow.textPrimary : "#d5eeff"
+                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                    wrapMode: Text.WrapAnywhere
+                                }
+
+                                Text {
+                                    text: root.sampleSequenceLabel
+                                    color: shellWindow ? shellWindow.textStrong : "#f4fbff"
+                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                    font.bold: true
+                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                }
+                            }
+
                             Text {
+                                width: parent.width
                                 text: "SAMPLE  " + root.sampleTimestamp
                                 color: shellWindow ? shellWindow.textPrimary : "#d5eeff"
-                                font.pixelSize: shellWindow ? shellWindow.captionSize : 11
+                                font.pixelSize: shellWindow ? shellWindow.captionSize : 10
                                 font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                wrapMode: Text.WrapAnywhere
                             }
                         }
                     }
@@ -1988,7 +2090,7 @@ PanelFrame {
 
                             Text {
                                 Layout.fillWidth: true
-                                text: "MISSION-CONTROL BUS / 主舞台总线"
+                                text: "主舞台总线 / MISSION-CONTROL BUS"
                                 color: shellWindow ? shellWindow.accentBlue : "#38b6ff"
                                 font.pixelSize: shellWindow ? shellWindow.captionSize : 10
                                 font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
@@ -2484,6 +2586,205 @@ PanelFrame {
                         }
 
                         Rectangle {
+                            id: projectionVaultCard
+                            visible: !compactCardLayout
+                                && projectionChamber.width >= (shellWindow ? shellWindow.scaled(720) : 720)
+                            anchors.left: threatFabricCard.right
+                            anchors.right: controlMeshCard.left
+                            anchors.top: parent.top
+                            anchors.leftMargin: shellWindow ? shellWindow.scaled(14) : 14
+                            anchors.rightMargin: shellWindow ? shellWindow.scaled(14) : 14
+                            anchors.topMargin: shellWindow ? shellWindow.scaled(100) : 100
+                            radius: shellWindow ? shellWindow.edgeRadius : 10
+                            gradient: Gradient {
+                                GradientStop { position: 0.0; color: "#12314b" }
+                                GradientStop { position: 0.22; color: "#0f2840" }
+                                GradientStop { position: 0.62; color: "#081420" }
+                                GradientStop { position: 1.0; color: "#07111b" }
+                            }
+                            border.color: root.traceStrong
+                            border.width: 1
+                            implicitHeight: projectionVaultLayout.implicitHeight + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
+                            opacity: 0.97
+
+                            Rectangle {
+                                anchors.fill: parent
+                                anchors.margins: 1
+                                radius: parent.radius - 1
+                                color: "transparent"
+                                border.color: "#12344f"
+                                border.width: 1
+                                opacity: 0.84
+                            }
+
+                            Rectangle {
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                height: shellWindow ? shellWindow.scaled(2) : 2
+                                gradient: Gradient {
+                                    GradientStop { position: 0.0; color: "transparent" }
+                                    GradientStop { position: 0.18; color: root.accentBlue }
+                                    GradientStop { position: 0.5; color: root.panelGlowStrong }
+                                    GradientStop { position: 0.82; color: root.accentCyan }
+                                    GradientStop { position: 1.0; color: "transparent" }
+                                }
+                                opacity: 0.82
+                            }
+
+                            Rectangle {
+                                width: parent.width * 0.72
+                                height: parent.height * 0.86
+                                radius: width / 2
+                                color: root.panelGlowStrong
+                                opacity: 0.08
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                y: -height * 0.12
+                            }
+
+                            ColumnLayout {
+                                id: projectionVaultLayout
+                                anchors.fill: parent
+                                anchors.margins: shellWindow ? shellWindow.scaled(10) : 10
+                                spacing: shellWindow ? shellWindow.scaled(6) : 6
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: shellWindow ? shellWindow.compactGap : 8
+
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 1
+
+                                        Text {
+                                            text: root.projectionVaultLabel
+                                            color: shellWindow ? shellWindow.accentCyan : "#72f3ff"
+                                            font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                            font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                            font.letterSpacing: shellWindow ? shellWindow.scaled(1) : 1
+                                        }
+
+                                        Text {
+                                            Layout.fillWidth: true
+                                            text: root.projectionVaultDetail
+                                            color: shellWindow ? shellWindow.textSecondary : "#83acc8"
+                                            font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                            font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                            wrapMode: Text.WordWrap
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        Layout.alignment: Qt.AlignTop
+                                        radius: shellWindow ? shellWindow.edgeRadius : 10
+                                        gradient: Gradient {
+                                            GradientStop { position: 0.0; color: Qt.lighter(root.toneFill(root.wallboardStatusTone), 1.14) }
+                                            GradientStop { position: 1.0; color: root.toneFill(root.wallboardStatusTone) }
+                                        }
+                                        border.color: root.toneColor(root.wallboardStatusTone)
+                                        border.width: 1
+                                        implicitWidth: projectionVaultStampColumn.implicitWidth + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
+                                        implicitHeight: projectionVaultStampColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(7) : 7) * 2)
+
+                                        Column {
+                                            id: projectionVaultStampColumn
+                                            anchors.centerIn: parent
+                                            spacing: 1
+
+                                            Text {
+                                                text: "VAULT"
+                                                color: shellWindow ? shellWindow.textMuted : "#4e7392"
+                                                font.pixelSize: shellWindow ? shellWindow.captionSize : 9
+                                                font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                            }
+
+                                            Text {
+                                                text: root.trackAgeLabel
+                                                color: shellWindow ? shellWindow.textStrong : "#f4fbff"
+                                                font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                                font.bold: true
+                                                font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                            }
+                                        }
+                                    }
+                                }
+
+                                GridLayout {
+                                    Layout.fillWidth: true
+                                    columns: root.projectionVaultModel.length
+                                    columnSpacing: shellWindow ? shellWindow.compactGap : 8
+                                    rowSpacing: shellWindow ? shellWindow.compactGap : 8
+
+                                    Repeater {
+                                        model: root.projectionVaultModel
+
+                                        delegate: Rectangle {
+                                            readonly property var vaultMetric: modelData
+                                            Layout.fillWidth: true
+                                            radius: shellWindow ? shellWindow.edgeRadius : 10
+                                            gradient: Gradient {
+                                                GradientStop { position: 0.0; color: Qt.lighter(root.toneFill(vaultMetric["tone"]), 1.12) }
+                                                GradientStop { position: 1.0; color: root.toneFill(vaultMetric["tone"]) }
+                                            }
+                                            border.color: root.toneColor(vaultMetric["tone"])
+                                            border.width: 1
+                                            implicitHeight: projectionVaultMetricColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(7) : 7) * 2)
+
+                                            Rectangle {
+                                                anchors.left: parent.left
+                                                anchors.right: parent.right
+                                                anchors.top: parent.top
+                                                height: shellWindow ? shellWindow.scaled(2) : 2
+                                                gradient: Gradient {
+                                                    GradientStop { position: 0.0; color: "transparent" }
+                                                    GradientStop { position: 0.28; color: root.toneColor(vaultMetric["tone"]) }
+                                                    GradientStop { position: 0.72; color: Qt.lighter(root.toneColor(vaultMetric["tone"]), 1.16) }
+                                                    GradientStop { position: 1.0; color: "transparent" }
+                                                }
+                                                opacity: 0.76
+                                            }
+
+                                            Column {
+                                                id: projectionVaultMetricColumn
+                                                anchors.fill: parent
+                                                anchors.margins: shellWindow ? shellWindow.scaled(7) : 7
+                                                spacing: 1
+
+                                                Text {
+                                                    text: vaultMetric["label"]
+                                                    color: shellWindow ? shellWindow.textMuted : "#4e7392"
+                                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 9
+                                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                                }
+
+                                                Text {
+                                                    width: parent.width
+                                                    text: vaultMetric["value"]
+                                                    color: shellWindow ? shellWindow.textStrong : "#f4fbff"
+                                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                                    font.bold: true
+                                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                                    wrapMode: Text.WrapAnywhere
+                                                }
+
+                                                Text {
+                                                    width: parent.width
+                                                    text: vaultMetric["detail"]
+                                                    color: shellWindow ? shellWindow.textSecondary : "#83acc8"
+                                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 9
+                                                    font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                                    wrapMode: Text.WordWrap
+                                                    maximumLineCount: 2
+                                                    elide: Text.ElideRight
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Rectangle {
                             id: threatFabricCard
                             visible: !compactCardLayout
                             anchors.left: parent.left
@@ -2696,7 +2997,7 @@ PanelFrame {
 
                                 Text {
                                     Layout.fillWidth: true
-                                    text: (root.wallboardStatusTone === "warning" ? "THREAT FABRIC BUS / " : "DEFENSE FABRIC BUS / ") + root.sampleSequenceLabel
+                                    text: (root.wallboardStatusTone === "warning" ? "压制底总线 / " : "防护底总线 / ") + root.sampleSequenceLabel
                                     color: shellWindow ? shellWindow.accentBlue : "#38b6ff"
                                     font.pixelSize: shellWindow ? shellWindow.captionSize : 9
                                     font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"

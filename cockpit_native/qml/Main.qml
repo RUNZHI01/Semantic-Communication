@@ -76,6 +76,11 @@ ApplicationWindow {
     readonly property color shellFabricTop: "#14314c"
     readonly property color shellFabricMid: "#0a1726"
     readonly property color shellFabricBottom: "#06101a"
+    readonly property color shellCanopyTop: "#1b4f7b"
+    readonly property color shellCanopyMid: "#0d2236"
+    readonly property color shellCanopyBottom: "#07111c"
+    readonly property color shellCanopyEdge: "#255d88"
+    readonly property color shellDeckAura: "#1c5d89"
 
     readonly property real widthScale: Math.max(0.78, Math.min(1.18, Number(metrics["width"] || designWidth) / designWidth))
     readonly property real heightScale: Math.max(0.78, Math.min(1.18, Number(metrics["height"] || designHeight) / designHeight))
@@ -832,6 +837,100 @@ ApplicationWindow {
         }
 
         Rectangle {
+            visible: !root.compactLayout
+            anchors.left: commandFabricBackdrop.left
+            anchors.right: commandFabricBackdrop.right
+            anchors.top: shellHeaderAnchorProxy.bottom
+            anchors.bottom: bottomActionBerth.top
+            anchors.leftMargin: root.scaled(8)
+            anchors.rightMargin: root.scaled(8)
+            anchors.topMargin: root.scaled(8)
+            anchors.bottomMargin: root.scaled(10)
+            radius: root.panelRadius + root.scaled(4)
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: root.shellCanopyTop }
+                GradientStop { position: 0.16; color: root.shellCanopyMid }
+                GradientStop { position: 0.48; color: "#091927" }
+                GradientStop { position: 1.0; color: root.shellCanopyBottom }
+            }
+            border.color: root.shellCanopyEdge
+            border.width: 1
+            opacity: 0.16
+        }
+
+        Rectangle {
+            visible: !root.compactLayout
+            anchors.fill: commandFabricBackdrop
+            anchors.margins: root.scaled(24)
+            radius: Math.max(2, commandFabricBackdrop.radius - root.scaled(24))
+            color: "transparent"
+            border.color: "#18476b"
+            border.width: 1
+            opacity: 0.22
+        }
+
+        Rectangle {
+            visible: !root.compactLayout
+            anchors.horizontalCenter: commandFabricBackdrop.horizontalCenter
+            anchors.top: commandFabricBackdrop.top
+            anchors.bottom: commandFabricBackdrop.bottom
+            width: Math.min(commandFabricBackdrop.width * 0.46, root.scaled(660))
+            radius: root.panelRadius
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: "#1c5d8d18" }
+                GradientStop { position: 0.18; color: "#16436236" }
+                GradientStop { position: 0.5; color: "#0a172522" }
+                GradientStop { position: 1.0; color: "#06101a00" }
+            }
+            border.color: root.shellCanopyEdge
+            border.width: 1
+            opacity: 0.2
+        }
+
+        Rectangle {
+            visible: !root.compactLayout
+            anchors.horizontalCenter: commandFabricBackdrop.horizontalCenter
+            anchors.top: commandFabricBackdrop.top
+            anchors.topMargin: root.scaled(42)
+            width: Math.min(commandFabricBackdrop.width - root.scaled(120), root.scaled(960))
+            height: root.scaled(34)
+            radius: height / 2
+            gradient: Gradient {
+                orientation: Gradient.Horizontal
+                GradientStop { position: 0.0; color: "transparent" }
+                GradientStop { position: 0.14; color: root.panelTraceSoft }
+                GradientStop { position: 0.32; color: root.shellGlowSoft }
+                GradientStop { position: 0.5; color: root.panelGlowStrong }
+                GradientStop { position: 0.68; color: root.shellGlowSoft }
+                GradientStop { position: 0.86; color: root.panelTraceSoft }
+                GradientStop { position: 1.0; color: "transparent" }
+            }
+            opacity: 0.18
+        }
+
+        Rectangle {
+            visible: !root.compactLayout
+            width: Math.min(commandFabricBackdrop.width * 0.52, root.scaled(720))
+            height: root.scaled(2)
+            rotation: -8
+            color: root.shellDeckAura
+            opacity: 0.14
+            anchors.horizontalCenter: commandFabricBackdrop.horizontalCenter
+            y: commandFabricBackdrop.y + root.scaled(118)
+        }
+
+        Rectangle {
+            visible: !root.compactLayout
+            width: Math.min(commandFabricBackdrop.width * 0.52, root.scaled(720))
+            height: root.scaled(2)
+            rotation: 8
+            color: root.shellDeckAura
+            opacity: 0.14
+            anchors.horizontalCenter: commandFabricBackdrop.horizontalCenter
+            y: commandFabricBackdrop.y + commandFabricBackdrop.height - root.scaled(146)
+        }
+
+        Rectangle {
             anchors.fill: commandFabricBackdrop
             anchors.margins: root.scaled(10)
             radius: Math.max(2, commandFabricBackdrop.radius - root.scaled(10))
@@ -884,6 +983,28 @@ ApplicationWindow {
             border.color: "#17486b"
             border.width: 1
             opacity: 0.28
+        }
+
+        Rectangle {
+            visible: !root.compactLayout
+            anchors.left: centerStageBerth.left
+            anchors.right: centerStageBerth.right
+            anchors.top: shellHeaderAnchorProxy.bottom
+            anchors.bottom: bottomActionBerth.top
+            anchors.leftMargin: root.scaled(20)
+            anchors.rightMargin: root.scaled(20)
+            anchors.topMargin: root.scaled(24)
+            anchors.bottomMargin: root.scaled(22)
+            radius: root.panelRadius
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: "#225f8f18" }
+                GradientStop { position: 0.2; color: "#16415f3c" }
+                GradientStop { position: 0.52; color: "#0c1d2d20" }
+                GradientStop { position: 1.0; color: "#06101a00" }
+            }
+            border.color: root.borderStrong
+            border.width: 1
+            opacity: 0.14
         }
 
         Rectangle {
