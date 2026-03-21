@@ -19,10 +19,10 @@ Rectangle {
 
     radius: shellWindow ? shellWindow.edgeRadius + shellWindow.scaled(1) : 13
     color: shellWindow
-        ? Qt.rgba(fillColor.r, fillColor.g, fillColor.b, prominent ? 0.94 : (minimalChrome ? 0.78 : 0.9))
+        ? Qt.rgba(fillColor.r, fillColor.g, fillColor.b, prominent ? 0.84 : (minimalChrome ? 0.64 : 0.78))
         : fillColor
     border.color: shellWindow
-        ? Qt.rgba(accentColor.r, accentColor.g, accentColor.b, prominent ? 0.62 : (minimalChrome ? 0.24 : 0.38))
+        ? Qt.rgba(accentColor.r, accentColor.g, accentColor.b, prominent ? 0.48 : (minimalChrome ? 0.18 : 0.28))
         : accentColor
     border.width: 1
     implicitHeight: content.implicitHeight + (padding * 2)
@@ -35,7 +35,7 @@ Rectangle {
             GradientStop { position: 0.18; color: "#08ffffff" }
             GradientStop { position: 1.0; color: "#06000000" }
         }
-        opacity: root.prominent ? 0.42 : (root.minimalChrome ? 0.14 : 0.28)
+        opacity: root.prominent ? 0.24 : (root.minimalChrome ? 0.08 : 0.16)
     }
 
     Rectangle {
@@ -54,7 +54,7 @@ Rectangle {
             GradientStop { position: 0.82; color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, root.minimalChrome ? 0.08 : 0.16) }
             GradientStop { position: 1.0; color: "transparent" }
         }
-        opacity: root.minimalChrome ? 0.56 : 0.94
+        opacity: root.minimalChrome ? 0.3 : 0.6
     }
 
     Rectangle {
@@ -74,7 +74,7 @@ Rectangle {
             GradientStop { position: 0.82; color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, root.minimalChrome ? 0.12 : 0.22) }
             GradientStop { position: 1.0; color: "transparent" }
         }
-        opacity: root.minimalChrome ? 0.64 : 1.0
+        opacity: root.minimalChrome ? 0.46 : 0.78
     }
 
     Rectangle {
@@ -82,7 +82,7 @@ Rectangle {
         height: parent.height * 0.42
         radius: width / 2
         color: root.accentColor
-        opacity: root.prominent ? 0.07 : (root.minimalChrome ? 0.018 : 0.04)
+        opacity: root.prominent ? 0.045 : (root.minimalChrome ? 0.012 : 0.024)
         x: parent.width - (width * 0.7)
         y: -height * 0.2
     }
@@ -102,7 +102,7 @@ Rectangle {
         color: "transparent"
         border.color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.16)
         border.width: 1
-        opacity: root.minimalChrome ? 0.48 : 1.0
+        opacity: root.minimalChrome ? 0.3 : 0.64
     }
 
     ColumnLayout {

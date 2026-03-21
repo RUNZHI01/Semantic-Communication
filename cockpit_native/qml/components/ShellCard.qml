@@ -17,8 +17,8 @@ Item {
     property bool minimalChrome: false
 
     readonly property bool hasHeader: eyebrow.length > 0 || title.length > 0 || subtitle.length > 0
-    readonly property color topFill: Qt.lighter(root.fillColor, root.minimalChrome ? 1.03 : 1.08)
-    readonly property color bottomFill: Qt.darker(root.fillColor, root.minimalChrome ? 1.02 : 1.08)
+    readonly property color topFill: Qt.lighter(root.fillColor, root.minimalChrome ? 1.02 : 1.05)
+    readonly property color bottomFill: Qt.darker(root.fillColor, root.minimalChrome ? 1.01 : 1.04)
     readonly property color rimTone: Qt.lighter(root.borderColor, 1.06)
 
     default property alias contentData: contentLayout.data
@@ -29,9 +29,9 @@ Item {
         anchors.fill: parent
         radius: root.radius
         gradient: Gradient {
-            GradientStop { position: 0.0; color: Qt.rgba(root.topFill.r, root.topFill.g, root.topFill.b, root.minimalChrome ? 0.84 : 0.98) }
-            GradientStop { position: 0.2; color: Qt.rgba(root.fillColor.r, root.fillColor.g, root.fillColor.b, root.minimalChrome ? 0.8 : 0.98) }
-            GradientStop { position: 1.0; color: Qt.rgba(root.bottomFill.r, root.bottomFill.g, root.bottomFill.b, root.minimalChrome ? 0.86 : 0.99) }
+            GradientStop { position: 0.0; color: Qt.rgba(root.topFill.r, root.topFill.g, root.topFill.b, root.minimalChrome ? 0.68 : 0.9) }
+            GradientStop { position: 0.2; color: Qt.rgba(root.fillColor.r, root.fillColor.g, root.fillColor.b, root.minimalChrome ? 0.62 : 0.86) }
+            GradientStop { position: 1.0; color: Qt.rgba(root.bottomFill.r, root.bottomFill.g, root.bottomFill.b, root.minimalChrome ? 0.74 : 0.92) }
         }
     }
 
@@ -40,7 +40,7 @@ Item {
         height: parent.height * 0.48
         radius: width / 2
         color: root.accentColor
-        opacity: root.minimalChrome ? 0.024 : 0.055
+        opacity: root.minimalChrome ? 0.016 : 0.038
         x: parent.width - (width * 0.68)
         y: -height * 0.18
     }
@@ -54,7 +54,7 @@ Item {
             GradientStop { position: 0.52; color: "#00000000" }
             GradientStop { position: 1.0; color: "#12000000" }
         }
-        opacity: root.minimalChrome ? 0.18 : 0.42
+        opacity: root.minimalChrome ? 0.12 : 0.26
     }
 
     Rectangle {
@@ -93,7 +93,7 @@ Item {
             GradientStop { position: 0.82; color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, root.minimalChrome ? 0.08 : 0.14) }
             GradientStop { position: 1.0; color: "transparent" }
         }
-        opacity: root.minimalChrome ? 0.56 : 0.94
+        opacity: root.minimalChrome ? 0.34 : 0.72
     }
 
     Rectangle {
@@ -109,9 +109,9 @@ Item {
         anchors.margins: 1
         radius: parent.radius - 1
         color: "transparent"
-        border.color: Qt.rgba(root.borderColor.r, root.borderColor.g, root.borderColor.b, 0.44)
+        border.color: Qt.rgba(root.borderColor.r, root.borderColor.g, root.borderColor.b, 0.26)
         border.width: 1
-        opacity: root.minimalChrome ? 0.58 : 1.0
+        opacity: root.minimalChrome ? 0.36 : 0.84
     }
 
     ColumnLayout {
@@ -147,7 +147,7 @@ Item {
                     font.pixelSize: shellWindow ? shellWindow.sectionTitleSize : 22
                     font.weight: Font.DemiBold
                     font.family: shellWindow ? shellWindow.displayFamily : "Noto Serif CJK SC"
-                    font.letterSpacing: shellWindow ? shellWindow.scaled(0.2) : 0.2
+                    font.letterSpacing: shellWindow ? shellWindow.scaled(0.16) : 0.16
                     wrapMode: Text.WordWrap
                 }
 

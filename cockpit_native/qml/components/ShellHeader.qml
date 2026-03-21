@@ -12,8 +12,8 @@ Item {
     readonly property bool compactTopRail: shellWindow ? shellWindow.viewportWidth < 1260 : width < 1260
     readonly property bool stackNav: shellWindow ? shellWindow.viewportWidth < 1120 : width < 1120
     readonly property bool stackStatusRail: shellWindow ? shellWindow.viewportWidth < 940 : width < 940
-    readonly property int topRailPadding: shellWindow ? shellWindow.scaled(landingPage ? 8 : 13) : (landingPage ? 8 : 13)
-    readonly property int navPadding: shellWindow ? shellWindow.scaled(landingPage ? 7 : 8) : (landingPage ? 7 : 8)
+    readonly property int topRailPadding: shellWindow ? shellWindow.scaled(landingPage ? 6 : 11) : (landingPage ? 6 : 11)
+    readonly property int navPadding: shellWindow ? shellWindow.scaled(landingPage ? 5 : 7) : (landingPage ? 5 : 7)
     readonly property color goldAccent: shellWindow ? shellWindow.accentGold : "#c6ab7d"
     readonly property color iceAccent: shellWindow ? shellWindow.accentIce : "#86c7d4"
     readonly property color railAccent: landingPage ? iceAccent : goldAccent
@@ -83,12 +83,12 @@ Item {
             Layout.fillWidth: true
             radius: shellWindow ? shellWindow.cardRadius + shellWindow.scaled(2) : 18
             color: shellWindow
-                ? Qt.rgba(shellWindow.surfaceGlass.r, shellWindow.surfaceGlass.g, shellWindow.surfaceGlass.b, landingPage ? 0.76 : 0.98)
+                ? Qt.rgba(shellWindow.surfaceGlass.r, shellWindow.surfaceGlass.g, shellWindow.surfaceGlass.b, landingPage ? 0.62 : 0.88)
                 : "#1d2832"
             border.color: shellWindow
                 ? (landingPage
-                    ? Qt.rgba(iceAccent.r, iceAccent.g, iceAccent.b, 0.34)
-                    : Qt.rgba(goldAccent.r, goldAccent.g, goldAccent.b, 0.84))
+                    ? Qt.rgba(iceAccent.r, iceAccent.g, iceAccent.b, 0.22)
+                    : Qt.rgba(goldAccent.r, goldAccent.g, goldAccent.b, 0.56))
                 : "#b4946c"
             border.width: 1
             implicitHeight: topRailGrid.implicitHeight + (root.topRailPadding * 2)
@@ -101,7 +101,7 @@ Item {
                     GradientStop { position: 0.24; color: shellWindow ? shellWindow.shellDockMid : "#15202a" }
                     GradientStop { position: 1.0; color: shellWindow ? shellWindow.shellDockBottom : "#0a1118" }
                 }
-                opacity: 0.96
+                opacity: landingPage ? 0.78 : 0.9
             }
 
             Rectangle {
@@ -109,7 +109,7 @@ Item {
                 height: parent.height * 1.08
                 radius: width / 2
                 color: goldAccent
-                opacity: landingPage ? 0.04 : 0.08
+                opacity: landingPage ? 0.022 : 0.05
                 x: -width * 0.18
                 y: -height * 0.18
             }
@@ -119,7 +119,7 @@ Item {
                 height: parent.height * 0.86
                 radius: width / 2
                 color: iceAccent
-                opacity: landingPage ? 0.05 : 0.06
+                opacity: landingPage ? 0.032 : 0.046
                 x: parent.width - (width * 0.68)
                 y: -height * 0.16
             }
@@ -134,12 +134,12 @@ Item {
                 gradient: Gradient {
                     orientation: Gradient.Horizontal
                     GradientStop { position: 0.0; color: "transparent" }
-                    GradientStop { position: 0.18; color: Qt.rgba(railAccent.r, railAccent.g, railAccent.b, landingPage ? 0.12 : 0.18) }
-                    GradientStop { position: 0.48; color: Qt.rgba(railAccent.r, railAccent.g, railAccent.b, landingPage ? 0.54 : 0.84) }
-                    GradientStop { position: 0.82; color: Qt.rgba(iceAccent.r, iceAccent.g, iceAccent.b, landingPage ? 0.18 : 0.28) }
+                    GradientStop { position: 0.18; color: Qt.rgba(railAccent.r, railAccent.g, railAccent.b, landingPage ? 0.08 : 0.14) }
+                    GradientStop { position: 0.48; color: Qt.rgba(railAccent.r, railAccent.g, railAccent.b, landingPage ? 0.38 : 0.64) }
+                    GradientStop { position: 0.82; color: Qt.rgba(iceAccent.r, iceAccent.g, iceAccent.b, landingPage ? 0.12 : 0.22) }
                     GradientStop { position: 1.0; color: "transparent" }
                 }
-                opacity: landingPage ? 0.58 : 0.9
+                opacity: landingPage ? 0.42 : 0.72
             }
 
             GridLayout {
@@ -153,14 +153,14 @@ Item {
                 Rectangle {
                     Layout.fillWidth: true
                     radius: shellWindow ? shellWindow.edgeRadius + shellWindow.scaled(1) : 13
-                    color: shellWindow ? Qt.rgba(shellWindow.surfaceQuiet.r, shellWindow.surfaceQuiet.g, shellWindow.surfaceQuiet.b, 0.88) : "#101820"
+                    color: shellWindow ? Qt.rgba(shellWindow.surfaceQuiet.r, shellWindow.surfaceQuiet.g, shellWindow.surfaceQuiet.b, landingPage ? 0.68 : 0.8) : "#101820"
                     border.color: shellWindow
                         ? (landingPage
-                            ? Qt.rgba(shellWindow.borderSubtle.r, shellWindow.borderSubtle.g, shellWindow.borderSubtle.b, 0.9)
-                            : Qt.rgba(goldAccent.r, goldAccent.g, goldAccent.b, 0.72))
+                            ? Qt.rgba(shellWindow.borderSubtle.r, shellWindow.borderSubtle.g, shellWindow.borderSubtle.b, 0.54)
+                            : Qt.rgba(goldAccent.r, goldAccent.g, goldAccent.b, 0.48))
                         : "#c6ab7d"
                     border.width: 1
-                    implicitHeight: badgeRow.implicitHeight + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
+                    implicitHeight: badgeRow.implicitHeight + ((shellWindow ? shellWindow.scaled(8) : 8) * 2)
 
                     RowLayout {
                         id: badgeRow
@@ -170,8 +170,8 @@ Item {
 
                         Rectangle {
                             radius: shellWindow ? shellWindow.edgeRadius : 12
-                            Layout.preferredWidth: shellWindow ? shellWindow.scaled(48) : 48
-                            Layout.preferredHeight: shellWindow ? shellWindow.scaled(48) : 48
+                            Layout.preferredWidth: shellWindow ? shellWindow.scaled(42) : 42
+                            Layout.preferredHeight: shellWindow ? shellWindow.scaled(42) : 42
                             gradient: Gradient {
                                 GradientStop { position: 0.0; color: goldAccent }
                                 GradientStop { position: 1.0; color: iceAccent }
@@ -208,7 +208,7 @@ Item {
                                     color: landingPage ? iceAccent : goldAccent
                                     font.pixelSize: shellWindow ? shellWindow.captionSize : 10
                                     font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
-                                    font.letterSpacing: shellWindow ? shellWindow.scaled(0.8) : 0.8
+                                    font.letterSpacing: shellWindow ? shellWindow.scaled(0.9) : 0.9
                                     elide: Text.ElideRight
                                 }
 
@@ -227,7 +227,7 @@ Item {
                                 text: root.heroTitle
                                 color: shellWindow ? shellWindow.textStrong : "#f5efe4"
                                 font.pixelSize: shellWindow
-                                    ? (root.landingPage ? shellWindow.sectionTitleSize + shellWindow.scaled(1) : shellWindow.sectionTitleSize)
+                                    ? (root.landingPage ? shellWindow.sectionTitleSize + shellWindow.scaled(2) : shellWindow.sectionTitleSize)
                                     : 24
                                 font.weight: Font.DemiBold
                                 font.family: shellWindow ? shellWindow.displayFamily : "Noto Serif CJK SC"
@@ -278,12 +278,12 @@ Item {
                         Rectangle {
                             visible: root.showLandingMissionPlate
                             Layout.alignment: Qt.AlignTop
-                            Layout.preferredWidth: shellWindow ? shellWindow.scaled(216) : 216
+                                    Layout.preferredWidth: shellWindow ? shellWindow.scaled(204) : 204
                             radius: shellWindow ? shellWindow.edgeRadius + shellWindow.scaled(1) : 13
-                            color: shellWindow ? Qt.rgba(shellWindow.surfaceRaised.r, shellWindow.surfaceRaised.g, shellWindow.surfaceRaised.b, 0.94) : "#152029"
-                            border.color: shellWindow ? Qt.rgba(iceAccent.r, iceAccent.g, iceAccent.b, 0.54) : "#86c7d4"
+                            color: shellWindow ? Qt.rgba(shellWindow.surfaceRaised.r, shellWindow.surfaceRaised.g, shellWindow.surfaceRaised.b, 0.74) : "#152029"
+                            border.color: shellWindow ? Qt.rgba(iceAccent.r, iceAccent.g, iceAccent.b, 0.34) : "#86c7d4"
                             border.width: 1
-                            implicitHeight: landingMissionColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
+                            implicitHeight: landingMissionColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(8) : 8) * 2)
 
                             Rectangle {
                                 anchors.left: parent.left
@@ -301,7 +301,7 @@ Item {
                                     GradientStop { position: 0.84; color: Qt.rgba(iceAccent.r, iceAccent.g, iceAccent.b, 0.24) }
                                     GradientStop { position: 1.0; color: "transparent" }
                                 }
-                                opacity: 0.92
+                                opacity: 0.64
                             }
 
                             ColumnLayout {
@@ -326,7 +326,7 @@ Item {
 
                                     Rectangle {
                                         radius: shellWindow ? shellWindow.edgeRadius : 12
-                                        color: shellWindow ? shellWindow.toneFill("online") : "#0b2432"
+                                        color: shellWindow ? Qt.rgba(shellWindow.surfaceQuiet.r, shellWindow.surfaceQuiet.g, shellWindow.surfaceQuiet.b, 0.78) : "#0b2432"
                                         border.color: iceAccent
                                         border.width: 1
                                         implicitWidth: landingMissionPill.implicitWidth + ((shellWindow ? shellWindow.scaled(8) : 8) * 2)
@@ -521,8 +521,8 @@ Item {
         Rectangle {
             Layout.fillWidth: true
             radius: shellWindow ? shellWindow.cardRadius : 16
-            color: shellWindow ? Qt.rgba(shellWindow.surfaceQuiet.r, shellWindow.surfaceQuiet.g, shellWindow.surfaceQuiet.b, 0.94) : "#0f161d"
-            border.color: shellWindow ? Qt.rgba(shellWindow.borderSubtle.r, shellWindow.borderSubtle.g, shellWindow.borderSubtle.b, 0.88) : "#2a3944"
+            color: shellWindow ? Qt.rgba(shellWindow.surfaceQuiet.r, shellWindow.surfaceQuiet.g, shellWindow.surfaceQuiet.b, 0.74) : "#0f161d"
+            border.color: shellWindow ? Qt.rgba(shellWindow.borderSubtle.r, shellWindow.borderSubtle.g, shellWindow.borderSubtle.b, 0.48) : "#2a3944"
             border.width: 1
             implicitHeight: navFlow.implicitHeight + (root.navPadding * 2)
 
@@ -550,11 +550,11 @@ Item {
 
                         radius: shellWindow ? shellWindow.edgeRadius + shellWindow.scaled(1) : 13
                         color: selected
-                            ? Qt.rgba(shellWindow.surfaceRaised.r, shellWindow.surfaceRaised.g, shellWindow.surfaceRaised.b, 0.98)
-                            : Qt.rgba(shellWindow.surfaceRaised.r, shellWindow.surfaceRaised.g, shellWindow.surfaceRaised.b, 0.74)
+                            ? Qt.rgba(shellWindow.surfaceGlass.r, shellWindow.surfaceGlass.g, shellWindow.surfaceGlass.b, 0.64)
+                            : Qt.rgba(shellWindow.surfaceRaised.r, shellWindow.surfaceRaised.g, shellWindow.surfaceRaised.b, 0.36)
                         border.color: selected
-                            ? Qt.rgba(goldAccent.r, goldAccent.g, goldAccent.b, 0.92)
-                            : Qt.rgba(shellWindow.borderSubtle.r, shellWindow.borderSubtle.g, shellWindow.borderSubtle.b, 0.9)
+                            ? Qt.rgba(goldAccent.r, goldAccent.g, goldAccent.b, 0.56)
+                            : Qt.rgba(shellWindow.borderSubtle.r, shellWindow.borderSubtle.g, shellWindow.borderSubtle.b, 0.34)
                         border.width: 1
                         implicitWidth: root.stackNav
                             ? Math.max(shellWindow ? shellWindow.scaled(146) : 146, navColumn.implicitWidth + ((shellWindow ? shellWindow.scaled(18) : 18) * 2))
@@ -571,7 +571,7 @@ Item {
                                 GradientStop { position: 0.5; color: "#0cffffff" }
                                 GradientStop { position: 1.0; color: Qt.rgba(iceAccent.r, iceAccent.g, iceAccent.b, 0.12) }
                             }
-                            opacity: 0.8
+                            opacity: 0.46
                         }
 
                         Rectangle {
@@ -581,10 +581,10 @@ Item {
                             anchors.leftMargin: shellWindow ? shellWindow.scaled(6) : 6
                             anchors.topMargin: shellWindow ? shellWindow.scaled(8) : 8
                             anchors.bottomMargin: shellWindow ? shellWindow.scaled(8) : 8
-                            width: shellWindow ? shellWindow.scaled(selected ? 3 : 2) : (selected ? 3 : 2)
+                            width: shellWindow ? shellWindow.scaled(selected ? 2 : 1) : (selected ? 2 : 1)
                             radius: width / 2
                             color: selected ? goldAccent : shellWindow ? shellWindow.borderSubtle : "#2a3944"
-                            opacity: selected ? 0.94 : 0.68
+                            opacity: selected ? 0.74 : 0.4
                         }
 
                         ColumnLayout {
@@ -605,6 +605,7 @@ Item {
                                 color: selected ? goldAccent : shellWindow.textMuted
                                 font.pixelSize: shellWindow ? shellWindow.captionSize : 10
                                 font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                font.letterSpacing: shellWindow ? shellWindow.scaled(0.4) : 0.4
                             }
                         }
 

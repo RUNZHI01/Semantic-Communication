@@ -28,8 +28,8 @@ Item {
     property bool showInfoPanels: true
     property bool preferBottomBannerDock: false
 
-    readonly property int mapInset: shellWindow ? shellWindow.scaled(landingMode ? 12 : 20) : (landingMode ? 12 : 20)
-    readonly property int overlayMargin: shellWindow ? shellWindow.scaled(landingMode ? 10 : 16) : (landingMode ? 10 : 16)
+    readonly property int mapInset: shellWindow ? shellWindow.scaled(landingMode ? 10 : 18) : (landingMode ? 10 : 18)
+    readonly property int overlayMargin: shellWindow ? shellWindow.scaled(landingMode ? 11 : 16) : (landingMode ? 11 : 16)
     readonly property bool minimalBanner: landingMode && bannerEyebrow.length === 0
     readonly property bool landingMicroBadge: landingMode && minimalBanner
     readonly property int bannerPadding: shellWindow
@@ -42,10 +42,10 @@ Item {
         ? (shellWindow ? shellWindow.scaled(minimalBanner ? 8 : 10) : (minimalBanner ? 8 : 10))
         : 0
     readonly property int badgePadding: shellWindow ? shellWindow.scaled(landingMicroBadge ? 8 : 9) : (landingMicroBadge ? 8 : 9)
-    readonly property color oceanTop: landingMode ? "#173b52" : "#17304b"
-    readonly property color oceanBottom: landingMode ? "#060e15" : "#050d15"
-    readonly property color landFill: landingMode ? "#4f6f83" : "#53758f"
-    readonly property color landFillBright: landingMode ? "#6e90a4" : "#7598ae"
+    readonly property color oceanTop: landingMode ? "#204d67" : "#17304b"
+    readonly property color oceanBottom: landingMode ? "#0b1622" : "#050d15"
+    readonly property color landFill: landingMode ? "#5e8096" : "#53758f"
+    readonly property color landFillBright: landingMode ? "#88acc0" : "#7598ae"
     readonly property color coastlineColor: shellWindow ? Qt.lighter(shellWindow.accentCyan, 1.04) : "#8fe6ff"
     readonly property color gridMinor: shellWindow ? shellWindow.gridLine : "#123147"
     readonly property color gridMajor: shellWindow ? shellWindow.gridLineStrong : "#245b80"
@@ -54,13 +54,13 @@ Item {
     readonly property color markerColor: shellWindow ? shellWindow.accentCyan : "#8fe6ff"
     readonly property color emphasisColor: shellWindow ? shellWindow.accentAmber : "#ffbf55"
     readonly property color overlayCardColor: shellWindow
-        ? Qt.rgba(shellWindow.surfaceGlass.r, shellWindow.surfaceGlass.g, shellWindow.surfaceGlass.b, landingMode ? 0.72 : 0.9)
+        ? Qt.rgba(shellWindow.surfaceGlass.r, shellWindow.surfaceGlass.g, shellWindow.surfaceGlass.b, landingMode ? 0.52 : 0.9)
         : (landingMode ? "#b3122330" : "#d2142634")
     readonly property color overlayCardColorSoft: shellWindow
-        ? Qt.rgba(shellWindow.surfaceQuiet.r, shellWindow.surfaceQuiet.g, shellWindow.surfaceQuiet.b, landingMode ? 0.76 : 0.92)
+        ? Qt.rgba(shellWindow.surfaceQuiet.r, shellWindow.surfaceQuiet.g, shellWindow.surfaceQuiet.b, landingMode ? 0.42 : 0.92)
         : (landingMode ? "#8a09121a" : "#b8091219")
     readonly property color overlayCardColorDeep: shellWindow
-        ? Qt.rgba(shellWindow.shellExterior.r, shellWindow.shellExterior.g, shellWindow.shellExterior.b, landingMode ? 0.56 : 0.72)
+        ? Qt.rgba(shellWindow.shellExterior.r, shellWindow.shellExterior.g, shellWindow.shellExterior.b, landingMode ? 0.32 : 0.72)
         : "#8d040b11"
     readonly property bool hasCurrentPoint: isFinite(Number(currentPoint["longitude"])) && isFinite(Number(currentPoint["latitude"]))
     readonly property bool compactStage: width < (landingMode ? 760 : 880)
@@ -337,14 +337,14 @@ Item {
         smooth: true
         asynchronous: true
         mipmap: true
-        opacity: root.landingMode ? 0.92 : 0.76
+        opacity: root.landingMode ? 0.98 : 0.76
         onStatusChanged: mapCanvas.requestPaint()
     }
 
     Rectangle {
         anchors.fill: externalBackdropImage
         visible: externalBackdropImage.visible
-        color: root.landingMode ? "#22131d20" : "#4c091118"
+        color: root.landingMode ? "#121c2510" : "#4c091118"
     }
 
     Canvas {
@@ -383,8 +383,8 @@ Item {
 
             var ocean = ctx.createLinearGradient(0, 0, 0, canvasHeight)
             ocean.addColorStop(0.0, root.oceanTop)
-            ocean.addColorStop(0.34, root.landingMode ? "#1a3852" : "#11253a")
-            ocean.addColorStop(0.62, root.landingMode ? "#10263a" : "#0d1d2d")
+            ocean.addColorStop(0.34, root.landingMode ? "#28546d" : "#11253a")
+            ocean.addColorStop(0.62, root.landingMode ? "#173247" : "#0d1d2d")
             ocean.addColorStop(1.0, root.oceanBottom)
             ctx.fillStyle = ocean
             ctx.fillRect(0, 0, canvasWidth, canvasHeight)
@@ -393,8 +393,8 @@ Item {
             var beamCenterY = canvasHeight * 0.32
             var beamRadius = Math.max(1, canvasWidth * 0.55)
             var beam = ctx.createRadialGradient(beamCenterX, beamCenterY, 0, beamCenterX, beamCenterY, beamRadius)
-            beam.addColorStop(0.0, root.landingMode ? "rgba(120,216,255,0.12)" : "rgba(120,216,255,0.18)")
-            beam.addColorStop(0.52, root.landingMode ? "rgba(120,216,255,0.05)" : "rgba(120,216,255,0.07)")
+            beam.addColorStop(0.0, root.landingMode ? "rgba(120,216,255,0.1)" : "rgba(120,216,255,0.18)")
+            beam.addColorStop(0.52, root.landingMode ? "rgba(120,216,255,0.04)" : "rgba(120,216,255,0.07)")
             beam.addColorStop(1.0, "rgba(120,216,255,0.0)")
             ctx.fillStyle = beam
             ctx.fillRect(0, 0, canvasWidth, canvasHeight)
@@ -403,8 +403,8 @@ Item {
             var hazeCenterY = canvasHeight * 0.78
             var hazeRadius = Math.max(1, canvasWidth * 0.42)
             var haze = ctx.createRadialGradient(hazeCenterX, hazeCenterY, 0, hazeCenterX, hazeCenterY, hazeRadius)
-            haze.addColorStop(0.0, "rgba(240,185,124,0.12)")
-            haze.addColorStop(0.5, "rgba(240,185,124,0.04)")
+            haze.addColorStop(0.0, root.landingMode ? "rgba(231,201,142,0.09)" : "rgba(240,185,124,0.12)")
+            haze.addColorStop(0.5, root.landingMode ? "rgba(231,201,142,0.03)" : "rgba(240,185,124,0.04)")
             haze.addColorStop(1.0, "rgba(240,185,124,0.0)")
             ctx.fillStyle = haze
             ctx.fillRect(0, 0, canvasWidth, canvasHeight)
@@ -430,8 +430,8 @@ Item {
                 ctx.moveTo(root.mapInset, latitudeY)
                 ctx.lineTo(width - root.mapInset, latitudeY)
                 ctx.strokeStyle = latitude === 0
-                    ? (root.landingMode ? "rgba(156,210,255,0.44)" : "rgba(132,191,255,0.36)")
-                    : (root.landingMode ? "rgba(78,110,139,0.28)" : "rgba(68,98,126,0.24)")
+                    ? (root.landingMode ? "rgba(176,221,255,0.38)" : "rgba(132,191,255,0.36)")
+                    : (root.landingMode ? "rgba(88,122,151,0.22)" : "rgba(68,98,126,0.24)")
                 ctx.lineWidth = latitude === 0 ? 1.4 : 1.0
                 ctx.stroke()
             }
@@ -442,8 +442,8 @@ Item {
                 ctx.moveTo(longitudeX, root.mapInset)
                 ctx.lineTo(longitudeX, height - root.mapInset)
                 ctx.strokeStyle = longitude === 0
-                    ? (root.landingMode ? "rgba(156,210,255,0.44)" : "rgba(132,191,255,0.36)")
-                    : (root.landingMode ? "rgba(40,63,88,0.34)" : "rgba(31,49,69,0.32)")
+                    ? (root.landingMode ? "rgba(176,221,255,0.38)" : "rgba(132,191,255,0.36)")
+                    : (root.landingMode ? "rgba(48,76,102,0.26)" : "rgba(31,49,69,0.32)")
                 ctx.lineWidth = longitude === 0 ? 1.4 : 1.0
                 ctx.stroke()
             }
@@ -466,7 +466,7 @@ Item {
 
             ctx.beginPath()
             ctx.rect(root.mapInset, root.mapInset, root.plotWidth, root.plotHeight)
-            ctx.strokeStyle = root.landingMode ? "rgba(188,233,255,0.34)" : "rgba(172,236,255,0.28)"
+            ctx.strokeStyle = root.landingMode ? "rgba(188,233,255,0.28)" : "rgba(172,236,255,0.28)"
             ctx.lineWidth = 1
             ctx.stroke()
 
@@ -500,7 +500,7 @@ Item {
             GradientStop { position: 0.78; color: root.mapGlow }
             GradientStop { position: 1.0; color: "transparent" }
         }
-        opacity: 0.62
+        opacity: root.landingMode ? 0.46 : 0.62
     }
 
     Rectangle {
@@ -509,8 +509,8 @@ Item {
         anchors.top: parent.top
         height: parent.height * 0.2
         gradient: Gradient {
-            GradientStop { position: 0.0; color: root.landingMode ? "#3c07111a" : "#7a07111c" }
-            GradientStop { position: 0.4; color: root.landingMode ? "#16071118" : "#3207111c" }
+            GradientStop { position: 0.0; color: root.landingMode ? "#120d1312" : "#7a07111c" }
+            GradientStop { position: 0.4; color: root.landingMode ? "#080d1310" : "#3207111c" }
             GradientStop { position: 1.0; color: "#0007111c" }
         }
     }
@@ -522,8 +522,8 @@ Item {
         height: parent.height * 0.26
         gradient: Gradient {
             GradientStop { position: 0.0; color: "#0007111c" }
-            GradientStop { position: 0.4; color: root.landingMode ? "#12071118" : "#2407111c" }
-            GradientStop { position: 1.0; color: root.landingMode ? "#3c061018" : "#98061018" }
+            GradientStop { position: 0.4; color: root.landingMode ? "#080d1310" : "#2407111c" }
+            GradientStop { position: 1.0; color: root.landingMode ? "#140d1312" : "#98061018" }
         }
     }
 
@@ -536,13 +536,13 @@ Item {
         Rectangle {
             width: parent.width
             height: 1
-            color: Qt.rgba(root.mapGlow.r, root.mapGlow.g, root.mapGlow.b, root.landingMode ? 0.82 : 0.62)
+            color: Qt.rgba(root.mapGlow.r, root.mapGlow.g, root.mapGlow.b, root.landingMode ? 0.54 : 0.62)
         }
 
         Rectangle {
             width: 1
             height: parent.height
-            color: Qt.rgba(root.mapGlow.r, root.mapGlow.g, root.mapGlow.b, root.landingMode ? 0.82 : 0.62)
+            color: Qt.rgba(root.mapGlow.r, root.mapGlow.g, root.mapGlow.b, root.landingMode ? 0.54 : 0.62)
         }
     }
 
@@ -556,14 +556,14 @@ Item {
             anchors.right: parent.right
             width: parent.width
             height: 1
-            color: Qt.rgba(root.mapGlow.r, root.mapGlow.g, root.mapGlow.b, root.landingMode ? 0.82 : 0.62)
+            color: Qt.rgba(root.mapGlow.r, root.mapGlow.g, root.mapGlow.b, root.landingMode ? 0.54 : 0.62)
         }
 
         Rectangle {
             anchors.right: parent.right
             width: 1
             height: parent.height
-            color: Qt.rgba(root.mapGlow.r, root.mapGlow.g, root.mapGlow.b, root.landingMode ? 0.82 : 0.62)
+            color: Qt.rgba(root.mapGlow.r, root.mapGlow.g, root.mapGlow.b, root.landingMode ? 0.54 : 0.62)
         }
     }
 
@@ -577,14 +577,14 @@ Item {
             anchors.bottom: parent.bottom
             width: parent.width
             height: 1
-            color: Qt.rgba(root.mapGlow.r, root.mapGlow.g, root.mapGlow.b, root.landingMode ? 0.82 : 0.62)
+            color: Qt.rgba(root.mapGlow.r, root.mapGlow.g, root.mapGlow.b, root.landingMode ? 0.54 : 0.62)
         }
 
         Rectangle {
             anchors.bottom: parent.bottom
             width: 1
             height: parent.height
-            color: Qt.rgba(root.mapGlow.r, root.mapGlow.g, root.mapGlow.b, root.landingMode ? 0.82 : 0.62)
+            color: Qt.rgba(root.mapGlow.r, root.mapGlow.g, root.mapGlow.b, root.landingMode ? 0.54 : 0.62)
         }
     }
 
@@ -599,7 +599,7 @@ Item {
             anchors.bottom: parent.bottom
             width: parent.width
             height: 1
-            color: Qt.rgba(root.mapGlow.r, root.mapGlow.g, root.mapGlow.b, root.landingMode ? 0.82 : 0.62)
+            color: Qt.rgba(root.mapGlow.r, root.mapGlow.g, root.mapGlow.b, root.landingMode ? 0.54 : 0.62)
         }
 
         Rectangle {
@@ -607,7 +607,7 @@ Item {
             anchors.bottom: parent.bottom
             width: 1
             height: parent.height
-            color: Qt.rgba(root.mapGlow.r, root.mapGlow.g, root.mapGlow.b, root.landingMode ? 0.82 : 0.62)
+            color: Qt.rgba(root.mapGlow.r, root.mapGlow.g, root.mapGlow.b, root.landingMode ? 0.54 : 0.62)
         }
     }
 
@@ -816,7 +816,7 @@ Item {
             anchors.margins: 1
             radius: parent.radius - 1
             color: "transparent"
-            border.color: "#10ffffff"
+            border.color: "#08ffffff"
             border.width: 1
         }
 
@@ -836,7 +836,7 @@ Item {
                 GradientStop { position: 0.76; color: Qt.lighter(root.mapGlow, 1.12) }
                 GradientStop { position: 1.0; color: "transparent" }
             }
-            opacity: 0.82
+            opacity: 0.64
         }
 
         Rectangle {
@@ -903,7 +903,7 @@ Item {
                 text: root.bannerTitle
                 color: shellWindow ? shellWindow.textStrong : "#f5f9ff"
                 font.pixelSize: shellWindow
-                    ? shellWindow.bodyEmphasisSize + (root.minimalBanner ? shellWindow.scaled(1) : shellWindow.scaled(2))
+                    ? shellWindow.bodyEmphasisSize + (root.minimalBanner ? shellWindow.scaled(2) : shellWindow.scaled(3))
                     : (root.minimalBanner ? 16 : 18)
                 font.weight: Font.DemiBold
                 font.family: shellWindow ? shellWindow.displayFamily : "Noto Sans CJK SC"
@@ -917,7 +917,7 @@ Item {
                 width: parent.width
                 text: root.bannerText
                 color: shellWindow ? shellWindow.textSecondary : "#8fa9be"
-                font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 12
+                font.pixelSize: shellWindow ? shellWindow.captionSize + 2 : 12
                 font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
                 wrapMode: Text.WordWrap
                 maximumLineCount: root.landingMode ? 1 : (root.stackedBanner ? 2 : 1)
