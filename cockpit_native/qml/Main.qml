@@ -45,32 +45,32 @@ ApplicationWindow {
     readonly property string uiFamily: String(options["uiFontFamily"] || "Ubuntu Sans")
     readonly property string monoFamily: String(options["monoFontFamily"] || "Ubuntu Sans Mono")
 
-    readonly property color sceneTop: themeColor("sceneTop", "#040c16")
-    readonly property color sceneMid: themeColor("sceneMid", "#081521")
-    readonly property color sceneBottom: themeColor("sceneBottom", "#0a111b")
-    readonly property color haloCool: themeColor("haloCool", "#12314d")
-    readonly property color haloWarm: themeColor("haloWarm", "#16314a")
-    readonly property color shellExterior: themeColor("shellExterior", "#07111a")
-    readonly property color shellInterior: themeColor("shellInterior", "#0b1722")
-    readonly property color surfaceRaised: themeColor("surfaceRaised", "#101d2a")
-    readonly property color surfaceQuiet: themeColor("surfaceQuiet", "#09131d")
-    readonly property color surfaceGlass: themeColor("surfaceGlass", "#132131")
-    readonly property color borderSubtle: themeColor("borderSubtle", "#203245")
-    readonly property color borderStrong: themeColor("borderStrong", "#3d6f92")
-    readonly property color accentIce: themeColor("accentIce", "#74dcff")
-    readonly property color accentGold: themeColor("accentGold", "#f2bf67")
-    readonly property color accentMint: themeColor("accentMint", "#73e5b0")
-    readonly property color accentRose: themeColor("accentRose", "#ff7f8c")
+    readonly property color sceneTop: themeColor("sceneTop", "#0b1623")
+    readonly property color sceneMid: themeColor("sceneMid", "#122234")
+    readonly property color sceneBottom: themeColor("sceneBottom", "#0f1824")
+    readonly property color haloCool: themeColor("haloCool", "#275674")
+    readonly property color haloWarm: themeColor("haloWarm", "#36586c")
+    readonly property color shellExterior: themeColor("shellExterior", "#101b27")
+    readonly property color shellInterior: themeColor("shellInterior", "#162433")
+    readonly property color surfaceRaised: themeColor("surfaceRaised", "#1a2a3a")
+    readonly property color surfaceQuiet: themeColor("surfaceQuiet", "#111c28")
+    readonly property color surfaceGlass: themeColor("surfaceGlass", "#223448")
+    readonly property color borderSubtle: themeColor("borderSubtle", "#355369")
+    readonly property color borderStrong: themeColor("borderStrong", "#7da8c6")
+    readonly property color accentIce: themeColor("accentIce", "#96e7ff")
+    readonly property color accentGold: themeColor("accentGold", "#e7c98e")
+    readonly property color accentMint: themeColor("accentMint", "#8ce3c0")
+    readonly property color accentRose: themeColor("accentRose", "#ff95a0")
     readonly property color textStrong: themeColor("textStrong", "#f4fbff")
-    readonly property color textPrimary: themeColor("textPrimary", "#d4e0ec")
-    readonly property color textSecondary: themeColor("textSecondary", "#8ea5bb")
-    readonly property color textMuted: themeColor("textMuted", "#5f768b")
-    readonly property color dataLine: themeColor("dataLine", "#112232")
-    readonly property color dataLineStrong: themeColor("dataLineStrong", "#1d3950")
-    readonly property color panelHighlight: themeColor("panelHighlight", "#17344b")
-    readonly property color panelGlowSoft: themeColor("panelGlowSoft", "#52dcff")
-    readonly property color canopyTop: themeColor("canopyTop", "#102131")
-    readonly property color canopyBottom: themeColor("canopyBottom", "#09111a")
+    readonly property color textPrimary: themeColor("textPrimary", "#d7e5f0")
+    readonly property color textSecondary: themeColor("textSecondary", "#9fb4c5")
+    readonly property color textMuted: themeColor("textMuted", "#72879a")
+    readonly property color dataLine: themeColor("dataLine", "#1b3448")
+    readonly property color dataLineStrong: themeColor("dataLineStrong", "#29516b")
+    readonly property color panelHighlight: themeColor("panelHighlight", "#294a62")
+    readonly property color panelGlowSoft: themeColor("panelGlowSoft", "#85ddff")
+    readonly property color canopyTop: themeColor("canopyTop", "#1a3043")
+    readonly property color canopyBottom: themeColor("canopyBottom", "#101925")
 
     readonly property color panelColor: surfaceRaised
     readonly property color panelColorRaised: surfaceGlass
@@ -84,9 +84,9 @@ ApplicationWindow {
     readonly property color accentRed: accentRose
     readonly property color gridLine: dataLine
     readonly property color gridLineStrong: dataLineStrong
-    readonly property color shellDockTop: themeColor("shellDockTop", "#12283d")
-    readonly property color shellDockMid: themeColor("shellDockMid", "#0c1724")
-    readonly property color shellDockBottom: themeColor("shellDockBottom", "#08111a")
+    readonly property color shellDockTop: themeColor("shellDockTop", "#21394f")
+    readonly property color shellDockMid: themeColor("shellDockMid", "#182637")
+    readonly property color shellDockBottom: themeColor("shellDockBottom", "#101b27")
     readonly property color panelGlowStrong: panelGlowSoft
     readonly property color panelTraceStrong: borderStrong
 
@@ -107,14 +107,14 @@ ApplicationWindow {
     readonly property bool compactLayout: !wideLayout && !mediumLayout
     readonly property bool shortViewport: viewportHeight < 780
 
-    readonly property int outerPadding: scaled(compactLayout ? 12 : 16)
-    readonly property int shellPadding: scaled(compactLayout ? 14 : 18)
-    readonly property int zoneGap: scaled(compactLayout ? 10 : 14)
+    readonly property int outerPadding: scaled(compactLayout ? 10 : 14)
+    readonly property int shellPadding: scaled(compactLayout ? 12 : 16)
+    readonly property int zoneGap: scaled(compactLayout ? 9 : 12)
     readonly property int compactGap: scaled(7)
     readonly property int panelPadding: scaled(compactLayout ? 12 : 16)
     readonly property int cardPadding: scaled(compactLayout ? 10 : 12)
-    readonly property int panelRadius: scaled(24)
-    readonly property int cardRadius: scaled(18)
+    readonly property int panelRadius: scaled(22)
+    readonly property int cardRadius: scaled(16)
     readonly property int edgeRadius: scaled(13)
     readonly property int headerTitleSize: scaled(compactLayout ? 27 : 32)
     readonly property int sectionTitleSize: scaled(compactLayout ? 19 : 24)
@@ -300,10 +300,10 @@ ApplicationWindow {
         { "label": "链路档位", "value": compactMessage(linkProfileValue, compactLayout ? 14 : 20), "tone": "neutral" }
     ]
     readonly property bool landingStageMinimalChrome: true
-    readonly property bool landingStageTopBadgesVisible: true
-    readonly property int landingStageBannerChipLimit: compactLayout ? 1 : 2
-    readonly property int landingStageBannerTextLimit: compactLayout ? 44 : 56
-    readonly property int landingStageBannerTitleLimit: compactLayout ? 24 : 34
+    readonly property bool landingStageTopBadgesVisible: false
+    readonly property int landingStageBannerChipLimit: 1
+    readonly property int landingStageBannerTextLimit: compactLayout ? 34 : 42
+    readonly property int landingStageBannerTitleLimit: compactLayout ? 22 : 28
     readonly property int flightStageBannerChipLimit: 3
 
     readonly property var systemPageChipModel: [
@@ -432,8 +432,8 @@ ApplicationWindow {
     Component.onCompleted: {
         var availableWidth = Math.max(minimumWidth, Number(metrics["width"] || designWidth))
         var availableHeight = Math.max(minimumHeight, Number(metrics["height"] || designHeight))
-        width = Math.max(minimumWidth, Math.min(Math.round(availableWidth * 0.96), scaled(1720)))
-        height = Math.max(minimumHeight, Math.min(Math.round(availableHeight * 0.96), scaled(980)))
+        width = Math.max(minimumWidth, Math.min(Math.round(availableWidth * 0.97), scaled(1760)))
+        height = Math.max(minimumHeight, Math.min(availableHeight, scaled(1020)))
     }
 
     Rectangle {

@@ -37,8 +37,8 @@ Item {
     property string tileRoot: ""
     property string tileFormat: "png"
 
-    readonly property int mapInset: shellWindow ? shellWindow.scaled(landingMode ? 12 : 20) : (landingMode ? 12 : 20)
-    readonly property int overlayMargin: shellWindow ? shellWindow.scaled(landingMode ? 10 : 16) : (landingMode ? 10 : 16)
+    readonly property int mapInset: shellWindow ? shellWindow.scaled(landingMode ? 10 : 18) : (landingMode ? 10 : 18)
+    readonly property int overlayMargin: shellWindow ? shellWindow.scaled(landingMode ? 11 : 16) : (landingMode ? 11 : 16)
     readonly property bool compactStage: width < 780
     readonly property bool stackedBanner: width < (landingMode ? 620 : 780)
     readonly property bool bannerDockedBottom: preferBottomBannerDock
@@ -76,8 +76,8 @@ Item {
     readonly property string trackNodeLabel: trackCoordinates.length > 0
         ? String(trackCoordinates.length) + " 节点"
         : "等待航迹"
-    readonly property color mapWaterTop: landingMode ? "#16324b" : "#132a40"
-    readonly property color mapWaterBottom: landingMode ? "#071019" : "#050d15"
+    readonly property color mapWaterTop: landingMode ? "#204d67" : "#132a40"
+    readonly property color mapWaterBottom: landingMode ? "#0b1622" : "#050d15"
     readonly property color gridGlow: shellWindow ? shellWindow.panelGlowStrong : "#74d7ff"
     readonly property color trackColor: shellWindow ? shellWindow.accentCyan : "#8fe6ff"
     readonly property color emphasisColor: shellWindow ? shellWindow.accentAmber : "#ffbf55"
@@ -273,7 +273,7 @@ Item {
             bearing: 0
             tilt: 0
             copyrightsVisible: true
-            opacity: landingMode ? (root.backdropActive ? 0.18 : 0.54) : (root.backdropActive ? 0.6 : 0.76)
+            opacity: landingMode ? (root.backdropActive ? 0.26 : 0.62) : (root.backdropActive ? 0.6 : 0.76)
 
             MapPolyline {
                 visible: root.trackCoordinates.length > 1
@@ -389,21 +389,21 @@ Item {
             smooth: true
             asynchronous: true
             mipmap: true
-            opacity: root.landingMode ? 0.74 : 0.24
+            opacity: root.landingMode ? 0.82 : 0.24
         }
 
         Rectangle {
             anchors.fill: mapBackdrop
             visible: mapBackdrop.visible
-            color: root.landingMode ? "#161c2618" : "#0d18212a"
+            color: root.landingMode ? "#0d162010" : "#0d18212a"
         }
 
         Rectangle {
             anchors.fill: parent
             gradient: Gradient {
-                GradientStop { position: 0.0; color: root.landingMode ? "#24071016" : "#28071118" }
+                GradientStop { position: 0.0; color: root.landingMode ? "#100d1310" : "#28071118" }
                 GradientStop { position: 0.42; color: "#11182322" }
-                GradientStop { position: 1.0; color: root.landingMode ? "#28071116" : "#32071118" }
+                GradientStop { position: 1.0; color: root.landingMode ? "#120d1310" : "#32071118" }
             }
         }
 
@@ -413,8 +413,8 @@ Item {
             anchors.top: parent.top
             height: parent.height * 0.28
             gradient: Gradient {
-                GradientStop { position: 0.0; color: root.landingMode ? "#34051217" : "#7805121b" }
-                GradientStop { position: 0.48; color: root.landingMode ? "#12081216" : "#2208121b" }
+                GradientStop { position: 0.0; color: root.landingMode ? "#120d1310" : "#7805121b" }
+                GradientStop { position: 0.48; color: root.landingMode ? "#080d130c" : "#2208121b" }
                 GradientStop { position: 1.0; color: "#0008121b" }
             }
         }
@@ -426,8 +426,8 @@ Item {
             height: parent.height * 0.34
             gradient: Gradient {
                 GradientStop { position: 0.0; color: "#0008121b" }
-                GradientStop { position: 0.42; color: root.landingMode ? "#10081215" : "#2408121b" }
-                GradientStop { position: 1.0; color: root.landingMode ? "#36081116" : "#7608111b" }
+                GradientStop { position: 0.42; color: root.landingMode ? "#080d130c" : "#2408121b" }
+                GradientStop { position: 1.0; color: root.landingMode ? "#140d1310" : "#7608111b" }
             }
         }
 
@@ -520,7 +520,7 @@ Item {
         minimalChrome: root.landingMode
         showAccentRail: !root.landingMode
         fillColor: shellWindow
-            ? Qt.rgba(shellWindow.surfaceGlass.r, shellWindow.surfaceGlass.g, shellWindow.surfaceGlass.b, root.landingMode ? 0.76 : 0.92)
+            ? Qt.rgba(shellWindow.surfaceGlass.r, shellWindow.surfaceGlass.g, shellWindow.surfaceGlass.b, root.landingMode ? 0.54 : 0.92)
             : "#c0142634"
         visible: root.bannerTitle.length > 0 || root.bannerText.length > 0 || (root.bannerChips && root.bannerChips.length > 0)
 
@@ -538,8 +538,11 @@ Item {
             Layout.fillWidth: true
             text: root.bannerTitle
             color: shellWindow ? shellWindow.textStrong : "#f6f1e7"
-            font.pixelSize: shellWindow ? shellWindow.sectionTitleSize : 24
+            font.pixelSize: shellWindow
+                ? (root.landingMode ? shellWindow.sectionTitleSize + shellWindow.scaled(1) : shellWindow.sectionTitleSize)
+                : 24
             font.family: shellWindow ? shellWindow.displayFamily : "Noto Serif CJK SC"
+            font.weight: root.landingMode ? Font.DemiBold : Font.Normal
             wrapMode: Text.Wrap
         }
 
@@ -547,7 +550,7 @@ Item {
             Layout.fillWidth: true
             text: root.bannerText
             color: shellWindow ? shellWindow.textPrimary : "#dbe2e6"
-            font.pixelSize: shellWindow ? shellWindow.bodySize : 13
+            font.pixelSize: shellWindow ? (root.landingMode ? shellWindow.bodySize + 1 : shellWindow.bodySize) : 13
             font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
             wrapMode: Text.Wrap
         }
