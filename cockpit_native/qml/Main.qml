@@ -44,48 +44,48 @@ ApplicationWindow {
     readonly property string uiFamily: "Noto Sans CJK SC"
     readonly property string monoFamily: "JetBrains Mono"
 
-    readonly property color sceneTop: "#050608"
-    readonly property color sceneMid: "#0a0f14"
-    readonly property color sceneBottom: "#12181f"
-    readonly property color haloCool: "#18303a"
-    readonly property color haloWarm: "#4f3d29"
-    readonly property color shellExterior: "#0b1117"
-    readonly property color shellInterior: "#11181f"
-    readonly property color surfaceRaised: "#18212a"
-    readonly property color surfaceQuiet: "#0f161d"
-    readonly property color surfaceGlass: "#1c2731"
-    readonly property color borderSubtle: "#2a3944"
-    readonly property color borderStrong: "#b4946c"
-    readonly property color accentIce: "#86c7d4"
-    readonly property color accentGold: "#c6ab7d"
-    readonly property color accentMint: "#93bea5"
-    readonly property color accentRose: "#c88478"
-    readonly property color textStrong: "#f5efe4"
-    readonly property color textPrimary: "#d7dde2"
-    readonly property color textSecondary: "#9aa8b1"
-    readonly property color textMuted: "#6f7f8a"
-    readonly property color dataLine: "#1b2730"
-    readonly property color dataLineStrong: "#33434f"
-    readonly property color panelHighlight: "#22303b"
-    readonly property color panelGlowSoft: "#86c7d4"
-    readonly property color canopyTop: "#1b252e"
-    readonly property color canopyBottom: "#0b1015"
+    readonly property color sceneTop: "#05080c"
+    readonly property color sceneMid: "#09111a"
+    readonly property color sceneBottom: "#0f171f"
+    readonly property color haloCool: "#183846"
+    readonly property color haloWarm: "#5c4227"
+    readonly property color shellExterior: "#0a1117"
+    readonly property color shellInterior: "#121b23"
+    readonly property color surfaceRaised: "#17222c"
+    readonly property color surfaceQuiet: "#0d151c"
+    readonly property color surfaceGlass: "#1b2833"
+    readonly property color borderSubtle: "#31424f"
+    readonly property color borderStrong: "#c3a174"
+    readonly property color accentIce: "#8dd8e4"
+    readonly property color accentGold: "#d4b283"
+    readonly property color accentMint: "#9fd1b0"
+    readonly property color accentRose: "#d18a80"
+    readonly property color textStrong: "#f6f1e7"
+    readonly property color textPrimary: "#dbe2e6"
+    readonly property color textSecondary: "#9aaab4"
+    readonly property color textMuted: "#6d7d88"
+    readonly property color dataLine: "#1b2a33"
+    readonly property color dataLineStrong: "#344651"
+    readonly property color panelHighlight: "#243542"
+    readonly property color panelGlowSoft: "#8dd8e4"
+    readonly property color canopyTop: "#1a252f"
+    readonly property color canopyBottom: "#0a0f14"
 
     readonly property color panelColor: surfaceRaised
     readonly property color panelColorRaised: surfaceGlass
     readonly property color panelColorSoft: surfaceQuiet
     readonly property color cardColor: surfaceRaised
     readonly property color borderSoft: borderSubtle
-    readonly property color accentBlue: "#9cb4c1"
+    readonly property color accentBlue: "#a7bdca"
     readonly property color accentCyan: accentIce
     readonly property color accentAmber: accentGold
     readonly property color accentGreen: accentMint
     readonly property color accentRed: accentRose
     readonly property color gridLine: dataLine
     readonly property color gridLineStrong: dataLineStrong
-    readonly property color shellDockTop: "#202d37"
-    readonly property color shellDockMid: "#141d25"
-    readonly property color shellDockBottom: "#0b1117"
+    readonly property color shellDockTop: "#22323d"
+    readonly property color shellDockMid: "#141e27"
+    readonly property color shellDockBottom: "#0b1118"
     readonly property color panelGlowStrong: panelGlowSoft
     readonly property color panelTraceStrong: borderStrong
 
@@ -106,17 +106,17 @@ ApplicationWindow {
     readonly property bool compactLayout: !wideLayout && !mediumLayout
     readonly property bool shortViewport: viewportHeight < 780
 
-    readonly property int outerPadding: scaled(compactLayout ? 14 : 18)
-    readonly property int shellPadding: scaled(compactLayout ? 16 : 22)
-    readonly property int zoneGap: scaled(compactLayout ? 12 : 16)
-    readonly property int compactGap: scaled(8)
-    readonly property int panelPadding: scaled(compactLayout ? 14 : 18)
-    readonly property int cardPadding: scaled(compactLayout ? 11 : 14)
-    readonly property int panelRadius: scaled(22)
-    readonly property int cardRadius: scaled(16)
-    readonly property int edgeRadius: scaled(12)
-    readonly property int headerTitleSize: scaled(compactLayout ? 28 : 34)
-    readonly property int sectionTitleSize: scaled(compactLayout ? 20 : 26)
+    readonly property int outerPadding: scaled(compactLayout ? 12 : 16)
+    readonly property int shellPadding: scaled(compactLayout ? 14 : 18)
+    readonly property int zoneGap: scaled(compactLayout ? 10 : 14)
+    readonly property int compactGap: scaled(7)
+    readonly property int panelPadding: scaled(compactLayout ? 12 : 16)
+    readonly property int cardPadding: scaled(compactLayout ? 10 : 12)
+    readonly property int panelRadius: scaled(24)
+    readonly property int cardRadius: scaled(18)
+    readonly property int edgeRadius: scaled(13)
+    readonly property int headerTitleSize: scaled(compactLayout ? 27 : 32)
+    readonly property int sectionTitleSize: scaled(compactLayout ? 19 : 24)
     readonly property int bodyEmphasisSize: scaled(compactLayout ? 14 : 15)
     readonly property int bodySize: scaled(13)
     readonly property int captionSize: scaled(10)

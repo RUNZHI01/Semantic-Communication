@@ -29,26 +29,31 @@ Item {
     )
     readonly property bool landingWide: shellWindow ? shellWindow.viewportWidth >= shellWindow.scaled(1320) : width >= 1320
     readonly property bool landingShortHeight: shellWindow ? shellWindow.shortViewport : height < 780
-    readonly property int railWidth: shellWindow ? shellWindow.scaled(landingWide ? 264 : 236) : 264
-    readonly property var landingStatusList: shellWindow ? shellWindow.previewItems(statusRows, 3) : []
+    readonly property int railWidth: shellWindow ? shellWindow.scaled(landingWide ? 236 : 220) : 236
+    readonly property var landingStatusList: shellWindow ? shellWindow.previewItems(statusRows, landingWide ? 2 : 3) : []
     readonly property var landingScenarioList: shellWindow ? shellWindow.previewItems(scenarioList, 1) : []
     readonly property var timingPreviewList: shellWindow ? shellWindow.previewItems(stageTimingList, shellWindow.compactLayout ? 3 : 4) : []
     readonly property var evidencePreviewList: shellWindow ? shellWindow.previewItems(evidenceList, 4) : []
     readonly property var scenarioDeckList: shellWindow ? shellWindow.previewItems(scenarioList, shellWindow.wideLayout ? 4 : 3) : []
     readonly property var landingJumpList: shellWindow ? DataUtils.arrayOrEmpty(shellWindow.landingJumpModel) : []
     readonly property var landingWeakMetricList: shellWindow ? DataUtils.arrayOrEmpty(shellWindow.landingWeakMetricModel) : []
-    readonly property var actionPreviewList: shellWindow ? shellWindow.previewItems(actionList, landingWide ? 3 : 2) : []
+    readonly property var landingTelemetryPreviewList: shellWindow
+        ? shellWindow.previewItems(shellWindow.landingTelemetryModel, landingWide ? 4 : 2)
+        : []
+    readonly property var actionPreviewList: shellWindow ? shellWindow.previewItems(actionList, 2) : []
     readonly property int landingTelemetryColumns: landingWide ? 4 : ((shellWindow ? shellWindow.viewportWidth : width) >= (shellWindow ? shellWindow.scaled(720) : 720) ? 2 : 1)
     readonly property int landingJumpColumns: (shellWindow ? shellWindow.viewportWidth : width) >= (shellWindow ? shellWindow.scaled(720) : 720) ? 2 : 1
-    readonly property int landingActionColumns: landingWide ? 3 : ((shellWindow ? shellWindow.viewportWidth : width) >= (shellWindow ? shellWindow.scaled(720) : 720) ? 2 : 1)
-    readonly property string landingBriefText: compact(shellWindow ? shellWindow.landingSummaryText : "", landingShortHeight ? 110 : 160)
+    readonly property int landingActionColumns: landingWide ? 2 : ((shellWindow ? shellWindow.viewportWidth : width) >= (shellWindow ? shellWindow.scaled(720) : 720) ? 2 : 1)
+    readonly property string landingBriefText: compact(shellWindow ? shellWindow.landingSummaryText : "", landingShortHeight ? 88 : 120)
     readonly property string landingTruthBrief: compact(shellWindow ? shellWindow.truthNoteValue : "", landingShortHeight ? 96 : 132)
     readonly property string landingLaunchBrief: compact(shellWindow ? shellWindow.launchHint : "--", landingShortHeight ? 40 : 56)
     readonly property string recommendedScenarioBrief: compact(
         String(recommendedScenario["summary"] || recommendedScenario["operator_note"] || "延续仓库现有弱网推荐剧本。"),
-        landingShortHeight ? 90 : 120
+        landingShortHeight ? 72 : 96
     )
-    readonly property string landingStageSubtitle: "世界地图保持主舞台，系统回注、弱网档位与执行入口收束到支撑轨。"
+    readonly property int landingWideStageHeight: shellWindow ? shellWindow.scaled(landingShortHeight ? 292 : 316) : 316
+    readonly property int landingStackedStageHeight: shellWindow ? shellWindow.scaled(landingShortHeight ? 258 : 286) : 286
+    readonly property string landingStageSubtitle: "世界地图保持主墙位，系统回注、弱网策略与执行门控全部退到支撑轨。"
     readonly property string mapCtaLabel: landingShortHeight ? "飞行合同" : "进入飞行合同"
     readonly property string dockCtaLabel: landingShortHeight ? "执行坞站" : "进入执行坞站"
 
@@ -379,12 +384,14 @@ Item {
             color: shellWindow ? shellWindow.surfaceQuiet : "#0f161d"
             border.color: Qt.rgba(metricAccent.r, metricAccent.g, metricAccent.b, 0.68)
             border.width: 1
-            implicitHeight: readoutColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
+            implicitHeight: readoutColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(8) : 8) * 2)
 
             Rectangle {
                 anchors.left: parent.left
                 anchors.top: parent.top
                 anchors.bottom: parent.bottom
+                anchors.topMargin: shellWindow ? shellWindow.scaled(7) : 7
+                anchors.bottomMargin: shellWindow ? shellWindow.scaled(7) : 7
                 width: shellWindow ? shellWindow.scaled(3) : 3
                 radius: width / 2
                 color: metricAccent
@@ -405,8 +412,11 @@ Item {
             ColumnLayout {
                 id: readoutColumn
                 anchors.fill: parent
-                anchors.margins: shellWindow ? shellWindow.scaled(10) : 10
-                spacing: shellWindow ? shellWindow.scaled(2) : 2
+                anchors.leftMargin: shellWindow ? shellWindow.scaled(14) : 14
+                anchors.rightMargin: shellWindow ? shellWindow.scaled(8) : 8
+                anchors.topMargin: shellWindow ? shellWindow.scaled(8) : 8
+                anchors.bottomMargin: shellWindow ? shellWindow.scaled(8) : 8
+                spacing: shellWindow ? shellWindow.scaled(1) : 1
 
                 Text {
                     text: String(metricData["label"] || "--")
@@ -420,10 +430,12 @@ Item {
                     Layout.fillWidth: true
                     text: String(metricData["value"] || "--")
                     color: shellWindow ? shellWindow.textStrong : "#f5efe4"
-                    font.pixelSize: shellWindow ? shellWindow.bodyEmphasisSize + shellWindow.scaled(1) : 15
+                    font.pixelSize: shellWindow ? shellWindow.bodyEmphasisSize : 14
                     font.weight: Font.DemiBold
                     font.family: shellWindow ? shellWindow.displayFamily : "Noto Serif CJK SC"
                     wrapMode: Text.WordWrap
+                    maximumLineCount: 2
+                    elide: Text.ElideRight
                 }
 
                 Text {
@@ -431,10 +443,10 @@ Item {
                     Layout.fillWidth: true
                     text: String(metricData["detail"] || "")
                     color: shellWindow ? shellWindow.textSecondary : "#9aa8b1"
-                    font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
+                    font.pixelSize: shellWindow ? shellWindow.captionSize : 10
                     font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
                     wrapMode: Text.WordWrap
-                    maximumLineCount: 2
+                    maximumLineCount: 1
                     elide: Text.ElideRight
                 }
             }
@@ -1294,7 +1306,7 @@ Item {
                                             font.pixelSize: shellWindow ? shellWindow.bodySize : 13
                                             font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
                                             wrapMode: Text.WordWrap
-                                            maximumLineCount: 3
+                                            maximumLineCount: 2
                                             elide: Text.ElideRight
                                         }
 
@@ -1385,7 +1397,7 @@ Item {
 
                             Item {
                                 Layout.fillWidth: true
-                                implicitHeight: shellWindow ? shellWindow.scaled(root.landingShortHeight ? 380 : 420) : 420
+                                implicitHeight: root.landingWideStageHeight
 
                                 WorldMapStage {
                                     anchors.fill: parent
@@ -1466,7 +1478,7 @@ Item {
                                 rowSpacing: shellWindow ? shellWindow.compactGap : 8
 
                                 Repeater {
-                                    model: shellWindow ? shellWindow.landingTelemetryModel : []
+                                    model: root.landingTelemetryPreviewList
                                     delegate: landingTelemetryReadoutDelegate
                                 }
                             }
@@ -1516,7 +1528,7 @@ Item {
                                             font.pixelSize: shellWindow ? shellWindow.bodySize : 13
                                             font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
                                             wrapMode: Text.WordWrap
-                                            maximumLineCount: 4
+                                            maximumLineCount: 3
                                             elide: Text.ElideRight
                                         }
                                     }
@@ -1719,7 +1731,7 @@ Item {
 
                         Item {
                             Layout.fillWidth: true
-                            implicitHeight: shellWindow ? shellWindow.scaled(root.landingShortHeight ? 312 : 348) : 348
+                            implicitHeight: root.landingStackedStageHeight
 
                             WorldMapStage {
                                 anchors.fill: parent
@@ -1800,7 +1812,7 @@ Item {
                             rowSpacing: shellWindow ? shellWindow.compactGap : 8
 
                             Repeater {
-                                model: shellWindow ? shellWindow.landingTelemetryModel : []
+                                model: root.landingTelemetryPreviewList
                                 delegate: landingTelemetryReadoutDelegate
                             }
                         }
@@ -1849,7 +1861,7 @@ Item {
                                         font.pixelSize: shellWindow ? shellWindow.bodySize : 13
                                         font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
                                         wrapMode: Text.WordWrap
-                                        maximumLineCount: 3
+                                        maximumLineCount: 2
                                         elide: Text.ElideRight
                                     }
                                 }
@@ -1928,7 +1940,7 @@ Item {
                                         font.pixelSize: shellWindow ? shellWindow.bodySize : 13
                                         font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
                                         wrapMode: Text.WordWrap
-                                        maximumLineCount: 4
+                                        maximumLineCount: 3
                                         elide: Text.ElideRight
                                     }
                                 }

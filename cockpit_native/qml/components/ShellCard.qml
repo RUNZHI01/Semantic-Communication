@@ -24,8 +24,8 @@ Item {
     Rectangle {
         anchors.fill: parent
         radius: root.radius
-        color: root.fillColor
-        border.color: root.borderColor
+        color: Qt.rgba(root.fillColor.r, root.fillColor.g, root.fillColor.b, 0.96)
+        border.color: Qt.rgba(root.borderColor.r, root.borderColor.g, root.borderColor.b, 0.88)
         border.width: 1
     }
 
@@ -33,40 +33,59 @@ Item {
         anchors.fill: parent
         radius: root.radius
         gradient: Gradient {
-            GradientStop { position: 0.0; color: "#12ffffff" }
-            GradientStop { position: 0.26; color: "#05ffffff" }
+            GradientStop { position: 0.0; color: "#14ffffff" }
+            GradientStop { position: 0.24; color: "#06ffffff" }
             GradientStop { position: 1.0; color: "#00000000" }
         }
-        opacity: 0.52
+        opacity: 0.48
+    }
+
+    Rectangle {
+        anchors.left: parent.left
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        anchors.leftMargin: shellWindow ? shellWindow.scaled(6) : 6
+        anchors.topMargin: shellWindow ? shellWindow.scaled(10) : 10
+        anchors.bottomMargin: shellWindow ? shellWindow.scaled(10) : 10
+        width: shellWindow ? shellWindow.scaled(3) : 3
+        radius: width / 2
+        gradient: Gradient {
+            orientation: Gradient.Vertical
+            GradientStop { position: 0.0; color: "transparent" }
+            GradientStop { position: 0.14; color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.22) }
+            GradientStop { position: 0.48; color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.9) }
+            GradientStop { position: 0.84; color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.24) }
+            GradientStop { position: 1.0; color: "transparent" }
+        }
     }
 
     Rectangle {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
-        anchors.leftMargin: shellWindow ? shellWindow.scaled(5) : 5
-        anchors.rightMargin: shellWindow ? shellWindow.scaled(5) : 5
-        anchors.topMargin: shellWindow ? shellWindow.scaled(4) : 4
-        height: shellWindow ? shellWindow.scaled(3) : 3
+        height: shellWindow ? shellWindow.scaled(2) : 2
+        anchors.leftMargin: shellWindow ? shellWindow.scaled(10) : 10
+        anchors.rightMargin: shellWindow ? shellWindow.scaled(10) : 10
         radius: height / 2
         gradient: Gradient {
             orientation: Gradient.Horizontal
             GradientStop { position: 0.0; color: "transparent" }
-            GradientStop { position: 0.18; color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.22) }
-            GradientStop { position: 0.52; color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.88) }
-            GradientStop { position: 0.84; color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.22) }
+            GradientStop { position: 0.16; color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.14) }
+            GradientStop { position: 0.5; color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.76) }
+            GradientStop { position: 0.84; color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.14) }
             GradientStop { position: 1.0; color: "transparent" }
         }
+        opacity: 0.88
     }
 
     Rectangle {
-        width: parent.width * 0.46
-        height: parent.height * 0.72
+        width: parent.width * 0.42
+        height: parent.height * 0.68
         radius: width / 2
         color: root.accentColor
-        opacity: 0.05
-        x: -width * 0.2
-        y: -height * 0.34
+        opacity: 0.045
+        x: -width * 0.18
+        y: -height * 0.28
     }
 
     Rectangle {
@@ -74,7 +93,7 @@ Item {
         anchors.margins: 1
         radius: parent.radius - 1
         color: "transparent"
-        border.color: "#10ffffff"
+        border.color: "#0cffffff"
         border.width: 1
     }
 
@@ -100,7 +119,7 @@ Item {
                     color: root.accentColor
                     font.pixelSize: shellWindow ? shellWindow.eyebrowSize : 10
                     font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
-                    font.letterSpacing: shellWindow ? shellWindow.scaled(1) : 1
+                    font.letterSpacing: shellWindow ? shellWindow.scaled(0.9) : 0.9
                 }
 
                 Text {
@@ -119,9 +138,11 @@ Item {
                     Layout.fillWidth: true
                     text: root.subtitle
                     color: shellWindow ? shellWindow.textSecondary : "#9aa8b1"
-                    font.pixelSize: shellWindow ? shellWindow.bodySize : 13
+                    font.pixelSize: shellWindow ? shellWindow.captionSize + 2 : 12
                     font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
                     wrapMode: Text.WordWrap
+                    maximumLineCount: 3
+                    elide: Text.ElideRight
                 }
             }
         }
