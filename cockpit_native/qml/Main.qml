@@ -2541,53 +2541,186 @@ ApplicationWindow {
                         }
                     }
 
-                    GridLayout {
+                    Rectangle {
+                        id: dashboardGridFrame
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        columns: root.dashboardColumns
-                        columnSpacing: root.zoneGap
-                        rowSpacing: root.zoneGap
+                        radius: root.cardRadius
+                        gradient: Gradient {
+                            GradientStop { position: 0.0; color: "#0d2134" }
+                            GradientStop { position: 0.2; color: "#0a1b2c" }
+                            GradientStop { position: 0.58; color: "#081522" }
+                            GradientStop { position: 1.0; color: "#06101a" }
+                        }
+                        border.color: "#1d5b87"
+                        border.width: 1
+                        implicitHeight: dashboardPanelGrid.implicitHeight + (root.scaled(12) * 2)
 
-                        TacticalView {
-                            Layout.row: 0
-                            Layout.column: root.wideLayout ? root.wideLeftSpan : 0
-                            Layout.columnSpan: root.wideLayout ? root.wideCenterSpan : (root.mediumLayout ? 2 : 1)
-                            Layout.fillWidth: true
-                            Layout.fillHeight: root.wideLayout
-                            Layout.minimumHeight: root.scaled(root.wideLayout ? 520 : 400)
-                            shellWindow: root
-                            panelData: root.centerPanelData
+                        Rectangle {
+                            anchors.fill: parent
+                            anchors.margins: 1
+                            radius: parent.radius - 1
+                            color: "transparent"
+                            border.color: "#123650"
+                            border.width: 1
+                            opacity: 0.84
                         }
 
-                        StatusPanel {
-                            Layout.row: root.wideLayout ? 0 : 1
-                            Layout.column: 0
-                            Layout.columnSpan: root.wideLayout ? root.wideLeftSpan : 1
-                            Layout.fillWidth: true
-                            Layout.fillHeight: root.wideLayout
-                            Layout.minimumHeight: root.scaled(root.wideLayout ? 500 : 300)
-                            shellWindow: root
-                            panelData: root.leftPanelData
+                        Rectangle {
+                            anchors.fill: parent
+                            anchors.margins: root.scaled(10)
+                            radius: Math.max(2, parent.radius - root.scaled(10))
+                            color: "transparent"
+                            border.color: "#133652"
+                            border.width: 1
+                            opacity: 0.48
                         }
 
-                        WeakNetworkPanel {
-                            Layout.row: root.wideLayout ? 0 : (root.mediumLayout ? 1 : 2)
-                            Layout.column: root.wideLayout ? (root.wideLeftSpan + root.wideCenterSpan) : (root.mediumLayout ? 1 : 0)
-                            Layout.columnSpan: root.wideLayout ? root.wideRightSpan : 1
-                            Layout.fillWidth: true
-                            Layout.fillHeight: root.wideLayout
-                            Layout.minimumHeight: root.scaled(root.wideLayout ? 500 : 340)
-                            shellWindow: root
-                            panelData: root.rightPanelData
+                        Rectangle {
+                            visible: !root.compactLayout
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            anchors.top: parent.top
+                            anchors.bottom: parent.bottom
+                            width: Math.min(parent.width * 0.44, root.scaled(680))
+                            radius: root.cardRadius
+                            gradient: Gradient {
+                                GradientStop { position: 0.0; color: "#1b5d8e16" }
+                                GradientStop { position: 0.18; color: "#15406132" }
+                                GradientStop { position: 0.52; color: "#0a182624" }
+                                GradientStop { position: 1.0; color: "#06101a00" }
+                            }
+                            border.color: "#18496d"
+                            border.width: 1
+                            opacity: 0.24
                         }
 
-                        ActionStrip {
-                            Layout.row: root.wideLayout ? 1 : (root.mediumLayout ? 2 : 3)
-                            Layout.column: 0
-                            Layout.columnSpan: root.wideLayout ? root.dashboardColumns : (root.mediumLayout ? 2 : 1)
-                            Layout.fillWidth: true
-                            shellWindow: root
-                            panelData: root.bottomPanelData
+                        Rectangle {
+                            visible: !root.compactLayout
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            anchors.top: parent.top
+                            anchors.bottom: parent.bottom
+                            width: 1
+                            color: root.panelTraceStrong
+                            opacity: 0.18
+                        }
+
+                        Rectangle {
+                            visible: root.wideLayout
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            height: 1
+                            gradient: Gradient {
+                                orientation: Gradient.Horizontal
+                                GradientStop { position: 0.0; color: "transparent" }
+                                GradientStop { position: 0.16; color: root.panelTraceSoft }
+                                GradientStop { position: 0.5; color: root.panelTraceStrong }
+                                GradientStop { position: 0.84; color: root.panelTraceSoft }
+                                GradientStop { position: 1.0; color: "transparent" }
+                            }
+                            opacity: 0.12
+                        }
+
+                        Rectangle {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            anchors.top: parent.top
+                            anchors.topMargin: root.scaled(10)
+                            width: Math.min(parent.width * 0.32, root.scaled(320))
+                            height: root.scaled(4)
+                            radius: height / 2
+                            gradient: Gradient {
+                                orientation: Gradient.Horizontal
+                                GradientStop { position: 0.0; color: "transparent" }
+                                GradientStop { position: 0.2; color: root.panelTraceSoft }
+                                GradientStop { position: 0.5; color: root.panelGlowStrong }
+                                GradientStop { position: 0.8; color: root.panelTraceSoft }
+                                GradientStop { position: 1.0; color: "transparent" }
+                            }
+                            opacity: 0.78
+                        }
+
+                        Rectangle {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            anchors.bottom: parent.bottom
+                            anchors.bottomMargin: root.scaled(10)
+                            width: Math.min(parent.width * 0.28, root.scaled(280))
+                            height: root.scaled(4)
+                            radius: height / 2
+                            gradient: Gradient {
+                                orientation: Gradient.Horizontal
+                                GradientStop { position: 0.0; color: "transparent" }
+                                GradientStop { position: 0.2; color: root.panelTraceSoft }
+                                GradientStop { position: 0.5; color: root.panelGlowStrong }
+                                GradientStop { position: 0.8; color: root.panelTraceSoft }
+                                GradientStop { position: 1.0; color: "transparent" }
+                            }
+                            opacity: 0.54
+                        }
+
+                        Rectangle {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            height: root.scaled(3)
+                            gradient: Gradient {
+                                GradientStop { position: 0.0; color: "transparent" }
+                                GradientStop { position: 0.18; color: root.accentBlue }
+                                GradientStop { position: 0.5; color: root.panelGlowStrong }
+                                GradientStop { position: 0.82; color: root.accentCyan }
+                                GradientStop { position: 1.0; color: "transparent" }
+                            }
+                            opacity: 0.84
+                        }
+
+                        GridLayout {
+                            id: dashboardPanelGrid
+                            anchors.fill: parent
+                            anchors.margins: root.scaled(12)
+                            columns: root.dashboardColumns
+                            columnSpacing: root.zoneGap
+                            rowSpacing: root.zoneGap
+
+                            TacticalView {
+                                Layout.row: 0
+                                Layout.column: root.wideLayout ? root.wideLeftSpan : 0
+                                Layout.columnSpan: root.wideLayout ? root.wideCenterSpan : (root.mediumLayout ? 2 : 1)
+                                Layout.fillWidth: true
+                                Layout.fillHeight: root.wideLayout
+                                Layout.minimumHeight: root.scaled(root.wideLayout ? 520 : 400)
+                                shellWindow: root
+                                panelData: root.centerPanelData
+                            }
+
+                            StatusPanel {
+                                Layout.row: root.wideLayout ? 0 : 1
+                                Layout.column: 0
+                                Layout.columnSpan: root.wideLayout ? root.wideLeftSpan : 1
+                                Layout.fillWidth: true
+                                Layout.fillHeight: root.wideLayout
+                                Layout.minimumHeight: root.scaled(root.wideLayout ? 500 : 300)
+                                shellWindow: root
+                                panelData: root.leftPanelData
+                            }
+
+                            WeakNetworkPanel {
+                                Layout.row: root.wideLayout ? 0 : (root.mediumLayout ? 1 : 2)
+                                Layout.column: root.wideLayout ? (root.wideLeftSpan + root.wideCenterSpan) : (root.mediumLayout ? 1 : 0)
+                                Layout.columnSpan: root.wideLayout ? root.wideRightSpan : 1
+                                Layout.fillWidth: true
+                                Layout.fillHeight: root.wideLayout
+                                Layout.minimumHeight: root.scaled(root.wideLayout ? 500 : 340)
+                                shellWindow: root
+                                panelData: root.rightPanelData
+                            }
+
+                            ActionStrip {
+                                Layout.row: root.wideLayout ? 1 : (root.mediumLayout ? 2 : 3)
+                                Layout.column: 0
+                                Layout.columnSpan: root.wideLayout ? root.dashboardColumns : (root.mediumLayout ? 2 : 1)
+                                Layout.fillWidth: true
+                                shellWindow: root
+                                panelData: root.bottomPanelData
+                            }
                         }
                     }
                 }
