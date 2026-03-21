@@ -9,40 +9,33 @@ Item {
 
     readonly property bool landingPage: currentIndex === 0
     readonly property var currentPageEntry: shellWindow ? shellWindow.navigationModel[currentIndex] : ({})
-    readonly property int heroPadding: shellWindow
-        ? shellWindow.scaled(landingPage ? (shellWindow.compactLayout ? 10 : 12) : (shellWindow.compactLayout ? 12 : 14))
-        : 14
-    readonly property int navPadding: shellWindow ? shellWindow.scaled(landingPage ? 7 : 9) : 9
+    readonly property bool compactTopRail: shellWindow ? shellWindow.viewportWidth < 1260 : width < 1260
+    readonly property bool stackNav: shellWindow ? shellWindow.viewportWidth < 1120 : width < 1120
+    readonly property bool stackStatusRail: shellWindow ? shellWindow.viewportWidth < 940 : width < 940
+    readonly property int topRailPadding: shellWindow ? shellWindow.scaled(landingPage ? 10 : 13) : (landingPage ? 10 : 13)
+    readonly property int navPadding: shellWindow ? shellWindow.scaled(landingPage ? 7 : 8) : (landingPage ? 7 : 8)
+    readonly property color goldAccent: shellWindow ? shellWindow.accentGold : "#c6ab7d"
+    readonly property color iceAccent: shellWindow ? shellWindow.accentIce : "#86c7d4"
     readonly property string leadText: shellWindow
         ? (landingPage
             ? shellWindow.currentPageSummary
-            : (String(currentPageEntry["label"] || "") + " / " + shellWindow.currentPageSummary))
+            : (String(currentPageEntry["label"] || shellWindow.topTitle) + " / " + shellWindow.currentPageSummary))
         : ""
     readonly property string heroEyebrow: landingPage
         ? "TVM-FEITENG PI / PHASE 6 NATIVE COCKPIT"
         : (String(currentPageEntry["english"] || "COCKPIT PAGE") + " / ACTIVE PAGE")
     readonly property string heroTitle: shellWindow
-        ? (landingPage ? shellWindow.topTitle : (String(currentPageEntry["label"] || shellWindow.topTitle)))
+        ? (landingPage ? shellWindow.topTitle : String(currentPageEntry["label"] || shellWindow.topTitle))
         : "飞腾原生座舱"
     readonly property string heroSubtitle: shellWindow
         ? (landingPage
             ? shellWindow.topSubtitle
-            : shellWindow.currentPageSummary + " · 继续使用仓库回注字段与安全渲染入口。")
+            : shellWindow.currentPageSummary + " · 保持仓库回注字段与软件安全回退。")
         : ""
-    readonly property string consoleTitle: landingPage ? "PRIMARY STAGE / LIVE POSTURE" : "MAP-FIRST SHELL / NAV CONTEXT"
-    readonly property string consoleSummary: landingPage
-        ? "压缩顶部壳体，让全球地图回到第一视觉层；系统、弱网与执行入口收束成同一条命令轨。"
-        : "保持相同的壳体语言与回退策略，让每个页面仍像同一个原生产品。"
     readonly property string pageIndicator: shellWindow
         ? ("0" + String(currentIndex + 1)).slice(-2) + " / " + ("0" + String(shellWindow.navigationModel.length)).slice(-2)
         : "01 / 05"
-    readonly property var landingHeroModel: shellWindow ? [
-        { "label": "任务代号", "value": shellWindow.missionCallSignValue, "tone": "neutral" },
-        { "label": "数据源", "value": shellWindow.activeSourceLabel, "tone": "online" },
-        { "label": "推荐剧本", "value": shellWindow.recommendedScenarioId, "tone": "warning" }
-    ] : []
-    readonly property var heroChipModel: landingPage ? landingHeroModel : (shellWindow ? shellWindow.topStatusModel : [])
-    readonly property var consoleModel: landingPage ? (shellWindow ? shellWindow.topStatusModel : []) : landingHeroModel
+    readonly property var commandRailModel: shellWindow ? shellWindow.topStatusModel : []
 
     signal pageRequested(int index)
 
@@ -55,283 +48,325 @@ Item {
 
         Rectangle {
             Layout.fillWidth: true
-            radius: shellWindow ? shellWindow.panelRadius + shellWindow.scaled(2) : 24
-            color: shellWindow ? Qt.rgba(shellWindow.surfaceGlass.r, shellWindow.surfaceGlass.g, shellWindow.surfaceGlass.b, 0.98) : "#1c2731"
-            border.color: shellWindow ? Qt.rgba(shellWindow.borderStrong.r, shellWindow.borderStrong.g, shellWindow.borderStrong.b, 0.86) : "#b4946c"
+            radius: shellWindow ? shellWindow.cardRadius + shellWindow.scaled(2) : 18
+            color: shellWindow ? Qt.rgba(shellWindow.surfaceGlass.r, shellWindow.surfaceGlass.g, shellWindow.surfaceGlass.b, 0.98) : "#1d2832"
+            border.color: shellWindow ? Qt.rgba(goldAccent.r, goldAccent.g, goldAccent.b, 0.84) : "#b4946c"
             border.width: 1
-            implicitHeight: heroGrid.implicitHeight + (root.heroPadding * 2)
+            implicitHeight: topRailGrid.implicitHeight + (root.topRailPadding * 2)
 
             Rectangle {
                 anchors.fill: parent
                 radius: parent.radius
                 gradient: Gradient {
-                    GradientStop { position: 0.0; color: "#12ffffff" }
-                    GradientStop { position: 0.24; color: "#05ffffff" }
-                    GradientStop { position: 1.0; color: "#00000000" }
+                    GradientStop { position: 0.0; color: shellWindow ? shellWindow.shellDockTop : "#22323d" }
+                    GradientStop { position: 0.24; color: shellWindow ? shellWindow.shellDockMid : "#15202a" }
+                    GradientStop { position: 1.0; color: shellWindow ? shellWindow.shellDockBottom : "#0a1118" }
                 }
-                opacity: 0.46
-            }
-
-            Rectangle {
-                width: parent.width * 0.32
-                height: parent.height * 0.9
-                radius: width / 2
-                color: shellWindow ? shellWindow.accentGold : "#c6ab7d"
-                opacity: 0.08
-                x: -width * 0.16
-                y: -height * 0.2
+                opacity: 0.96
             }
 
             Rectangle {
                 width: parent.width * 0.26
-                height: parent.height * 0.84
+                height: parent.height * 1.08
                 radius: width / 2
-                color: shellWindow ? shellWindow.accentIce : "#86c7d4"
+                color: goldAccent
+                opacity: 0.08
+                x: -width * 0.18
+                y: -height * 0.18
+            }
+
+            Rectangle {
+                width: parent.width * 0.18
+                height: parent.height * 0.86
+                radius: width / 2
+                color: iceAccent
                 opacity: 0.06
-                x: parent.width - (width * 0.72)
-                y: -height * 0.22
+                x: parent.width - (width * 0.68)
+                y: -height * 0.16
             }
 
             Rectangle {
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.top: parent.top
-                anchors.leftMargin: shellWindow ? shellWindow.scaled(12) : 12
-                anchors.rightMargin: shellWindow ? shellWindow.scaled(12) : 12
+                anchors.leftMargin: shellWindow ? shellWindow.scaled(10) : 10
+                anchors.rightMargin: shellWindow ? shellWindow.scaled(10) : 10
                 height: shellWindow ? shellWindow.scaled(2) : 2
-                radius: height / 2
                 gradient: Gradient {
                     orientation: Gradient.Horizontal
                     GradientStop { position: 0.0; color: "transparent" }
-                    GradientStop { position: 0.18; color: Qt.rgba(shellWindow.accentGold.r, shellWindow.accentGold.g, shellWindow.accentGold.b, 0.16) }
-                    GradientStop { position: 0.48; color: Qt.rgba(shellWindow.accentGold.r, shellWindow.accentGold.g, shellWindow.accentGold.b, 0.82) }
-                    GradientStop { position: 0.78; color: Qt.rgba(shellWindow.accentIce.r, shellWindow.accentIce.g, shellWindow.accentIce.b, 0.22) }
+                    GradientStop { position: 0.18; color: Qt.rgba(goldAccent.r, goldAccent.g, goldAccent.b, 0.18) }
+                    GradientStop { position: 0.48; color: Qt.rgba(goldAccent.r, goldAccent.g, goldAccent.b, 0.84) }
+                    GradientStop { position: 0.82; color: Qt.rgba(iceAccent.r, iceAccent.g, iceAccent.b, 0.28) }
                     GradientStop { position: 1.0; color: "transparent" }
                 }
+                opacity: 0.9
             }
 
             GridLayout {
-                id: heroGrid
+                id: topRailGrid
                 anchors.fill: parent
-                anchors.margins: root.heroPadding
-                columns: shellWindow && shellWindow.viewportWidth < shellWindow.scaled(1120) ? 1 : 2
+                anchors.margins: root.topRailPadding
+                columns: root.landingPage ? 1 : (root.compactTopRail ? 1 : 3)
                 columnSpacing: shellWindow ? shellWindow.zoneGap : 12
                 rowSpacing: shellWindow ? shellWindow.compactGap : 8
 
-                ColumnLayout {
+                Rectangle {
                     Layout.fillWidth: true
-                    spacing: shellWindow ? shellWindow.scaled(5) : 5
+                    radius: shellWindow ? shellWindow.edgeRadius + shellWindow.scaled(1) : 13
+                    color: shellWindow ? Qt.rgba(shellWindow.surfaceQuiet.r, shellWindow.surfaceQuiet.g, shellWindow.surfaceQuiet.b, 0.88) : "#101820"
+                    border.color: shellWindow ? Qt.rgba(goldAccent.r, goldAccent.g, goldAccent.b, 0.72) : "#c6ab7d"
+                    border.width: 1
+                    implicitHeight: badgeRow.implicitHeight + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
 
                     RowLayout {
-                        Layout.fillWidth: true
+                        id: badgeRow
+                        anchors.fill: parent
+                        anchors.margins: shellWindow ? shellWindow.scaled(10) : 10
                         spacing: shellWindow ? shellWindow.compactGap : 8
-
-                        Text {
-                            Layout.fillWidth: true
-                            text: root.heroEyebrow
-                            color: shellWindow ? shellWindow.accentGold : "#c6ab7d"
-                            font.pixelSize: shellWindow ? shellWindow.eyebrowSize : 10
-                            font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
-                            font.letterSpacing: shellWindow ? shellWindow.scaled(0.9) : 0.9
-                            elide: Text.ElideRight
-                        }
 
                         Rectangle {
                             radius: shellWindow ? shellWindow.edgeRadius : 12
-                            color: shellWindow ? Qt.rgba(shellWindow.surfaceQuiet.r, shellWindow.surfaceQuiet.g, shellWindow.surfaceQuiet.b, 0.84) : "#101820"
-                            border.color: shellWindow ? Qt.rgba(shellWindow.accentGold.r, shellWindow.accentGold.g, shellWindow.accentGold.b, 0.74) : "#c6ab7d"
-                            border.width: 1
-                            implicitWidth: pageIndicatorText.implicitWidth + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
-                            implicitHeight: pageIndicatorText.implicitHeight + ((shellWindow ? shellWindow.scaled(5) : 5) * 2)
-
-                            Text {
-                                id: pageIndicatorText
-                                anchors.centerIn: parent
-                                text: root.pageIndicator
-                                color: shellWindow ? shellWindow.textStrong : "#f5efe4"
-                                font.pixelSize: shellWindow ? shellWindow.captionSize : 10
-                                font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
-                                font.letterSpacing: shellWindow ? shellWindow.scaled(0.7) : 0.7
-                            }
-                        }
-                    }
-
-                    Text {
-                        Layout.fillWidth: true
-                        text: root.heroTitle
-                        color: shellWindow ? shellWindow.textStrong : "#f5efe4"
-                        font.pixelSize: shellWindow
-                            ? (root.landingPage
-                                ? shellWindow.sectionTitleSize + shellWindow.scaled(shellWindow.compactLayout ? 3 : 5)
-                                : shellWindow.headerTitleSize)
-                            : 32
-                        font.weight: Font.DemiBold
-                        font.family: shellWindow ? shellWindow.displayFamily : "Noto Serif CJK SC"
-                        font.letterSpacing: shellWindow ? shellWindow.scaled(0.22) : 0.22
-                        wrapMode: Text.WordWrap
-                    }
-
-                    Text {
-                        Layout.fillWidth: true
-                        text: root.heroSubtitle
-                        color: shellWindow ? shellWindow.textSecondary : "#9aa8b1"
-                        font.pixelSize: shellWindow ? shellWindow.captionSize + 2 : 12
-                        font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
-                        wrapMode: Text.WordWrap
-                        maximumLineCount: root.landingPage ? 1 : 2
-                        elide: Text.ElideRight
-                    }
-
-                    Flow {
-                        Layout.fillWidth: true
-                        spacing: shellWindow ? shellWindow.compactGap : 8
-
-                        Repeater {
-                            model: root.heroChipModel
-
-                            delegate: ToneChip {
-                                shellWindow: root.shellWindow
-                                label: modelData["label"]
-                                value: modelData["value"]
-                                tone: modelData["tone"]
-                                prominent: root.landingPage
-                            }
-                        }
-                    }
-                }
-
-                InsetPanel {
-                    Layout.fillWidth: true
-                    shellWindow: root.shellWindow
-                    accentColor: root.landingPage && shellWindow ? shellWindow.accentIce : (shellWindow ? shellWindow.accentGold : "#c6ab7d")
-                    fillColor: shellWindow ? shellWindow.surfaceQuiet : "#101820"
-                    prominent: root.landingPage
-
-                    ColumnLayout {
-                        Layout.fillWidth: true
-                        spacing: shellWindow ? shellWindow.compactGap : 8
-
-                        RowLayout {
-                            Layout.fillWidth: true
-                            spacing: shellWindow ? shellWindow.compactGap : 8
-
-                            ColumnLayout {
-                                Layout.fillWidth: true
-                                spacing: shellWindow ? shellWindow.scaled(1) : 1
-
-                                Text {
-                                    text: root.consoleTitle
-                                    color: shellWindow ? shellWindow.accentIce : "#86c7d4"
-                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 10
-                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
-                                    font.letterSpacing: shellWindow ? shellWindow.scaled(0.8) : 0.8
-                                }
-
-                                Text {
-                                    Layout.fillWidth: true
-                                    text: root.leadText
-                                    color: shellWindow ? shellWindow.textStrong : "#f5efe4"
-                                    font.pixelSize: shellWindow ? shellWindow.bodyEmphasisSize : 14
-                                    font.weight: Font.DemiBold
-                                    font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
-                                    wrapMode: Text.WordWrap
-                                    maximumLineCount: 2
-                                    elide: Text.ElideRight
-                                }
+                            Layout.preferredWidth: shellWindow ? shellWindow.scaled(48) : 48
+                            Layout.preferredHeight: shellWindow ? shellWindow.scaled(48) : 48
+                            gradient: Gradient {
+                                GradientStop { position: 0.0; color: goldAccent }
+                                GradientStop { position: 1.0; color: iceAccent }
                             }
 
                             Rectangle {
-                                radius: shellWindow ? shellWindow.edgeRadius : 12
-                                color: shellWindow ? Qt.rgba(shellWindow.surfaceRaised.r, shellWindow.surfaceRaised.g, shellWindow.surfaceRaised.b, 0.9) : "#152029"
-                                border.color: shellWindow ? Qt.rgba(shellWindow.accentGold.r, shellWindow.accentGold.g, shellWindow.accentGold.b, 0.76) : "#c6ab7d"
-                                border.width: 1
-                                implicitWidth: consolePillText.implicitWidth + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
-                                implicitHeight: consolePillText.implicitHeight + ((shellWindow ? shellWindow.scaled(6) : 6) * 2)
+                                anchors.fill: parent
+                                anchors.margins: 1
+                                radius: parent.radius - 1
+                                color: shellWindow ? shellWindow.surfaceRaised : "#152029"
+                            }
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "FP"
+                                color: shellWindow ? shellWindow.textStrong : "#f5efe4"
+                                font.pixelSize: shellWindow ? shellWindow.bodyEmphasisSize + shellWindow.scaled(2) : 16
+                                font.weight: Font.DemiBold
+                                font.family: shellWindow ? shellWindow.displayFamily : "Noto Serif CJK SC"
+                            }
+                        }
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: shellWindow ? shellWindow.scaled(2) : 2
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: shellWindow ? shellWindow.compactGap : 8
 
                                 Text {
-                                    id: consolePillText
-                                    anchors.centerIn: parent
-                                    text: root.landingPage ? "MAP FIRST" : "UNIFIED SHELL"
+                                    Layout.fillWidth: true
+                                    text: root.heroEyebrow
+                                    color: goldAccent
+                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                    font.letterSpacing: shellWindow ? shellWindow.scaled(0.8) : 0.8
+                                    elide: Text.ElideRight
+                                }
+
+                                Text {
+                                    text: root.pageIndicator
                                     color: shellWindow ? shellWindow.textStrong : "#f5efe4"
                                     font.pixelSize: shellWindow ? shellWindow.captionSize : 10
                                     font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
                                     font.letterSpacing: shellWindow ? shellWindow.scaled(0.7) : 0.7
                                 }
                             }
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: root.heroTitle
+                                color: shellWindow ? shellWindow.textStrong : "#f5efe4"
+                                font.pixelSize: shellWindow
+                                    ? (root.landingPage ? shellWindow.sectionTitleSize + shellWindow.scaled(2) : shellWindow.sectionTitleSize)
+                                    : 24
+                                font.weight: Font.DemiBold
+                                font.family: shellWindow ? shellWindow.displayFamily : "Noto Serif CJK SC"
+                                elide: Text.ElideRight
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: root.heroSubtitle
+                                color: shellWindow ? shellWindow.textSecondary : "#9aa8b1"
+                                font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
+                                font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                maximumLineCount: root.landingPage ? 1 : 2
+                                elide: Text.ElideRight
+                            }
+
+                            Text {
+                                visible: root.landingPage && root.leadText.length > 0
+                                Layout.fillWidth: true
+                                text: root.leadText
+                                color: shellWindow ? shellWindow.textStrong : "#f5efe4"
+                                font.pixelSize: shellWindow ? shellWindow.bodySize : 13
+                                font.weight: Font.DemiBold
+                                font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                wrapMode: Text.WordWrap
+                                maximumLineCount: 2
+                                elide: Text.ElideRight
+                            }
+
+                            Flow {
+                                visible: root.landingPage && root.commandRailModel.length > 0
+                                Layout.fillWidth: true
+                                spacing: shellWindow ? shellWindow.compactGap : 8
+
+                                Repeater {
+                                    model: root.commandRailModel
+
+                                    delegate: ToneChip {
+                                        shellWindow: root.shellWindow
+                                        label: String(modelData["label"] || "--")
+                                        value: String(modelData["value"] || "--")
+                                        tone: String(modelData["tone"] || "neutral")
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    visible: !root.landingPage
+                    Layout.fillWidth: true
+                    radius: shellWindow ? shellWindow.edgeRadius + shellWindow.scaled(1) : 13
+                    color: shellWindow ? Qt.rgba(shellWindow.surfaceQuiet.r, shellWindow.surfaceQuiet.g, shellWindow.surfaceQuiet.b, 0.78) : "#101820"
+                    border.color: shellWindow ? Qt.rgba(shellWindow.borderSubtle.r, shellWindow.borderSubtle.g, shellWindow.borderSubtle.b, 0.84) : "#2a3944"
+                    border.width: 1
+                    implicitHeight: summaryColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
+
+                    ColumnLayout {
+                        id: summaryColumn
+                        anchors.fill: parent
+                        anchors.margins: shellWindow ? shellWindow.scaled(10) : 10
+                        spacing: shellWindow ? shellWindow.scaled(4) : 4
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: shellWindow ? shellWindow.compactGap : 8
+
+                            Text {
+                                text: root.landingPage ? "PRIMARY COMMAND SHELL" : "ACTIVE PAGE SUMMARY"
+                                color: iceAccent
+                                font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                font.letterSpacing: shellWindow ? shellWindow.scaled(0.7) : 0.7
+                            }
+
+                            Rectangle {
+                                Layout.alignment: Qt.AlignVCenter
+                                radius: shellWindow ? shellWindow.edgeRadius : 12
+                                color: shellWindow ? shellWindow.toneFill(root.landingPage ? "online" : "neutral") : "#102033"
+                                border.color: shellWindow ? shellWindow.toneColor(root.landingPage ? "online" : "neutral") : "#86c7d4"
+                                border.width: 1
+                                implicitWidth: summaryPill.implicitWidth + ((shellWindow ? shellWindow.scaled(8) : 8) * 2)
+                                implicitHeight: summaryPill.implicitHeight + ((shellWindow ? shellWindow.scaled(4) : 4) * 2)
+
+                                Text {
+                                    id: summaryPill
+                                    anchors.centerIn: parent
+                                    text: root.landingPage ? "MAP-FIRST" : "UNIFIED NAV"
+                                    color: shellWindow ? shellWindow.textStrong : "#f5efe4"
+                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                }
+                            }
                         }
 
                         Text {
                             Layout.fillWidth: true
-                            text: root.consoleSummary
+                            text: root.leadText
+                            color: shellWindow ? shellWindow.textStrong : "#f5efe4"
+                            font.pixelSize: shellWindow ? shellWindow.bodyEmphasisSize : 14
+                            font.weight: Font.DemiBold
+                            font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                            wrapMode: Text.WordWrap
+                            maximumLineCount: root.landingPage ? 2 : 3
+                            elide: Text.ElideRight
+                        }
+
+                        Text {
+                            Layout.fillWidth: true
+                            text: root.landingPage
+                                ? "借用 cluster 的壳体比例和 QDashBoard 的顶部命令带，让地图主舞台重新成为第一视觉层。"
+                                : "延续相同的命令带与导航逻辑，页面切换仍保持同一个原生壳体语言。"
                             color: shellWindow ? shellWindow.textSecondary : "#9aa8b1"
                             font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
                             font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
                             wrapMode: Text.WordWrap
-                            maximumLineCount: root.landingPage ? 1 : 2
+                            maximumLineCount: 2
                             elide: Text.ElideRight
                         }
+                    }
+                }
 
-                        GridLayout {
+                GridLayout {
+                    visible: !root.landingPage
+                    Layout.fillWidth: true
+                    columns: root.stackStatusRail ? 1 : 2
+                    columnSpacing: shellWindow ? shellWindow.compactGap : 8
+                    rowSpacing: shellWindow ? shellWindow.compactGap : 8
+
+                    Repeater {
+                        model: root.commandRailModel
+
+                        delegate: Rectangle {
+                            readonly property string tone: String(modelData["tone"] || "neutral")
+                            readonly property color accent: shellWindow ? shellWindow.toneColor(tone) : "#86c7d4"
+
                             Layout.fillWidth: true
-                            columns: root.consoleModel.length >= 4 ? 2 : Math.max(1, root.consoleModel.length)
-                            columnSpacing: shellWindow ? shellWindow.compactGap : 8
-                            rowSpacing: shellWindow ? shellWindow.compactGap : 8
+                            radius: shellWindow ? shellWindow.edgeRadius : 12
+                            color: shellWindow ? Qt.rgba(shellWindow.surfaceRaised.r, shellWindow.surfaceRaised.g, shellWindow.surfaceRaised.b, 0.86) : "#152029"
+                            border.color: Qt.rgba(accent.r, accent.g, accent.b, 0.58)
+                            border.width: 1
+                            implicitHeight: statusColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(8) : 8) * 2)
 
-                            Repeater {
-                                model: root.consoleModel
+                            Rectangle {
+                                anchors.left: parent.left
+                                anchors.top: parent.top
+                                anchors.bottom: parent.bottom
+                                anchors.leftMargin: shellWindow ? shellWindow.scaled(6) : 6
+                                anchors.topMargin: shellWindow ? shellWindow.scaled(7) : 7
+                                anchors.bottomMargin: shellWindow ? shellWindow.scaled(7) : 7
+                                width: shellWindow ? shellWindow.scaled(2) : 2
+                                radius: width / 2
+                                color: accent
+                                opacity: 0.84
+                            }
 
-                                delegate: Rectangle {
-                                    readonly property string itemTone: String(modelData["tone"] || "neutral")
-                                    readonly property color itemAccent: shellWindow ? shellWindow.toneColor(itemTone) : "#86c7d4"
+                            ColumnLayout {
+                                id: statusColumn
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.leftMargin: shellWindow ? shellWindow.scaled(14) : 14
+                                anchors.rightMargin: shellWindow ? shellWindow.scaled(10) : 10
+                                spacing: shellWindow ? shellWindow.scaled(1) : 1
 
+                                Text {
                                     Layout.fillWidth: true
-                                    radius: shellWindow ? shellWindow.edgeRadius : 12
-                                    color: shellWindow ? Qt.rgba(shellWindow.surfaceRaised.r, shellWindow.surfaceRaised.g, shellWindow.surfaceRaised.b, 0.88) : "#152029"
-                                    border.color: Qt.rgba(itemAccent.r, itemAccent.g, itemAccent.b, 0.56)
-                                    border.width: 1
-                                    implicitHeight: consoleCellColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(8) : 8) * 2)
+                                    text: String(modelData["label"] || "--")
+                                    color: shellWindow ? shellWindow.textMuted : "#6f7f8a"
+                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                    elide: Text.ElideRight
+                                }
 
-                                    Rectangle {
-                                        anchors.left: parent.left
-                                        anchors.top: parent.top
-                                        anchors.bottom: parent.bottom
-                                        anchors.leftMargin: shellWindow ? shellWindow.scaled(6) : 6
-                                        anchors.topMargin: shellWindow ? shellWindow.scaled(7) : 7
-                                        anchors.bottomMargin: shellWindow ? shellWindow.scaled(7) : 7
-                                        width: shellWindow ? shellWindow.scaled(2) : 2
-                                        radius: width / 2
-                                        color: itemAccent
-                                        opacity: 0.84
-                                    }
-
-                                    ColumnLayout {
-                                        id: consoleCellColumn
-                                        anchors.left: parent.left
-                                        anchors.right: parent.right
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        anchors.leftMargin: shellWindow ? shellWindow.scaled(14) : 14
-                                        anchors.rightMargin: shellWindow ? shellWindow.scaled(10) : 10
-                                        spacing: shellWindow ? shellWindow.scaled(1) : 1
-
-                                        Text {
-                                            Layout.fillWidth: true
-                                            text: String(modelData["label"] || "--")
-                                            color: shellWindow ? shellWindow.textMuted : "#6f7f8a"
-                                            font.pixelSize: shellWindow ? shellWindow.captionSize : 10
-                                            font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
-                                            elide: Text.ElideRight
-                                        }
-
-                                        Text {
-                                            Layout.fillWidth: true
-                                            text: String(modelData["value"] || "--")
-                                            color: shellWindow ? shellWindow.textStrong : "#f5efe4"
-                                            font.pixelSize: shellWindow ? shellWindow.bodyEmphasisSize : 14
-                                            font.weight: Font.DemiBold
-                                            font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
-                                            elide: Text.ElideRight
-                                        }
-                                    }
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: String(modelData["value"] || "--")
+                                    color: shellWindow ? shellWindow.textStrong : "#f5efe4"
+                                    font.pixelSize: shellWindow ? shellWindow.bodyEmphasisSize : 14
+                                    font.weight: Font.DemiBold
+                                    font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                    elide: Text.ElideRight
                                 }
                             }
                         }
@@ -355,7 +390,7 @@ Item {
                 anchors.leftMargin: shellWindow ? shellWindow.scaled(10) : 10
                 anchors.rightMargin: shellWindow ? shellWindow.scaled(10) : 10
                 height: shellWindow ? shellWindow.scaled(1) : 1
-                color: "#12ffffff"
+                color: "#14ffffff"
             }
 
             Flow {
@@ -370,48 +405,43 @@ Item {
                     delegate: Rectangle {
                         readonly property bool selected: Number(modelData["index"]) === root.currentIndex
 
-                        radius: shellWindow ? shellWindow.edgeRadius : 12
+                        radius: shellWindow ? shellWindow.edgeRadius + shellWindow.scaled(1) : 13
                         color: selected
                             ? Qt.rgba(shellWindow.surfaceRaised.r, shellWindow.surfaceRaised.g, shellWindow.surfaceRaised.b, 0.98)
-                            : Qt.rgba(shellWindow.surfaceRaised.r, shellWindow.surfaceRaised.g, shellWindow.surfaceRaised.b, 0.72)
+                            : Qt.rgba(shellWindow.surfaceRaised.r, shellWindow.surfaceRaised.g, shellWindow.surfaceRaised.b, 0.74)
                         border.color: selected
-                            ? Qt.rgba(shellWindow.accentGold.r, shellWindow.accentGold.g, shellWindow.accentGold.b, 0.9)
-                            : Qt.rgba(shellWindow.borderSubtle.r, shellWindow.borderSubtle.g, shellWindow.borderSubtle.b, 0.88)
+                            ? Qt.rgba(goldAccent.r, goldAccent.g, goldAccent.b, 0.92)
+                            : Qt.rgba(shellWindow.borderSubtle.r, shellWindow.borderSubtle.g, shellWindow.borderSubtle.b, 0.9)
                         border.width: 1
-                        implicitWidth: navColumn.implicitWidth + ((shellWindow ? shellWindow.scaled(12) : 12) * 2)
-                        implicitHeight: navColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(root.landingPage ? 7 : 8) : 8) * 2)
+                        implicitWidth: root.stackNav
+                            ? Math.max(shellWindow ? shellWindow.scaled(146) : 146, navColumn.implicitWidth + ((shellWindow ? shellWindow.scaled(18) : 18) * 2))
+                            : navColumn.implicitWidth + ((shellWindow ? shellWindow.scaled(18) : 18) * 2)
+                        implicitHeight: navColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(9) : 9) * 2)
+
+                        Rectangle {
+                            visible: selected
+                            anchors.fill: parent
+                            radius: parent.radius
+                            gradient: Gradient {
+                                orientation: Gradient.Horizontal
+                                GradientStop { position: 0.0; color: Qt.rgba(goldAccent.r, goldAccent.g, goldAccent.b, 0.14) }
+                                GradientStop { position: 0.5; color: "#0cffffff" }
+                                GradientStop { position: 1.0; color: Qt.rgba(iceAccent.r, iceAccent.g, iceAccent.b, 0.12) }
+                            }
+                            opacity: 0.8
+                        }
 
                         Rectangle {
                             anchors.left: parent.left
                             anchors.top: parent.top
                             anchors.bottom: parent.bottom
                             anchors.leftMargin: shellWindow ? shellWindow.scaled(6) : 6
-                            anchors.topMargin: shellWindow ? shellWindow.scaled(7) : 7
-                            anchors.bottomMargin: shellWindow ? shellWindow.scaled(7) : 7
+                            anchors.topMargin: shellWindow ? shellWindow.scaled(8) : 8
+                            anchors.bottomMargin: shellWindow ? shellWindow.scaled(8) : 8
                             width: shellWindow ? shellWindow.scaled(selected ? 3 : 2) : (selected ? 3 : 2)
                             radius: width / 2
-                            color: selected ? shellWindow.accentGold : shellWindow.borderSubtle
-                            opacity: selected ? 0.94 : 0.7
-                        }
-
-                        Rectangle {
-                            visible: selected
-                            anchors.left: parent.left
-                            anchors.right: parent.right
-                            anchors.top: parent.top
-                            anchors.leftMargin: shellWindow ? shellWindow.scaled(10) : 10
-                            anchors.rightMargin: shellWindow ? shellWindow.scaled(10) : 10
-                            anchors.topMargin: shellWindow ? shellWindow.scaled(4) : 4
-                            height: shellWindow ? shellWindow.scaled(2) : 2
-                            radius: height / 2
-                            gradient: Gradient {
-                                orientation: Gradient.Horizontal
-                                GradientStop { position: 0.0; color: "transparent" }
-                                GradientStop { position: 0.24; color: shellWindow.accentGold }
-                                GradientStop { position: 0.78; color: Qt.lighter(shellWindow.accentIce, 1.08) }
-                                GradientStop { position: 1.0; color: "transparent" }
-                            }
-                            opacity: 0.92
+                            color: selected ? goldAccent : shellWindow ? shellWindow.borderSubtle : "#2a3944"
+                            opacity: selected ? 0.94 : 0.68
                         }
 
                         ColumnLayout {
@@ -429,7 +459,7 @@ Item {
 
                             Text {
                                 text: modelData["english"]
-                                color: selected ? shellWindow.accentGold : shellWindow.textMuted
+                                color: selected ? goldAccent : shellWindow.textMuted
                                 font.pixelSize: shellWindow ? shellWindow.captionSize : 10
                                 font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
                             }

@@ -49,8 +49,14 @@ OFFSCREEN_CAPTURE_ENV_VARS = {
 }
 
 MAP_BACKEND_ENV = "COCKPIT_NATIVE_MAP_BACKEND"
+MAP_PROVIDER_ENV = "COCKPIT_NATIVE_MAP_PROVIDER"
+MAP_TILE_MODE_ENV = "COCKPIT_NATIVE_MAP_TILE_MODE"
+MAP_TILE_ROOT_ENV = "COCKPIT_NATIVE_MAP_TILE_ROOT"
+MAP_TILE_FORMAT_ENV = "COCKPIT_NATIVE_MAP_TILE_FORMAT"
 WORLD_MAP_BACKDROP_ENV = "COCKPIT_NATIVE_WORLD_MAP_BACKDROP"
 VALID_MAP_BACKENDS = {"auto", "canvas", "svg", "qtlocation"}
+VALID_MAP_PROVIDERS = {"auto", "osm"}
+VALID_MAP_TILE_MODES = {"auto", "online", "local_arcgis_cache"}
 
 
 @dataclass
@@ -72,6 +78,51 @@ def normalize_map_backend(raw_value: str | None) -> str:
     return candidate if candidate in VALID_MAP_BACKENDS else "auto"
 
 
+def normalize_map_provider(raw_value: str | None) -> str:
+    candidate = str(raw_value or "").strip().lower()
+    return candidate if candidate in VALID_MAP_PROVIDERS else "auto"
+
+
+def normalize_map_tile_mode(raw_value: str | None) -> str:
+    candidate = str(raw_value or "").strip().lower()
+    return candidate if candidate in VALID_MAP_TILE_MODES else "auto"
+
+
+def resolve_map_tile_mode(raw_value: str | None, *, tile_root: str | None = None) -> str:
+    normalized = normalize_map_tile_mode(raw_value)
+    if normalized != "auto":
+        return normalized
+    return "local_arcgis_cache" if str(tile_root or "").strip() else "online"
+
+
+def available_qtlocation_providers() -> list[str]:
+    if not _optional_module_available("PySide6.QtLocation"):
+        return []
+
+    try:
+        from PySide6.QtLocation import QGeoServiceProvider
+
+        providers = [str(name) for name in QGeoServiceProvider.availableServiceProviders()]
+    except Exception:
+        return []
+    return sorted(provider for provider in providers if provider)
+
+
+def resolve_qtlocation_plugin_name(
+    raw_value: str | None,
+    *,
+    available_providers: Sequence[str] | None = None,
+) -> str:
+    providers_source = available_qtlocation_providers() if available_providers is None else available_providers
+    providers = [str(provider) for provider in providers_source if provider]
+    preferred = normalize_map_provider(raw_value)
+    if preferred != "auto" and preferred in providers:
+        return preferred
+    if "osm" in providers:
+        return "osm"
+    return providers[0] if providers else ""
+
+
 def resolve_optional_repo_path(raw_value: str | None, *, project_root: Path | None = None) -> str:
     candidate = str(raw_value or "").strip()
     if not candidate:
@@ -91,17 +142,54 @@ def build_launch_options(
     env: Mapping[str, str] | None = None,
 ) -> dict[str, object]:
     resolved_env = os.environ if env is None else env
+    package_root = Path(__file__).resolve().parent
+    qtlocation_providers = available_qtlocation_providers()
+    map_tile_root = resolve_optional_repo_path(
+        resolved_env.get(MAP_TILE_ROOT_ENV),
+        project_root=project_root,
+    )
+    map_tile_format = str(resolved_env.get(MAP_TILE_FORMAT_ENV, "png") or "png").strip().lower() or "png"
     return {
         "softwareRender": bool(software_render),
         "mapBackend": normalize_map_backend(resolved_env.get(MAP_BACKEND_ENV)),
+        "mapProvider": normalize_map_provider(resolved_env.get(MAP_PROVIDER_ENV)),
+        "mapTileMode": resolve_map_tile_mode(
+            resolved_env.get(MAP_TILE_MODE_ENV),
+            tile_root=map_tile_root,
+        ),
+        "mapTileRoot": map_tile_root,
+        "mapTileFormat": map_tile_format,
         "qtLocationAvailable": _optional_module_available("PySide6.QtLocation"),
         "qtPositioningAvailable": _optional_module_available("PySide6.QtPositioning"),
         "qtSvgAvailable": _optional_module_available("PySide6.QtSvg"),
+        "qtLocationStageAvailable": (package_root / "qml" / "components" / "WorldMapStageQtLocation.qml").is_file(),
+        "qtLocationProviders": qtlocation_providers,
+        "qtLocationPluginName": resolve_qtlocation_plugin_name(
+            resolved_env.get(MAP_PROVIDER_ENV),
+            available_providers=qtlocation_providers,
+        ),
         "worldMapBackdropSource": resolve_optional_repo_path(
             resolved_env.get(WORLD_MAP_BACKDROP_ENV),
             project_root=project_root,
         ),
     }
+
+
+def resolve_repo_runtime_cache_root(project_root: Path | None = None) -> str:
+    resolved_root = (project_root or Path(__file__).resolve().parent.parent).resolve()
+    cache_root = resolved_root / "cockpit_native" / "runtime" / "xdg_cache"
+    cache_root.mkdir(parents=True, exist_ok=True)
+    return str(cache_root)
+
+
+def apply_repo_runtime_env(
+    target: MutableMapping[str, str] | None = None,
+    *,
+    project_root: Path | None = None,
+) -> MutableMapping[str, str]:
+    resolved = os.environ if target is None else target
+    resolved.setdefault("XDG_CACHE_HOME", resolve_repo_runtime_cache_root(project_root))
+    return resolved
 
 
 def apply_software_renderer_env(target: MutableMapping[str, str] | None = None) -> MutableMapping[str, str]:
@@ -136,6 +224,7 @@ def _create_cockpit_runtime(
 
     software_render = software_render or os.environ.get("COCKPIT_NATIVE_SOFTWARE_FALLBACK_ACTIVE") == "1"
     _configure_renderer(software_render)
+    apply_repo_runtime_env(project_root=project_root)
 
     from PySide6.QtCore import QCoreApplication, QObject, Property, Qt, Signal, Slot
     from PySide6.QtGui import QGuiApplication
