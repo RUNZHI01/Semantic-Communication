@@ -750,7 +750,7 @@ ApplicationWindow {
                             accentTone: root.accentBlue
                             Layout.fillWidth: true
                             Layout.fillHeight: true
-                            Layout.columnSpan: root.wideLayout ? 8 : 1
+                            Layout.columnSpan: root.wideLayout ? 9 : 1
                             Layout.minimumHeight: root.scaled(root.wideLayout ? 420 : (root.mediumLayout ? 340 : 260))
                             Layout.preferredHeight: root.scaled(root.wideLayout ? 560 : (root.mediumLayout ? 410 : 300))
 
@@ -758,8 +758,32 @@ ApplicationWindow {
                                 anchors.fill: parent
                                 anchors.margins: root.scaled(14)
 
-                                WorldMapStage {
+                                Rectangle {
+                                    id: landingMapViewport
                                     anchors.fill: parent
+                                    radius: root.cardRadius
+                                    clip: true
+                                    gradient: Gradient {
+                                        GradientStop { position: 0.0; color: "#132a41" }
+                                        GradientStop { position: 0.32; color: "#0d1d2c" }
+                                        GradientStop { position: 1.0; color: "#071019" }
+                                    }
+                                    border.color: "#385877"
+                                    border.width: 1
+                                }
+
+                                Rectangle {
+                                    anchors.fill: landingMapViewport
+                                    anchors.margins: 1
+                                    radius: landingMapViewport.radius - 1
+                                    color: "transparent"
+                                    border.color: "#132f45"
+                                    border.width: 1
+                                }
+
+                                WorldMapStage {
+                                    anchors.fill: landingMapViewport
+                                    anchors.margins: 2
                                     shellWindow: root
                                     trackData: root.trackData
                                     currentPoint: root.currentPosition
@@ -774,10 +798,13 @@ ApplicationWindow {
 
                                 Rectangle {
                                     anchors.right: parent.right
-                                    anchors.top: parent.top
+                                    anchors.bottom: parent.bottom
                                     anchors.margins: root.scaled(16)
                                     radius: root.edgeRadius
-                                    color: "#e60d1522"
+                                    gradient: Gradient {
+                                        GradientStop { position: 0.0; color: "#de0a1320" }
+                                        GradientStop { position: 1.0; color: "#bc09111b" }
+                                    }
                                     border.color: root.accentBlue
                                     border.width: 1
                                     implicitWidth: mapActionRow.implicitWidth + (root.scaled(14) * 2)
@@ -789,7 +816,7 @@ ApplicationWindow {
                                         spacing: root.scaled(8)
 
                                         Text {
-                                            text: "查看飞行合同"
+                                            text: "进入飞行合同"
                                             color: root.textStrong
                                             font.pixelSize: root.bodySize
                                             font.bold: true
@@ -812,72 +839,13 @@ ApplicationWindow {
                                         onClicked: root.currentPage = 2
                                     }
                                 }
-
-                                Flow {
-                                    id: telemetryFlow
-                                    width: parent.width - (root.scaled(32))
-                                    anchors.left: parent.left
-                                    anchors.bottom: parent.bottom
-                                    anchors.leftMargin: root.scaled(16)
-                                    anchors.bottomMargin: root.scaled(16)
-                                    spacing: root.compactGap
-
-                                    Repeater {
-                                        model: root.landingTelemetryModel
-
-                                        delegate: Rectangle {
-                                            property var itemData: modelData
-                                            width: root.wideLayout
-                                                ? ((telemetryFlow.width - (root.compactGap * 3)) / 4)
-                                                : ((telemetryFlow.width - root.compactGap) / 2)
-                                            radius: root.edgeRadius
-                                            color: "#dc0d1624"
-                                            border.color: "#31455c"
-                                            border.width: 1
-                                            implicitHeight: telemetryColumn.implicitHeight + (root.scaled(12) * 2)
-
-                                            Column {
-                                                id: telemetryColumn
-                                                anchors.fill: parent
-                                                anchors.margins: root.scaled(12)
-                                                spacing: root.scaled(2)
-
-                                                Text {
-                                                    text: itemData["label"]
-                                                    color: root.textMuted
-                                                    font.pixelSize: root.captionSize
-                                                    font.family: root.monoFamily
-                                                }
-
-                                                Text {
-                                                    width: parent.width
-                                                    text: itemData["value"]
-                                                    color: root.textStrong
-                                                    font.pixelSize: root.bodyEmphasisSize
-                                                    font.bold: true
-                                                    font.family: root.uiFamily
-                                                    elide: Text.ElideRight
-                                                }
-
-                                                Text {
-                                                    width: parent.width
-                                                    text: itemData["detail"]
-                                                    color: root.textSecondary
-                                                    font.pixelSize: root.captionSize
-                                                    font.family: root.uiFamily
-                                                    wrapMode: Text.WordWrap
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
                             }
                         }
 
                         ColumnLayout {
                             Layout.fillWidth: true
                             Layout.fillHeight: true
-                            Layout.columnSpan: root.wideLayout ? 4 : 1
+                            Layout.columnSpan: root.wideLayout ? 3 : 1
                             spacing: root.zoneGap
 
                             PanelFrame {
@@ -1009,7 +977,7 @@ ApplicationWindow {
                                     }
 
                                     Text {
-                                        text: "跳转二级页面 / Secondary Surfaces"
+                                        text: "飞行读数 / Flight Deck"
                                         color: root.accentBlue
                                         font.pixelSize: root.eyebrowSize
                                         font.family: root.monoFamily
@@ -1018,7 +986,84 @@ ApplicationWindow {
 
                                     Text {
                                         Layout.fillWidth: true
-                                        text: "把系统板态、飞行合同、弱网策略和执行坞站全部拆成独立页面，总览页只保留地图主墙板和必要摘要。"
+                                        text: "把高度、地速、航向和定位读数移出地图表面，首屏主墙板只保留必要标注。"
+                                        color: root.textSecondary
+                                        font.pixelSize: root.bodySize
+                                        font.family: root.uiFamily
+                                        wrapMode: Text.WordWrap
+                                    }
+
+                                    GridLayout {
+                                        Layout.fillWidth: true
+                                        columns: 2
+                                        columnSpacing: root.compactGap
+                                        rowSpacing: root.compactGap
+
+                                        Repeater {
+                                            model: root.landingTelemetryModel
+
+                                            delegate: Rectangle {
+                                                property var itemData: modelData
+                                                Layout.fillWidth: true
+                                                radius: root.edgeRadius
+                                                color: "#101925"
+                                                border.color: root.toneColor(String(itemData["tone"] || "neutral"))
+                                                border.width: 1
+                                                implicitHeight: landingTelemetryColumn.implicitHeight + (root.scaled(10) * 2)
+
+                                                Column {
+                                                    id: landingTelemetryColumn
+                                                    anchors.fill: parent
+                                                    anchors.margins: root.scaled(10)
+                                                    spacing: root.scaled(2)
+
+                                                    Text {
+                                                        text: itemData["label"]
+                                                        color: root.textMuted
+                                                        font.pixelSize: root.captionSize
+                                                        font.family: root.monoFamily
+                                                    }
+
+                                                    Text {
+                                                        width: parent.width
+                                                        text: itemData["value"]
+                                                        color: root.textStrong
+                                                        font.pixelSize: root.bodyEmphasisSize
+                                                        font.bold: true
+                                                        font.family: root.uiFamily
+                                                        elide: Text.ElideRight
+                                                    }
+
+                                                    Text {
+                                                        width: parent.width
+                                                        text: itemData["detail"]
+                                                        color: root.textSecondary
+                                                        font.pixelSize: root.captionSize
+                                                        font.family: root.uiFamily
+                                                        wrapMode: Text.WordWrap
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: 1
+                                        color: "#28384d"
+                                    }
+
+                                    Text {
+                                        text: "页面分区 / Zone Routing"
+                                        color: root.accentBlue
+                                        font.pixelSize: root.eyebrowSize
+                                        font.family: root.monoFamily
+                                        font.letterSpacing: root.scaled(1)
+                                    }
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: "参考 cluster 与 Tesla/QDashBoard 的分区做法，把系统、飞行、弱网和执行移到独立页面，首屏只保留中心主屏、摘要和跳转。"
                                         color: root.textSecondary
                                         font.pixelSize: root.bodySize
                                         font.family: root.uiFamily
