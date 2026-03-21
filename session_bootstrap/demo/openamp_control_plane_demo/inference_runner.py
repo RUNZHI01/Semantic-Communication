@@ -1151,21 +1151,35 @@ def describe_demo_variant_support(access: BoardAccessConfig, *, variant: str) ->
 
     if admission["mode"] == "legacy_sha":
         ready = admission["status"] == "ready"
-        note = f"{variant_label} live path is still using the legacy SHA allowlist."
-        if ready and admission.get("artifact_sha256"):
-            note = f"{note} expected_sha={str(admission['artifact_sha256'])[:12]}."
-        elif variant == "baseline":
-            note = "缺少 PyTorch generator expected SHA；第三幕只能回退到归档参考图与正式报告。"
+        if variant == "baseline":
+            if ready:
+                note = "PyTorch live path currently uses expected-SHA admission (legacy_sha)."
+                if admission.get("artifact_sha256"):
+                    note = f"{note} expected_sha={str(admission['artifact_sha256'])[:12]}."
+                note = (
+                    f"{note} Archived PyTorch reference images remain the default visual comparison source, "
+                    "and the 2026-03-17 dual-path signed-sideband run remains historical live evidence."
+                )
+            else:
+                note = "缺少 PyTorch generator expected SHA；第三幕只能回退到归档参考图与正式报告。"
+            label = "PyTorch live 已支持" if ready else "PyTorch live 未就绪"
+            tone = "neutral" if ready else "degraded"
         else:
-            note = "Current live path is not ready; the legacy SHA allowlist still needs a trusted current expected SHA."
-        if variant == "baseline" and ready:
-            note = f"{note} Archived PyTorch reference images remain the visual comparison source."
+            note = f"{variant_label} live path is still using the legacy SHA allowlist."
+            if ready and admission.get("artifact_sha256"):
+                note = f"{note} expected_sha={str(admission['artifact_sha256'])[:12]}."
+            else:
+                note = (
+                    "Current live path is not ready; the legacy SHA allowlist still needs a trusted current expected SHA."
+                )
+            label = f"{variant_label} legacy live" if ready else f"{variant_label} legacy live 未就绪"
+            tone = "degraded"
         return {
             "variant": variant,
             "status": admission["status"],
             "mode": admission["mode"],
-            "label": f"{variant_label} legacy live" if ready else f"{variant_label} legacy live 未就绪",
-            "tone": "degraded",
+            "label": label,
+            "tone": tone,
             "note": note,
             "supported": ready,
             "launch_allowed": ready,
