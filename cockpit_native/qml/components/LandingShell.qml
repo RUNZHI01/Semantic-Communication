@@ -73,6 +73,23 @@ Item {
         ? shellWindow.previewItems(shellWindow.landingTelemetryModel, landingWide ? 3 : 2)
         : []
     readonly property var actionPreviewList: shellWindow ? shellWindow.previewItems(actionList, 2) : []
+    readonly property var landingDockChipModel: shellWindow ? [
+        {
+            "label": "动作",
+            "value": String(shellWindow.enabledBottomActions) + " / " + String(actionList.length),
+            "tone": shellWindow.enabledBottomActions > 0 ? "online" : "warning"
+        },
+        {
+            "label": "桥接",
+            "value": shellWindow.bridgeAvailable ? "仓库在线" : "桥接缺失",
+            "tone": shellWindow.bridgeAvailable ? "online" : "warning"
+        },
+        {
+            "label": "渲染",
+            "value": shellWindow.softwareRenderEnabled ? "软件安全" : "图形优先",
+            "tone": shellWindow.softwareRenderEnabled ? "warning" : "online"
+        }
+    ] : []
     readonly property int landingTelemetryColumns: landingWide ? 3 : ((shellWindow ? shellWindow.viewportWidth : width) >= 720 ? 2 : 1)
     readonly property int landingJumpColumns: (shellWindow ? shellWindow.viewportWidth : width) >= 720 ? 2 : 1
     readonly property int landingActionColumns: landingWide ? 2 : ((shellWindow ? shellWindow.viewportWidth : width) >= 720 ? 2 : 1)
@@ -171,8 +188,8 @@ Item {
         "锚点 " + anchorValue + "  ·  " + anchorProbeSummary,
         landingShortHeight ? 68 : 104
     )
-    readonly property int landingWideStageHeight: shellWindow ? shellWindow.scaled(landingShortHeight ? 352 : 438) : 438
-    readonly property int landingStackedStageHeight: shellWindow ? shellWindow.scaled(landingShortHeight ? 320 : 392) : 392
+    readonly property int landingWideStageHeight: shellWindow ? shellWindow.scaled(landingShortHeight ? 340 : 426) : 426
+    readonly property int landingStackedStageHeight: shellWindow ? shellWindow.scaled(landingShortHeight ? 300 : 384) : 384
     readonly property string landingStageSubtitle: "真实地理底图占主位，板态与弱网只保留两侧细轨，执行动作收口到底部坞站。"
     readonly property string mapCtaLabel: landingShortHeight ? "飞行合同" : "进入飞行合同"
     readonly property string dockCtaLabel: landingShortHeight ? "执行页" : "展开执行页"
@@ -1839,8 +1856,8 @@ Item {
                                 bannerTitle: shellWindow ? shellWindow.landingMapBannerTitle : ""
                                 bannerText: shellWindow ? shellWindow.landingMapBannerText : ""
                                 bannerChips: root.landingStageBannerChips
-                                showStageBadge: false
-                                showScenarioBadge: false
+                                showStageBadge: true
+                                showScenarioBadge: true
                                 showInfoPanels: false
                                 preferBottomBannerDock: true
                             }
@@ -1905,6 +1922,22 @@ Item {
                     eyebrow: "指挥坞站 / COMMAND DOCK"
                     title: "启动、门控与执行入口"
                     subtitle: "底部只保留 repo-backed 启动、动作门控和统一跳转。"
+
+                    Flow {
+                        Layout.fillWidth: true
+                        spacing: shellWindow ? shellWindow.compactGap : 8
+
+                        Repeater {
+                            model: root.landingDockChipModel
+
+                            delegate: ToneChip {
+                                shellWindow: root.shellWindow
+                                label: String(modelData["label"] || "--")
+                                value: String(modelData["value"] || "--")
+                                tone: String(modelData["tone"] || "neutral")
+                            }
+                        }
+                    }
 
                     GridLayout {
                         Layout.fillWidth: true
@@ -2212,8 +2245,8 @@ Item {
                                 bannerTitle: shellWindow ? shellWindow.landingMapBannerTitle : ""
                                 bannerText: shellWindow ? shellWindow.landingMapBannerText : ""
                                 bannerChips: root.landingStageBannerChips
-                                showStageBadge: false
-                                showScenarioBadge: false
+                                showStageBadge: true
+                                showScenarioBadge: true
                                 showInfoPanels: false
                                 preferBottomBannerDock: true
                             }
@@ -2326,6 +2359,22 @@ Item {
                         eyebrow: "指挥坞站 / COMMAND DOCK"
                         title: "启动、门控与执行入口"
                         subtitle: "底部只保留 repo-backed 启动、动作门控和统一跳转。"
+
+                    Flow {
+                        Layout.fillWidth: true
+                        spacing: shellWindow ? shellWindow.compactGap : 8
+
+                        Repeater {
+                            model: root.landingDockChipModel
+
+                            delegate: ToneChip {
+                                shellWindow: root.shellWindow
+                                label: String(modelData["label"] || "--")
+                                value: String(modelData["value"] || "--")
+                                tone: String(modelData["tone"] || "neutral")
+                            }
+                        }
+                    }
 
                     GridLayout {
                         Layout.fillWidth: true
