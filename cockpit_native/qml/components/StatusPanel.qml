@@ -15,6 +15,9 @@ PanelFrame {
     readonly property bool hasRows: rows.length > 0
     readonly property bool dualColumn: width >= (shellWindow ? shellWindow.scaled(520) : 520)
     readonly property string heroStampLabel: String(rows.length) + " ROWS"
+    readonly property var centerStagePanel: shellWindow ? DataUtils.objectOrEmpty(shellWindow.centerPanelData) : ({})
+    readonly property var centerStageControl: shellWindow ? DataUtils.objectOrEmpty(shellWindow.centerControlSummary) : ({})
+    readonly property var shellMeta: shellWindow ? DataUtils.objectOrEmpty(shellWindow.meta) : ({})
     readonly property var standbyModel: [
         {
             "label": "会话总线",
@@ -30,6 +33,38 @@ PanelFrame {
             "label": "心跳",
             "value": rowValue("心跳") || "采样心跳待接入",
             "detail": "软件渲染与合同镜像继续可用"
+        }
+    ]
+    readonly property string railBridgeLabel: rowTone("链路档位") === "warning"
+        ? "左舷系统轨进入风险回注态"
+        : "左舷系统轨维持稳态回注态"
+    readonly property string railBridgeDetail: rowTone("链路档位") === "warning"
+        ? "把板端链路档位、心跳与最近事件直接回注中心墙板，演示时左舷不再像单独的状态列表。"
+        : "把会话、心跳与链路档位持续喂给中心墙板，让左舷系统轨更像总控壳体中的真实供给轨。"
+    readonly property var railBridgeModel: [
+        {
+            "label": "主舞台",
+            "value": String(centerStagePanel["mission_call_sign"] || "--"),
+            "detail": String(centerStageControl["link_profile"] || "GLOBAL WALLBOARD"),
+            "tone": rowTone("链路档位")
+        },
+        {
+            "label": "链路",
+            "value": rowValue("链路档位") || "--",
+            "detail": rowValue("心跳") || "BOARD HEARTBEAT",
+            "tone": rowTone("链路档位")
+        },
+        {
+            "label": "事件",
+            "value": rowValue("最近事件") || "--",
+            "detail": rowValue("快照原因") || rowValue("事件时间") || "镜像总线",
+            "tone": rowTone("最近事件")
+        },
+        {
+            "label": "布局",
+            "value": String(shellMeta["layout_strategy"] || "--"),
+            "detail": shellWindow && shellWindow.softwareRenderEnabled ? "software-safe shell" : "adaptive native shell",
+            "tone": shellWindow && shellWindow.softwareRenderEnabled ? "warning" : "online"
         }
     ]
 
@@ -421,6 +456,161 @@ PanelFrame {
                                         font.bold: true
                                         font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
                                         wrapMode: Text.WrapAnywhere
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.columnSpan: dualColumn ? 2 : 1
+                    radius: shellWindow ? shellWindow.edgeRadius : 10
+                    gradient: Gradient {
+                        GradientStop { position: 0.0; color: "#10253a" }
+                        GradientStop { position: 0.48; color: "#0b1828" }
+                        GradientStop { position: 1.0; color: "#081321" }
+                    }
+                    border.color: root.toneColor(root.rowTone("链路档位"))
+                    border.width: 1
+                    implicitHeight: stageFeedBusColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
+
+                    Rectangle {
+                        anchors.fill: parent
+                        anchors.margins: 1
+                        radius: parent.radius - 1
+                        color: "transparent"
+                        border.color: "#13334e"
+                        border.width: 1
+                        opacity: 0.8
+                    }
+
+                    Rectangle {
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        height: shellWindow ? shellWindow.scaled(3) : 3
+                        gradient: Gradient {
+                            GradientStop { position: 0.0; color: "transparent" }
+                            GradientStop { position: 0.22; color: root.toneColor(root.rowTone("链路档位")) }
+                            GradientStop { position: 0.72; color: Qt.lighter(root.toneColor(root.rowTone("链路档位")), 1.16) }
+                            GradientStop { position: 1.0; color: "transparent" }
+                        }
+                        opacity: 0.78
+                    }
+
+                    ColumnLayout {
+                        id: stageFeedBusColumn
+                        anchors.fill: parent
+                        anchors.margins: shellWindow ? shellWindow.scaled(10) : 10
+                        spacing: shellWindow ? shellWindow.compactGap : 8
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: shellWindow ? shellWindow.compactGap : 8
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: "左舷联动 / STAGE FEED BUS"
+                                color: shellWindow ? shellWindow.accentCyan : "#72f3ff"
+                                font.pixelSize: shellWindow ? shellWindow.captionSize : 11
+                                font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                font.letterSpacing: shellWindow ? shellWindow.scaled(1) : 1
+                            }
+
+                            Rectangle {
+                                radius: shellWindow ? shellWindow.edgeRadius : 10
+                                color: "#091726"
+                                border.color: "#1d547c"
+                                border.width: 1
+                                implicitWidth: stageFeedStamp.implicitWidth + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
+                                implicitHeight: stageFeedStamp.implicitHeight + ((shellWindow ? shellWindow.scaled(5) : 5) * 2)
+
+                                Text {
+                                    id: stageFeedStamp
+                                    anchors.centerIn: parent
+                                    text: "LEFT -> CENTER"
+                                    color: shellWindow ? shellWindow.textPrimary : "#d5eeff"
+                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 9
+                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                }
+                            }
+                        }
+
+                        Text {
+                            Layout.fillWidth: true
+                            text: root.railBridgeLabel
+                            color: shellWindow ? shellWindow.textStrong : "#f4fbff"
+                            font.pixelSize: shellWindow ? shellWindow.bodyEmphasisSize : 14
+                            font.bold: true
+                            font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                            wrapMode: Text.WordWrap
+                        }
+
+                        Text {
+                            Layout.fillWidth: true
+                            text: root.railBridgeDetail
+                            color: shellWindow ? shellWindow.textSecondary : "#83acc8"
+                            font.pixelSize: shellWindow ? shellWindow.captionSize : 11
+                            font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                            wrapMode: Text.WordWrap
+                        }
+
+                        GridLayout {
+                            Layout.fillWidth: true
+                            columns: dualColumn ? 4 : 2
+                            columnSpacing: shellWindow ? shellWindow.compactGap : 8
+                            rowSpacing: shellWindow ? shellWindow.compactGap : 8
+
+                            Repeater {
+                                model: root.railBridgeModel.length
+
+                                delegate: Rectangle {
+                                    readonly property var bridgeData: root.railBridgeModel[index]
+                                    Layout.fillWidth: true
+                                    radius: shellWindow ? shellWindow.edgeRadius : 10
+                                    gradient: Gradient {
+                                        GradientStop { position: 0.0; color: Qt.lighter(root.toneFill(bridgeData["tone"]), 1.14) }
+                                        GradientStop { position: 1.0; color: root.toneFill(bridgeData["tone"]) }
+                                    }
+                                    border.color: root.toneColor(bridgeData["tone"])
+                                    border.width: 1
+                                    implicitHeight: bridgeMetricColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(8) : 8) * 2)
+
+                                    Column {
+                                        id: bridgeMetricColumn
+                                        anchors.fill: parent
+                                        anchors.margins: shellWindow ? shellWindow.scaled(8) : 8
+                                        spacing: 2
+
+                                        Text {
+                                            text: bridgeData["label"]
+                                            color: shellWindow ? shellWindow.textMuted : "#4e7392"
+                                            font.pixelSize: shellWindow ? shellWindow.captionSize : 11
+                                            font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                        }
+
+                                        Text {
+                                            width: parent.width
+                                            text: bridgeData["value"]
+                                            color: shellWindow ? shellWindow.textStrong : "#f4fbff"
+                                            font.pixelSize: shellWindow ? shellWindow.captionSize : 11
+                                            font.bold: true
+                                            font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                            wrapMode: Text.WrapAnywhere
+                                        }
+
+                                        Text {
+                                            width: parent.width
+                                            text: bridgeData["detail"]
+                                            color: shellWindow ? shellWindow.textSecondary : "#83acc8"
+                                            font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                            font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                            wrapMode: Text.WordWrap
+                                            maximumLineCount: 2
+                                            elide: Text.ElideRight
+                                        }
                                     }
                                 }
                             }
