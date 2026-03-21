@@ -1922,7 +1922,7 @@ Item {
                     minimalChrome: true
                     eyebrow: "指挥坞站 / COMMAND DOCK"
                     title: "命令坞站与快速入口"
-                    subtitle: "底部只保留启动路径、动作门控和页面跳转。"
+                    subtitle: ""
 
                     Flow {
                         visible: false
@@ -2008,7 +2008,7 @@ Item {
                                 font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
                                 font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
                                 wrapMode: Text.WordWrap
-                                maximumLineCount: 2
+                                maximumLineCount: 1
                                 elide: Text.ElideRight
                             }
                         }
@@ -2068,7 +2068,7 @@ Item {
                                 font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
                                 font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
                                 wrapMode: Text.WordWrap
-                                maximumLineCount: 2
+                                maximumLineCount: 1
                                 elide: Text.ElideRight
                             }
                         }
@@ -2097,7 +2097,7 @@ Item {
                                 font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
                                 font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
                                 wrapMode: Text.WordWrap
-                                maximumLineCount: 2
+                                maximumLineCount: 1
                                 elide: Text.ElideRight
                             }
 
@@ -2364,7 +2364,7 @@ Item {
                         minimalChrome: true
                         eyebrow: "指挥坞站 / COMMAND DOCK"
                         title: "命令坞站与快速入口"
-                        subtitle: "底部只保留启动路径、动作门控和页面跳转。"
+                        subtitle: ""
 
                         Flow {
                             visible: false
@@ -2450,7 +2450,7 @@ Item {
                                     font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
                                     font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
                                     wrapMode: Text.WordWrap
-                                    maximumLineCount: 2
+                                    maximumLineCount: 1
                                     elide: Text.ElideRight
                                 }
                             }
@@ -2510,7 +2510,7 @@ Item {
                                     font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
                                     font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
                                     wrapMode: Text.WordWrap
-                                    maximumLineCount: 2
+                                    maximumLineCount: 1
                                     elide: Text.ElideRight
                                 }
                             }
@@ -2540,7 +2540,7 @@ Item {
                                     font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
                                     font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
                                     wrapMode: Text.WordWrap
-                                    maximumLineCount: 2
+                                    maximumLineCount: 1
                                     elide: Text.ElideRight
                                 }
 
