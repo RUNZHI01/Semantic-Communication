@@ -298,6 +298,11 @@ ApplicationWindow {
         { "label": "在线锚点", "value": String(liveAnchor["valid_instance"] || "--"), "tone": liveAnchorTone },
         { "label": "链路档位", "value": compactMessage(linkProfileValue, compactLayout ? 14 : 20), "tone": "neutral" }
     ]
+    readonly property bool landingStageMinimalChrome: true
+    readonly property bool landingStageTopBadgesVisible: false
+    readonly property int landingStageBannerChipLimit: compactLayout ? 1 : 2
+    readonly property int landingStageBannerTextLimit: compactLayout ? 32 : 52
+    readonly property int flightStageBannerChipLimit: 3
 
     readonly property var systemPageChipModel: [
         { "label": "会话", "value": systemSessionValue, "tone": "neutral" },
