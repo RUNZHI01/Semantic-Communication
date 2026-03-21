@@ -12,10 +12,11 @@ Item {
     readonly property bool compactTopRail: shellWindow ? shellWindow.viewportWidth < 1260 : width < 1260
     readonly property bool stackNav: shellWindow ? shellWindow.viewportWidth < 1120 : width < 1120
     readonly property bool stackStatusRail: shellWindow ? shellWindow.viewportWidth < 940 : width < 940
-    readonly property int topRailPadding: shellWindow ? shellWindow.scaled(landingPage ? 10 : 13) : (landingPage ? 10 : 13)
+    readonly property int topRailPadding: shellWindow ? shellWindow.scaled(landingPage ? 8 : 13) : (landingPage ? 8 : 13)
     readonly property int navPadding: shellWindow ? shellWindow.scaled(landingPage ? 7 : 8) : (landingPage ? 7 : 8)
     readonly property color goldAccent: shellWindow ? shellWindow.accentGold : "#c6ab7d"
     readonly property color iceAccent: shellWindow ? shellWindow.accentIce : "#86c7d4"
+    readonly property color railAccent: landingPage ? iceAccent : goldAccent
     readonly property var landingCommandRailModel: shellWindow && landingPage
         ? shellWindow.previewItems(commandRailModel, 2)
         : commandRailModel
@@ -52,8 +53,14 @@ Item {
         Rectangle {
             Layout.fillWidth: true
             radius: shellWindow ? shellWindow.cardRadius + shellWindow.scaled(2) : 18
-            color: shellWindow ? Qt.rgba(shellWindow.surfaceGlass.r, shellWindow.surfaceGlass.g, shellWindow.surfaceGlass.b, 0.98) : "#1d2832"
-            border.color: shellWindow ? Qt.rgba(goldAccent.r, goldAccent.g, goldAccent.b, 0.84) : "#b4946c"
+            color: shellWindow
+                ? Qt.rgba(shellWindow.surfaceGlass.r, shellWindow.surfaceGlass.g, shellWindow.surfaceGlass.b, landingPage ? 0.82 : 0.98)
+                : "#1d2832"
+            border.color: shellWindow
+                ? (landingPage
+                    ? Qt.rgba(iceAccent.r, iceAccent.g, iceAccent.b, 0.42)
+                    : Qt.rgba(goldAccent.r, goldAccent.g, goldAccent.b, 0.84))
+                : "#b4946c"
             border.width: 1
             implicitHeight: topRailGrid.implicitHeight + (root.topRailPadding * 2)
 
@@ -73,7 +80,7 @@ Item {
                 height: parent.height * 1.08
                 radius: width / 2
                 color: goldAccent
-                opacity: 0.08
+                opacity: landingPage ? 0.04 : 0.08
                 x: -width * 0.18
                 y: -height * 0.18
             }
@@ -83,7 +90,7 @@ Item {
                 height: parent.height * 0.86
                 radius: width / 2
                 color: iceAccent
-                opacity: 0.06
+                opacity: landingPage ? 0.05 : 0.06
                 x: parent.width - (width * 0.68)
                 y: -height * 0.16
             }
@@ -98,12 +105,12 @@ Item {
                 gradient: Gradient {
                     orientation: Gradient.Horizontal
                     GradientStop { position: 0.0; color: "transparent" }
-                    GradientStop { position: 0.18; color: Qt.rgba(goldAccent.r, goldAccent.g, goldAccent.b, 0.18) }
-                    GradientStop { position: 0.48; color: Qt.rgba(goldAccent.r, goldAccent.g, goldAccent.b, 0.84) }
-                    GradientStop { position: 0.82; color: Qt.rgba(iceAccent.r, iceAccent.g, iceAccent.b, 0.28) }
+                    GradientStop { position: 0.18; color: Qt.rgba(railAccent.r, railAccent.g, railAccent.b, landingPage ? 0.12 : 0.18) }
+                    GradientStop { position: 0.48; color: Qt.rgba(railAccent.r, railAccent.g, railAccent.b, landingPage ? 0.54 : 0.84) }
+                    GradientStop { position: 0.82; color: Qt.rgba(iceAccent.r, iceAccent.g, iceAccent.b, landingPage ? 0.18 : 0.28) }
                     GradientStop { position: 1.0; color: "transparent" }
                 }
-                opacity: 0.9
+                opacity: landingPage ? 0.58 : 0.9
             }
 
             GridLayout {
@@ -118,7 +125,11 @@ Item {
                     Layout.fillWidth: true
                     radius: shellWindow ? shellWindow.edgeRadius + shellWindow.scaled(1) : 13
                     color: shellWindow ? Qt.rgba(shellWindow.surfaceQuiet.r, shellWindow.surfaceQuiet.g, shellWindow.surfaceQuiet.b, 0.88) : "#101820"
-                    border.color: shellWindow ? Qt.rgba(goldAccent.r, goldAccent.g, goldAccent.b, 0.72) : "#c6ab7d"
+                    border.color: shellWindow
+                        ? (landingPage
+                            ? Qt.rgba(shellWindow.borderSubtle.r, shellWindow.borderSubtle.g, shellWindow.borderSubtle.b, 0.9)
+                            : Qt.rgba(goldAccent.r, goldAccent.g, goldAccent.b, 0.72))
+                        : "#c6ab7d"
                     border.width: 1
                     implicitHeight: badgeRow.implicitHeight + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
 
@@ -165,7 +176,7 @@ Item {
                                 Text {
                                     Layout.fillWidth: true
                                     text: root.heroEyebrow
-                                    color: goldAccent
+                                    color: landingPage ? iceAccent : goldAccent
                                     font.pixelSize: shellWindow ? shellWindow.captionSize : 10
                                     font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
                                     font.letterSpacing: shellWindow ? shellWindow.scaled(0.8) : 0.8

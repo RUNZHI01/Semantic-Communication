@@ -42,6 +42,9 @@ Item {
         && qtLocationProviders.indexOf(qtLocationPluginName) >= 0
     readonly property string worldMapBackdropSource: String(launchOptions["worldMapBackdropSource"] || "")
     readonly property bool localBackdropReady: worldMapBackdropSource.length > 0
+    readonly property bool preferLandingBackdropBackend: landingMode
+        && requestedMapBackend === "auto"
+        && localBackdropReady
     readonly property bool compactStage: width < (landingMode ? 760 : 880)
     readonly property bool landingMinimalChrome: landingMode && !!(shellWindow ? shellWindow.landingStageMinimalChrome : true)
     readonly property bool landingTopBadgesVisible: shellWindow ? !!shellWindow.landingStageTopBadgesVisible : false
@@ -110,6 +113,8 @@ Item {
             return localBackdropReady ? "svg" : (qtLocationBackendReady ? "qtlocation" : "canvas")
         if (requestedMapBackend === "canvas")
             return "canvas"
+        if (preferLandingBackdropBackend)
+            return "svg"
         if (qtLocationBackendReady)
             return "qtlocation"
         if (localBackdropReady)

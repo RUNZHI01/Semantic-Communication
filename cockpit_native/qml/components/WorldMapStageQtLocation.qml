@@ -37,8 +37,8 @@ Item {
     property string tileRoot: ""
     property string tileFormat: "png"
 
-    readonly property int mapInset: shellWindow ? shellWindow.scaled(landingMode ? 16 : 20) : (landingMode ? 16 : 20)
-    readonly property int overlayMargin: shellWindow ? shellWindow.scaled(landingMode ? 12 : 16) : (landingMode ? 12 : 16)
+    readonly property int mapInset: shellWindow ? shellWindow.scaled(landingMode ? 12 : 20) : (landingMode ? 12 : 20)
+    readonly property int overlayMargin: shellWindow ? shellWindow.scaled(landingMode ? 10 : 16) : (landingMode ? 10 : 16)
     readonly property bool compactStage: width < 780
     readonly property bool stackedBanner: width < (landingMode ? 620 : 780)
     readonly property bool bannerDockedBottom: preferBottomBannerDock
@@ -273,7 +273,7 @@ Item {
             bearing: 0
             tilt: 0
             copyrightsVisible: true
-            opacity: landingMode ? (root.backdropActive ? 0.36 : 0.58) : (root.backdropActive ? 0.66 : 0.76)
+            opacity: landingMode ? (root.backdropActive ? 0.18 : 0.54) : (root.backdropActive ? 0.6 : 0.76)
 
             MapPolyline {
                 visible: root.trackCoordinates.length > 1
@@ -385,25 +385,25 @@ Item {
             anchors.fill: parent
             visible: root.backdropActive
             source: root.backdropSource
-            fillMode: Image.PreserveAspectFit
+            fillMode: Image.PreserveAspectCrop
             smooth: true
             asynchronous: true
             mipmap: true
-            opacity: root.landingMode ? 0.34 : 0.18
+            opacity: root.landingMode ? 0.74 : 0.24
         }
 
         Rectangle {
             anchors.fill: mapBackdrop
             visible: mapBackdrop.visible
-            color: root.landingMode ? "#12182633" : "#0d18212a"
+            color: root.landingMode ? "#161c2618" : "#0d18212a"
         }
 
         Rectangle {
             anchors.fill: parent
             gradient: Gradient {
-                GradientStop { position: 0.0; color: root.landingMode ? "#4a071018" : "#28071118" }
+                GradientStop { position: 0.0; color: root.landingMode ? "#24071016" : "#28071118" }
                 GradientStop { position: 0.42; color: "#11182322" }
-                GradientStop { position: 1.0; color: root.landingMode ? "#52071118" : "#32071118" }
+                GradientStop { position: 1.0; color: root.landingMode ? "#28071116" : "#32071118" }
             }
         }
 
@@ -413,8 +413,8 @@ Item {
             anchors.top: parent.top
             height: parent.height * 0.28
             gradient: Gradient {
-                GradientStop { position: 0.0; color: "#7805121b" }
-                GradientStop { position: 0.48; color: "#2208121b" }
+                GradientStop { position: 0.0; color: root.landingMode ? "#34051217" : "#7805121b" }
+                GradientStop { position: 0.48; color: root.landingMode ? "#12081216" : "#2208121b" }
                 GradientStop { position: 1.0; color: "#0008121b" }
             }
         }
@@ -426,8 +426,8 @@ Item {
             height: parent.height * 0.34
             gradient: Gradient {
                 GradientStop { position: 0.0; color: "#0008121b" }
-                GradientStop { position: 0.42; color: "#2408121b" }
-                GradientStop { position: 1.0; color: "#7608111b" }
+                GradientStop { position: 0.42; color: root.landingMode ? "#10081215" : "#2408121b" }
+                GradientStop { position: 1.0; color: root.landingMode ? "#36081116" : "#7608111b" }
             }
         }
 
