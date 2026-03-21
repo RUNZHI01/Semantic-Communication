@@ -20,6 +20,12 @@ Launch the adaptive QML shell when `PySide6` is installed:
 python3 -m cockpit_native
 ```
 
+Project-local operator launcher:
+
+```bash
+bash ./session_bootstrap/scripts/run_cockpit_native.sh
+```
+
 The launcher now supervises the Qt process and retries once with software rendering if the first GPU-backed launch exits early.
 
 Force software rendering from the start:
