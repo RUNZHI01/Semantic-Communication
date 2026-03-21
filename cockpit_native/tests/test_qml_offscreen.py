@@ -44,6 +44,7 @@ class OffscreenQmlLoadTest(unittest.TestCase):
                 "ReferenceError",
                 "TypeError",
                 "Cannot anchor to an item that isn't a parent or sibling",
+                "Unable to assign [undefined] to QColor",
             )
             errors = [message for message in messages if any(marker in message for marker in markers)]
             print(json.dumps({"root_objects": len(engine.rootObjects()), "errors": errors}))
