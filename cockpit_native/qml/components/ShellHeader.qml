@@ -18,7 +18,7 @@ Item {
     readonly property color iceAccent: shellWindow ? shellWindow.accentIce : "#86c7d4"
     readonly property color railAccent: landingPage ? iceAccent : goldAccent
     readonly property var landingCommandRailModel: shellWindow && landingPage
-        ? shellWindow.previewItems(commandRailModel, 2)
+        ? shellWindow.previewItems(commandRailModel, compactTopRail ? 2 : 3)
         : commandRailModel
     readonly property string leadText: shellWindow
         ? (landingPage
@@ -26,14 +26,14 @@ Item {
             : (String(currentPageEntry["label"] || shellWindow.topTitle) + " / " + shellWindow.currentPageSummary))
         : ""
     readonly property string heroEyebrow: landingPage
-        ? "飞腾派原生座舱 / TVM-FEITENG PI"
+        ? "飞腾派原生座舱 / PHASE 6 NATIVE COCKPIT"
         : (String(currentPageEntry["label"] || "座舱页面") + " / ACTIVE PAGE")
     readonly property string heroTitle: shellWindow
         ? (landingPage ? shellWindow.topTitle : String(currentPageEntry["label"] || shellWindow.topTitle))
         : "飞腾原生座舱"
     readonly property string heroSubtitle: shellWindow
         ? (landingPage
-            ? shellWindow.topSubtitle
+            ? shellWindow.currentPageSummary
             : shellWindow.currentPageSummary + " · 保持仓库回注字段与软件安全回退。")
         : ""
     readonly property string pageIndicator: shellWindow
@@ -54,11 +54,11 @@ Item {
             Layout.fillWidth: true
             radius: shellWindow ? shellWindow.cardRadius + shellWindow.scaled(2) : 18
             color: shellWindow
-                ? Qt.rgba(shellWindow.surfaceGlass.r, shellWindow.surfaceGlass.g, shellWindow.surfaceGlass.b, landingPage ? 0.82 : 0.98)
+                ? Qt.rgba(shellWindow.surfaceGlass.r, shellWindow.surfaceGlass.g, shellWindow.surfaceGlass.b, landingPage ? 0.76 : 0.98)
                 : "#1d2832"
             border.color: shellWindow
                 ? (landingPage
-                    ? Qt.rgba(iceAccent.r, iceAccent.g, iceAccent.b, 0.42)
+                    ? Qt.rgba(iceAccent.r, iceAccent.g, iceAccent.b, 0.34)
                     : Qt.rgba(goldAccent.r, goldAccent.g, goldAccent.b, 0.84))
                 : "#b4946c"
             border.width: 1
@@ -197,7 +197,7 @@ Item {
                                 text: root.heroTitle
                                 color: shellWindow ? shellWindow.textStrong : "#f5efe4"
                                 font.pixelSize: shellWindow
-                                    ? (root.landingPage ? shellWindow.sectionTitleSize + shellWindow.scaled(2) : shellWindow.sectionTitleSize)
+                                    ? (root.landingPage ? shellWindow.sectionTitleSize + shellWindow.scaled(1) : shellWindow.sectionTitleSize)
                                     : 24
                                 font.weight: Font.DemiBold
                                 font.family: shellWindow ? shellWindow.displayFamily : "Noto Serif CJK SC"
