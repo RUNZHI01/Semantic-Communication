@@ -14,13 +14,21 @@ Item {
     property string scenarioLabel: ""
     property string scenarioTone: "neutral"
     property bool landingMode: false
+    property string bannerEyebrow: landingMode ? "GLOBAL COMMAND STAGE" : "LIVE COMMAND STAGE"
+    property string bannerTitle: currentLabel && currentLabel.length > 0
+        ? currentLabel
+        : (landingMode ? "世界主墙板" : "实时航迹")
+    property string bannerText: currentDetailText
+    property var bannerChips: []
 
     readonly property int mapInset: shellWindow ? shellWindow.scaled(landingMode ? 16 : 20) : (landingMode ? 16 : 20)
     readonly property int overlayMargin: shellWindow ? shellWindow.scaled(landingMode ? 14 : 16) : (landingMode ? 14 : 16)
-    readonly property color oceanTop: landingMode ? "#204565" : "#183250"
-    readonly property color oceanBottom: landingMode ? "#081019" : "#071019"
-    readonly property color landFill: landingMode ? "#557e97" : "#456a82"
-    readonly property color landFillBright: landingMode ? "#719eb9" : "#6388a2"
+    readonly property int bannerPadding: shellWindow ? shellWindow.scaled(landingMode ? 12 : 11) : (landingMode ? 12 : 11)
+    readonly property int bannerGap: shellWindow ? shellWindow.scaled(landingMode ? 7 : 6) : (landingMode ? 7 : 6)
+    readonly property color oceanTop: landingMode ? "#2a5879" : "#183250"
+    readonly property color oceanBottom: landingMode ? "#0b1721" : "#071019"
+    readonly property color landFill: landingMode ? "#638da5" : "#456a82"
+    readonly property color landFillBright: landingMode ? "#87afc4" : "#6388a2"
     readonly property color coastlineColor: shellWindow ? Qt.lighter(shellWindow.accentCyan, 1.04) : "#8fe6ff"
     readonly property color gridMinor: shellWindow ? shellWindow.gridLine : "#123147"
     readonly property color gridMajor: shellWindow ? shellWindow.gridLineStrong : "#245b80"
@@ -28,8 +36,8 @@ Item {
     readonly property color mapGlow: shellWindow ? shellWindow.panelGlowStrong : "#78d8ff"
     readonly property color markerColor: shellWindow ? shellWindow.accentCyan : "#8fe6ff"
     readonly property color emphasisColor: shellWindow ? shellWindow.accentAmber : "#ffbf55"
-    readonly property color overlayCardColor: landingMode ? "#d6091118" : "#de0a1320"
-    readonly property color overlayCardColorSoft: landingMode ? "#a1081016" : "#bc09111b"
+    readonly property color overlayCardColor: landingMode ? "#ce0a111a" : "#de0a1320"
+    readonly property color overlayCardColorSoft: landingMode ? "#a8060d14" : "#bc09111b"
     readonly property bool hasCurrentPoint: isFinite(Number(currentPoint["longitude"])) && isFinite(Number(currentPoint["latitude"]))
     readonly property bool compactStage: width < (shellWindow ? shellWindow.scaled(620) : 620)
     readonly property real markerX: hasCurrentPoint ? projectX(Number(currentPoint["longitude"])) : width * 0.5
@@ -44,6 +52,31 @@ Item {
     readonly property string currentDetailText: currentDetail && currentDetail.length > 0
         ? currentDetail
         : "世界地图主墙板"
+    readonly property bool stackedBanner: width < (shellWindow
+        ? shellWindow.scaled(landingMode ? 720 : 980)
+        : (landingMode ? 720 : 980))
+    readonly property bool dockBannerBottomLeft: landingMode && !stackedBanner
+    readonly property real bannerMaxWidth: Math.max(
+        shellWindow ? shellWindow.scaled(landingMode ? 280 : 260) : (landingMode ? 280 : 260),
+        Math.min(
+            width - (overlayMargin * 2),
+            shellWindow ? shellWindow.scaled(landingMode ? 360 : 560) : (landingMode ? 360 : 560)
+        )
+    )
+    readonly property real scenarioPlateMaxWidth: Math.max(
+        shellWindow ? shellWindow.scaled(landingMode ? 148 : 176) : (landingMode ? 148 : 176),
+        Math.min(
+            width * (landingMode ? 0.32 : 0.42),
+            shellWindow ? shellWindow.scaled(landingMode ? 210 : 250) : (landingMode ? 210 : 250)
+        )
+    )
+    readonly property int topOverlayHeight: Math.max(
+        stageLabelPlate.visible ? stageLabelPlate.height : 0,
+        scenarioPlate.visible ? scenarioPlate.height : 0
+    )
+    readonly property string trackNodeLabel: trackData && trackData.length > 0
+        ? String(trackData.length) + " 节点"
+        : "等待航迹"
     readonly property var continentPolygons: [
         [
             [-168, 72], [-156, 67], [-149, 60], [-141, 58], [-132, 52], [-124, 48],
@@ -121,6 +154,25 @@ Item {
         if (tone === "neutral")
             return "#5ab7ff"
         return "#88abc5"
+    }
+
+    function toneFill(tone) {
+        if (shellWindow) {
+            if (tone === "warning" || tone === "degraded")
+                return "#251d10"
+            if (tone === "online")
+                return "#0b2432"
+            if (tone === "neutral")
+                return "#102033"
+            return "#0a1724"
+        }
+        if (tone === "warning" || tone === "degraded")
+            return "#251d10"
+        if (tone === "online")
+            return "#0b2432"
+        if (tone === "neutral")
+            return "#102033"
+        return "#0a1724"
     }
 
     function projectX(longitude) {
@@ -431,6 +483,8 @@ Item {
     }
 
     Rectangle {
+        id: stageLabelPlate
+        visible: !root.landingMode
         anchors.left: parent.left
         anchors.top: parent.top
         anchors.margins: root.overlayMargin
@@ -441,8 +495,8 @@ Item {
         }
         border.color: root.mapGlow
         border.width: 1
-        implicitWidth: stageLabelColumn.implicitWidth + ((shellWindow ? shellWindow.scaled(14) : 14) * 2)
-        implicitHeight: stageLabelColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
+        implicitWidth: stageLabelColumn.implicitWidth + ((shellWindow ? shellWindow.scaled(12) : 12) * 2)
+        implicitHeight: stageLabelColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(9) : 9) * 2)
 
         Column {
             id: stageLabelColumn
@@ -467,9 +521,11 @@ Item {
     }
 
     Rectangle {
+        id: scenarioPlate
         anchors.right: parent.right
         anchors.top: parent.top
         anchors.margins: root.overlayMargin
+        width: Math.min(implicitWidth, root.scenarioPlateMaxWidth)
         radius: shellWindow ? shellWindow.edgeRadius : 12
         gradient: Gradient {
             GradientStop { position: 0.0; color: root.overlayCardColor }
@@ -477,29 +533,191 @@ Item {
         }
         border.color: toneColor(scenarioTone)
         border.width: 1
-        implicitWidth: scenarioColumn.implicitWidth + ((shellWindow ? shellWindow.scaled(14) : 14) * 2)
-        implicitHeight: scenarioColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
+        implicitWidth: scenarioColumn.implicitWidth + ((shellWindow ? shellWindow.scaled(12) : 12) * 2)
+        implicitHeight: scenarioColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(9) : 9) * 2)
 
         Column {
             id: scenarioColumn
-            anchors.centerIn: parent
+            anchors.fill: parent
+            anchors.margins: shellWindow ? shellWindow.scaled(9) : 9
             spacing: shellWindow ? shellWindow.scaled(2) : 2
 
             Text {
+                width: parent.width
                 text: root.compactStage
                     ? (root.landingMode ? "场景焦点" : "当前关注")
                     : (root.landingMode ? "场景焦点 / Focus" : "当前关注 / Focus")
                 color: shellWindow ? shellWindow.textMuted : "#68859d"
                 font.pixelSize: shellWindow ? shellWindow.captionSize : 10
                 font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                elide: Text.ElideRight
             }
 
             Text {
+                width: parent.width
                 text: scenarioLabel && scenarioLabel.length > 0 ? scenarioLabel : "全球链路稳态"
                 color: toneColor(scenarioTone)
                 font.pixelSize: shellWindow ? shellWindow.bodyEmphasisSize : 14
                 font.bold: true
                 font.family: shellWindow ? shellWindow.displayFamily : "Noto Sans CJK SC"
+                elide: Text.ElideRight
+            }
+        }
+    }
+
+    Rectangle {
+        id: commandBanner
+        visible: root.bannerTitle.length > 0 || root.bannerText.length > 0 || root.bannerChips.length > 0
+        width: root.bannerMaxWidth
+        x: root.dockBannerBottomLeft
+            ? root.overlayMargin
+            : Math.max(root.overlayMargin, (root.width - width) / 2)
+        y: root.dockBannerBottomLeft
+            ? root.height - height - root.overlayMargin
+            : (root.stackedBanner
+                ? root.overlayMargin + root.topOverlayHeight + (shellWindow ? shellWindow.scaled(10) : 10)
+                : root.overlayMargin + (shellWindow ? shellWindow.scaled(root.landingMode ? 8 : 6) : (root.landingMode ? 8 : 6)))
+        radius: shellWindow ? shellWindow.scaled(root.landingMode ? 14 : 13) : (root.landingMode ? 14 : 13)
+        gradient: Gradient {
+            GradientStop { position: 0.0; color: root.landingMode ? "#d512202b" : "#d30b1621" }
+            GradientStop { position: 0.58; color: root.landingMode ? "#bf0a1220" : "#bd09111a" }
+            GradientStop { position: 1.0; color: root.landingMode ? "#98081018" : "#9c071018" }
+        }
+        border.color: root.landingMode ? Qt.lighter(root.mapGlow, 1.06) : Qt.rgba(root.mapGlow.r, root.mapGlow.g, root.mapGlow.b, 0.72)
+        border.width: 1
+
+        Rectangle {
+            visible: root.landingMode
+            width: shellWindow ? shellWindow.scaled(3) : 3
+            anchors.left: parent.left
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            anchors.leftMargin: root.bannerPadding
+            anchors.topMargin: root.bannerPadding
+            anchors.bottomMargin: root.bannerPadding
+            radius: width / 2
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: "transparent" }
+                GradientStop { position: 0.24; color: root.mapGlow }
+                GradientStop { position: 0.76; color: Qt.lighter(root.mapGlow, 1.12) }
+                GradientStop { position: 1.0; color: "transparent" }
+            }
+            opacity: 0.82
+        }
+
+        Rectangle {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            height: shellWindow ? shellWindow.scaled(2) : 2
+            radius: height / 2
+            gradient: Gradient {
+                orientation: Gradient.Horizontal
+                GradientStop { position: 0.0; color: "transparent" }
+                GradientStop { position: 0.16; color: root.mapGlow }
+                GradientStop { position: 0.54; color: Qt.lighter(root.mapGlow, 1.12) }
+                GradientStop { position: 0.84; color: root.mapGlow }
+                GradientStop { position: 1.0; color: "transparent" }
+            }
+            opacity: root.landingMode ? 0.92 : 0.76
+        }
+
+        Rectangle {
+            width: parent.width * 0.32
+            height: parent.height * 0.8
+            radius: width / 2
+            color: root.mapGlow
+            opacity: root.landingMode ? 0.05 : 0.04
+            x: -width * 0.16
+            y: -height * 0.26
+        }
+
+        Column {
+            id: bannerColumn
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.leftMargin: root.bannerPadding + (root.landingMode ? (shellWindow ? shellWindow.scaled(10) : 10) : 0)
+            anchors.rightMargin: root.bannerPadding
+            anchors.topMargin: root.bannerPadding
+            anchors.bottomMargin: root.bannerPadding
+            spacing: root.bannerGap
+
+            Text {
+                width: parent.width
+                text: root.bannerEyebrow
+                color: root.mapGlow
+                font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                font.letterSpacing: shellWindow ? shellWindow.scaled(1) : 1
+                elide: Text.ElideRight
+            }
+
+            Text {
+                width: parent.width
+                text: root.bannerTitle
+                color: shellWindow ? shellWindow.textStrong : "#f5f9ff"
+                font.pixelSize: shellWindow
+                    ? shellWindow.bodyEmphasisSize + (root.landingMode ? shellWindow.scaled(2) : shellWindow.scaled(2))
+                    : (root.landingMode ? 18 : 18)
+                font.weight: Font.DemiBold
+                font.family: shellWindow ? shellWindow.displayFamily : "Noto Sans CJK SC"
+                wrapMode: Text.WordWrap
+                maximumLineCount: root.stackedBanner ? 2 : 1
+                elide: Text.ElideRight
+            }
+
+            Text {
+                visible: text.length > 0
+                width: parent.width
+                text: root.bannerText
+                color: shellWindow ? shellWindow.textSecondary : "#8fa9be"
+                font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 12
+                font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                wrapMode: Text.WordWrap
+                maximumLineCount: root.landingMode ? 2 : (root.stackedBanner ? 2 : 1)
+                elide: Text.ElideRight
+            }
+
+            Flow {
+                visible: root.bannerChips.length > 0
+                width: parent.width
+                spacing: root.bannerGap
+
+                Repeater {
+                    model: root.bannerChips
+
+                    delegate: Rectangle {
+                        readonly property var chipData: modelData
+                        radius: shellWindow ? shellWindow.edgeRadius : 12
+                        color: root.toneFill(String(chipData["tone"] || "neutral"))
+                        border.color: root.toneColor(String(chipData["tone"] || "neutral"))
+                        border.width: 1
+                        implicitWidth: bannerChipColumn.implicitWidth + ((shellWindow ? shellWindow.scaled(8) : 8) * 2)
+                        implicitHeight: bannerChipColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(5) : 5) * 2)
+
+                        Column {
+                            id: bannerChipColumn
+                            anchors.centerIn: parent
+                            spacing: 1
+
+                            Text {
+                                text: chipData["label"]
+                                color: shellWindow ? shellWindow.textMuted : "#68859d"
+                                font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                            }
+
+                            Text {
+                                text: chipData["value"]
+                                color: shellWindow ? shellWindow.textStrong : "#f5f9ff"
+                                font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
+                                font.bold: true
+                                font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                            }
+                        }
+                    }
+                }
             }
         }
     }

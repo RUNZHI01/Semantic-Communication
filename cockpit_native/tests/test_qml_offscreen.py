@@ -43,6 +43,7 @@ class OffscreenQmlLoadTest(unittest.TestCase):
             markers = (
                 "ReferenceError",
                 "TypeError",
+                "Binding loop detected",
                 "Cannot anchor to an item that isn't a parent or sibling",
                 "Unable to assign [undefined] to QColor",
             )
