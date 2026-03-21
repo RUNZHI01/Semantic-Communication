@@ -144,12 +144,14 @@ ApplicationWindow {
     readonly property string missionCallSignValue: String(centerPanelData["mission_call_sign"] || "M9-DEMO")
     readonly property string liveAnchorTone: String(liveAnchor["tone"] || "neutral")
     readonly property string landingSummaryTitle: recentEventTone === "warning"
-        ? "异常事件已回注到主壳体"
-        : "地图优先的原生命令壳"
+        ? "异常回注态势墙"
+        : "全球任务态势主墙"
     readonly property string landingSummaryText: String(centerControlSummary["last_event_message"] || rightPanelData["summary"] || topSubtitle)
     readonly property string landingMapBannerTitle: missionCallSignValue + " · " + aircraftIdValue
     readonly property string landingMapBannerText: coordinatePair(currentPosition) + " · "
         + formattedMetric(kinematics["ground_speed_kph"], 0, "km/h")
+        + " · "
+        + formattedMetric(kinematics["altitude_m"], 0, "m")
     readonly property string footerNote: String(
         bottomPanelData["footer_note"] || "默认执行仓库内软件渲染安全启动路径。"
     )
@@ -164,7 +166,7 @@ ApplicationWindow {
             "index": 0,
             "label": "总览",
             "english": "Landing",
-            "summary": "地图主舞台、左舷系统轨、右舷弱网策略与执行坞站。"
+            "summary": "世界地图主舞台、系统回注、弱网剧本与执行坞站。"
         },
         {
             "index": 1,
@@ -196,7 +198,7 @@ ApplicationWindow {
         { "label": "会话", "value": systemSessionValue, "tone": "neutral" },
         { "label": "心跳", "value": heartbeatValue, "tone": heartbeatTone },
         { "label": "在线锚点", "value": String(liveAnchor["valid_instance"] || "--"), "tone": liveAnchorTone },
-        { "label": "渲染", "value": softwareRenderEnabled ? "软件安全" : "图形优先", "tone": softwareRenderEnabled ? "warning" : "online" }
+        { "label": "渲染模式", "value": softwareRenderEnabled ? "软件安全" : "图形优先", "tone": softwareRenderEnabled ? "warning" : "online" }
     ]
 
     readonly property var landingJumpModel: [
@@ -263,7 +265,7 @@ ApplicationWindow {
 
     readonly property var landingWeakMetricModel: [
         {
-            "label": "推荐档",
+            "label": "推荐剧本",
             "value": recommendedScenarioId,
             "detail": compactMessage(
                 String(recommendedScenario["summary"] || "延续仓库现有弱网推荐剧本。"),
@@ -272,19 +274,19 @@ ApplicationWindow {
             "tone": "warning"
         },
         {
-            "label": "吞吐",
+            "label": "吞吐对照",
             "value": formattedMetric(recommendedComparison["pipeline_images_per_sec"], 3, "img/s"),
             "detail": "pipeline 对照",
             "tone": "online"
         },
         {
-            "label": "提升",
+            "label": "提升幅度",
             "value": formattedMetric(recommendedComparison["throughput_uplift_pct"], 3, "%"),
             "detail": "弱网 uplift",
             "tone": "warning"
         },
         {
-            "label": "锚点",
+            "label": "在线锚点",
             "value": String(liveAnchor["valid_instance"] || "--"),
             "detail": compactMessage(String(liveAnchor["board_status"] || "等待在线锚点"), compactLayout ? 16 : 28),
             "tone": liveAnchorTone
@@ -293,8 +295,8 @@ ApplicationWindow {
 
     readonly property var landingStageChipModel: [
         { "label": "数据源", "value": compactMessage(activeSourceLabel, compactLayout ? 18 : 24), "tone": "online" },
-        { "label": "锚点", "value": String(liveAnchor["valid_instance"] || "--"), "tone": liveAnchorTone },
-        { "label": "链路", "value": compactMessage(linkProfileValue, compactLayout ? 14 : 20), "tone": "neutral" }
+        { "label": "在线锚点", "value": String(liveAnchor["valid_instance"] || "--"), "tone": liveAnchorTone },
+        { "label": "链路档位", "value": compactMessage(linkProfileValue, compactLayout ? 14 : 20), "tone": "neutral" }
     ]
 
     readonly property var systemPageChipModel: [
@@ -314,7 +316,7 @@ ApplicationWindow {
     readonly property var actionPageChipModel: [
         { "label": "动作", "value": String(bottomActions.length), "tone": "neutral" },
         { "label": "可执行", "value": String(enabledBottomActions), "tone": enabledBottomActions > 0 ? "online" : "warning" },
-        { "label": "桥接", "value": bridgeAvailable ? "仓库在线" : "桥接缺失", "tone": bridgeAvailable ? "online" : "warning" },
+        { "label": "仓库桥接", "value": bridgeAvailable ? "仓库在线" : "桥接缺失", "tone": bridgeAvailable ? "online" : "warning" },
         { "label": "渲染", "value": softwareRenderEnabled ? "软件安全" : "图形优先", "tone": softwareRenderEnabled ? "warning" : "online" }
     ]
 

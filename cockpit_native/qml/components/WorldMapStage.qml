@@ -14,7 +14,7 @@ Item {
     property string scenarioLabel: ""
     property string scenarioTone: "neutral"
     property bool landingMode: false
-    property string bannerEyebrow: landingMode ? "GLOBAL COMMAND STAGE" : "LIVE COMMAND STAGE"
+    property string bannerEyebrow: landingMode ? "全球指挥主舞台 / GLOBAL COMMAND STAGE" : "实时指挥舞台 / LIVE COMMAND STAGE"
     property string bannerTitle: currentLabel && currentLabel.length > 0
         ? currentLabel
         : (landingMode ? "世界主墙板" : "实时航迹")
@@ -27,8 +27,8 @@ Item {
     readonly property int bannerGap: shellWindow ? shellWindow.scaled(landingMode ? 7 : 6) : (landingMode ? 7 : 6)
     readonly property color oceanTop: landingMode ? "#2a5879" : "#183250"
     readonly property color oceanBottom: landingMode ? "#0b1721" : "#071019"
-    readonly property color landFill: landingMode ? "#638da5" : "#456a82"
-    readonly property color landFillBright: landingMode ? "#87afc4" : "#6388a2"
+    readonly property color landFill: landingMode ? "#769fb8" : "#456a82"
+    readonly property color landFillBright: landingMode ? "#a6cadb" : "#6388a2"
     readonly property color coastlineColor: shellWindow ? Qt.lighter(shellWindow.accentCyan, 1.04) : "#8fe6ff"
     readonly property color gridMinor: shellWindow ? shellWindow.gridLine : "#123147"
     readonly property color gridMajor: shellWindow ? shellWindow.gridLineStrong : "#245b80"
@@ -484,7 +484,7 @@ Item {
 
     Rectangle {
         id: stageLabelPlate
-        visible: !root.landingMode
+        visible: true
         anchors.left: parent.left
         anchors.top: parent.top
         anchors.margins: root.overlayMargin
@@ -493,7 +493,9 @@ Item {
             GradientStop { position: 0.0; color: root.overlayCardColor }
             GradientStop { position: 1.0; color: root.overlayCardColorSoft }
         }
-        border.color: root.mapGlow
+        border.color: root.landingMode
+            ? Qt.rgba(root.mapGlow.r, root.mapGlow.g, root.mapGlow.b, 0.82)
+            : root.mapGlow
         border.width: 1
         implicitWidth: stageLabelColumn.implicitWidth + ((shellWindow ? shellWindow.scaled(12) : 12) * 2)
         implicitHeight: stageLabelColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(9) : 9) * 2)
@@ -504,11 +506,12 @@ Item {
             spacing: shellWindow ? shellWindow.scaled(2) : 2
 
             Text {
-                text: root.landingMode ? "世界主墙板 / GLOBAL WALLBOARD" : "世界态势地图 / WORLD MAP"
+                text: root.landingMode ? "全球主墙板 / GLOBAL WALLBOARD" : "世界态势地图 / WORLD MAP"
                 color: root.mapGlow
                 font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
                 font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
                 font.letterSpacing: shellWindow ? shellWindow.scaled(1) : 1
+                opacity: root.landingMode ? 0.94 : 1.0
             }
 
             Text {
