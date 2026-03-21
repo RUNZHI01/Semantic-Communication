@@ -1757,6 +1757,57 @@ Item {
                                     bannerChips: shellWindow ? shellWindow.landingStageChipModel : []
                                 }
 
+                                InsetPanel {
+                                    anchors.left: parent.left
+                                    anchors.top: parent.top
+                                    anchors.leftMargin: shellWindow ? shellWindow.scaled(16) : 16
+                                    anchors.topMargin: shellWindow ? shellWindow.scaled(78) : 78
+                                    width: Math.min(
+                                        parent.width - ((shellWindow ? shellWindow.scaled(32) : 32) * 2),
+                                        root.landingStageLedgerWidth
+                                    )
+                                    shellWindow: root.shellWindow
+                                    accentColor: shellWindow ? shellWindow.accentGold : "#c6ab7d"
+                                    fillColor: "#d509121a"
+                                    prominent: true
+
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        spacing: shellWindow ? shellWindow.scaled(3) : 3
+
+                                        Text {
+                                            text: "STAGE LEDGER / 主墙摘要"
+                                            color: shellWindow ? shellWindow.accentGold : "#c6ab7d"
+                                            font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                            font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                            font.letterSpacing: shellWindow ? shellWindow.scaled(0.7) : 0.7
+                                        }
+
+                                        Text {
+                                            Layout.fillWidth: true
+                                            text: root.landingStageLedgerText
+                                            color: shellWindow ? shellWindow.textStrong : "#f5efe4"
+                                            font.pixelSize: shellWindow ? shellWindow.bodySize : 13
+                                            font.weight: Font.DemiBold
+                                            font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                            wrapMode: Text.WordWrap
+                                            maximumLineCount: 3
+                                            elide: Text.ElideRight
+                                        }
+
+                                        Text {
+                                            Layout.fillWidth: true
+                                            text: root.landingStageLedgerSupport
+                                            color: shellWindow ? shellWindow.textSecondary : "#9aa8b1"
+                                            font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
+                                            font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                            wrapMode: Text.WordWrap
+                                            maximumLineCount: 2
+                                            elide: Text.ElideRight
+                                        }
+                                    }
+                                }
+
                                 Rectangle {
                                     anchors.right: parent.right
                                     anchors.bottom: parent.bottom
@@ -2198,6 +2249,57 @@ Item {
                                 bannerTitle: shellWindow ? shellWindow.landingMapBannerTitle : ""
                                 bannerText: shellWindow ? shellWindow.landingMapBannerText : ""
                                 bannerChips: shellWindow ? shellWindow.landingStageChipModel : []
+                            }
+
+                            InsetPanel {
+                                anchors.left: parent.left
+                                anchors.top: parent.top
+                                anchors.leftMargin: shellWindow ? shellWindow.scaled(14) : 14
+                                anchors.topMargin: shellWindow ? shellWindow.scaled(72) : 72
+                                width: Math.min(
+                                    parent.width - ((shellWindow ? shellWindow.scaled(28) : 28) * 2),
+                                    root.landingStageLedgerWidth
+                                )
+                                shellWindow: root.shellWindow
+                                accentColor: shellWindow ? shellWindow.accentGold : "#c6ab7d"
+                                fillColor: "#d509121a"
+                                prominent: true
+
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: shellWindow ? shellWindow.scaled(3) : 3
+
+                                    Text {
+                                        text: "STAGE LEDGER / 主墙摘要"
+                                        color: shellWindow ? shellWindow.accentGold : "#c6ab7d"
+                                        font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                        font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                        font.letterSpacing: shellWindow ? shellWindow.scaled(0.7) : 0.7
+                                    }
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: root.landingStageLedgerText
+                                        color: shellWindow ? shellWindow.textStrong : "#f5efe4"
+                                        font.pixelSize: shellWindow ? shellWindow.bodySize : 13
+                                        font.weight: Font.DemiBold
+                                        font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                        wrapMode: Text.WordWrap
+                                        maximumLineCount: 3
+                                        elide: Text.ElideRight
+                                    }
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: root.landingStageLedgerSupport
+                                        color: shellWindow ? shellWindow.textSecondary : "#9aa8b1"
+                                        font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
+                                        font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                        wrapMode: Text.WordWrap
+                                        maximumLineCount: 2
+                                        elide: Text.ElideRight
+                                    }
+                                }
                             }
 
                             Rectangle {
