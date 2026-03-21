@@ -479,6 +479,58 @@ ApplicationWindow {
         }
 
         Rectangle {
+            width: parent.width * 0.26
+            height: root.scaled(88)
+            radius: root.edgeRadius
+            color: "#09111a"
+            opacity: 0.88
+            rotation: -11
+            x: -width * 0.16
+            y: -height * 0.42
+        }
+
+        Rectangle {
+            width: parent.width * 0.26
+            height: root.scaled(88)
+            radius: root.edgeRadius
+            color: "#09111a"
+            opacity: 0.88
+            rotation: 11
+            x: parent.width - (width * 0.84)
+            y: -height * 0.42
+        }
+
+        Rectangle {
+            anchors.top: parent.top
+            anchors.horizontalCenter: parent.horizontalCenter
+            width: Math.min(parent.width * 0.42, root.scaled(560))
+            height: root.scaled(28)
+            radius: height / 2
+            gradient: Gradient {
+                orientation: Gradient.Horizontal
+                GradientStop { position: 0.0; color: "transparent" }
+                GradientStop { position: 0.2; color: "#14ffffff" }
+                GradientStop { position: 0.5; color: "#22ffffff" }
+                GradientStop { position: 0.8; color: "#14ffffff" }
+                GradientStop { position: 1.0; color: "transparent" }
+            }
+            opacity: 0.72
+        }
+
+        Rectangle {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            height: parent.height * 0.18
+            radius: parent.radius
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: "#00000000" }
+                GradientStop { position: 0.48; color: "#18000000" }
+                GradientStop { position: 1.0; color: "#4c060c14" }
+            }
+        }
+
+        Rectangle {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
@@ -492,6 +544,16 @@ ApplicationWindow {
                 GradientStop { position: 1.0; color: "transparent" }
             }
             opacity: 0.88
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            anchors.margins: 3
+            radius: parent.radius - 3
+            color: "transparent"
+            border.color: "#3f546d"
+            border.width: 1
+            opacity: 0.85
         }
 
         ColumnLayout {
