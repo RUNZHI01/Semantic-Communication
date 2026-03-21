@@ -91,30 +91,38 @@ ApplicationWindow {
     readonly property int safeRight: Number(insets["right"] || 0)
     readonly property int safeBottom: Number(insets["bottom"] || 0)
 
-    readonly property int outerPadding: scaled(20)
-    readonly property int shellPadding: scaled(26)
-    readonly property int zoneGap: scaled(18)
-    readonly property int compactGap: scaled(10)
-    readonly property int panelPadding: scaled(18)
-    readonly property int cardPadding: scaled(16)
+    readonly property int viewportHeight: height > 0 ? height : Number(metrics["height"] || designHeight)
+    readonly property bool shortViewport: viewportHeight < 900
+    readonly property bool tallViewport: viewportHeight >= 1000
+    readonly property bool showHeaderNarrative: viewportHeight >= 920
+    readonly property bool showHeaderTrace: viewportHeight >= 980
+    readonly property bool showDashboardDeckMetrics: viewportHeight >= 940
+    readonly property bool showFooterBus: viewportHeight >= 1000
+
+    readonly property int outerPadding: scaled(shortViewport ? 16 : 20)
+    readonly property int shellPadding: scaled(shortViewport ? 20 : 26)
+    readonly property int zoneGap: scaled(shortViewport ? 14 : 18)
+    readonly property int compactGap: scaled(shortViewport ? 8 : 10)
+    readonly property int panelPadding: scaled(shortViewport ? 16 : 18)
+    readonly property int cardPadding: scaled(shortViewport ? 14 : 16)
     readonly property int panelRadius: scaled(24)
     readonly property int cardRadius: scaled(16)
     readonly property int edgeRadius: scaled(12)
-    readonly property int headerTitleSize: scaled(36)
-    readonly property int sectionTitleSize: scaled(24)
+    readonly property int headerTitleSize: scaled(shortViewport ? 32 : 36)
+    readonly property int sectionTitleSize: scaled(shortViewport ? 21 : 24)
     readonly property int bodyEmphasisSize: scaled(14)
     readonly property int bodySize: scaled(13)
     readonly property int captionSize: scaled(10)
     readonly property int eyebrowSize: scaled(10)
-    readonly property int headerPad: scaled(wideLayout ? 18 : 24)
-    readonly property int headerChipWidth: scaled(wideLayout ? 142 : 154)
-    readonly property int headerMirrorWidth: scaled(wideLayout ? 448 : 0)
+    readonly property int headerPad: scaled(splitHeaderLayout ? (shortViewport ? 14 : 18) : (shortViewport ? 16 : 24))
+    readonly property int headerChipWidth: scaled(splitHeaderLayout ? 128 : (wideLayout ? 142 : 154))
+    readonly property int headerMirrorWidth: scaled(splitHeaderLayout ? (shortViewport ? 392 : 436) : 0)
 
     readonly property real contentWidth: Math.max(1, width - safeLeft - safeRight - (outerPadding * 2))
     readonly property bool wideLayout: contentWidth >= scaled(1380)
     readonly property bool mediumLayout: !wideLayout && contentWidth >= scaled(980)
     readonly property bool compactLayout: !wideLayout && !mediumLayout
-    readonly property bool splitHeaderLayout: !compactLayout && contentWidth >= scaled(1500)
+    readonly property bool splitHeaderLayout: !compactLayout && (wideLayout || contentWidth >= scaled(1240))
     readonly property int dashboardColumns: wideLayout ? 16 : (mediumLayout ? 2 : 1)
     readonly property int wideLeftSpan: 3
     readonly property int wideCenterSpan: 10
@@ -384,8 +392,8 @@ ApplicationWindow {
     Component.onCompleted: {
         var availableWidth = Math.max(minimumWidth, Number(metrics["width"] || designWidth))
         var availableHeight = Math.max(minimumHeight, Number(metrics["height"] || designHeight))
-        width = Math.max(minimumWidth, Math.min(Math.round(availableWidth * 0.95), scaled(1820)))
-        height = Math.max(minimumHeight, Math.min(Math.round(availableHeight * 0.92), scaled(1060)))
+        width = Math.max(minimumWidth, Math.min(Math.round(availableWidth * 0.97), scaled(1860)))
+        height = Math.max(minimumHeight, Math.min(Math.round(availableHeight * 0.96), scaled(1080)))
     }
 
     Rectangle {
@@ -764,6 +772,63 @@ ApplicationWindow {
                 GradientStop { position: 1.0; color: "transparent" }
             }
             opacity: 0.76
+        }
+
+        Rectangle {
+            visible: root.wideLayout
+            anchors.horizontalCenter: leftRailBerth.horizontalCenter
+            anchors.top: leftRailBerth.bottom
+            anchors.bottom: bottomActionBerth.top
+            anchors.topMargin: root.scaled(10)
+            anchors.bottomMargin: root.scaled(12)
+            width: root.scaled(2)
+            radius: width / 2
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: "#00000000" }
+                GradientStop { position: 0.18; color: root.panelTraceSoft }
+                GradientStop { position: 0.52; color: root.accentBlue }
+                GradientStop { position: 0.84; color: root.panelGlowStrong }
+                GradientStop { position: 1.0; color: "#00000000" }
+            }
+            opacity: 0.24
+        }
+
+        Rectangle {
+            visible: !root.compactLayout
+            anchors.horizontalCenter: centerStageBerth.horizontalCenter
+            anchors.top: centerStageBerth.bottom
+            anchors.bottom: bottomActionBerth.top
+            anchors.topMargin: root.scaled(10)
+            anchors.bottomMargin: root.scaled(12)
+            width: root.scaled(2)
+            radius: width / 2
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: "#00000000" }
+                GradientStop { position: 0.16; color: root.panelTraceSoft }
+                GradientStop { position: 0.52; color: root.accentCyan }
+                GradientStop { position: 0.86; color: root.panelGlowStrong }
+                GradientStop { position: 1.0; color: "#00000000" }
+            }
+            opacity: 0.28
+        }
+
+        Rectangle {
+            visible: root.wideLayout
+            anchors.horizontalCenter: rightRailBerth.horizontalCenter
+            anchors.top: rightRailBerth.bottom
+            anchors.bottom: bottomActionBerth.top
+            anchors.topMargin: root.scaled(10)
+            anchors.bottomMargin: root.scaled(12)
+            width: root.scaled(2)
+            radius: width / 2
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: "#00000000" }
+                GradientStop { position: 0.18; color: root.panelTraceSoft }
+                GradientStop { position: 0.52; color: root.accentBlue }
+                GradientStop { position: 0.84; color: root.panelGlowStrong }
+                GradientStop { position: 1.0; color: "#00000000" }
+            }
+            opacity: 0.24
         }
 
         Rectangle {
@@ -1357,7 +1422,7 @@ ApplicationWindow {
             anchors.topMargin: root.shellPadding + root.safeTop
             anchors.rightMargin: root.shellPadding + root.safeRight
             anchors.bottomMargin: root.shellPadding + root.safeBottom
-            spacing: root.zoneGap
+            spacing: root.shortViewport ? root.compactGap : root.zoneGap
 
             Rectangle {
                 id: shellHeaderCard
@@ -1426,7 +1491,7 @@ ApplicationWindow {
 
                         Text {
                             text: root.topSubtitle
-                            visible: text.length > 0
+                            visible: text.length > 0 && root.showHeaderNarrative
                             color: "#8ec5ea"
                             font.pixelSize: root.bodySize
                             font.family: root.monoFamily
@@ -1436,6 +1501,7 @@ ApplicationWindow {
 
                         Text {
                             text: root.meta["subtitle"] || "Qt/QML 原生壳体继续沿用既有 TVM/OpenAMP 合同，以安全运营中台风格整合飞行、链路、弱网与锚点观测。"
+                            visible: root.showHeaderNarrative
                             color: root.textSecondary
                             font.pixelSize: root.bodySize
                             font.family: root.uiFamily
@@ -1631,6 +1697,8 @@ ApplicationWindow {
                                                     font.pixelSize: root.captionSize
                                                     font.family: root.uiFamily
                                                     wrapMode: Text.WordWrap
+                                                    maximumLineCount: root.shortViewport ? 1 : 2
+                                                    elide: Text.ElideRight
                                                 }
                                             }
                                         }
@@ -1701,6 +1769,8 @@ ApplicationWindow {
                                 font.bold: true
                                 font.family: root.uiFamily
                                 wrapMode: Text.WordWrap
+                                maximumLineCount: root.showHeaderNarrative ? 2 : 1
+                                elide: Text.ElideRight
                             }
 
                             Text {
@@ -1710,6 +1780,8 @@ ApplicationWindow {
                                 font.pixelSize: root.bodySize
                                 font.family: root.uiFamily
                                 wrapMode: Text.WordWrap
+                                maximumLineCount: root.showHeaderNarrative ? 2 : 1
+                                elide: Text.ElideRight
                             }
 
                             Rectangle {
@@ -1784,7 +1856,7 @@ ApplicationWindow {
                                             font.pixelSize: root.captionSize
                                             font.family: root.uiFamily
                                             wrapMode: Text.WordWrap
-                                            visible: root.height >= 900
+                                            visible: root.showHeaderTrace
                                         }
                                     }
 
@@ -1885,7 +1957,7 @@ ApplicationWindow {
                                                 wrapMode: Text.WordWrap
                                                 maximumLineCount: 2
                                                 elide: Text.ElideRight
-                                                visible: root.height >= 900
+                                                visible: root.showHeaderNarrative
                                             }
                                         }
                                     }
@@ -1893,7 +1965,7 @@ ApplicationWindow {
                             }
 
                             Rectangle {
-                                visible: root.height >= 900
+                                visible: root.showHeaderTrace
                                 width: parent.width
                                 radius: root.edgeRadius
                                 gradient: Gradient {
@@ -1994,6 +2066,7 @@ ApplicationWindow {
                             }
 
                             Rectangle {
+                                visible: root.tallViewport
                                 width: parent.width
                                 radius: root.edgeRadius
                                 gradient: Gradient {
@@ -2247,6 +2320,7 @@ ApplicationWindow {
                 id: dashboardDeck
                 Layout.fillWidth: true
                 Layout.fillHeight: true
+                Layout.minimumHeight: root.scaled(root.wideLayout ? (root.shortViewport ? 460 : 560) : (root.mediumLayout ? 420 : 360))
                 radius: root.panelRadius
                 gradient: Gradient {
                     GradientStop { position: 0.0; color: "#10253a" }
@@ -2372,6 +2446,7 @@ ApplicationWindow {
                             Text {
                                 Layout.fillWidth: true
                                 text: "把中心墙板、左右轨与执行坞站压进同一成品壳体，让整个 native cockpit 读起来更像完成态产品，而不是若干强面板的并列。"
+                                visible: root.showDashboardDeckMetrics
                                 color: root.textSecondary
                                 font.pixelSize: root.captionSize
                                 font.family: root.uiFamily
@@ -2401,7 +2476,7 @@ ApplicationWindow {
 
                     Flow {
                         Layout.fillWidth: true
-                        visible: !root.compactLayout
+                        visible: root.showDashboardDeckMetrics && !root.compactLayout
                         spacing: root.compactGap
 
                         Repeater {
@@ -2519,6 +2594,7 @@ ApplicationWindow {
             }
 
             Rectangle {
+                visible: root.showFooterBus
                 Layout.fillWidth: true
                 radius: root.cardRadius
                 gradient: Gradient {

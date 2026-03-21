@@ -42,7 +42,9 @@ PanelFrame {
     readonly property string heartbeatTone: String(heartbeatRow["tone"] || "neutral")
     readonly property real headingDeg: Number(kinematicsData["heading_deg"] || 0)
     readonly property bool compactCardLayout: shellWindow ? shellWindow.compactLayout : width < 920
-    readonly property bool compressedTheaterLayout: !compactCardLayout && height < (shellWindow ? shellWindow.scaled(860) : 860)
+    readonly property bool compressedTheaterLayout: !compactCardLayout
+        && (height < (shellWindow ? shellWindow.scaled(980) : 980)
+            || (shellWindow ? shellWindow.shortViewport : false))
     readonly property int metricColumns: compactCardLayout ? 1 : 4
     readonly property int mapInset: shellWindow ? shellWindow.scaled(24) : 24
     readonly property int stageDockMargin: shellWindow ? shellWindow.scaled(compressedTheaterLayout ? 10 : 14) : 14
