@@ -23,15 +23,24 @@ Item {
         : (landingMode ? "世界主墙板" : "实时航迹")
     property string bannerText: currentDetailText
     property var bannerChips: []
+    property bool showStageBadge: true
+    property bool showScenarioBadge: true
+    property bool showInfoPanels: true
+    property bool preferBottomBannerDock: false
 
     readonly property int mapInset: shellWindow ? shellWindow.scaled(landingMode ? 16 : 20) : (landingMode ? 16 : 20)
     readonly property int overlayMargin: shellWindow ? shellWindow.scaled(landingMode ? 14 : 16) : (landingMode ? 14 : 16)
-    readonly property int bannerPadding: shellWindow ? shellWindow.scaled(landingMode ? 12 : 11) : (landingMode ? 12 : 11)
-    readonly property int bannerGap: shellWindow ? shellWindow.scaled(landingMode ? 7 : 6) : (landingMode ? 7 : 6)
-    readonly property color oceanTop: landingMode ? "#234c69" : "#17304b"
-    readonly property color oceanBottom: landingMode ? "#09131c" : "#050d15"
-    readonly property color landFill: landingMode ? "#6f96ae" : "#53758f"
-    readonly property color landFillBright: landingMode ? "#99bece" : "#7598ae"
+    readonly property bool minimalBanner: landingMode && bannerEyebrow.length === 0
+    readonly property int bannerPadding: shellWindow
+        ? shellWindow.scaled(minimalBanner ? 10 : (landingMode ? 12 : 11))
+        : (minimalBanner ? 10 : (landingMode ? 12 : 11))
+    readonly property int bannerGap: shellWindow
+        ? shellWindow.scaled(minimalBanner ? 5 : (landingMode ? 7 : 6))
+        : (minimalBanner ? 5 : (landingMode ? 7 : 6))
+    readonly property color oceanTop: landingMode ? "#173b52" : "#17304b"
+    readonly property color oceanBottom: landingMode ? "#060e15" : "#050d15"
+    readonly property color landFill: landingMode ? "#4f6f83" : "#53758f"
+    readonly property color landFillBright: landingMode ? "#6e90a4" : "#7598ae"
     readonly property color coastlineColor: shellWindow ? Qt.lighter(shellWindow.accentCyan, 1.04) : "#8fe6ff"
     readonly property color gridMinor: shellWindow ? shellWindow.gridLine : "#123147"
     readonly property color gridMajor: shellWindow ? shellWindow.gridLineStrong : "#245b80"
@@ -42,7 +51,7 @@ Item {
     readonly property color overlayCardColor: landingMode ? "#d70c1721" : "#d90a1320"
     readonly property color overlayCardColorSoft: landingMode ? "#9b07111a" : "#aa081119"
     readonly property bool hasCurrentPoint: isFinite(Number(currentPoint["longitude"])) && isFinite(Number(currentPoint["latitude"]))
-    readonly property bool compactStage: width < (shellWindow ? shellWindow.scaled(620) : 620)
+    readonly property bool compactStage: width < (landingMode ? 760 : 880)
     readonly property bool useExternalBackdrop: backdropMode === "asset" && backdropSource.length > 0
     readonly property bool externalBackdropActive: useExternalBackdrop && externalBackdropImage.status === Image.Ready
     readonly property real markerX: hasCurrentPoint ? projectX(Number(currentPoint["longitude"])) : width * 0.5
@@ -66,15 +75,34 @@ Item {
     readonly property string infoRailAnchorText: anchorLabel && anchorLabel.length > 0 && anchorLabel !== "--"
         ? anchorLabel
         : "待命"
-    readonly property bool stackedBanner: width < (shellWindow
-        ? shellWindow.scaled(landingMode ? 720 : 980)
-        : (landingMode ? 720 : 980))
-    readonly property bool dockBannerBottomLeft: landingMode && !stackedBanner
+    readonly property bool stackedBanner: width < (landingMode ? 620 : 780)
+    readonly property bool bannerDockedBottom: preferBottomBannerDock
+        && width >= (shellWindow ? shellWindow.scaled(landingMode ? 280 : 340) : (landingMode ? 280 : 340))
     readonly property real bannerMaxWidth: Math.max(
-        shellWindow ? shellWindow.scaled(landingMode ? 280 : 260) : (landingMode ? 280 : 260),
+        shellWindow
+            ? shellWindow.scaled(
+                bannerDockedBottom
+                    ? (landingMode ? (minimalBanner ? 260 : 300) : 340)
+                    : (landingMode ? 280 : 260)
+            )
+            : (
+                bannerDockedBottom
+                    ? (landingMode ? (minimalBanner ? 260 : 300) : 340)
+                    : (landingMode ? 280 : 260)
+            ),
         Math.min(
             width - (overlayMargin * 2),
-            shellWindow ? shellWindow.scaled(landingMode ? 360 : 560) : (landingMode ? 360 : 560)
+            shellWindow
+                ? shellWindow.scaled(
+                    bannerDockedBottom
+                        ? (landingMode ? (minimalBanner ? 340 : 420) : 500)
+                        : (landingMode ? 360 : 560)
+                )
+                : (
+                    bannerDockedBottom
+                        ? (landingMode ? (minimalBanner ? 340 : 420) : 500)
+                        : (landingMode ? 360 : 560)
+                )
         )
     )
     readonly property real scenarioPlateMaxWidth: Math.max(
@@ -353,8 +381,8 @@ Item {
             var beamCenterY = canvasHeight * 0.32
             var beamRadius = Math.max(1, canvasWidth * 0.55)
             var beam = ctx.createRadialGradient(beamCenterX, beamCenterY, 0, beamCenterX, beamCenterY, beamRadius)
-            beam.addColorStop(0.0, root.landingMode ? "rgba(120,216,255,0.22)" : "rgba(120,216,255,0.18)")
-            beam.addColorStop(0.52, root.landingMode ? "rgba(120,216,255,0.09)" : "rgba(120,216,255,0.07)")
+            beam.addColorStop(0.0, root.landingMode ? "rgba(120,216,255,0.12)" : "rgba(120,216,255,0.18)")
+            beam.addColorStop(0.52, root.landingMode ? "rgba(120,216,255,0.05)" : "rgba(120,216,255,0.07)")
             beam.addColorStop(1.0, "rgba(120,216,255,0.0)")
             ctx.fillStyle = beam
             ctx.fillRect(0, 0, canvasWidth, canvasHeight)
@@ -372,8 +400,8 @@ Item {
             if (root.hasCurrentPoint) {
                 var spotlightRadius = Math.max(1, Math.min(canvasWidth, canvasHeight) * 0.38)
                 var spotlight = ctx.createRadialGradient(root.markerX, root.markerY, 0, root.markerX, root.markerY, spotlightRadius)
-                spotlight.addColorStop(0.0, "rgba(255,255,255,0.04)")
-                spotlight.addColorStop(0.3, "rgba(172,236,255,0.09)")
+                spotlight.addColorStop(0.0, "rgba(255,255,255,0.03)")
+                spotlight.addColorStop(0.3, "rgba(172,236,255,0.06)")
                 spotlight.addColorStop(1.0, "rgba(172,236,255,0.0)")
                 ctx.fillStyle = spotlight
                 ctx.fillRect(0, 0, canvasWidth, canvasHeight)
@@ -616,7 +644,7 @@ Item {
 
     Rectangle {
         id: stageLabelPlate
-        visible: true
+        visible: root.showStageBadge
         anchors.left: parent.left
         anchors.top: parent.top
         anchors.margins: root.overlayMargin
@@ -666,6 +694,7 @@ Item {
 
     Rectangle {
         id: scenarioPlate
+        visible: root.showScenarioBadge
         anchors.right: parent.right
         anchors.top: parent.top
         anchors.margins: root.overlayMargin
@@ -722,25 +751,25 @@ Item {
         id: commandBanner
         visible: root.bannerTitle.length > 0 || root.bannerText.length > 0 || root.bannerChips.length > 0
         width: root.bannerMaxWidth
-        x: root.dockBannerBottomLeft
+        x: root.bannerDockedBottom
             ? root.overlayMargin
             : Math.max(root.overlayMargin, (root.width - width) / 2)
-        y: root.dockBannerBottomLeft
+        y: root.bannerDockedBottom
             ? root.height - height - root.overlayMargin
             : (root.stackedBanner
                 ? root.overlayMargin + root.topOverlayHeight + (shellWindow ? shellWindow.scaled(10) : 10)
                 : root.overlayMargin + (shellWindow ? shellWindow.scaled(root.landingMode ? 8 : 6) : (root.landingMode ? 8 : 6)))
         radius: shellWindow ? shellWindow.scaled(root.landingMode ? 14 : 13) : (root.landingMode ? 14 : 13)
         gradient: Gradient {
-            GradientStop { position: 0.0; color: root.landingMode ? "#d212202b" : "#d40b1621" }
-            GradientStop { position: 0.54; color: root.landingMode ? "#b80a1220" : "#bb09111a" }
-            GradientStop { position: 1.0; color: root.landingMode ? "#86081018" : "#8d071018" }
+            GradientStop { position: 0.0; color: root.landingMode ? "#bc101b26" : "#d40b1621" }
+            GradientStop { position: 0.54; color: root.landingMode ? "#9409101b" : "#bb09111a" }
+            GradientStop { position: 1.0; color: root.landingMode ? "#6b060d14" : "#8d071018" }
         }
         border.color: root.landingMode ? Qt.lighter(root.mapGlow, 1.06) : Qt.rgba(root.mapGlow.r, root.mapGlow.g, root.mapGlow.b, 0.72)
         border.width: 1
 
         Rectangle {
-            visible: root.landingMode
+            visible: root.landingMode && !root.minimalBanner
             width: shellWindow ? shellWindow.scaled(3) : 3
             anchors.left: parent.left
             anchors.top: parent.top
@@ -797,6 +826,7 @@ Item {
             spacing: root.bannerGap
 
             Text {
+                visible: text.length > 0
                 width: parent.width
                 text: root.bannerEyebrow
                 color: root.mapGlow
@@ -811,12 +841,12 @@ Item {
                 text: root.bannerTitle
                 color: shellWindow ? shellWindow.textStrong : "#f5f9ff"
                 font.pixelSize: shellWindow
-                    ? shellWindow.bodyEmphasisSize + (root.landingMode ? shellWindow.scaled(2) : shellWindow.scaled(2))
-                    : (root.landingMode ? 18 : 18)
+                    ? shellWindow.bodyEmphasisSize + (root.minimalBanner ? shellWindow.scaled(1) : shellWindow.scaled(2))
+                    : (root.minimalBanner ? 16 : 18)
                 font.weight: Font.DemiBold
                 font.family: shellWindow ? shellWindow.displayFamily : "Noto Sans CJK SC"
                 wrapMode: Text.WordWrap
-                maximumLineCount: root.stackedBanner ? 2 : 1
+                maximumLineCount: root.landingMode ? 1 : (root.stackedBanner ? 2 : 1)
                 elide: Text.ElideRight
             }
 
@@ -828,7 +858,7 @@ Item {
                 font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 12
                 font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
                 wrapMode: Text.WordWrap
-                maximumLineCount: root.landingMode ? 2 : (root.stackedBanner ? 2 : 1)
+                maximumLineCount: root.landingMode ? 1 : (root.stackedBanner ? 2 : 1)
                 elide: Text.ElideRight
             }
 
@@ -876,7 +906,7 @@ Item {
     }
 
     Rectangle {
-        visible: width >= (shellWindow ? shellWindow.scaled(520) : 520)
+        visible: root.showInfoPanels && width >= (shellWindow ? shellWindow.scaled(520) : 520)
         width: root.infoRailMaxWidth
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
@@ -1048,7 +1078,7 @@ Item {
     }
 
     Rectangle {
-        visible: root.showCurrentCallout
+        visible: root.showCurrentCallout && root.showInfoPanels
         readonly property real preferredY: Math.max(
             shellWindow ? shellWindow.scaled(68) : 68,
             Math.min(

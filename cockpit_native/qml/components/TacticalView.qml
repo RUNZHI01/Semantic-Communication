@@ -452,6 +452,10 @@ PanelFrame {
                 bannerTitle: root.missionText + " · " + root.aircraftIdText
                 bannerText: root.coordinateText + " · " + root.speedLabel + " · " + root.sourceText + " / " + root.sourceStatusText
                 bannerChips: root.stageBannerChipModel
+                showStageBadge: true
+                showScenarioBadge: false
+                showInfoPanels: false
+                preferBottomBannerDock: true
             }
 
             Rectangle {

@@ -49,6 +49,10 @@ Item {
         shellWindow ? shellWindow.landingStageBannerChipLimit : (compactStage ? 1 : 2),
         compactStage ? 1 : 2
     )
+    readonly property int landingBannerTitleLimit: resolveInt(
+        shellWindow ? shellWindow.landingStageBannerTitleLimit : (compactStage ? 18 : 24),
+        compactStage ? 18 : 24
+    )
     readonly property int flightBannerChipLimit: resolveInt(
         shellWindow ? shellWindow.flightStageBannerChipLimit : bannerChips.length,
         bannerChips.length
@@ -61,6 +65,10 @@ Item {
     readonly property string effectiveBannerText: landingMinimalChrome
         ? compactText(root.bannerText, landingBannerTextLimit)
         : root.bannerText
+    readonly property string effectiveBannerEyebrow: landingMinimalChrome ? "" : root.bannerEyebrow
+    readonly property string effectiveBannerTitle: landingMinimalChrome
+        ? compactText(root.bannerTitle, landingBannerTitleLimit)
+        : root.bannerTitle
     readonly property var effectiveBannerChips: limitedChips(root.bannerChips, bannerChipLimit)
     readonly property bool effectiveShowStageBadge: root.showStageBadge && (!landingMinimalChrome || landingTopBadgesVisible)
     readonly property bool effectiveShowScenarioBadge: root.showScenarioBadge && (!landingMinimalChrome || landingTopBadgesVisible)
@@ -198,14 +206,14 @@ Item {
         when: stageLoader.item !== null
         target: stageLoader.item
         property: "bannerEyebrow"
-        value: root.bannerEyebrow
+        value: root.effectiveBannerEyebrow
     }
 
     Binding {
         when: stageLoader.item !== null
         target: stageLoader.item
         property: "bannerTitle"
-        value: root.bannerTitle
+        value: root.effectiveBannerTitle
     }
 
     Binding {
