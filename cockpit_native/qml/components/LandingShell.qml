@@ -29,7 +29,7 @@ Item {
     )
     readonly property bool landingWide: shellWindow ? shellWindow.viewportWidth >= 1320 : width >= 1320
     readonly property bool landingShortHeight: shellWindow ? shellWindow.shortViewport : height < 780
-    readonly property int railWidth: shellWindow ? shellWindow.scaled(landingWide ? 188 : 182) : 188
+    readonly property int railWidth: shellWindow ? shellWindow.scaled(landingWide ? 170 : 164) : 170
     readonly property int landingStageLedgerWidth: shellWindow ? shellWindow.scaled(landingWide ? 298 : 268) : 298
     readonly property int flightSidebarWidth: shellWindow ? shellWindow.scaled(shellWindow.wideLayout ? 316 : 292) : 316
     readonly property int flightStageHeight: shellWindow ? shellWindow.scaled(shellWindow.compactLayout ? 332 : 478) : 478
@@ -126,11 +126,26 @@ Item {
         "锚点 " + anchorValue + "  ·  " + anchorProbeSummary,
         landingShortHeight ? 68 : 104
     )
-    readonly property int landingWideStageHeight: shellWindow ? shellWindow.scaled(landingShortHeight ? 340 : 440) : 440
-    readonly property int landingStackedStageHeight: shellWindow ? shellWindow.scaled(landingShortHeight ? 320 : 392) : 392
+    readonly property int landingWideStageHeight: shellWindow ? shellWindow.scaled(landingShortHeight ? 352 : 456) : 456
+    readonly property int landingStackedStageHeight: shellWindow ? shellWindow.scaled(landingShortHeight ? 332 : 408) : 408
     readonly property string landingStageSubtitle: "真实地理底图占主位，板态与弱网只保留两侧细轨，执行动作收口到底部坞站。"
     readonly property string mapCtaLabel: landingShortHeight ? "飞行合同" : "进入飞行合同"
     readonly property string dockCtaLabel: landingShortHeight ? "执行页" : "展开执行页"
+    readonly property color landingRailFill: shellWindow
+        ? Qt.rgba(shellWindow.surfaceGlass.r, shellWindow.surfaceGlass.g, shellWindow.surfaceGlass.b, 0.58)
+        : "#8c0f1720"
+    readonly property color landingRailBorder: shellWindow
+        ? Qt.rgba(shellWindow.borderSubtle.r, shellWindow.borderSubtle.g, shellWindow.borderSubtle.b, 0.48)
+        : "#49657d"
+    readonly property color landingStageFill: shellWindow
+        ? Qt.rgba(shellWindow.surfaceQuiet.r, shellWindow.surfaceQuiet.g, shellWindow.surfaceQuiet.b, 0.34)
+        : "#62081119"
+    readonly property color landingStageBorder: shellWindow
+        ? Qt.rgba(shellWindow.panelGlowStrong.r, shellWindow.panelGlowStrong.g, shellWindow.panelGlowStrong.b, 0.3)
+        : "#58b2da"
+    readonly property color landingDockFill: shellWindow
+        ? Qt.rgba(shellWindow.surfaceGlass.r, shellWindow.surfaceGlass.g, shellWindow.surfaceGlass.b, 0.5)
+        : "#7d0f1720"
 
     function compact(text, limit) {
         if (shellWindow)
@@ -1584,8 +1599,8 @@ Item {
                 RowLayout {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    Layout.preferredHeight: shellWindow ? shellWindow.scaled(400) : 400
-                    Layout.maximumHeight: shellWindow ? shellWindow.scaled(400) : 400
+                    Layout.preferredHeight: root.landingWideStageHeight
+                    Layout.maximumHeight: root.landingWideStageHeight
                     spacing: shellWindow ? shellWindow.zoneGap : 14
 
                     ShellCard {
@@ -1595,6 +1610,9 @@ Item {
                         Layout.fillHeight: true
                         shellWindow: root.shellWindow
                         accentColor: shellWindow ? shellWindow.accentGold : "#c6ab7d"
+                        fillColor: root.landingRailFill
+                        borderColor: root.landingRailBorder
+                        minimalChrome: true
                         eyebrow: "系统细轨 / SYSTEM"
                         title: "会话、心跳与快照"
                         subtitle: "板态继续直连仓库字段，但只保留 landing 页最短事实链。"
@@ -1622,6 +1640,8 @@ Item {
                                 Layout.fillWidth: true
                                 shellWindow: root.shellWindow
                                 accentColor: shellWindow ? shellWindow.accentGold : "#c6ab7d"
+                                minimalChrome: true
+                                showAccentRail: false
 
                                 Text {
                                     Layout.fillWidth: true
@@ -1670,8 +1690,13 @@ Item {
                         Layout.minimumWidth: shellWindow ? shellWindow.scaled(740) : 740
                         shellWindow: root.shellWindow
                         accentColor: shellWindow ? shellWindow.accentIce : "#86c7d4"
-                        eyebrow: "主地图台 / PRIMARY MAP"
-                        title: shellWindow ? shellWindow.landingSummaryTitle : "真实地理底图主墙"
+                        fillColor: root.landingStageFill
+                        borderColor: root.landingStageBorder
+                        padding: shellWindow ? shellWindow.scaled(8) : 8
+                        radius: shellWindow ? shellWindow.panelRadius + shellWindow.scaled(4) : 28
+                        minimalChrome: true
+                        eyebrow: ""
+                        title: ""
                         subtitle: ""
 
                         Item {
@@ -1690,7 +1715,7 @@ Item {
                                 scenarioLabel: root.recommendedScenarioLabel
                                 scenarioTone: shellWindow ? shellWindow.liveAnchorTone : "neutral"
                                 landingMode: true
-                                bannerEyebrow: "真实地理底图 / QTLOCATION MAP"
+                                bannerEyebrow: "真实地理底图 / WORLD MAP"
                                 bannerTitle: shellWindow ? shellWindow.landingMapBannerTitle : ""
                                 bannerText: shellWindow ? shellWindow.landingMapBannerText : ""
                                 bannerChips: []
@@ -1709,6 +1734,9 @@ Item {
                         Layout.fillHeight: true
                         shellWindow: root.shellWindow
                         accentColor: shellWindow ? shellWindow.accentMint : "#93bea5"
+                        fillColor: root.landingRailFill
+                        borderColor: root.landingRailBorder
+                        minimalChrome: true
                         eyebrow: "弱网细轨 / WEAK-LINK"
                         title: root.recommendedScenarioLabel
                         subtitle: "在线锚点 " + root.anchorValue + "  ·  " + root.anchorStatus
@@ -1717,6 +1745,8 @@ Item {
                                 Layout.fillWidth: true
                                 shellWindow: root.shellWindow
                                 accentColor: shellWindow ? shellWindow.accentMint : "#93bea5"
+                                minimalChrome: true
+                                showAccentRail: false
 
                                 Text {
                                     Layout.fillWidth: true
@@ -1756,6 +1786,9 @@ Item {
                     Layout.fillWidth: true
                     shellWindow: root.shellWindow
                     accentColor: shellWindow ? shellWindow.accentIce : "#86c7d4"
+                    fillColor: root.landingDockFill
+                    borderColor: root.landingRailBorder
+                    minimalChrome: true
                     eyebrow: "底部坞站 / BOTTOM DOCK"
                     title: "启动命令与执行动作"
                     subtitle: shellWindow ? shellWindow.footerNote : ""
@@ -1770,6 +1803,8 @@ Item {
                             Layout.fillWidth: true
                             shellWindow: root.shellWindow
                             accentColor: shellWindow ? shellWindow.accentIce : "#86c7d4"
+                            minimalChrome: true
+                            showAccentRail: false
 
                             Text {
                                 Layout.fillWidth: true
@@ -1803,6 +1838,8 @@ Item {
                             Layout.fillWidth: true
                             shellWindow: root.shellWindow
                             accentColor: shellWindow ? shellWindow.accentMint : "#93bea5"
+                            minimalChrome: true
+                            showAccentRail: false
 
                             Text {
                                 Layout.fillWidth: true
@@ -1842,6 +1879,8 @@ Item {
                             shellWindow: root.shellWindow
                             accentColor: shellWindow ? shellWindow.accentGold : "#c6ab7d"
                             prominent: true
+                            minimalChrome: true
+                            showAccentRail: false
 
                             Text {
                                 Layout.fillWidth: true
@@ -1936,8 +1975,13 @@ Item {
                         Layout.fillWidth: true
                         shellWindow: root.shellWindow
                         accentColor: shellWindow ? shellWindow.accentIce : "#86c7d4"
-                        eyebrow: "主地图台 / PRIMARY MAP"
-                        title: shellWindow ? shellWindow.landingSummaryTitle : "真实地理底图主墙"
+                        fillColor: root.landingStageFill
+                        borderColor: root.landingStageBorder
+                        padding: shellWindow ? shellWindow.scaled(8) : 8
+                        radius: shellWindow ? shellWindow.panelRadius + shellWindow.scaled(4) : 28
+                        minimalChrome: true
+                        eyebrow: ""
+                        title: ""
                         subtitle: ""
 
                         Item {
@@ -1956,7 +2000,7 @@ Item {
                                 scenarioLabel: root.recommendedScenarioLabel
                                 scenarioTone: shellWindow ? shellWindow.liveAnchorTone : "neutral"
                                 landingMode: true
-                                bannerEyebrow: "真实地理底图 / QTLOCATION MAP"
+                                bannerEyebrow: "真实地理底图 / WORLD MAP"
                                 bannerTitle: shellWindow ? shellWindow.landingMapBannerTitle : ""
                                 bannerText: shellWindow ? shellWindow.landingMapBannerText : ""
                                 bannerChips: []
@@ -1978,6 +2022,9 @@ Item {
                             Layout.fillWidth: true
                             shellWindow: root.shellWindow
                             accentColor: shellWindow ? shellWindow.accentGold : "#c6ab7d"
+                            fillColor: root.landingRailFill
+                            borderColor: root.landingRailBorder
+                            minimalChrome: true
                             eyebrow: "系统细轨 / SYSTEM"
                             title: "会话、心跳与快照"
                             subtitle: "板态信息退成 landing 页一条事实细轨。"
@@ -2028,6 +2075,9 @@ Item {
                             Layout.fillWidth: true
                             shellWindow: root.shellWindow
                             accentColor: shellWindow ? shellWindow.accentMint : "#93bea5"
+                            fillColor: root.landingRailFill
+                            borderColor: root.landingRailBorder
+                            minimalChrome: true
                             eyebrow: "弱网细轨 / WEAK-LINK"
                             title: root.recommendedScenarioLabel
                             subtitle: "推荐剧本与锚点只保留 landing 必要读数。"
@@ -2070,6 +2120,9 @@ Item {
                         Layout.fillWidth: true
                         shellWindow: root.shellWindow
                         accentColor: shellWindow ? shellWindow.accentIce : "#86c7d4"
+                        fillColor: root.landingDockFill
+                        borderColor: root.landingRailBorder
+                        minimalChrome: true
                         eyebrow: "底部坞站 / BOTTOM DOCK"
                         title: "启动命令与执行动作"
                         subtitle: shellWindow ? shellWindow.footerNote : ""
@@ -2084,6 +2137,8 @@ Item {
                                 Layout.fillWidth: true
                                 shellWindow: root.shellWindow
                                 accentColor: shellWindow ? shellWindow.accentIce : "#86c7d4"
+                                minimalChrome: true
+                                showAccentRail: false
 
                                 Text {
                                     Layout.fillWidth: true
@@ -2117,6 +2172,8 @@ Item {
                                 Layout.fillWidth: true
                                 shellWindow: root.shellWindow
                                 accentColor: shellWindow ? shellWindow.accentGold : "#c6ab7d"
+                                minimalChrome: true
+                                showAccentRail: false
 
                                 Text {
                                     Layout.fillWidth: true
@@ -2157,6 +2214,8 @@ Item {
                                 shellWindow: root.shellWindow
                                 accentColor: shellWindow ? shellWindow.accentGold : "#c6ab7d"
                                 prominent: true
+                                minimalChrome: true
+                                showAccentRail: false
 
                                 Text {
                                     Layout.fillWidth: true

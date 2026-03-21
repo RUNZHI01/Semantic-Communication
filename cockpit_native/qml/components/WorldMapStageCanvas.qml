@@ -28,8 +28,8 @@ Item {
     property bool showInfoPanels: true
     property bool preferBottomBannerDock: false
 
-    readonly property int mapInset: shellWindow ? shellWindow.scaled(landingMode ? 16 : 20) : (landingMode ? 16 : 20)
-    readonly property int overlayMargin: shellWindow ? shellWindow.scaled(landingMode ? 12 : 16) : (landingMode ? 12 : 16)
+    readonly property int mapInset: shellWindow ? shellWindow.scaled(landingMode ? 12 : 20) : (landingMode ? 12 : 20)
+    readonly property int overlayMargin: shellWindow ? shellWindow.scaled(landingMode ? 10 : 16) : (landingMode ? 10 : 16)
     readonly property bool minimalBanner: landingMode && bannerEyebrow.length === 0
     readonly property int bannerPadding: shellWindow
         ? shellWindow.scaled(minimalBanner ? 8 : (landingMode ? 10 : 11))
@@ -48,8 +48,8 @@ Item {
     readonly property color mapGlow: shellWindow ? shellWindow.panelGlowStrong : "#78d8ff"
     readonly property color markerColor: shellWindow ? shellWindow.accentCyan : "#8fe6ff"
     readonly property color emphasisColor: shellWindow ? shellWindow.accentAmber : "#ffbf55"
-    readonly property color overlayCardColor: landingMode ? "#d70c1721" : "#d90a1320"
-    readonly property color overlayCardColorSoft: landingMode ? "#9b07111a" : "#aa081119"
+    readonly property color overlayCardColor: landingMode ? "#b30c1720" : "#d90a1320"
+    readonly property color overlayCardColorSoft: landingMode ? "#59071116" : "#aa081119"
     readonly property bool hasCurrentPoint: isFinite(Number(currentPoint["longitude"])) && isFinite(Number(currentPoint["latitude"]))
     readonly property bool compactStage: width < (landingMode ? 760 : 880)
     readonly property bool useExternalBackdrop: backdropMode === "asset" && backdropSource.length > 0
@@ -321,18 +321,18 @@ Item {
         anchors.margins: root.mapInset
         visible: root.externalBackdropActive
         source: root.useExternalBackdrop ? root.backdropSource : ""
-        fillMode: Image.Stretch
+        fillMode: Image.PreserveAspectCrop
         smooth: true
         asynchronous: true
         mipmap: true
-        opacity: root.landingMode ? 0.78 : 0.72
+        opacity: root.landingMode ? 0.92 : 0.76
         onStatusChanged: mapCanvas.requestPaint()
     }
 
     Rectangle {
         anchors.fill: externalBackdropImage
         visible: externalBackdropImage.visible
-        color: root.landingMode ? "#50111b27" : "#64091118"
+        color: root.landingMode ? "#22131d20" : "#4c091118"
     }
 
     Canvas {
@@ -497,8 +497,8 @@ Item {
         anchors.top: parent.top
         height: parent.height * 0.2
         gradient: Gradient {
-            GradientStop { position: 0.0; color: "#7a07111c" }
-            GradientStop { position: 0.4; color: "#3207111c" }
+            GradientStop { position: 0.0; color: root.landingMode ? "#3c07111a" : "#7a07111c" }
+            GradientStop { position: 0.4; color: root.landingMode ? "#16071118" : "#3207111c" }
             GradientStop { position: 1.0; color: "#0007111c" }
         }
     }
@@ -510,8 +510,8 @@ Item {
         height: parent.height * 0.26
         gradient: Gradient {
             GradientStop { position: 0.0; color: "#0007111c" }
-            GradientStop { position: 0.4; color: "#2407111c" }
-            GradientStop { position: 1.0; color: "#98061018" }
+            GradientStop { position: 0.4; color: root.landingMode ? "#12071118" : "#2407111c" }
+            GradientStop { position: 1.0; color: root.landingMode ? "#3c061018" : "#98061018" }
         }
     }
 
@@ -761,12 +761,12 @@ Item {
                 : root.overlayMargin + (shellWindow ? shellWindow.scaled(root.landingMode ? 8 : 6) : (root.landingMode ? 8 : 6)))
         radius: shellWindow ? shellWindow.scaled(root.landingMode ? 14 : 13) : (root.landingMode ? 14 : 13)
         gradient: Gradient {
-            GradientStop { position: 0.0; color: root.landingMode ? "#8e101b24" : "#d40b1621" }
-            GradientStop { position: 0.54; color: root.landingMode ? "#68091019" : "#bb09111a" }
-            GradientStop { position: 1.0; color: root.landingMode ? "#3d060d12" : "#8d071018" }
+            GradientStop { position: 0.0; color: root.landingMode ? "#74101b22" : "#d40b1621" }
+            GradientStop { position: 0.54; color: root.landingMode ? "#42091016" : "#bb09111a" }
+            GradientStop { position: 1.0; color: root.landingMode ? "#21060d0f" : "#8d071018" }
         }
         border.color: root.landingMode
-            ? Qt.rgba(root.mapGlow.r, root.mapGlow.g, root.mapGlow.b, 0.54)
+            ? Qt.rgba(root.mapGlow.r, root.mapGlow.g, root.mapGlow.b, 0.36)
             : Qt.rgba(root.mapGlow.r, root.mapGlow.g, root.mapGlow.b, 0.72)
         border.width: 1
 
@@ -811,7 +811,7 @@ Item {
             height: parent.height * 0.8
             radius: width / 2
             color: root.mapGlow
-            opacity: root.landingMode ? 0.05 : 0.04
+            opacity: root.landingMode ? 0.028 : 0.04
             x: -width * 0.16
             y: -height * 0.26
         }

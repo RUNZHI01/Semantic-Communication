@@ -14,10 +14,11 @@ Item {
     property int padding: shellWindow ? shellWindow.panelPadding : 18
     property int radius: shellWindow ? shellWindow.panelRadius : 22
     property int contentSpacing: shellWindow ? shellWindow.compactGap : 8
+    property bool minimalChrome: false
 
     readonly property bool hasHeader: eyebrow.length > 0 || title.length > 0 || subtitle.length > 0
-    readonly property color topFill: Qt.lighter(root.fillColor, 1.08)
-    readonly property color bottomFill: Qt.darker(root.fillColor, 1.08)
+    readonly property color topFill: Qt.lighter(root.fillColor, root.minimalChrome ? 1.03 : 1.08)
+    readonly property color bottomFill: Qt.darker(root.fillColor, root.minimalChrome ? 1.02 : 1.08)
     readonly property color rimTone: Qt.lighter(root.borderColor, 1.06)
 
     default property alias contentData: contentLayout.data
@@ -28,9 +29,9 @@ Item {
         anchors.fill: parent
         radius: root.radius
         gradient: Gradient {
-            GradientStop { position: 0.0; color: Qt.rgba(root.topFill.r, root.topFill.g, root.topFill.b, 0.98) }
-            GradientStop { position: 0.2; color: Qt.rgba(root.fillColor.r, root.fillColor.g, root.fillColor.b, 0.98) }
-            GradientStop { position: 1.0; color: Qt.rgba(root.bottomFill.r, root.bottomFill.g, root.bottomFill.b, 0.99) }
+            GradientStop { position: 0.0; color: Qt.rgba(root.topFill.r, root.topFill.g, root.topFill.b, root.minimalChrome ? 0.84 : 0.98) }
+            GradientStop { position: 0.2; color: Qt.rgba(root.fillColor.r, root.fillColor.g, root.fillColor.b, root.minimalChrome ? 0.8 : 0.98) }
+            GradientStop { position: 1.0; color: Qt.rgba(root.bottomFill.r, root.bottomFill.g, root.bottomFill.b, root.minimalChrome ? 0.86 : 0.99) }
         }
     }
 
@@ -39,7 +40,7 @@ Item {
         height: parent.height * 0.48
         radius: width / 2
         color: root.accentColor
-        opacity: 0.055
+        opacity: root.minimalChrome ? 0.024 : 0.055
         x: parent.width - (width * 0.68)
         y: -height * 0.18
     }
@@ -53,10 +54,11 @@ Item {
             GradientStop { position: 0.52; color: "#00000000" }
             GradientStop { position: 1.0; color: "#12000000" }
         }
-        opacity: 0.42
+        opacity: root.minimalChrome ? 0.18 : 0.42
     }
 
     Rectangle {
+        visible: !root.minimalChrome
         anchors.left: parent.left
         anchors.top: parent.top
         anchors.bottom: parent.bottom
@@ -79,19 +81,19 @@ Item {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
-        height: shellWindow ? shellWindow.scaled(2) : 2
+        height: shellWindow ? shellWindow.scaled(root.minimalChrome ? 1 : 2) : (root.minimalChrome ? 1 : 2)
         anchors.leftMargin: shellWindow ? shellWindow.scaled(10) : 10
         anchors.rightMargin: shellWindow ? shellWindow.scaled(10) : 10
         radius: height / 2
         gradient: Gradient {
             orientation: Gradient.Horizontal
             GradientStop { position: 0.0; color: "transparent" }
-            GradientStop { position: 0.18; color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.14) }
-            GradientStop { position: 0.5; color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.84) }
-            GradientStop { position: 0.82; color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.14) }
+            GradientStop { position: 0.18; color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, root.minimalChrome ? 0.08 : 0.14) }
+            GradientStop { position: 0.5; color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, root.minimalChrome ? 0.46 : 0.84) }
+            GradientStop { position: 0.82; color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, root.minimalChrome ? 0.08 : 0.14) }
             GradientStop { position: 1.0; color: "transparent" }
         }
-        opacity: 0.94
+        opacity: root.minimalChrome ? 0.56 : 0.94
     }
 
     Rectangle {
@@ -109,6 +111,7 @@ Item {
         color: "transparent"
         border.color: Qt.rgba(root.borderColor.r, root.borderColor.g, root.borderColor.b, 0.44)
         border.width: 1
+        opacity: root.minimalChrome ? 0.58 : 1.0
     }
 
     ColumnLayout {
