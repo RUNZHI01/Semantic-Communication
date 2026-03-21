@@ -128,6 +128,9 @@ PanelFrame {
             "tone": recommendedScenarioTone
         }
     ]
+    readonly property color mapOverlayColor: "#de0a1320"
+    readonly property color mapOverlayColorSoft: "#bc09111b"
+    readonly property int mapRailWidth: shellWindow ? shellWindow.scaled(compactLayout ? 172 : 196) : 196
 
     function toneColor(tone) {
         if (shellWindow) {
@@ -362,12 +365,28 @@ PanelFrame {
             radius: shellWindow ? shellWindow.cardRadius : 16
             clip: true
             gradient: Gradient {
-                GradientStop { position: 0.0; color: "#10283f" }
-                GradientStop { position: 0.32; color: "#0c1d2c" }
-                GradientStop { position: 1.0; color: "#07121d" }
+                GradientStop { position: 0.0; color: "#132a41" }
+                GradientStop { position: 0.28; color: "#0d1b2a" }
+                GradientStop { position: 1.0; color: "#071019" }
             }
-            border.color: "#2d6e99"
+            border.color: shellWindow ? shellWindow.borderStrong : "#2d6e99"
             border.width: 1
+
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                height: shellWindow ? shellWindow.scaled(3) : 3
+                gradient: Gradient {
+                    orientation: Gradient.Horizontal
+                    GradientStop { position: 0.0; color: "transparent" }
+                    GradientStop { position: 0.2; color: shellWindow ? shellWindow.accentBlue : "#5ab7ff" }
+                    GradientStop { position: 0.5; color: shellWindow ? shellWindow.accentCyan : "#8fe6ff" }
+                    GradientStop { position: 0.8; color: shellWindow ? shellWindow.accentBlue : "#5ab7ff" }
+                    GradientStop { position: 1.0; color: "transparent" }
+                }
+                opacity: 0.82
+            }
 
             Rectangle {
                 anchors.fill: parent
@@ -378,9 +397,33 @@ PanelFrame {
                 border.width: 1
             }
 
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                height: parent.height * 0.18
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: "#5c07111b" }
+                    GradientStop { position: 0.5; color: "#2407111b" }
+                    GradientStop { position: 1.0; color: "#0007111b" }
+                }
+            }
+
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                height: parent.height * 0.22
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: "#0007111b" }
+                    GradientStop { position: 0.45; color: "#2407111b" }
+                    GradientStop { position: 1.0; color: "#70061018" }
+                }
+            }
+
             WorldMapStage {
                 anchors.fill: parent
-                anchors.margins: 1
+                anchors.margins: shellWindow ? shellWindow.scaled(2) : 2
                 shellWindow: root.shellWindow
                 trackData: root.trackData
                 currentPoint: root.currentPoint
@@ -401,10 +444,13 @@ PanelFrame {
                 anchors.top: parent.top
                 anchors.margins: shellWindow ? shellWindow.scaled(18) : 18
                 radius: shellWindow ? shellWindow.edgeRadius : 12
-                color: "#071522d8"
-                border.color: "#235c82"
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: root.mapOverlayColor }
+                    GradientStop { position: 1.0; color: root.mapOverlayColorSoft }
+                }
+                border.color: shellWindow ? shellWindow.panelGlowStrong : "#235c82"
                 border.width: 1
-                width: shellWindow ? shellWindow.scaled(188) : 188
+                width: root.mapRailWidth
                 implicitHeight: railMetricColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(12) : 12) * 2)
 
                 Column {
@@ -418,7 +464,7 @@ PanelFrame {
                     spacing: shellWindow ? shellWindow.scaled(8) : 8
 
                     Text {
-                        text: "飞行读数"
+                        text: "飞行读数 / Flight Core"
                         color: shellWindow ? shellWindow.accentBlue : "#5ab7ff"
                         font.pixelSize: shellWindow ? shellWindow.captionSize : 10
                         font.family: shellWindow ? shellWindow.monoFamily : "Ubuntu Sans Mono"
@@ -484,10 +530,13 @@ PanelFrame {
                 anchors.margins: shellWindow ? shellWindow.scaled(18) : 18
                 width: Math.min(
                     parent.width - ((shellWindow ? shellWindow.scaled(36) : 36) * 2),
-                    shellWindow ? shellWindow.scaled(compactLayout ? 420 : 500) : 500
+                    shellWindow ? shellWindow.scaled(compactLayout ? 360 : 420) : 420
                 )
                 radius: shellWindow ? shellWindow.edgeRadius : 12
-                color: "#071522e8"
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: root.mapOverlayColor }
+                    GradientStop { position: 1.0; color: root.mapOverlayColorSoft }
+                }
                 border.color: root.toneColor(root.recommendedScenarioTone)
                 border.width: 1
                 implicitHeight: recommendationColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(12) : 12) * 2)
