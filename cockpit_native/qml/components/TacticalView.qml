@@ -57,7 +57,7 @@ PanelFrame {
     readonly property string recommendedSummary: compactMessage(
         String(recommendedScenario["summary"] || recommendedScenario["label"] || "当前主舞台没有额外弱网建议。"),
         "当前主舞台没有额外弱网建议。",
-        compactLayout ? 44 : 72
+        compactLayout ? 36 : 56
     )
     readonly property var headerChipModel: [
         {
@@ -69,11 +69,23 @@ PanelFrame {
             "label": "板端",
             "value": anchorValue,
             "tone": liveAnchorTone
+        }
+    ]
+    readonly property var stageBannerChipModel: [
+        {
+            "label": "源",
+            "value": sourceText,
+            "tone": "online"
         },
         {
-            "label": "渲染",
-            "value": shellWindow && shellWindow.softwareRenderEnabled ? "软件回退" : "图形加速",
-            "tone": shellWindow && shellWindow.softwareRenderEnabled ? "warning" : "online"
+            "label": "链路",
+            "value": String(controlSummary["link_profile"] || "--"),
+            "tone": "neutral"
+        },
+        {
+            "label": "航迹",
+            "value": String(trackData.length) + " 节点",
+            "tone": hasTrack() ? "online" : "neutral"
         }
     ]
     readonly property var railMetricModel: [
@@ -130,7 +142,7 @@ PanelFrame {
     ]
     readonly property color mapOverlayColor: "#de0a1320"
     readonly property color mapOverlayColorSoft: "#bc09111b"
-    readonly property int mapRailWidth: shellWindow ? shellWindow.scaled(compactLayout ? 172 : 196) : 196
+    readonly property int mapRailWidth: shellWindow ? shellWindow.scaled(compactLayout ? 156 : 176) : 176
 
     function toneColor(tone) {
         if (shellWindow) {
@@ -436,6 +448,10 @@ PanelFrame {
                     ? root.recommendedScenarioId
                     : String(root.controlSummary["link_profile"] || "全球链路稳态")
                 scenarioTone: root.recommendedScenarioTone
+                bannerEyebrow: "CENTER STAGE / COMMAND MAP"
+                bannerTitle: root.missionText + " · " + root.aircraftIdText
+                bannerText: root.coordinateText + " · " + root.speedLabel + " · " + root.sourceText + " / " + root.sourceStatusText
+                bannerChips: root.stageBannerChipModel
             }
 
             Rectangle {
@@ -530,7 +546,7 @@ PanelFrame {
                 anchors.margins: shellWindow ? shellWindow.scaled(18) : 18
                 width: Math.min(
                     parent.width - ((shellWindow ? shellWindow.scaled(36) : 36) * 2),
-                    shellWindow ? shellWindow.scaled(compactLayout ? 360 : 420) : 420
+                    shellWindow ? shellWindow.scaled(compactLayout ? 300 : 360) : 360
                 )
                 radius: shellWindow ? shellWindow.edgeRadius : 12
                 gradient: Gradient {
@@ -576,7 +592,8 @@ PanelFrame {
                         font.pixelSize: shellWindow ? shellWindow.captionSize : 10
                         font.family: shellWindow ? shellWindow.uiFamily : "Ubuntu Sans"
                         wrapMode: Text.WordWrap
-                        maximumLineCount: compactLayout ? 3 : 2
+                        maximumLineCount: compactLayout ? 2 : 1
+                        elide: Text.ElideRight
                     }
                 }
             }

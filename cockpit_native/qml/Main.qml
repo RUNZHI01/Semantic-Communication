@@ -86,9 +86,10 @@ ApplicationWindow {
     readonly property int safeBottom: Number(insets["bottom"] || 0)
 
     readonly property int viewportHeight: height > 0 ? height : Number(metrics["height"] || designHeight)
-    readonly property real contentWidth: Math.max(1, width - safeLeft - safeRight - (outerPadding * 2))
-    readonly property bool wideLayout: contentWidth >= scaled(1320)
-    readonly property bool mediumLayout: !wideLayout && contentWidth >= scaled(980)
+    readonly property real viewportWidth: width > 0 ? width : Number(metrics["width"] || designWidth)
+    readonly property real contentWidth: Math.max(1, viewportWidth - safeLeft - safeRight)
+    readonly property bool wideLayout: viewportWidth >= 1320
+    readonly property bool mediumLayout: !wideLayout && viewportWidth >= 980
     readonly property bool compactLayout: !wideLayout && !mediumLayout
     readonly property bool shortViewport: viewportHeight < 780
 
@@ -109,7 +110,7 @@ ApplicationWindow {
     readonly property int eyebrowSize: scaled(10)
 
     readonly property string topTitle: primaryLabel(meta["title"] || "飞腾原生座舱 / Feiteng Native Cockpit")
-    readonly property string topSubtitle: String(meta["subtitle"] || "Qt/QML 原生壳体继续读取仓库现有 TVM/OpenAMP 演示合同。")
+    readonly property string topSubtitle: String(meta["subtitle"] || "Qt/QML 原生命令壳体，直接读取仓库内 TVM/OpenAMP 演示合同与板端态势。")
     readonly property string activeSourceLabel: String(centerFeedContract["active_source_label"] || centerPanelData["source_label"] || "--")
     readonly property string systemSessionValue: String((statusRow("会话") || {})["value"] || "--")
     readonly property string recentEventValue: String((statusRow("最近事件") || {})["value"] || "--")
@@ -128,12 +129,18 @@ ApplicationWindow {
     readonly property string missionCallSignValue: String(centerPanelData["mission_call_sign"] || "M9-DEMO")
     readonly property string liveAnchorTone: String(liveAnchor["tone"] || "neutral")
     readonly property string currentPageSummary: currentPage === 0
-        ? "借用 cluster 的座舱外壳和 QDashBoard 的分区导航，让首屏收敛为地图主舞台加两侧支援导轨。"
+        ? "首屏将全球地图、链路状态与执行入口收口到同一张命令墙板，默认落在真实航迹与仓库合同证据上。"
         : String(DataUtils.objectOrEmpty(navigationModel[currentPage])["summary"] || "")
     readonly property string landingSummaryTitle: recentEventTone === "warning"
-        ? "首屏改为问题导向的世界态势墙板"
-        : "首屏改为地图主导的命令中心壳体"
+        ? "问题聚焦的全球态势墙板"
+        : "地图优先的全球态势墙板"
     readonly property string landingSummaryText: String(centerControlSummary["last_event_message"] || rightPanelData["summary"] || topSubtitle)
+    readonly property string landingStageTitle: "全球态势主屏"
+    readonly property string landingMapBannerTitle: missionCallSignValue + " · " + aircraftIdValue
+    readonly property string landingMapBannerText: coordinatePair(currentPosition) + " · "
+        + formattedMetric(kinematics["ground_speed_kph"], 0, "km/h")
+    readonly property string dockFooterSummary: compactMessage(footerNote, compactLayout ? 46 : 78)
+    readonly property string dockLaunchLabel: compactMessage(launchHint, compactLayout ? 34 : 62)
     readonly property string footerNote: String(bottomPanelData["footer_note"] || "默认执行仓库内软件渲染安全启动路径。")
 
     property int currentPage: 0
@@ -144,7 +151,7 @@ ApplicationWindow {
             "label": "总览",
             "english": "Landing",
             "detail": "地图主墙板",
-            "summary": "借用 cluster 座舱骨架后的首屏主壳。"
+            "summary": "全球地图、链路态势与执行入口。"
         },
         {
             "index": 1,
@@ -287,6 +294,23 @@ ApplicationWindow {
             "tone": liveAnchorTone
         }
     ]
+    readonly property var landingStageChipModel: [
+        {
+            "label": "数据源",
+            "value": compactMessage(activeSourceLabel, compactLayout ? 16 : 22),
+            "tone": "online"
+        },
+        {
+            "label": "锚点",
+            "value": String(liveAnchor["valid_instance"] || "--"),
+            "tone": liveAnchorTone
+        },
+        {
+            "label": "链路",
+            "value": compactMessage(linkProfileValue, compactLayout ? 14 : 20),
+            "tone": "neutral"
+        }
+    ]
 
     readonly property var systemPageChipModel: [
         { "label": "会话", "value": systemSessionValue, "tone": "neutral" },
@@ -410,9 +434,9 @@ ApplicationWindow {
 
     function previewActions(actionsModel) {
         var resolved = DataUtils.arrayOrEmpty(actionsModel)
-        if (resolved.length <= 4)
+        if (resolved.length <= 2)
             return resolved
-        return resolved.slice(0, 4)
+        return resolved.slice(0, 2)
     }
 
     Component.onCompleted: {
@@ -626,11 +650,12 @@ ApplicationWindow {
                     id: canopyLayout
                     anchors.fill: parent
                     anchors.margins: root.panelPadding
-                    columns: root.compactLayout ? 1 : 3
+                    columns: root.compactLayout ? 1 : 5
                     columnSpacing: root.zoneGap
                     rowSpacing: root.compactGap
 
                     Rectangle {
+                        Layout.columnSpan: root.compactLayout ? 1 : 2
                         Layout.fillWidth: true
                         radius: root.cardRadius
                         gradient: Gradient {
@@ -672,11 +697,14 @@ ApplicationWindow {
                                 font.pixelSize: root.bodySize
                                 font.family: root.uiFamily
                                 wrapMode: Text.WordWrap
+                                maximumLineCount: root.compactLayout ? 4 : 2
+                                elide: Text.ElideRight
                             }
                         }
                     }
 
                     Rectangle {
+                        Layout.columnSpan: root.compactLayout ? 1 : 2
                         Layout.fillWidth: true
                         radius: root.cardRadius
                         color: "#0c1520"
@@ -765,15 +793,12 @@ ApplicationWindow {
                         }
                     }
 
-                    Rectangle {
+                    PanelFrame {
+                        shellWindow: root
+                        panelColor: "#111b29"
+                        borderTone: root.recentEventTone === "warning" ? root.accentAmber : root.borderSoft
+                        accentTone: root.recentEventTone === "warning" ? root.accentAmber : root.accentCyan
                         Layout.fillWidth: true
-                        radius: root.cardRadius
-                        gradient: Gradient {
-                            GradientStop { position: 0.0; color: "#121f30" }
-                            GradientStop { position: 1.0; color: "#09111a" }
-                        }
-                        border.color: root.accentAmber
-                        border.width: 1
                         implicitHeight: statusColumn.implicitHeight + (root.cardPadding * 2)
 
                         ColumnLayout {
@@ -782,30 +807,119 @@ ApplicationWindow {
                             anchors.margins: root.cardPadding
                             spacing: root.compactGap
 
-                            Text {
-                                text: "跳转摘要 / Current Zone"
-                                color: root.accentAmber
-                                font.pixelSize: root.eyebrowSize
-                                font.family: root.monoFamily
-                                font.letterSpacing: root.scaled(1)
-                            }
-
-                            Text {
-                                text: root.currentPage === 0 ? root.landingSummaryTitle : DataUtils.objectOrEmpty(root.navigationModel[root.currentPage])["label"]
-                                color: root.textStrong
-                                font.pixelSize: root.sectionTitleSize
-                                font.bold: true
-                                font.family: root.displayFamily
-                                wrapMode: Text.WordWrap
-                            }
-
-                            Text {
+                            RowLayout {
                                 Layout.fillWidth: true
-                                text: root.currentPageSummary
-                                color: root.textSecondary
-                                font.pixelSize: root.bodySize
-                                font.family: root.uiFamily
-                                wrapMode: Text.WordWrap
+                                spacing: root.zoneGap
+
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: root.scaled(2)
+
+                                    Text {
+                                        text: "任务简报 / Mission Brief"
+                                        color: root.currentPage === 0 ? root.accentCyan : root.accentAmber
+                                        font.pixelSize: root.eyebrowSize
+                                        font.family: root.monoFamily
+                                        font.letterSpacing: root.scaled(1)
+                                    }
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: root.currentPage === 0 ? root.landingSummaryTitle : DataUtils.objectOrEmpty(root.navigationModel[root.currentPage])["label"]
+                                        color: root.textStrong
+                                        font.pixelSize: root.sectionTitleSize
+                                        font.bold: true
+                                        font.family: root.displayFamily
+                                        wrapMode: Text.WordWrap
+                                    }
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: root.currentPageSummary
+                                        color: root.textSecondary
+                                        font.pixelSize: root.bodySize
+                                        font.family: root.uiFamily
+                                        wrapMode: Text.WordWrap
+                                        maximumLineCount: root.compactLayout ? 4 : 2
+                                        elide: Text.ElideRight
+                                    }
+                                }
+
+                                Rectangle {
+                                    Layout.alignment: Qt.AlignTop
+                                    radius: root.edgeRadius
+                                    color: root.toneFill(root.currentPage === 0
+                                        ? (root.trackData.length > 1 ? "online" : "neutral")
+                                        : "neutral")
+                                    border.color: root.toneColor(root.currentPage === 0
+                                        ? (root.trackData.length > 1 ? "online" : "neutral")
+                                        : "neutral")
+                                    border.width: 1
+                                    implicitWidth: currentZoneStamp.implicitWidth + (root.scaled(12) * 2)
+                                    implicitHeight: currentZoneStamp.implicitHeight + (root.scaled(8) * 2)
+
+                                    Column {
+                                        id: currentZoneStamp
+                                        anchors.centerIn: parent
+                                        spacing: 1
+
+                                        Text {
+                                            text: root.currentPage === 0 ? "LANDING SHELL" : "ZONE VIEW"
+                                            color: root.textMuted
+                                            font.pixelSize: root.captionSize
+                                            font.family: root.monoFamily
+                                        }
+
+                                        Text {
+                                            text: root.currentPage === 0
+                                                ? (root.trackData.length > 1 ? "LIVE TRACK" : "CONTRACT MIRROR")
+                                                : String(DataUtils.objectOrEmpty(root.navigationModel[root.currentPage])["english"] || "ZONE")
+                                            color: root.toneColor(root.currentPage === 0
+                                                ? (root.trackData.length > 1 ? "online" : "neutral")
+                                                : "neutral")
+                                            font.pixelSize: root.captionSize + 1
+                                            font.bold: true
+                                            font.family: root.monoFamily
+                                        }
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                radius: root.edgeRadius
+                                gradient: Gradient {
+                                    GradientStop { position: 0.0; color: "#142131" }
+                                    GradientStop { position: 1.0; color: "#0b141e" }
+                                }
+                                border.color: root.recentEventTone === "warning" ? "#7a5a34" : "#2d4661"
+                                border.width: 1
+                                implicitHeight: liveBriefColumn.implicitHeight + (root.scaled(8) * 2)
+
+                                Column {
+                                    id: liveBriefColumn
+                                    anchors.fill: parent
+                                    anchors.margins: root.scaled(8)
+                                    spacing: root.scaled(2)
+
+                                    Text {
+                                        text: "实时摘要 / Live Brief"
+                                        color: root.textMuted
+                                        font.pixelSize: root.captionSize
+                                        font.family: root.monoFamily
+                                    }
+
+                                    Text {
+                                        width: parent.width
+                                        text: root.currentPage === 0 ? root.landingSummaryText : root.currentPageSummary
+                                        color: root.textPrimary
+                                        font.pixelSize: root.bodySize
+                                        font.family: root.uiFamily
+                                        wrapMode: Text.WordWrap
+                                        maximumLineCount: root.compactLayout ? 3 : 2
+                                        elide: Text.ElideRight
+                                    }
+                                }
                             }
 
                             Flow {
@@ -878,7 +992,7 @@ ApplicationWindow {
                             Layout.columnSpan: 1
                             Layout.fillWidth: true
                             Layout.fillHeight: root.wideLayout
-                            Layout.minimumWidth: root.scaled(214)
+                            Layout.minimumWidth: root.scaled(root.wideLayout ? 196 : 214)
                             implicitHeight: leftRailColumn.implicitHeight + (root.panelPadding * 2)
 
                             ColumnLayout {
@@ -994,75 +1108,65 @@ ApplicationWindow {
 
                                         ColumnLayout {
                                             Layout.fillWidth: true
-                                            spacing: root.scaled(2)
+                                            spacing: root.scaled(1)
 
                                             Text {
-                                                text: "中心主舞台 / Main Bay"
-                                                color: root.accentBlue
+                                                text: "中心主舞台 / Command Wall"
+                                                color: root.accentCyan
                                                 font.pixelSize: root.eyebrowSize
                                                 font.family: root.monoFamily
                                                 font.letterSpacing: root.scaled(1)
                                             }
 
                                             Text {
-                                                text: "全球态势主屏"
+                                                text: root.landingStageTitle
                                                 color: root.textStrong
-                                                font.pixelSize: root.sectionTitleSize + (root.wideLayout ? root.scaled(4) : 0)
+                                                font.pixelSize: root.bodyEmphasisSize + (root.wideLayout ? root.scaled(3) : root.scaled(1))
                                                 font.bold: true
                                                 font.family: root.displayFamily
+                                                maximumLineCount: 1
+                                                elide: Text.ElideRight
                                             }
 
                                             Text {
                                                 Layout.fillWidth: true
-                                                text: root.missionCallSignValue + " · " + root.aircraftIdValue + " · " + root.linkProfileValue
+                                                text: root.landingSummaryTitle
                                                 color: root.textSecondary
-                                                font.pixelSize: root.bodySize
+                                                font.pixelSize: root.captionSize + 1
                                                 font.family: root.uiFamily
                                                 wrapMode: Text.WordWrap
+                                                maximumLineCount: 2
+                                                elide: Text.ElideRight
                                             }
                                         }
 
-                                        Flow {
-                                            Layout.preferredWidth: root.wideLayout ? root.scaled(420) : root.scaled(250)
-                                            width: implicitWidth
-                                            spacing: root.compactGap
+                                        Rectangle {
+                                            Layout.alignment: Qt.AlignTop
+                                            radius: root.edgeRadius
+                                            color: root.toneFill(root.liveAnchorTone)
+                                            border.color: root.toneColor(root.liveAnchorTone)
+                                            border.width: 1
+                                            implicitWidth: mapStatusStamp.implicitWidth + (root.scaled(12) * 2)
+                                            implicitHeight: mapStatusStamp.implicitHeight + (root.scaled(8) * 2)
 
-                                            Repeater {
-                                                model: [
-                                                    { "label": "数据源", "value": root.activeSourceLabel, "tone": "online" },
-                                                    { "label": "链路", "value": root.linkProfileValue, "tone": "neutral" },
-                                                    { "label": "锚点", "value": String(root.liveAnchor["valid_instance"] || "--"), "tone": root.liveAnchorTone }
-                                                ]
+                                            Column {
+                                                id: mapStatusStamp
+                                                anchors.centerIn: parent
+                                                spacing: 1
 
-                                                delegate: Rectangle {
-                                                    property var itemData: modelData
-                                                    radius: root.edgeRadius
-                                                    color: root.toneFill(String(itemData["tone"] || "neutral"))
-                                                    border.color: root.toneColor(String(itemData["tone"] || "neutral"))
-                                                    border.width: 1
-                                                    implicitWidth: stageChipColumn.implicitWidth + (root.scaled(10) * 2)
-                                                    implicitHeight: stageChipColumn.implicitHeight + (root.scaled(7) * 2)
+                                                Text {
+                                                    text: "MAP STAGE"
+                                                    color: root.textMuted
+                                                    font.pixelSize: root.captionSize
+                                                    font.family: root.monoFamily
+                                                }
 
-                                                    Column {
-                                                        id: stageChipColumn
-                                                        anchors.centerIn: parent
-                                                        spacing: 1
-
-                                                        Text {
-                                                            text: itemData["label"]
-                                                            color: root.textMuted
-                                                            font.pixelSize: root.captionSize
-                                                            font.family: root.monoFamily
-                                                        }
-
-                                                        Text {
-                                                            text: itemData["value"]
-                                                            color: root.textStrong
-                                                            font.pixelSize: root.captionSize
-                                                            font.bold: true
-                                                            font.family: root.uiFamily
-                                                        }
-                                                    }
+                                                Text {
+                                                    text: root.trackData.length > 1 ? "LIVE TRACK" : "CONTRACT MIRROR"
+                                                    color: root.toneColor(root.trackData.length > 1 ? "online" : "neutral")
+                                                    font.pixelSize: root.captionSize + 1
+                                                    font.bold: true
+                                                    font.family: root.monoFamily
                                                 }
                                             }
                                         }
@@ -1086,141 +1190,22 @@ ApplicationWindow {
                                             anchors.fill: parent
                                             anchors.margins: 2
                                             shellWindow: root
+                                            landingMode: true
                                             trackData: root.trackData
                                             currentPoint: root.currentPosition
                                             headingDeg: Number(root.kinematics["heading_deg"] || 0)
                                             currentLabel: root.missionCallSignValue + " 实时航迹"
-                                            currentDetail: root.activeSourceLabel + " / " + root.linkProfileValue
+                                            currentDetail: root.coordinatePair(root.currentPosition) + " / " + root.formattedMetric(root.kinematics["ground_speed_kph"], 0, "km/h")
                                             anchorLabel: String(root.liveAnchor["valid_instance"] || "--")
                                             projectionLabel: "等经纬投影 / Equirectangular"
                                             scenarioLabel: root.recommendedScenarioId
                                             scenarioTone: root.liveAnchorTone
+                                            bannerEyebrow: "LIVE COMMAND BRIEF / GLOBAL WALLBOARD"
+                                            bannerTitle: root.landingMapBannerTitle
+                                            bannerText: root.landingMapBannerText
+                                            bannerChips: root.landingStageChipModel
                                         }
 
-                                        Column {
-                                            visible: !root.compactLayout
-                                            anchors.right: parent.right
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            anchors.rightMargin: root.scaled(14)
-                                            spacing: root.compactGap
-
-                                            Repeater {
-                                                model: root.landingJumpModel
-
-                                                delegate: Rectangle {
-                                                    property var itemData: modelData
-                                                    radius: root.edgeRadius
-                                                    color: "#c40a121c"
-                                                    border.color: root.toneColor(String(itemData["tone"] || "neutral"))
-                                                    border.width: 1
-                                                    implicitWidth: stageJumpRow.implicitWidth + (root.scaled(12) * 2)
-                                                    implicitHeight: stageJumpRow.implicitHeight + (root.scaled(8) * 2)
-
-                                                    Row {
-                                                        id: stageJumpRow
-                                                        anchors.centerIn: parent
-                                                        spacing: root.scaled(8)
-
-                                                        Text {
-                                                            text: itemData["label"]
-                                                            color: root.textStrong
-                                                            font.pixelSize: root.bodySize
-                                                            font.bold: true
-                                                            font.family: root.uiFamily
-                                                        }
-
-                                                        Text {
-                                                            text: ">"
-                                                            color: root.toneColor(String(itemData["tone"] || "neutral"))
-                                                            font.pixelSize: root.bodyEmphasisSize
-                                                            font.bold: true
-                                                            font.family: root.monoFamily
-                                                        }
-                                                    }
-
-                                                    MouseArea {
-                                                        anchors.fill: parent
-                                                        hoverEnabled: true
-                                                        cursorShape: Qt.PointingHandCursor
-                                                        onClicked: root.currentPage = Number(parent.itemData["index"])
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        Row {
-                                            anchors.left: parent.left
-                                            anchors.bottom: parent.bottom
-                                            anchors.margins: root.scaled(14)
-                                            spacing: root.compactGap
-
-                                            Repeater {
-                                                model: [
-                                                    { "label": "世界底图", "tone": "online" },
-                                                    { "label": "飞机合同", "tone": "neutral" },
-                                                    { "label": "弱网对照", "tone": "warning" }
-                                                ]
-
-                                                delegate: Rectangle {
-                                                    radius: root.edgeRadius
-                                                    color: "#b6091119"
-                                                    border.color: root.toneColor(String(modelData["tone"] || "neutral"))
-                                                    border.width: 1
-                                                    implicitWidth: legendText.implicitWidth + (root.scaled(10) * 2)
-                                                    implicitHeight: legendText.implicitHeight + (root.scaled(6) * 2)
-
-                                                    Text {
-                                                        id: legendText
-                                                        anchors.centerIn: parent
-                                                        text: modelData["label"]
-                                                        color: root.textPrimary
-                                                        font.pixelSize: root.captionSize
-                                                        font.family: root.uiFamily
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        Rectangle {
-                                            anchors.right: parent.right
-                                            anchors.bottom: parent.bottom
-                                            anchors.margins: root.scaled(14)
-                                            radius: root.edgeRadius
-                                            color: "#de09131f"
-                                            border.color: root.accentBlue
-                                            border.width: 1
-                                            implicitWidth: mapCtaRow.implicitWidth + (root.scaled(14) * 2)
-                                            implicitHeight: mapCtaRow.implicitHeight + (root.scaled(8) * 2)
-
-                                            Row {
-                                                id: mapCtaRow
-                                                anchors.centerIn: parent
-                                                spacing: root.scaled(8)
-
-                                                Text {
-                                                    text: "进入飞行合同"
-                                                    color: root.textStrong
-                                                    font.pixelSize: root.bodySize
-                                                    font.bold: true
-                                                    font.family: root.uiFamily
-                                                }
-
-                                                Text {
-                                                    text: ">"
-                                                    color: root.accentBlue
-                                                    font.pixelSize: root.bodyEmphasisSize
-                                                    font.bold: true
-                                                    font.family: root.monoFamily
-                                                }
-                                            }
-
-                                            MouseArea {
-                                                anchors.fill: parent
-                                                hoverEnabled: true
-                                                cursorShape: Qt.PointingHandCursor
-                                                onClicked: root.currentPage = 2
-                                            }
-                                        }
                                     }
                                 }
                             }
@@ -1236,7 +1221,7 @@ ApplicationWindow {
                             Layout.columnSpan: 1
                             Layout.fillWidth: true
                             Layout.fillHeight: root.wideLayout
-                            Layout.minimumWidth: root.scaled(236)
+                            Layout.minimumWidth: root.scaled(root.wideLayout ? 216 : 236)
                             implicitHeight: rightRailColumn.implicitHeight + (root.panelPadding * 2)
 
                             ColumnLayout {
@@ -1264,7 +1249,7 @@ ApplicationWindow {
 
                                 Text {
                                     Layout.fillWidth: true
-                                    text: "借用 QDashBoard 的分区导航思路，把系统、飞行、弱网和执行都收口为明确的跳转轨。"
+                                    text: "把系统、飞行、弱网和执行收口为显式跳转轨，首屏保持地图主舞台。"
                                     color: root.textSecondary
                                     font.pixelSize: root.bodySize
                                     font.family: root.uiFamily
@@ -2177,7 +2162,7 @@ ApplicationWindow {
                         }
 
                         Text {
-                            text: "持续可见的执行收口"
+                            text: "随时可调用的执行坞站"
                             color: root.textStrong
                             font.pixelSize: root.bodyEmphasisSize
                             font.bold: true
@@ -2186,20 +2171,36 @@ ApplicationWindow {
 
                         Text {
                             Layout.fillWidth: true
-                            text: root.footerNote
+                            text: root.dockFooterSummary
                             color: root.textSecondary
                             font.pixelSize: root.bodySize
                             font.family: root.uiFamily
                             wrapMode: Text.WordWrap
+                            maximumLineCount: 2
+                            elide: Text.ElideRight
                         }
 
-                        Text {
+                        Rectangle {
                             Layout.fillWidth: true
-                            text: root.launchHint
-                            color: root.textPrimary
-                            font.pixelSize: root.captionSize
-                            font.family: root.monoFamily
-                            wrapMode: Text.WrapAnywhere
+                            radius: root.edgeRadius
+                            color: "#0d1520"
+                            border.color: "#29405a"
+                            border.width: 1
+                            implicitHeight: dockLaunchText.implicitHeight + (root.scaled(7) * 2)
+
+                            Text {
+                                id: dockLaunchText
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.leftMargin: root.scaled(10)
+                                anchors.rightMargin: root.scaled(10)
+                                text: root.dockLaunchLabel
+                                color: root.textPrimary
+                                font.pixelSize: root.captionSize
+                                font.family: root.monoFamily
+                                elide: Text.ElideMiddle
+                            }
                         }
                     }
 
@@ -2223,29 +2224,30 @@ ApplicationWindow {
                                         ? root.toneColor(String(itemData["tone"] || "neutral"))
                                         : "#2c3c50"
                                     border.width: 1
-                                    width: Math.max(root.scaled(150), dockActionColumn.implicitWidth + (root.scaled(18) * 2))
-                                    height: dockActionColumn.implicitHeight + (root.scaled(10) * 2)
+                                    width: Math.max(root.scaled(142), dockActionRow.implicitWidth + (root.scaled(16) * 2))
+                                    height: dockActionRow.implicitHeight + (root.scaled(8) * 2)
 
-                                    Column {
-                                        id: dockActionColumn
+                                    Row {
+                                        id: dockActionRow
                                         anchors.centerIn: parent
-                                        spacing: root.scaled(2)
+                                        spacing: root.scaled(8)
 
                                         Text {
+                                            width: root.scaled(92)
                                             text: itemData["label"]
                                             color: root.textStrong
                                             font.pixelSize: root.bodySize
                                             font.bold: true
                                             font.family: root.uiFamily
+                                            elide: Text.ElideRight
                                         }
 
                                         Text {
-                                            width: parent.width
-                                            text: itemData["enabled"] ? "可执行 / live" : compactMessage(String(itemData["note"] || "只读合同"), 24)
+                                            text: itemData["enabled"] ? "live" : compactMessage(String(itemData["note"] || "只读合同"), 14)
                                             color: itemData["enabled"] ? root.toneColor(String(itemData["tone"] || "neutral")) : root.textMuted
                                             font.pixelSize: root.captionSize
                                             font.family: root.monoFamily
-                                            wrapMode: Text.WrapAnywhere
+                                            font.bold: itemData["enabled"]
                                         }
                                     }
                                 }
@@ -2302,41 +2304,48 @@ ApplicationWindow {
                             }
                         }
 
-                        Rectangle {
-                            radius: root.edgeRadius
-                            color: "#0d1520"
-                            border.color: root.accentCyan
-                            border.width: 1
-                            implicitWidth: dockCtaRow.implicitWidth + (root.scaled(14) * 2)
-                            implicitHeight: dockCtaRow.implicitHeight + (root.scaled(9) * 2)
+                        Item {
+                            Layout.fillWidth: true
+                            implicitHeight: dockCtaButton.implicitHeight
 
-                            Row {
-                                id: dockCtaRow
-                                anchors.centerIn: parent
-                                spacing: root.scaled(8)
+                            Rectangle {
+                                id: dockCtaButton
+                                anchors.right: parent.right
+                                radius: root.edgeRadius
+                                color: "#0d1520"
+                                border.color: root.accentCyan
+                                border.width: 1
+                                implicitWidth: dockCtaRow.implicitWidth + (root.scaled(14) * 2)
+                                implicitHeight: dockCtaRow.implicitHeight + (root.scaled(9) * 2)
 
-                                Text {
-                                    text: "进入执行坞站"
-                                    color: root.textStrong
-                                    font.pixelSize: root.bodySize
-                                    font.bold: true
-                                    font.family: root.uiFamily
+                                Row {
+                                    id: dockCtaRow
+                                    anchors.centerIn: parent
+                                    spacing: root.scaled(8)
+
+                                    Text {
+                                        text: "进入执行坞站"
+                                        color: root.textStrong
+                                        font.pixelSize: root.bodySize
+                                        font.bold: true
+                                        font.family: root.uiFamily
+                                    }
+
+                                    Text {
+                                        text: ">"
+                                        color: root.accentCyan
+                                        font.pixelSize: root.bodyEmphasisSize
+                                        font.bold: true
+                                        font.family: root.monoFamily
+                                    }
                                 }
 
-                                Text {
-                                    text: ">"
-                                    color: root.accentCyan
-                                    font.pixelSize: root.bodyEmphasisSize
-                                    font.bold: true
-                                    font.family: root.monoFamily
+                                MouseArea {
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: root.currentPage = 4
                                 }
-                            }
-
-                            MouseArea {
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: root.currentPage = 4
                             }
                         }
                     }
