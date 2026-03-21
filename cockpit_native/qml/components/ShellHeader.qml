@@ -16,14 +16,17 @@ Item {
     readonly property int navPadding: shellWindow ? shellWindow.scaled(landingPage ? 7 : 8) : (landingPage ? 7 : 8)
     readonly property color goldAccent: shellWindow ? shellWindow.accentGold : "#c6ab7d"
     readonly property color iceAccent: shellWindow ? shellWindow.accentIce : "#86c7d4"
+    readonly property var landingCommandRailModel: shellWindow && landingPage
+        ? shellWindow.previewItems(commandRailModel, 2)
+        : commandRailModel
     readonly property string leadText: shellWindow
         ? (landingPage
             ? shellWindow.currentPageSummary
             : (String(currentPageEntry["label"] || shellWindow.topTitle) + " / " + shellWindow.currentPageSummary))
         : ""
     readonly property string heroEyebrow: landingPage
-        ? "TVM-FEITENG PI / PHASE 6 NATIVE COCKPIT"
-        : (String(currentPageEntry["english"] || "COCKPIT PAGE") + " / ACTIVE PAGE")
+        ? "飞腾派原生座舱 / TVM-FEITENG PI"
+        : (String(currentPageEntry["label"] || "座舱页面") + " / ACTIVE PAGE")
     readonly property string heroTitle: shellWindow
         ? (landingPage ? shellWindow.topTitle : String(currentPageEntry["label"] || shellWindow.topTitle))
         : "飞腾原生座舱"
@@ -201,7 +204,7 @@ Item {
                             }
 
                             Text {
-                                visible: root.landingPage && root.leadText.length > 0
+                                visible: !root.landingPage && root.leadText.length > 0
                                 Layout.fillWidth: true
                                 text: root.leadText
                                 color: shellWindow ? shellWindow.textStrong : "#f5efe4"
@@ -219,7 +222,7 @@ Item {
                                 spacing: shellWindow ? shellWindow.compactGap : 8
 
                                 Repeater {
-                                    model: root.commandRailModel
+                                    model: root.landingCommandRailModel
 
                                     delegate: ToneChip {
                                         shellWindow: root.shellWindow

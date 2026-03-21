@@ -57,6 +57,40 @@ WORLD_MAP_BACKDROP_ENV = "COCKPIT_NATIVE_WORLD_MAP_BACKDROP"
 VALID_MAP_BACKENDS = {"auto", "canvas", "svg", "qtlocation"}
 VALID_MAP_PROVIDERS = {"auto", "osm"}
 VALID_MAP_TILE_MODES = {"auto", "online", "local_arcgis_cache"}
+FONT_FILE_SUFFIXES = {".ttf", ".otf", ".ttc"}
+DEFAULT_WORLD_MAP_BACKDROP_RELATIVE_PATH = Path("cockpit_native") / "qml" / "assets" / "world-map-backdrop.svg"
+DEFAULT_THEME_PALETTE = {
+    "sceneTop": "#040c16",
+    "sceneMid": "#081521",
+    "sceneBottom": "#0a111b",
+    "haloCool": "#12314d",
+    "haloWarm": "#16314a",
+    "shellExterior": "#07111a",
+    "shellInterior": "#0b1722",
+    "surfaceRaised": "#101d2a",
+    "surfaceQuiet": "#09131d",
+    "surfaceGlass": "#132131",
+    "borderSubtle": "#203245",
+    "borderStrong": "#3d6f92",
+    "accentIce": "#74dcff",
+    "accentGold": "#f2bf67",
+    "accentMint": "#73e5b0",
+    "accentRose": "#ff7f8c",
+    "textStrong": "#f4fbff",
+    "textPrimary": "#d4e0ec",
+    "textSecondary": "#8ea5bb",
+    "textMuted": "#5f768b",
+    "dataLine": "#112232",
+    "dataLineStrong": "#1d3950",
+    "panelHighlight": "#17344b",
+    "panelGlowSoft": "#52dcff",
+    "canopyTop": "#102131",
+    "canopyBottom": "#09111a",
+    "accentBlue": "#94bad8",
+    "shellDockTop": "#12283d",
+    "shellDockMid": "#0c1724",
+    "shellDockBottom": "#08111a",
+}
 
 
 @dataclass
@@ -135,6 +169,21 @@ def resolve_optional_repo_path(raw_value: str | None, *, project_root: Path | No
     return resolved_path.resolve().as_uri()
 
 
+def resolve_default_world_map_backdrop(project_root: Path | None = None) -> str:
+    resolved_root = (project_root or Path(__file__).resolve().parent.parent).resolve()
+    backdrop_path = resolved_root / DEFAULT_WORLD_MAP_BACKDROP_RELATIVE_PATH
+    if not backdrop_path.is_file():
+        return ""
+    return backdrop_path.resolve().as_uri()
+
+
+def resolve_world_map_backdrop_source(raw_value: str | None, *, project_root: Path | None = None) -> str:
+    explicit_source = resolve_optional_repo_path(raw_value, project_root=project_root)
+    if explicit_source:
+        return explicit_source
+    return resolve_default_world_map_backdrop(project_root)
+
+
 def build_launch_options(
     project_root: Path | None = None,
     *,
@@ -168,7 +217,7 @@ def build_launch_options(
             resolved_env.get(MAP_PROVIDER_ENV),
             available_providers=qtlocation_providers,
         ),
-        "worldMapBackdropSource": resolve_optional_repo_path(
+        "worldMapBackdropSource": resolve_world_map_backdrop_source(
             resolved_env.get(WORLD_MAP_BACKDROP_ENV),
             project_root=project_root,
         ),
@@ -190,6 +239,84 @@ def apply_repo_runtime_env(
     resolved = os.environ if target is None else target
     resolved.setdefault("XDG_CACHE_HOME", resolve_repo_runtime_cache_root(project_root))
     return resolved
+
+
+def register_project_fonts(package_root: Path) -> list[str]:
+    font_root = package_root / "fonts"
+    if not font_root.is_dir():
+        return []
+
+    try:
+        from PySide6.QtGui import QFontDatabase
+    except Exception:
+        return []
+
+    registered_families: list[str] = []
+    for font_path in sorted(font_root.iterdir()):
+        if not font_path.is_file() or font_path.suffix.lower() not in FONT_FILE_SUFFIXES:
+            continue
+        try:
+            font_id = QFontDatabase.addApplicationFont(str(font_path))
+        except Exception:
+            continue
+        if font_id < 0:
+            continue
+        try:
+            registered_families.extend(str(name) for name in QFontDatabase.applicationFontFamilies(font_id) if name)
+        except Exception:
+            continue
+    return sorted(set(registered_families))
+
+
+def resolve_font_family(preferred_families: Sequence[str], *, available_families: Sequence[str], fallback_family: str) -> str:
+    available_lookup = {str(family).casefold(): str(family) for family in available_families if family}
+    for family in preferred_families:
+        resolved = available_lookup.get(str(family).casefold())
+        if resolved:
+            return resolved
+    return fallback_family
+
+
+def build_runtime_font_plan(package_root: Path, app: Any) -> dict[str, object]:
+    try:
+        from PySide6.QtGui import QFontDatabase
+    except Exception:
+        default_family = str(app.font().family()) if hasattr(app, "font") else "Sans Serif"
+        return {
+            "registeredFontFamilies": [],
+            "displayFontFamily": default_family,
+            "uiFontFamily": default_family,
+            "monoFontFamily": "Monospace",
+        }
+
+    registered_families = register_project_fonts(package_root)
+    available_families = [str(name) for name in QFontDatabase().families()]
+    default_family = str(app.font().family()) if hasattr(app, "font") else "Sans Serif"
+    return {
+        "registeredFontFamilies": registered_families,
+        "displayFontFamily": resolve_font_family(
+            ["Ubuntu Sans", "Noto Sans CJK SC", "Ubuntu", "DejaVu Sans"],
+            available_families=available_families,
+            fallback_family=default_family,
+        ),
+        "uiFontFamily": resolve_font_family(
+            ["Noto Sans CJK SC", "Ubuntu Sans", "Ubuntu", "DejaVu Sans"],
+            available_families=available_families,
+            fallback_family=default_family,
+        ),
+        "monoFontFamily": resolve_font_family(
+            ["Ubuntu Sans Mono", "JetBrains Mono", "Ubuntu Mono", "DejaVu Sans Mono"],
+            available_families=available_families,
+            fallback_family="Monospace",
+        ),
+    }
+
+
+def build_runtime_theme_plan() -> dict[str, object]:
+    return {
+        "themeProfile": "native_cockpit_runtime_v2",
+        "themePalette": dict(DEFAULT_THEME_PALETTE),
+    }
 
 
 def apply_software_renderer_env(target: MutableMapping[str, str] | None = None) -> MutableMapping[str, str]:
@@ -274,6 +401,10 @@ def _create_cockpit_runtime(
     app.setOrganizationName("CICC0903540")
     engine = QQmlApplicationEngine()
     engine.rootContext().setContextProperty("cockpitUiStateJson", "{}")
+    package_root = Path(__file__).resolve().parent
+    launch_options = build_launch_options(project_root=project_root, software_render=software_render)
+    launch_options.update(build_runtime_font_plan(package_root, app))
+    launch_options.update(build_runtime_theme_plan())
 
     def publish_state_json(state_json: str) -> None:
         engine.rootContext().setContextProperty("cockpitUiStateJson", state_json)
@@ -292,10 +423,7 @@ def _create_cockpit_runtime(
     engine.rootContext().setContextProperty("cockpitBridgeAvailable", True)
     engine.rootContext().setContextProperty("safeAreaInsets", _resolve_safe_area_insets(safe_area_insets))
     engine.rootContext().setContextProperty("screenMetrics", screen_metrics)
-    engine.rootContext().setContextProperty(
-        "launchOptions",
-        build_launch_options(project_root=project_root, software_render=software_render),
-    )
+    engine.rootContext().setContextProperty("launchOptions", launch_options)
 
     qml_path = Path(__file__).resolve().parent / "qml" / "Main.qml"
     engine.load(str(qml_path))

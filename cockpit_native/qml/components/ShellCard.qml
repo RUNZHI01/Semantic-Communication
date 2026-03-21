@@ -16,10 +16,9 @@ Item {
     property int contentSpacing: shellWindow ? shellWindow.compactGap : 8
 
     readonly property bool hasHeader: eyebrow.length > 0 || title.length > 0 || subtitle.length > 0
-    readonly property color topFill: Qt.lighter(root.fillColor, 1.06)
-    readonly property color bottomFill: Qt.darker(root.fillColor, 1.12)
-    readonly property color deepFill: Qt.darker(root.fillColor, 1.24)
-    readonly property color rimTone: Qt.lighter(root.borderColor, 1.04)
+    readonly property color topFill: Qt.lighter(root.fillColor, 1.08)
+    readonly property color bottomFill: Qt.darker(root.fillColor, 1.08)
+    readonly property color rimTone: Qt.lighter(root.borderColor, 1.06)
 
     default property alias contentData: contentLayout.data
 
@@ -30,41 +29,38 @@ Item {
         radius: root.radius
         gradient: Gradient {
             GradientStop { position: 0.0; color: Qt.rgba(root.topFill.r, root.topFill.g, root.topFill.b, 0.98) }
-            GradientStop { position: 0.26; color: Qt.rgba(root.fillColor.r, root.fillColor.g, root.fillColor.b, 0.97) }
-            GradientStop { position: 1.0; color: Qt.rgba(root.bottomFill.r, root.bottomFill.g, root.bottomFill.b, 0.98) }
+            GradientStop { position: 0.2; color: Qt.rgba(root.fillColor.r, root.fillColor.g, root.fillColor.b, 0.98) }
+            GradientStop { position: 1.0; color: Qt.rgba(root.bottomFill.r, root.bottomFill.g, root.bottomFill.b, 0.99) }
         }
+    }
+
+    Rectangle {
+        width: parent.width * 0.34
+        height: parent.height * 0.48
+        radius: width / 2
+        color: root.accentColor
+        opacity: 0.055
+        x: parent.width - (width * 0.68)
+        y: -height * 0.18
     }
 
     Rectangle {
         anchors.fill: parent
-        radius: root.radius
-        gradient: Gradient {
-            GradientStop { position: 0.0; color: "#14ffffff" }
-            GradientStop { position: 0.24; color: "#06ffffff" }
-            GradientStop { position: 1.0; color: "#00000000" }
-        }
-        opacity: 0.48
-    }
-
-    Rectangle {
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.bottom: parent.bottom
-        height: Math.max(parent.height * 0.38, root.radius * 1.8)
         radius: parent.radius
         gradient: Gradient {
-            GradientStop { position: 0.0; color: "#00000000" }
-            GradientStop { position: 0.44; color: "#10000000" }
-            GradientStop { position: 1.0; color: Qt.rgba(root.deepFill.r, root.deepFill.g, root.deepFill.b, 0.84) }
+            GradientStop { position: 0.0; color: "#18ffffff" }
+            GradientStop { position: 0.16; color: "#08ffffff" }
+            GradientStop { position: 0.52; color: "#00000000" }
+            GradientStop { position: 1.0; color: "#12000000" }
         }
-        opacity: 0.82
+        opacity: 0.42
     }
 
     Rectangle {
         anchors.left: parent.left
         anchors.top: parent.top
         anchors.bottom: parent.bottom
-        anchors.leftMargin: shellWindow ? shellWindow.scaled(6) : 6
+        anchors.leftMargin: shellWindow ? shellWindow.scaled(5) : 5
         anchors.topMargin: shellWindow ? shellWindow.scaled(10) : 10
         anchors.bottomMargin: shellWindow ? shellWindow.scaled(10) : 10
         width: shellWindow ? shellWindow.scaled(3) : 3
@@ -72,9 +68,9 @@ Item {
         gradient: Gradient {
             orientation: Gradient.Vertical
             GradientStop { position: 0.0; color: "transparent" }
-            GradientStop { position: 0.14; color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.22) }
-            GradientStop { position: 0.48; color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.9) }
-            GradientStop { position: 0.84; color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.24) }
+            GradientStop { position: 0.18; color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.18) }
+            GradientStop { position: 0.5; color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.96) }
+            GradientStop { position: 0.82; color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.22) }
             GradientStop { position: 1.0; color: "transparent" }
         }
     }
@@ -90,38 +86,17 @@ Item {
         gradient: Gradient {
             orientation: Gradient.Horizontal
             GradientStop { position: 0.0; color: "transparent" }
-            GradientStop { position: 0.16; color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.14) }
-            GradientStop { position: 0.5; color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.76) }
-            GradientStop { position: 0.84; color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.14) }
+            GradientStop { position: 0.18; color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.14) }
+            GradientStop { position: 0.5; color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.84) }
+            GradientStop { position: 0.82; color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.14) }
             GradientStop { position: 1.0; color: "transparent" }
         }
-        opacity: 0.88
-    }
-
-    Rectangle {
-        width: parent.width * 0.42
-        height: parent.height * 0.68
-        radius: width / 2
-        color: root.accentColor
-        opacity: 0.045
-        x: -width * 0.18
-        y: -height * 0.28
-    }
-
-    Rectangle {
-        width: parent.width * 0.24
-        height: parent.height * 0.22
-        radius: shellWindow ? shellWindow.edgeRadius : 12
-        color: "#0f000000"
-        rotation: -10
-        x: parent.width - (width * 0.8)
-        y: -height * 0.24
+        opacity: 0.94
     }
 
     Rectangle {
         anchors.fill: parent
-        anchors.margins: 1
-        radius: parent.radius - 1
+        radius: parent.radius
         color: "transparent"
         border.color: root.rimTone
         border.width: 1
@@ -129,10 +104,10 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        anchors.margins: shellWindow ? shellWindow.scaled(5) : 5
-        radius: parent.radius - (shellWindow ? shellWindow.scaled(5) : 5)
+        anchors.margins: 1
+        radius: parent.radius - 1
         color: "transparent"
-        border.color: Qt.rgba(root.borderColor.r, root.borderColor.g, root.borderColor.b, 0.22)
+        border.color: Qt.rgba(root.borderColor.r, root.borderColor.g, root.borderColor.b, 0.44)
         border.width: 1
     }
 
