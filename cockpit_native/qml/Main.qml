@@ -302,8 +302,8 @@ ApplicationWindow {
     readonly property bool landingStageMinimalChrome: true
     readonly property bool landingStageTopBadgesVisible: false
     readonly property int landingStageBannerChipLimit: 0
-    readonly property int landingStageBannerTextLimit: compactLayout ? 20 : 28
-    readonly property int landingStageBannerTitleLimit: compactLayout ? 16 : 22
+    readonly property int landingStageBannerTextLimit: compactLayout ? 28 : 40
+    readonly property int landingStageBannerTitleLimit: compactLayout ? 20 : 30
     readonly property int flightStageBannerChipLimit: 3
 
     readonly property var systemPageChipModel: [

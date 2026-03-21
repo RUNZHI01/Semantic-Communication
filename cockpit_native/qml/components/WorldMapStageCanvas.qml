@@ -48,8 +48,15 @@ Item {
     readonly property color mapGlow: shellWindow ? shellWindow.panelGlowStrong : "#78d8ff"
     readonly property color markerColor: shellWindow ? shellWindow.accentCyan : "#8fe6ff"
     readonly property color emphasisColor: shellWindow ? shellWindow.accentAmber : "#ffbf55"
-    readonly property color overlayCardColor: landingMode ? "#b30c1720" : "#d90a1320"
-    readonly property color overlayCardColorSoft: landingMode ? "#59071116" : "#aa081119"
+    readonly property color overlayCardColor: shellWindow
+        ? Qt.rgba(shellWindow.surfaceGlass.r, shellWindow.surfaceGlass.g, shellWindow.surfaceGlass.b, landingMode ? 0.72 : 0.9)
+        : (landingMode ? "#b3122330" : "#d2142634")
+    readonly property color overlayCardColorSoft: shellWindow
+        ? Qt.rgba(shellWindow.surfaceQuiet.r, shellWindow.surfaceQuiet.g, shellWindow.surfaceQuiet.b, landingMode ? 0.76 : 0.92)
+        : (landingMode ? "#8a09121a" : "#b8091219")
+    readonly property color overlayCardColorDeep: shellWindow
+        ? Qt.rgba(shellWindow.shellExterior.r, shellWindow.shellExterior.g, shellWindow.shellExterior.b, landingMode ? 0.56 : 0.72)
+        : "#8d040b11"
     readonly property bool hasCurrentPoint: isFinite(Number(currentPoint["longitude"])) && isFinite(Number(currentPoint["latitude"]))
     readonly property bool compactStage: width < (landingMode ? 760 : 880)
     readonly property bool useExternalBackdrop: backdropMode === "asset" && backdropSource.length > 0
@@ -82,26 +89,26 @@ Item {
         shellWindow
             ? shellWindow.scaled(
                 bannerDockedBottom
-                    ? (landingMode ? (minimalBanner ? 260 : 300) : 340)
-                    : (landingMode ? 280 : 260)
+                    ? (landingMode ? (minimalBanner ? 320 : 352) : 340)
+                    : (landingMode ? 312 : 260)
             )
             : (
                 bannerDockedBottom
-                    ? (landingMode ? (minimalBanner ? 220 : 260) : 340)
-                    : (landingMode ? 250 : 260)
+                    ? (landingMode ? (minimalBanner ? 320 : 352) : 340)
+                    : (landingMode ? 312 : 260)
             ),
         Math.min(
             width - (overlayMargin * 2),
             shellWindow
                 ? shellWindow.scaled(
                     bannerDockedBottom
-                        ? (landingMode ? (minimalBanner ? 300 : 360) : 500)
-                        : (landingMode ? 320 : 560)
+                        ? (landingMode ? (minimalBanner ? 430 : 470) : 500)
+                        : (landingMode ? 420 : 560)
                 )
                 : (
                     bannerDockedBottom
-                        ? (landingMode ? (minimalBanner ? 300 : 360) : 500)
-                        : (landingMode ? 320 : 560)
+                        ? (landingMode ? (minimalBanner ? 430 : 470) : 500)
+                        : (landingMode ? 420 : 560)
                 )
         )
     )
@@ -761,14 +768,23 @@ Item {
                 : root.overlayMargin + (shellWindow ? shellWindow.scaled(root.landingMode ? 8 : 6) : (root.landingMode ? 8 : 6)))
         radius: shellWindow ? shellWindow.scaled(root.landingMode ? 14 : 13) : (root.landingMode ? 14 : 13)
         gradient: Gradient {
-            GradientStop { position: 0.0; color: root.landingMode ? "#74101b22" : "#d40b1621" }
-            GradientStop { position: 0.54; color: root.landingMode ? "#42091016" : "#bb09111a" }
-            GradientStop { position: 1.0; color: root.landingMode ? "#21060d0f" : "#8d071018" }
+            GradientStop { position: 0.0; color: root.overlayCardColor }
+            GradientStop { position: 0.52; color: root.overlayCardColorSoft }
+            GradientStop { position: 1.0; color: root.overlayCardColorDeep }
         }
         border.color: root.landingMode
             ? Qt.rgba(root.mapGlow.r, root.mapGlow.g, root.mapGlow.b, 0.36)
             : Qt.rgba(root.mapGlow.r, root.mapGlow.g, root.mapGlow.b, 0.72)
         border.width: 1
+
+        Rectangle {
+            anchors.fill: parent
+            anchors.margins: 1
+            radius: parent.radius - 1
+            color: "transparent"
+            border.color: "#10ffffff"
+            border.width: 1
+        }
 
         Rectangle {
             visible: root.landingMode && !root.minimalBanner
@@ -814,6 +830,16 @@ Item {
             opacity: root.landingMode ? 0.028 : 0.04
             x: -width * 0.16
             y: -height * 0.26
+        }
+
+        Rectangle {
+            width: parent.width * 0.42
+            height: parent.height * 0.92
+            radius: width / 2
+            color: root.mapGlow
+            opacity: root.landingMode ? 0.04 : 0.02
+            x: parent.width - (width * 0.72)
+            y: -height * 0.22
         }
 
         Column {
@@ -915,9 +941,9 @@ Item {
         anchors.bottomMargin: root.overlayMargin + (shellWindow ? shellWindow.scaled(10) : 10)
         radius: shellWindow ? shellWindow.edgeRadius : 12
         gradient: Gradient {
-            GradientStop { position: 0.0; color: "#d20b1520" }
-            GradientStop { position: 0.54; color: "#af09111a" }
-            GradientStop { position: 1.0; color: "#82060d15" }
+            GradientStop { position: 0.0; color: root.overlayCardColor }
+            GradientStop { position: 0.52; color: root.overlayCardColorSoft }
+            GradientStop { position: 1.0; color: root.overlayCardColorDeep }
         }
         border.color: Qt.rgba(root.mapGlow.r, root.mapGlow.g, root.mapGlow.b, root.landingMode ? 0.72 : 0.58)
         border.width: 1
