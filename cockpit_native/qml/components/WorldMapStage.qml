@@ -13,13 +13,14 @@ Item {
     property string projectionLabel: "经纬投影 / EQUIRECTANGULAR"
     property string scenarioLabel: ""
     property string scenarioTone: "neutral"
+    property bool landingMode: false
 
-    readonly property int mapInset: shellWindow ? shellWindow.scaled(20) : 20
-    readonly property int overlayMargin: shellWindow ? shellWindow.scaled(16) : 16
-    readonly property color oceanTop: "#183250"
-    readonly property color oceanBottom: "#071019"
-    readonly property color landFill: "#456a82"
-    readonly property color landFillBright: "#6388a2"
+    readonly property int mapInset: shellWindow ? shellWindow.scaled(landingMode ? 16 : 20) : (landingMode ? 16 : 20)
+    readonly property int overlayMargin: shellWindow ? shellWindow.scaled(landingMode ? 14 : 16) : (landingMode ? 14 : 16)
+    readonly property color oceanTop: landingMode ? "#204565" : "#183250"
+    readonly property color oceanBottom: landingMode ? "#081019" : "#071019"
+    readonly property color landFill: landingMode ? "#557e97" : "#456a82"
+    readonly property color landFillBright: landingMode ? "#719eb9" : "#6388a2"
     readonly property color coastlineColor: shellWindow ? Qt.lighter(shellWindow.accentCyan, 1.04) : "#8fe6ff"
     readonly property color gridMinor: shellWindow ? shellWindow.gridLine : "#123147"
     readonly property color gridMajor: shellWindow ? shellWindow.gridLineStrong : "#245b80"
@@ -27,13 +28,14 @@ Item {
     readonly property color mapGlow: shellWindow ? shellWindow.panelGlowStrong : "#78d8ff"
     readonly property color markerColor: shellWindow ? shellWindow.accentCyan : "#8fe6ff"
     readonly property color emphasisColor: shellWindow ? shellWindow.accentAmber : "#ffbf55"
-    readonly property color overlayCardColor: "#de0a1320"
-    readonly property color overlayCardColorSoft: "#bc09111b"
+    readonly property color overlayCardColor: landingMode ? "#d6091118" : "#de0a1320"
+    readonly property color overlayCardColorSoft: landingMode ? "#a1081016" : "#bc09111b"
     readonly property bool hasCurrentPoint: isFinite(Number(currentPoint["longitude"])) && isFinite(Number(currentPoint["latitude"]))
     readonly property bool compactStage: width < (shellWindow ? shellWindow.scaled(620) : 620)
     readonly property real markerX: hasCurrentPoint ? projectX(Number(currentPoint["longitude"])) : width * 0.5
     readonly property real markerY: hasCurrentPoint ? projectY(Number(currentPoint["latitude"])) : height * 0.5
     readonly property bool leftCallout: markerX > width * 0.64
+    readonly property bool showCurrentCallout: hasCurrentPoint && !landingMode
     readonly property real plotWidth: Math.max(1, width - (mapInset * 2))
     readonly property real plotHeight: Math.max(1, height - (mapInset * 2))
     readonly property string anchorDetailText: anchorLabel && anchorLabel !== "--"
@@ -137,6 +139,9 @@ Item {
         ctx.lineJoin = "round"
         ctx.lineCap = "round"
         if (trackData.length > 1) {
+            var shadowWidth = landingMode ? 8.4 : 7.2
+            var washWidth = landingMode ? 4.8 : 4.2
+            var trackWidth = landingMode ? 3.1 : 2.6
             ctx.beginPath()
             for (var index = 0; index < trackData.length; ++index) {
                 var point = trackData[index]
@@ -148,15 +153,15 @@ Item {
                     ctx.lineTo(x, y)
             }
             ctx.strokeStyle = "rgba(4,11,18,0.78)"
-            ctx.lineWidth = 7.2
+            ctx.lineWidth = shadowWidth
             ctx.stroke()
 
             ctx.strokeStyle = "rgba(255,255,255,0.18)"
-            ctx.lineWidth = 4.2
+            ctx.lineWidth = washWidth
             ctx.stroke()
 
             ctx.strokeStyle = "rgba(143,230,255,0.94)"
-            ctx.lineWidth = 2.6
+            ctx.lineWidth = trackWidth
             ctx.stroke()
 
             ctx.beginPath()
@@ -165,7 +170,7 @@ Item {
                 var mx = projectX(midPoint["longitude"])
                 var my = projectY(midPoint["latitude"])
                 ctx.moveTo(mx + 3.4, my)
-                ctx.arc(mx, my, midIndex === trackData.length - 1 ? 4.6 : 2.8, 0, Math.PI * 2)
+                ctx.arc(mx, my, midIndex === trackData.length - 1 ? (landingMode ? 5.2 : 4.6) : (landingMode ? 3.2 : 2.8), 0, Math.PI * 2)
             }
             ctx.fillStyle = "rgba(143,230,255,0.88)"
             ctx.fill()
@@ -238,37 +243,46 @@ Item {
 
         onPaint: {
             var ctx = getContext("2d")
+            var canvasWidth = Math.max(1, root.width)
+            var canvasHeight = Math.max(1, root.height)
             ctx.reset()
-            ctx.clearRect(0, 0, width, height)
+            ctx.clearRect(0, 0, canvasWidth, canvasHeight)
 
-            var ocean = ctx.createLinearGradient(0, 0, 0, height)
+            var ocean = ctx.createLinearGradient(0, 0, 0, canvasHeight)
             ocean.addColorStop(0.0, root.oceanTop)
-            ocean.addColorStop(0.48, "#10253a")
+            ocean.addColorStop(0.48, root.landingMode ? "#14314b" : "#10253a")
             ocean.addColorStop(1.0, root.oceanBottom)
             ctx.fillStyle = ocean
-            ctx.fillRect(0, 0, width, height)
+            ctx.fillRect(0, 0, canvasWidth, canvasHeight)
 
-            var beam = ctx.createRadialGradient(width * 0.72, height * 0.32, 0, width * 0.72, height * 0.32, width * 0.55)
-            beam.addColorStop(0.0, "rgba(120,216,255,0.18)")
-            beam.addColorStop(0.52, "rgba(120,216,255,0.07)")
+            var beamCenterX = canvasWidth * 0.72
+            var beamCenterY = canvasHeight * 0.32
+            var beamRadius = Math.max(1, canvasWidth * 0.55)
+            var beam = ctx.createRadialGradient(beamCenterX, beamCenterY, 0, beamCenterX, beamCenterY, beamRadius)
+            beam.addColorStop(0.0, root.landingMode ? "rgba(120,216,255,0.22)" : "rgba(120,216,255,0.18)")
+            beam.addColorStop(0.52, root.landingMode ? "rgba(120,216,255,0.09)" : "rgba(120,216,255,0.07)")
             beam.addColorStop(1.0, "rgba(120,216,255,0.0)")
             ctx.fillStyle = beam
-            ctx.fillRect(0, 0, width, height)
+            ctx.fillRect(0, 0, canvasWidth, canvasHeight)
 
-            var haze = ctx.createRadialGradient(width * 0.22, height * 0.78, 0, width * 0.22, height * 0.78, width * 0.42)
+            var hazeCenterX = canvasWidth * 0.22
+            var hazeCenterY = canvasHeight * 0.78
+            var hazeRadius = Math.max(1, canvasWidth * 0.42)
+            var haze = ctx.createRadialGradient(hazeCenterX, hazeCenterY, 0, hazeCenterX, hazeCenterY, hazeRadius)
             haze.addColorStop(0.0, "rgba(240,185,124,0.12)")
             haze.addColorStop(0.5, "rgba(240,185,124,0.04)")
             haze.addColorStop(1.0, "rgba(240,185,124,0.0)")
             ctx.fillStyle = haze
-            ctx.fillRect(0, 0, width, height)
+            ctx.fillRect(0, 0, canvasWidth, canvasHeight)
 
             if (root.hasCurrentPoint) {
-                var spotlight = ctx.createRadialGradient(root.markerX, root.markerY, 0, root.markerX, root.markerY, Math.min(width, height) * 0.38)
+                var spotlightRadius = Math.max(1, Math.min(canvasWidth, canvasHeight) * 0.38)
+                var spotlight = ctx.createRadialGradient(root.markerX, root.markerY, 0, root.markerX, root.markerY, spotlightRadius)
                 spotlight.addColorStop(0.0, "rgba(255,255,255,0.04)")
                 spotlight.addColorStop(0.3, "rgba(172,236,255,0.09)")
                 spotlight.addColorStop(1.0, "rgba(172,236,255,0.0)")
                 ctx.fillStyle = spotlight
-                ctx.fillRect(0, 0, width, height)
+                ctx.fillRect(0, 0, canvasWidth, canvasHeight)
             }
 
             ctx.save()
@@ -281,7 +295,9 @@ Item {
                 ctx.beginPath()
                 ctx.moveTo(root.mapInset, latitudeY)
                 ctx.lineTo(width - root.mapInset, latitudeY)
-                ctx.strokeStyle = latitude === 0 ? "rgba(132,191,255,0.36)" : "rgba(68,98,126,0.24)"
+                ctx.strokeStyle = latitude === 0
+                    ? (root.landingMode ? "rgba(156,210,255,0.44)" : "rgba(132,191,255,0.36)")
+                    : (root.landingMode ? "rgba(78,110,139,0.28)" : "rgba(68,98,126,0.24)")
                 ctx.lineWidth = latitude === 0 ? 1.4 : 1.0
                 ctx.stroke()
             }
@@ -291,7 +307,9 @@ Item {
                 ctx.beginPath()
                 ctx.moveTo(longitudeX, root.mapInset)
                 ctx.lineTo(longitudeX, height - root.mapInset)
-                ctx.strokeStyle = longitude === 0 ? "rgba(132,191,255,0.36)" : "rgba(31,49,69,0.32)"
+                ctx.strokeStyle = longitude === 0
+                    ? (root.landingMode ? "rgba(156,210,255,0.44)" : "rgba(132,191,255,0.36)")
+                    : (root.landingMode ? "rgba(40,63,88,0.34)" : "rgba(31,49,69,0.32)")
                 ctx.lineWidth = longitude === 0 ? 1.4 : 1.0
                 ctx.stroke()
             }
@@ -305,12 +323,12 @@ Item {
                 ctx.restore()
 
                 var fillColor = polygonIndex % 2 === 0 ? root.landFill : root.landFillBright
-                drawPolygon(ctx, polygon, fillColor, "rgba(172,236,255,0.54)")
+                drawPolygon(ctx, polygon, fillColor, root.landingMode ? "rgba(194,239,255,0.66)" : "rgba(172,236,255,0.54)")
             }
 
             ctx.beginPath()
             ctx.rect(root.mapInset, root.mapInset, root.plotWidth, root.plotHeight)
-            ctx.strokeStyle = "rgba(172,236,255,0.28)"
+            ctx.strokeStyle = root.landingMode ? "rgba(188,233,255,0.34)" : "rgba(172,236,255,0.28)"
             ctx.lineWidth = 1
             ctx.stroke()
 
@@ -432,7 +450,7 @@ Item {
             spacing: shellWindow ? shellWindow.scaled(2) : 2
 
             Text {
-                text: "世界态势地图 / WORLD MAP"
+                text: root.landingMode ? "世界主墙板 / GLOBAL WALLBOARD" : "世界态势地图 / WORLD MAP"
                 color: root.mapGlow
                 font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
                 font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
@@ -468,7 +486,9 @@ Item {
             spacing: shellWindow ? shellWindow.scaled(2) : 2
 
             Text {
-                text: root.compactStage ? "当前关注" : "当前关注 / Focus"
+                text: root.compactStage
+                    ? (root.landingMode ? "场景焦点" : "当前关注")
+                    : (root.landingMode ? "场景焦点 / Focus" : "当前关注 / Focus")
                 color: shellWindow ? shellWindow.textMuted : "#68859d"
                 font.pixelSize: shellWindow ? shellWindow.captionSize : 10
                 font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
@@ -545,7 +565,7 @@ Item {
     }
 
     Rectangle {
-        visible: root.hasCurrentPoint
+        visible: root.showCurrentCallout
         readonly property real preferredY: Math.max(
             shellWindow ? shellWindow.scaled(68) : 68,
             Math.min(
