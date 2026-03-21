@@ -261,6 +261,32 @@ ApplicationWindow {
             "tone": softwareRenderEnabled ? "warning" : "online"
         }
     ]
+    readonly property var dashboardDeckModel: [
+        {
+            "label": "主舞台",
+            "value": String(centerPanelData["mission_call_sign"] || "--"),
+            "detail": String(centerControlSummary["link_profile"] || "global wallboard"),
+            "tone": String(liveAnchor["tone"] || "neutral")
+        },
+        {
+            "label": "锚点",
+            "value": String(liveAnchor["valid_instance"] || "--"),
+            "detail": String(liveAnchor["board_status"] || "--"),
+            "tone": String(liveAnchor["tone"] || "neutral")
+        },
+        {
+            "label": "弱网",
+            "value": recommendedScenarioId,
+            "detail": String((statusRow("最近事件") || {})["value"] || "--"),
+            "tone": "warning"
+        },
+        {
+            "label": "渲染",
+            "value": softwareRenderEnabled ? "软件回退" : "图形加速",
+            "detail": String(meta["layout_strategy"] || "adaptive_zones"),
+            "tone": softwareRenderEnabled ? "warning" : "online"
+        }
+    ]
     readonly property var headerMirrorLedgerModel: [
         {
             "label": "ACTIVE STAGE",
@@ -2096,53 +2122,278 @@ ApplicationWindow {
                 }
             }
 
-            GridLayout {
+            Rectangle {
+                id: dashboardDeck
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                columns: root.dashboardColumns
-                columnSpacing: root.zoneGap
-                rowSpacing: root.zoneGap
+                radius: root.panelRadius
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: "#10253a" }
+                    GradientStop { position: 0.2; color: "#0d1d30" }
+                    GradientStop { position: 0.58; color: "#091624" }
+                    GradientStop { position: 1.0; color: "#07111b" }
+                }
+                border.color: "#2a7fb6"
+                border.width: 1
+                implicitHeight: dashboardDeckLayout.implicitHeight + (root.scaled(12) * 2)
 
-                TacticalView {
-                    Layout.row: 0
-                    Layout.column: root.wideLayout ? root.wideLeftSpan : 0
-                    Layout.columnSpan: root.wideLayout ? root.wideCenterSpan : (root.mediumLayout ? 2 : 1)
-                    Layout.fillWidth: true
-                    Layout.fillHeight: root.wideLayout
-                    Layout.minimumHeight: root.scaled(root.wideLayout ? 520 : 400)
-                    shellWindow: root
-                    panelData: root.centerPanelData
+                Rectangle {
+                    anchors.fill: parent
+                    anchors.margins: 1
+                    radius: parent.radius - 1
+                    color: "transparent"
+                    border.color: "#133754"
+                    border.width: 1
+                    opacity: 0.84
                 }
 
-                StatusPanel {
-                    Layout.row: root.wideLayout ? 0 : 1
-                    Layout.column: 0
-                    Layout.columnSpan: root.wideLayout ? root.wideLeftSpan : 1
-                    Layout.fillWidth: true
-                    Layout.fillHeight: root.wideLayout
-                    Layout.minimumHeight: root.scaled(root.wideLayout ? 500 : 300)
-                    shellWindow: root
-                    panelData: root.leftPanelData
+                Rectangle {
+                    anchors.fill: parent
+                    anchors.margins: root.scaled(10)
+                    radius: Math.max(2, parent.radius - root.scaled(10))
+                    color: "transparent"
+                    border.color: "#153653"
+                    border.width: 1
+                    opacity: 0.46
                 }
 
-                WeakNetworkPanel {
-                    Layout.row: root.wideLayout ? 0 : (root.mediumLayout ? 1 : 2)
-                    Layout.column: root.wideLayout ? (root.wideLeftSpan + root.wideCenterSpan) : (root.mediumLayout ? 1 : 0)
-                    Layout.columnSpan: root.wideLayout ? root.wideRightSpan : 1
-                    Layout.fillWidth: true
-                    Layout.fillHeight: root.wideLayout
-                    Layout.minimumHeight: root.scaled(root.wideLayout ? 500 : 340)
-                    shellWindow: root
-                    panelData: root.rightPanelData
+                Rectangle {
+                    width: parent.width * 0.42
+                    height: parent.height * 0.72
+                    radius: width / 2
+                    color: "#41adff"
+                    opacity: 0.08
+                    x: -width * 0.1
+                    y: -height * 0.18
                 }
 
-                ActionStrip {
-                    Layout.row: root.wideLayout ? 1 : (root.mediumLayout ? 2 : 3)
-                    Layout.column: 0
-                    Layout.columnSpan: root.wideLayout ? root.dashboardColumns : (root.mediumLayout ? 2 : 1)
-                    Layout.fillWidth: true
-                    shellWindow: root
-                    panelData: root.bottomPanelData
+                Rectangle {
+                    width: parent.width * 0.34
+                    height: parent.height * 0.58
+                    radius: width / 2
+                    color: "#8fefff"
+                    opacity: 0.05
+                    x: parent.width - (width * 0.72)
+                    y: parent.height * 0.28
+                }
+
+                Rectangle {
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    height: root.scaled(3)
+                    gradient: Gradient {
+                        GradientStop { position: 0.0; color: "transparent" }
+                        GradientStop { position: 0.18; color: root.accentBlue }
+                        GradientStop { position: 0.5; color: root.panelGlowStrong }
+                        GradientStop { position: 0.82; color: root.accentCyan }
+                        GradientStop { position: 1.0; color: "transparent" }
+                    }
+                    opacity: 0.84
+                }
+
+                Rectangle {
+                    anchors.left: parent.left
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    anchors.margins: root.scaled(10)
+                    width: root.scaled(4)
+                    radius: width / 2
+                    gradient: Gradient {
+                        GradientStop { position: 0.0; color: "transparent" }
+                        GradientStop { position: 0.16; color: root.accentBlue }
+                        GradientStop { position: 0.5; color: root.panelGlowStrong }
+                        GradientStop { position: 0.86; color: root.accentCyan }
+                        GradientStop { position: 1.0; color: "transparent" }
+                    }
+                    opacity: 0.48
+                }
+
+                Rectangle {
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.bottom: parent.bottom
+                    anchors.margins: root.scaled(10)
+                    width: root.scaled(4)
+                    radius: width / 2
+                    gradient: Gradient {
+                        GradientStop { position: 0.0; color: "transparent" }
+                        GradientStop { position: 0.16; color: root.accentCyan }
+                        GradientStop { position: 0.5; color: root.panelGlowStrong }
+                        GradientStop { position: 0.86; color: root.accentBlue }
+                        GradientStop { position: 1.0; color: "transparent" }
+                    }
+                    opacity: 0.48
+                }
+
+                ColumnLayout {
+                    id: dashboardDeckLayout
+                    anchors.fill: parent
+                    anchors.margins: root.scaled(12)
+                    spacing: root.compactGap
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: root.compactGap
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: root.scaled(2)
+
+                            Text {
+                                text: "联合战情甲板 / UNIFIED OPERATIONS DECK"
+                                color: root.accentBlue
+                                font.pixelSize: root.captionSize
+                                font.family: root.monoFamily
+                                font.letterSpacing: root.scaled(1)
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: "把中心墙板、左右轨与执行坞站压进同一成品壳体，让整个 native cockpit 读起来更像完成态产品，而不是若干强面板的并列。"
+                                color: root.textSecondary
+                                font.pixelSize: root.captionSize
+                                font.family: root.uiFamily
+                                wrapMode: Text.WordWrap
+                            }
+                        }
+
+                        Rectangle {
+                            Layout.alignment: Qt.AlignTop
+                            radius: root.edgeRadius
+                            color: "#091726"
+                            border.color: "#1c547c"
+                            border.width: 1
+                            implicitWidth: dashboardDeckStamp.implicitWidth + (root.scaled(12) * 2)
+                            implicitHeight: dashboardDeckStamp.implicitHeight + (root.scaled(6) * 2)
+
+                            Text {
+                                id: dashboardDeckStamp
+                                anchors.centerIn: parent
+                                text: root.wideLayout ? "TRIPLE RAIL FINISH" : "STACKED SAFE FINISH"
+                                color: root.textPrimary
+                                font.pixelSize: root.captionSize
+                                font.family: root.monoFamily
+                            }
+                        }
+                    }
+
+                    Flow {
+                        Layout.fillWidth: true
+                        visible: !root.compactLayout
+                        spacing: root.compactGap
+
+                        Repeater {
+                            model: root.dashboardDeckModel.length
+
+                            delegate: Rectangle {
+                                readonly property var deckData: root.dashboardDeckModel[index]
+                                radius: root.edgeRadius
+                                gradient: Gradient {
+                                    GradientStop { position: 0.0; color: Qt.lighter(root.toneFill(deckData["tone"]), 1.14) }
+                                    GradientStop { position: 1.0; color: root.toneFill(deckData["tone"]) }
+                                }
+                                border.color: root.toneColor(deckData["tone"])
+                                border.width: 1
+                                height: deckMetricColumn.implicitHeight + (root.scaled(8) * 2)
+                                width: Math.max(root.scaled(150), deckMetricColumn.implicitWidth + root.scaled(24))
+
+                                Rectangle {
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.top: parent.top
+                                    height: root.scaled(2)
+                                    gradient: Gradient {
+                                        GradientStop { position: 0.0; color: "transparent" }
+                                        GradientStop { position: 0.24; color: root.toneColor(deckData["tone"]) }
+                                        GradientStop { position: 0.74; color: Qt.lighter(root.toneColor(deckData["tone"]), 1.16) }
+                                        GradientStop { position: 1.0; color: "transparent" }
+                                    }
+                                    opacity: 0.74
+                                }
+
+                                Column {
+                                    id: deckMetricColumn
+                                    anchors.fill: parent
+                                    anchors.margins: root.scaled(8)
+                                    spacing: root.scaled(2)
+
+                                    Text {
+                                        text: deckData["label"]
+                                        color: root.textMuted
+                                        font.pixelSize: root.captionSize
+                                        font.family: root.monoFamily
+                                        font.letterSpacing: root.scaled(1)
+                                    }
+
+                                    Text {
+                                        text: deckData["value"]
+                                        color: root.textStrong
+                                        font.pixelSize: root.captionSize
+                                        font.bold: true
+                                        font.family: root.monoFamily
+                                    }
+
+                                    Text {
+                                        text: deckData["detail"]
+                                        color: root.textSecondary
+                                        font.pixelSize: root.captionSize
+                                        font.family: root.uiFamily
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    GridLayout {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        columns: root.dashboardColumns
+                        columnSpacing: root.zoneGap
+                        rowSpacing: root.zoneGap
+
+                        TacticalView {
+                            Layout.row: 0
+                            Layout.column: root.wideLayout ? root.wideLeftSpan : 0
+                            Layout.columnSpan: root.wideLayout ? root.wideCenterSpan : (root.mediumLayout ? 2 : 1)
+                            Layout.fillWidth: true
+                            Layout.fillHeight: root.wideLayout
+                            Layout.minimumHeight: root.scaled(root.wideLayout ? 520 : 400)
+                            shellWindow: root
+                            panelData: root.centerPanelData
+                        }
+
+                        StatusPanel {
+                            Layout.row: root.wideLayout ? 0 : 1
+                            Layout.column: 0
+                            Layout.columnSpan: root.wideLayout ? root.wideLeftSpan : 1
+                            Layout.fillWidth: true
+                            Layout.fillHeight: root.wideLayout
+                            Layout.minimumHeight: root.scaled(root.wideLayout ? 500 : 300)
+                            shellWindow: root
+                            panelData: root.leftPanelData
+                        }
+
+                        WeakNetworkPanel {
+                            Layout.row: root.wideLayout ? 0 : (root.mediumLayout ? 1 : 2)
+                            Layout.column: root.wideLayout ? (root.wideLeftSpan + root.wideCenterSpan) : (root.mediumLayout ? 1 : 0)
+                            Layout.columnSpan: root.wideLayout ? root.wideRightSpan : 1
+                            Layout.fillWidth: true
+                            Layout.fillHeight: root.wideLayout
+                            Layout.minimumHeight: root.scaled(root.wideLayout ? 500 : 340)
+                            shellWindow: root
+                            panelData: root.rightPanelData
+                        }
+
+                        ActionStrip {
+                            Layout.row: root.wideLayout ? 1 : (root.mediumLayout ? 2 : 3)
+                            Layout.column: 0
+                            Layout.columnSpan: root.wideLayout ? root.dashboardColumns : (root.mediumLayout ? 2 : 1)
+                            Layout.fillWidth: true
+                            shellWindow: root
+                            panelData: root.bottomPanelData
+                        }
+                    }
                 }
             }
 

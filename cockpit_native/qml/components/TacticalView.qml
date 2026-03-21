@@ -18,6 +18,7 @@ PanelFrame {
     readonly property color dockSurfaceTop: shellWindow ? shellWindow.shellDockTop : "#112c47"
     readonly property color dockSurfaceMid: shellWindow ? shellWindow.shellDockMid : "#0a1828"
     readonly property color dockSurfaceBottom: shellWindow ? shellWindow.shellDockBottom : "#06101a"
+    readonly property color panelGlowStrong: shellWindow ? shellWindow.panelGlowStrong : "#6fdcff"
     readonly property color traceStrong: shellWindow ? shellWindow.panelTraceStrong : "#1f5b86"
     readonly property color traceTone: shellWindow ? shellWindow.panelTrace : "#143754"
     readonly property color traceSoft: shellWindow ? shellWindow.panelTraceSoft : "#0d2940"
@@ -450,11 +451,11 @@ PanelFrame {
         }
     ]
     readonly property string stageCommandBridgeLabel: wallboardStatusTone === "warning"
-        ? "DDoS WATCH BRIDGE"
-        : "MISSION-CONTROL BRIDGE"
+        ? "中央压制桥 / THREAT SUPPRESSION BRIDGE"
+        : "中央防护桥 / CENTRAL DEFENSE BRIDGE"
     readonly property string stageCommandBridgeDetail: wallboardStatusTone === "warning"
-        ? "把弱网、锚点、控制事件与热点警戒网格压进同一桥接层，中心主舞台优先追踪链路风险。"
-        : "把航迹、热点弧线、采样心跳与在线锚点锁进同一桥接层，中心主舞台维持防护稳态。"
+        ? "把弱网、锚点、控制事件与热点警戒网格压进同一桥接层，中心墙板优先追踪链路风险。"
+        : "把航迹、热点弧线、采样心跳与在线锚点锁进同一桥接层，中心墙板维持防护稳态。"
     readonly property var stageBridgeModel: [
         {
             "label": "STATUS",
@@ -482,8 +483,8 @@ PanelFrame {
         }
     ]
     readonly property string stageOperationsRibbonLabel: wallboardStatusTone === "warning"
-        ? "THREAT ORCHESTRATION RIBBON"
-        : "DEFENSE ORCHESTRATION RIBBON"
+        ? "运营压制织带 / THREAT ORCHESTRATION RIBBON"
+        : "运营防护织带 / DEFENSE ORCHESTRATION RIBBON"
     readonly property string stageOperationsRibbonDetail: wallboardStatusTone === "warning"
         ? "把链路风险、在线锚点与高风险网格压成统一运营带，确保中心墙板先看最危险的事实。"
         : "把航迹、防护网格、采样心跳与锚点状态压成统一运营带，确保中心墙板保持稳态锁定。"
@@ -519,6 +520,16 @@ PanelFrame {
     readonly property string threatPostureEnglish: wallboardStatusTone === "warning"
         ? "THREAT SUPPRESSION"
         : "DEFENSE LOCK"
+    readonly property string stageAegisLabel: wallboardStatusTone === "warning"
+        ? "中央压制格栅 / THREAT SUPPRESSION GRID"
+        : "中央防护格栅 / CENTRAL DEFENSE GRID"
+    readonly property string stageAegisDetail: wallboardStatusTone === "warning"
+        ? "把弱网、锚点、控制事件与热点警戒压进同一中心桥板，主墙板优先显示最危险的真实事实。"
+        : "把航迹、防护网格、采样心跳与在线锚点压进同一中心桥板，主墙板保持稳定锁定。"
+    readonly property string stageAegisStamp: warningHotspotCount > 0
+        ? String(warningHotspotCount) + " WARN GRID"
+        : String(onlineHotspotCount) + " LOCKED MESH"
+    readonly property string stageAegisStampTone: warningHotspotCount > 0 ? "warning" : "online"
     readonly property var threatFabricModel: [
         {
             "label": "POSTURE",
@@ -3197,6 +3208,46 @@ PanelFrame {
                         }
 
                         Rectangle {
+                            anchors.fill: parent
+                            anchors.margins: shellWindow ? shellWindow.scaled(24) : 24
+                            radius: Math.max(2, parent.radius - (shellWindow ? shellWindow.scaled(24) : 24))
+                            color: "transparent"
+                            border.color: "#1a4c72"
+                            border.width: 1
+                            opacity: 0.18
+                        }
+
+                        Rectangle {
+                            width: parent.width * 0.74
+                            height: parent.height * 0.46
+                            radius: width / 2
+                            color: root.panelGlowStrong
+                            opacity: 0.06
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            y: parent.height * 0.16
+                        }
+
+                        Rectangle {
+                            width: parent.width * 0.34
+                            height: shellWindow ? shellWindow.scaled(2) : 2
+                            rotation: -18
+                            color: root.panelGlowStrong
+                            opacity: 0.14
+                            x: parent.width * 0.08
+                            y: parent.height * 0.18
+                        }
+
+                        Rectangle {
+                            width: parent.width * 0.34
+                            height: shellWindow ? shellWindow.scaled(2) : 2
+                            rotation: 18
+                            color: root.panelGlowStrong
+                            opacity: 0.14
+                            x: parent.width - width - (parent.width * 0.08)
+                            y: parent.height * 0.18
+                        }
+
+                        Rectangle {
                             anchors.left: parent.left
                             anchors.top: parent.top
                             anchors.bottom: parent.bottom
@@ -3306,6 +3357,26 @@ PanelFrame {
                             opacity: 0.96
 
                             Rectangle {
+                                width: parent.width * 0.74
+                                height: parent.height * 0.88
+                                radius: width / 2
+                                color: root.panelGlowStrong
+                                opacity: 0.08
+                                x: -width * 0.18
+                                y: -height * 0.22
+                            }
+
+                            Rectangle {
+                                width: parent.width * 0.42
+                                height: parent.height * 0.48
+                                radius: width / 2
+                                color: root.accentBlue
+                                opacity: 0.06
+                                x: parent.width - (width * 0.72)
+                                y: parent.height * 0.44
+                            }
+
+                            Rectangle {
                                 anchors.fill: parent
                                 anchors.margins: 1
                                 radius: parent.radius - 1
@@ -3391,6 +3462,100 @@ PanelFrame {
                                                 color: shellWindow ? shellWindow.textPrimary : "#d5eeff"
                                                 font.pixelSize: shellWindow ? shellWindow.captionSize : 9
                                                 font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    radius: shellWindow ? shellWindow.edgeRadius : 10
+                                    gradient: Gradient {
+                                        GradientStop { position: 0.0; color: "#12283d" }
+                                        GradientStop { position: 0.56; color: "#0b1726" }
+                                        GradientStop { position: 1.0; color: "#08111b" }
+                                    }
+                                    border.color: root.toneColor(root.stageAegisStampTone)
+                                    border.width: 1
+                                    implicitHeight: stageAegisRow.implicitHeight + ((shellWindow ? shellWindow.scaled(8) : 8) * 2)
+
+                                    Rectangle {
+                                        anchors.left: parent.left
+                                        anchors.top: parent.top
+                                        anchors.bottom: parent.bottom
+                                        anchors.margins: shellWindow ? shellWindow.scaled(8) : 8
+                                        width: shellWindow ? shellWindow.scaled(3) : 3
+                                        radius: width / 2
+                                        gradient: Gradient {
+                                            GradientStop { position: 0.0; color: "transparent" }
+                                            GradientStop { position: 0.18; color: root.accentBlue }
+                                            GradientStop { position: 0.52; color: root.panelGlowStrong }
+                                            GradientStop { position: 0.82; color: root.accentCyan }
+                                            GradientStop { position: 1.0; color: "transparent" }
+                                        }
+                                        opacity: 0.78
+                                    }
+
+                                    RowLayout {
+                                        id: stageAegisRow
+                                        anchors.fill: parent
+                                        anchors.margins: shellWindow ? shellWindow.scaled(8) : 8
+                                        anchors.leftMargin: (shellWindow ? shellWindow.scaled(8) : 8) + (shellWindow ? shellWindow.scaled(8) : 8)
+                                        spacing: shellWindow ? shellWindow.compactGap : 8
+
+                                        ColumnLayout {
+                                            Layout.fillWidth: true
+                                            spacing: 1
+
+                                            Text {
+                                                text: root.stageAegisLabel
+                                                color: shellWindow ? shellWindow.accentCyan : "#72f3ff"
+                                                font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                                font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                                font.letterSpacing: shellWindow ? shellWindow.scaled(1) : 1
+                                            }
+
+                                            Text {
+                                                Layout.fillWidth: true
+                                                text: root.stageAegisDetail
+                                                color: shellWindow ? shellWindow.textSecondary : "#83acc8"
+                                                font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                                font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                                wrapMode: Text.WordWrap
+                                            }
+                                        }
+
+                                        Rectangle {
+                                            Layout.alignment: Qt.AlignTop
+                                            radius: shellWindow ? shellWindow.edgeRadius : 10
+                                            gradient: Gradient {
+                                                GradientStop { position: 0.0; color: Qt.lighter(root.toneFill(root.stageAegisStampTone), 1.14) }
+                                                GradientStop { position: 1.0; color: root.toneFill(root.stageAegisStampTone) }
+                                            }
+                                            border.color: root.toneColor(root.stageAegisStampTone)
+                                            border.width: 1
+                                            implicitWidth: stageAegisStampColumn.implicitWidth + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
+                                            implicitHeight: stageAegisStampColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(7) : 7) * 2)
+
+                                            Column {
+                                                id: stageAegisStampColumn
+                                                anchors.centerIn: parent
+                                                spacing: 1
+
+                                                Text {
+                                                    text: "AEGIS"
+                                                    color: shellWindow ? shellWindow.textMuted : "#4e7392"
+                                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 9
+                                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                                }
+
+                                                Text {
+                                                    text: root.stageAegisStamp
+                                                    color: shellWindow ? shellWindow.textStrong : "#f4fbff"
+                                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                                    font.bold: true
+                                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                                }
                                             }
                                         }
                                     }
