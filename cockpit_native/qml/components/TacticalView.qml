@@ -57,6 +57,7 @@ PanelFrame {
     readonly property int stageFooterDockHeight: shellWindow ? shellWindow.scaled(compressedTheaterLayout ? 124 : 176) : 176
     readonly property int missionDeckWidth: shellWindow ? shellWindow.scaled(compressedTheaterLayout ? 220 : (compactCardLayout ? 214 : 248)) : 248
     readonly property int telemetryRailWidth: shellWindow ? shellWindow.scaled(compressedTheaterLayout ? 212 : 236) : 236
+    readonly property int compactStagePreviewHeight: shellWindow ? shellWindow.scaled(compactCardLayout ? 158 : 184) : 184
     readonly property var currentPoint: trackPoint(Math.max(trackData.length - 1, 0))
     readonly property var originPoint: trackPoint(0)
     readonly property string sampleTimestamp: String(sampleData["captured_at"] || "采样时间未知")
@@ -244,6 +245,28 @@ PanelFrame {
             "value": compactMessage(latestEventValue, "--", 18),
             "detail": compactMessage(lastJobLabel, "--", 18),
             "tone": latestEventTone
+        }
+    ]
+    readonly property var compactPreviewOverlayModel: [
+        {
+            "label": "GRID",
+            "value": String(wallboardHotspots.length) + " sectors",
+            "tone": "neutral"
+        },
+        {
+            "label": "WARN",
+            "value": String(warningHotspotCount) + " hot",
+            "tone": warningHotspotCount > 0 ? "warning" : "online"
+        },
+        {
+            "label": "EVENT",
+            "value": compactMessage(latestEventValue, "--", 12),
+            "tone": latestEventTone
+        },
+        {
+            "label": "ANCHOR",
+            "value": compactMessage(String(liveAnchorData["valid_instance"] || "--"), "--", 10),
+            "tone": String(liveAnchorData["tone"] || "neutral")
         }
     ]
     readonly property string projectionApertureLabel: wallboardStatusTone === "warning"
@@ -614,6 +637,40 @@ PanelFrame {
         { "label": "南洋链路", "latitude": 3.0, "longitude": 104.0, "tone": "neutral", "intensity": 0.56 },
         { "label": "北大西洋", "latitude": 43.0, "longitude": -35.0, "tone": "warning", "intensity": 0.5 }
     ]
+    readonly property var dominantHotspot: strongestHotspot()
+    readonly property string dominantHotspotLabel: String(dominantHotspot["label"] || "GLOBAL GRID")
+    readonly property string dominantHotspotTone: String(dominantHotspot["tone"] || "neutral")
+    readonly property int dominantHotspotIntensity: Math.round(Number(dominantHotspot["intensity"] || 0) * 100)
+    readonly property string globalWallboardLabel: wallboardStatusTone === "warning"
+        ? "GLOBAL WALLBOARD / THREAT PRIORITY"
+        : "GLOBAL WALLBOARD / DEFENSE PRIORITY"
+    readonly property string globalWallboardDetail: dominantHotspotLabel + " / " + String(dominantHotspotIntensity) + "% mesh load"
+    readonly property var wallboardBannerModel: [
+        {
+            "label": "POSTURE",
+            "value": threatPostureEnglish,
+            "detail": compactMessage(threatPostureLabel, "防护稳态", 26),
+            "tone": wallboardStatusTone
+        },
+        {
+            "label": "HOT GRID",
+            "value": String(warningHotspotCount) + " warn / " + String(wallboardHotspots.length),
+            "detail": globalWallboardDetail,
+            "tone": warningHotspotCount > 0 ? "warning" : dominantHotspotTone
+        },
+        {
+            "label": "ANCHOR",
+            "value": compactMessage(String(liveAnchorData["valid_instance"] || "--"), "--", 16),
+            "detail": compactMessage(String(liveAnchorData["board_status"] || sampleTimestamp), sampleTimestamp, 24),
+            "tone": String(liveAnchorData["tone"] || "neutral")
+        },
+        {
+            "label": "SOURCE",
+            "value": sampleSequenceLabel,
+            "detail": compactMessage(sampleTransportLabel + " / " + sampleProducerLabel, sampleTimestamp, 26),
+            "tone": "neutral"
+        }
+    ]
 
     implicitHeight: contentLayout.implicitHeight + ((shellWindow ? shellWindow.panelPadding : 18) * 2)
 
@@ -684,6 +741,20 @@ PanelFrame {
         return String(scenario["summary"] || scenario["operator_note"] || "")
     }
 
+    function strongestHotspot() {
+        var best = ({})
+        var bestIntensity = -1
+        for (var index = 0; index < wallboardHotspots.length; ++index) {
+            var hotspot = DataUtils.objectOrEmpty(wallboardHotspots[index])
+            var intensity = Number(hotspot["intensity"] || 0)
+            if (intensity > bestIntensity) {
+                best = hotspot
+                bestIntensity = intensity
+            }
+        }
+        return best
+    }
+
     function hotspotCountByTone(tone) {
         var total = 0
         for (var index = 0; index < wallboardHotspots.length; ++index) {
@@ -729,10 +800,30 @@ PanelFrame {
         return (amount >= 0 ? "+" : "") + amount.toFixed(precision) + " " + unit
     }
 
-    onTrackDataChanged: if (mapCanvas) mapCanvas.requestPaint()
-    onHeadingDegChanged: if (mapCanvas) mapCanvas.requestPaint()
-    onWidthChanged: if (mapCanvas) mapCanvas.requestPaint()
-    onHeightChanged: if (mapCanvas) mapCanvas.requestPaint()
+    onTrackDataChanged: {
+        if (mapCanvas)
+            mapCanvas.requestPaint()
+        if (compactStageCanvas)
+            compactStageCanvas.requestPaint()
+    }
+    onHeadingDegChanged: {
+        if (mapCanvas)
+            mapCanvas.requestPaint()
+        if (compactStageCanvas)
+            compactStageCanvas.requestPaint()
+    }
+    onWidthChanged: {
+        if (mapCanvas)
+            mapCanvas.requestPaint()
+        if (compactStageCanvas)
+            compactStageCanvas.requestPaint()
+    }
+    onHeightChanged: {
+        if (mapCanvas)
+            mapCanvas.requestPaint()
+        if (compactStageCanvas)
+            compactStageCanvas.requestPaint()
+    }
 
     ColumnLayout {
         id: contentLayout
@@ -970,6 +1061,522 @@ PanelFrame {
                                             font.pixelSize: shellWindow ? shellWindow.captionSize : 9
                                             font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
                                             wrapMode: Text.WordWrap
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    radius: shellWindow ? shellWindow.cardRadius : 14
+                    gradient: Gradient {
+                        GradientStop { position: 0.0; color: "#10263b" }
+                        GradientStop { position: 0.52; color: "#0b1828" }
+                        GradientStop { position: 1.0; color: "#07111b" }
+                    }
+                    border.color: root.traceStrong
+                    border.width: 1
+                    implicitHeight: compactPreviewLayout.implicitHeight + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
+
+                    Rectangle {
+                        anchors.fill: parent
+                        anchors.margins: 1
+                        radius: parent.radius - 1
+                        color: "transparent"
+                        border.color: "#12344f"
+                        border.width: 1
+                        opacity: 0.82
+                    }
+
+                    Rectangle {
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.top: parent.top
+                        height: shellWindow ? shellWindow.scaled(3) : 3
+                        gradient: Gradient {
+                            GradientStop { position: 0.0; color: "transparent" }
+                            GradientStop { position: 0.2; color: root.accentBlue }
+                            GradientStop { position: 0.5; color: root.panelGlowStrong }
+                            GradientStop { position: 0.82; color: root.accentCyan }
+                            GradientStop { position: 1.0; color: "transparent" }
+                        }
+                        opacity: 0.8
+                    }
+
+                    ColumnLayout {
+                        id: compactPreviewLayout
+                        anchors.fill: parent
+                        anchors.margins: shellWindow ? shellWindow.scaled(10) : 10
+                        spacing: shellWindow ? shellWindow.scaled(6) : 6
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: shellWindow ? shellWindow.compactGap : 8
+
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 1
+
+                                Text {
+                                    text: "COMPACT WALLBOARD / LIVE MESH PREVIEW"
+                                    color: shellWindow ? shellWindow.accentBlue : "#38b6ff"
+                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                    font.letterSpacing: shellWindow ? shellWindow.scaled(1) : 1
+                                }
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: root.stageCommandBridgeDetail
+                                    color: shellWindow ? shellWindow.textSecondary : "#83acc8"
+                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                    font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                    wrapMode: Text.WordWrap
+                                    maximumLineCount: 2
+                                    elide: Text.ElideRight
+                                }
+                            }
+
+                            Rectangle {
+                                Layout.alignment: Qt.AlignTop
+                                radius: shellWindow ? shellWindow.edgeRadius : 10
+                                gradient: Gradient {
+                                    GradientStop { position: 0.0; color: Qt.lighter(root.toneFill(root.wallboardStatusTone), 1.14) }
+                                    GradientStop { position: 1.0; color: root.toneFill(root.wallboardStatusTone) }
+                                }
+                                border.color: root.toneColor(root.wallboardStatusTone)
+                                border.width: 1
+                                implicitWidth: compactPreviewStampColumn.implicitWidth + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
+                                implicitHeight: compactPreviewStampColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(7) : 7) * 2)
+
+                                Column {
+                                    id: compactPreviewStampColumn
+                                    anchors.centerIn: parent
+                                    spacing: 1
+
+                                    Text {
+                                        text: "WALLBOARD"
+                                        color: shellWindow ? shellWindow.textMuted : "#4e7392"
+                                        font.pixelSize: shellWindow ? shellWindow.captionSize : 9
+                                        font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                    }
+
+                                    Text {
+                                        text: root.trackAgeLabel
+                                        color: shellWindow ? shellWindow.textStrong : "#f4fbff"
+                                        font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                        font.bold: true
+                                        font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                    }
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            radius: shellWindow ? shellWindow.edgeRadius : 10
+                            gradient: Gradient {
+                                GradientStop { position: 0.0; color: "#0c1c2e" }
+                                GradientStop { position: 0.48; color: "#091421" }
+                                GradientStop { position: 1.0; color: "#06101a" }
+                            }
+                            border.color: "#1d5c87"
+                            border.width: 1
+                            implicitHeight: root.compactStagePreviewHeight
+                            clip: true
+
+                            Rectangle {
+                                anchors.fill: parent
+                                anchors.margins: 1
+                                radius: parent.radius - 1
+                                color: "transparent"
+                                border.color: "#12344f"
+                                border.width: 1
+                                opacity: 0.82
+                            }
+
+                            Rectangle {
+                                width: parent.width * 0.62
+                                height: parent.height * 0.88
+                                radius: width / 2
+                                color: root.panelGlowStrong
+                                opacity: 0.08
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                y: -height * 0.24
+                            }
+
+                            Repeater {
+                                model: 6
+
+                                delegate: Rectangle {
+                                    width: parent.width - ((shellWindow ? shellWindow.scaled(18) : 18) * 2)
+                                    height: 1
+                                    x: shellWindow ? shellWindow.scaled(18) : 18
+                                    y: (shellWindow ? shellWindow.scaled(14) : 14)
+                                        + index * ((parent.height - ((shellWindow ? shellWindow.scaled(28) : 28))) / 5)
+                                    color: index % 2 === 0 ? root.traceStrong : root.traceTone
+                                    opacity: index === 2 ? 0.24 : 0.14
+                                }
+                            }
+
+                            Repeater {
+                                model: 7
+
+                                delegate: Rectangle {
+                                    width: 1
+                                    height: parent.height - ((shellWindow ? shellWindow.scaled(18) : 18) * 2)
+                                    y: shellWindow ? shellWindow.scaled(18) : 18
+                                    x: (shellWindow ? shellWindow.scaled(18) : 18)
+                                        + index * ((parent.width - ((shellWindow ? shellWindow.scaled(36) : 36))) / 6)
+                                    color: index === 3 ? root.traceStrong : root.traceTone
+                                    opacity: index === 3 ? 0.24 : 0.12
+                                }
+                            }
+
+                            Rectangle {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                anchors.top: parent.top
+                                anchors.bottom: parent.bottom
+                                width: 1
+                                color: root.traceStrong
+                                opacity: 0.22
+                            }
+
+                            Rectangle {
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                height: 1
+                                color: root.traceStrong
+                                opacity: 0.18
+                            }
+
+                            Canvas {
+                                id: compactStageCanvas
+                                anchors.fill: parent
+                                anchors.margins: shellWindow ? shellWindow.scaled(12) : 12
+                                antialiasing: true
+
+                                onPaint: {
+                                    var ctx = getContext("2d")
+                                    ctx.clearRect(0, 0, width, height)
+                                    if (width <= 0 || height <= 0)
+                                        return
+
+                                    ctx.lineCap = "round"
+                                    ctx.lineJoin = "round"
+
+                                    var inset = shellWindow ? shellWindow.scaled(6) : 6
+
+                                    function px(longitude) {
+                                        return inset + (((Number(longitude || 0) + 180) / 360) * Math.max(1, width - (inset * 2)))
+                                    }
+
+                                    function py(latitude) {
+                                        return inset + (((90 - Number(latitude || 0)) / 180) * Math.max(1, height - (inset * 2)))
+                                    }
+
+                                    function drawLandmass(points, fillColor, strokeColor) {
+                                        if (!points || points.length === 0)
+                                            return
+                                        ctx.beginPath()
+                                        ctx.moveTo(px(points[0][0]), py(points[0][1]))
+                                        for (var i = 1; i < points.length; ++i)
+                                            ctx.lineTo(px(points[i][0]), py(points[i][1]))
+                                        ctx.closePath()
+                                        ctx.fillStyle = fillColor
+                                        ctx.fill()
+                                        ctx.strokeStyle = strokeColor
+                                        ctx.lineWidth = 1
+                                        ctx.stroke()
+                                    }
+
+                                    function drawArc(lon1, lat1, lon2, lat2, color, widthValue, rise, glowColor) {
+                                        var x1 = px(lon1)
+                                        var y1 = py(lat1)
+                                        var x2 = px(lon2)
+                                        var y2 = py(lat2)
+                                        var midX = (x1 + x2) / 2
+                                        var midY = (y1 + y2) / 2 - rise
+
+                                        ctx.save()
+                                        ctx.beginPath()
+                                        ctx.moveTo(x1, y1)
+                                        ctx.quadraticCurveTo(midX, midY, x2, y2)
+                                        ctx.lineWidth = widthValue + 1.8
+                                        ctx.strokeStyle = glowColor
+                                        ctx.globalAlpha = 0.2
+                                        ctx.stroke()
+                                        ctx.restore()
+
+                                        ctx.beginPath()
+                                        ctx.moveTo(x1, y1)
+                                        ctx.quadraticCurveTo(midX, midY, x2, y2)
+                                        ctx.lineWidth = widthValue
+                                        ctx.strokeStyle = color
+                                        ctx.stroke()
+                                    }
+
+                                    function drawPoint(lon, lat, fillColor, strokeColor, size) {
+                                        ctx.beginPath()
+                                        ctx.arc(px(lon), py(lat), size, 0, Math.PI * 2)
+                                        ctx.fillStyle = fillColor
+                                        ctx.fill()
+                                        ctx.strokeStyle = strokeColor
+                                        ctx.lineWidth = 1.1
+                                        ctx.stroke()
+                                    }
+
+                                    var wash = ctx.createRadialGradient(width * 0.54, height * 0.44, 12, width * 0.54, height * 0.44, width * 0.44)
+                                    wash.addColorStop(0.0, "rgba(33,122,184,0.14)")
+                                    wash.addColorStop(0.56, "rgba(10,42,68,0.05)")
+                                    wash.addColorStop(1.0, "rgba(0,0,0,0)")
+                                    ctx.fillStyle = wash
+                                    ctx.fillRect(0, 0, width, height)
+
+                                    drawLandmass([[-165, 12], [-155, 55], [-126, 73], [-95, 67], [-64, 50], [-77, 18], [-110, 7]], "rgba(17,63,97,0.34)", "rgba(109,202,255,0.12)")
+                                    drawLandmass([[-82, 12], [-72, 3], [-61, -16], [-56, -34], [-63, -55], [-76, -50], [-81, -20]], "rgba(17,63,97,0.34)", "rgba(109,202,255,0.12)")
+                                    drawLandmass([[-12, 36], [2, 58], [34, 71], [78, 66], [120, 56], [151, 40], [131, 9], [90, 20], [66, 8], [35, 28], [9, 30]], "rgba(17,63,97,0.34)", "rgba(109,202,255,0.12)")
+                                    drawLandmass([[-18, 31], [6, 33], [28, 19], [34, -8], [24, -31], [14, -34], [-2, -20], [-12, 6]], "rgba(19,71,93,0.32)", "rgba(109,202,255,0.12)")
+                                    drawLandmass([[111, -13], [126, -11], [145, -24], [154, -38], [136, -43], [117, -33]], "rgba(17,70,96,0.3)", "rgba(109,202,255,0.12)")
+
+                                    for (var hotspotIndex = 0; hotspotIndex < root.wallboardHotspots.length; ++hotspotIndex) {
+                                        var hotspot = root.wallboardHotspots[hotspotIndex]
+                                        var hot = String(hotspot["tone"] || "") === "warning"
+                                        drawArc(
+                                            root.currentPoint["longitude"],
+                                            root.currentPoint["latitude"],
+                                            hotspot["longitude"],
+                                            hotspot["latitude"],
+                                            hot ? "rgba(255,191,82,0.68)" : "rgba(114,243,255,0.52)",
+                                            hot ? 1.8 : 1.5,
+                                            16 + (hotspotIndex * 4),
+                                            hot ? "rgba(255,191,82,0.32)" : "rgba(114,243,255,0.2)"
+                                        )
+                                        drawPoint(
+                                            hotspot["longitude"],
+                                            hotspot["latitude"],
+                                            hot ? "rgba(255,191,82,0.88)" : "rgba(114,243,255,0.78)",
+                                            "rgba(255,255,255,0.74)",
+                                            hot ? 3.2 : 2.8
+                                        )
+                                    }
+
+                                    if (root.trackData.length > 1) {
+                                        for (var trackIndex = 0; trackIndex < root.trackData.length - 1; ++trackIndex) {
+                                            var pointA = root.trackData[trackIndex]
+                                            var pointB = root.trackData[trackIndex + 1]
+                                            var currentSegment = trackIndex === root.trackData.length - 2
+                                            drawArc(
+                                                pointA["longitude"],
+                                                pointA["latitude"],
+                                                pointB["longitude"],
+                                                pointB["latitude"],
+                                                currentSegment ? "rgba(159,241,255,0.96)" : "rgba(57,182,255,0.58)",
+                                                currentSegment ? 2.8 : 1.8,
+                                                8 + (trackIndex * 2),
+                                                currentSegment ? "rgba(159,241,255,0.28)" : "rgba(57,182,255,0.16)"
+                                            )
+                                        }
+                                    }
+
+                                    drawPoint(
+                                        root.currentPoint["longitude"],
+                                        root.currentPoint["latitude"],
+                                        "rgba(159,241,255,0.96)",
+                                        "rgba(255,255,255,0.9)",
+                                        4.4
+                                    )
+
+                                    var aircraftX = px(root.currentPoint["longitude"])
+                                    var aircraftY = py(root.currentPoint["latitude"])
+                                    ctx.beginPath()
+                                    ctx.arc(aircraftX, aircraftY, 14, 0, Math.PI * 2)
+                                    ctx.strokeStyle = "rgba(114,243,255,0.26)"
+                                    ctx.lineWidth = 1.2
+                                    ctx.stroke()
+
+                                    for (var apertureIndex = 0; apertureIndex < 2; ++apertureIndex) {
+                                        ctx.beginPath()
+                                        ctx.arc(
+                                            aircraftX,
+                                            aircraftY,
+                                            22 + (apertureIndex * 14),
+                                            (-130 * Math.PI) / 180,
+                                            (32 * Math.PI) / 180
+                                        )
+                                        ctx.strokeStyle = apertureIndex === 0 ? "rgba(159,241,255,0.38)" : "rgba(47,143,202,0.18)"
+                                        ctx.lineWidth = apertureIndex === 0 ? 1.4 : 1.0
+                                        ctx.stroke()
+                                    }
+
+                                    var headingRadians = (root.headingDeg - 90) * Math.PI / 180
+                                    ctx.beginPath()
+                                    ctx.moveTo(aircraftX, aircraftY)
+                                    ctx.lineTo(
+                                        aircraftX + (Math.cos(headingRadians) * 54),
+                                        aircraftY + (Math.sin(headingRadians) * 54)
+                                    )
+                                    ctx.strokeStyle = "rgba(159,241,255,0.46)"
+                                    ctx.lineWidth = 1.1
+                                    ctx.stroke()
+                                }
+
+                                onWidthChanged: requestPaint()
+                                onHeightChanged: requestPaint()
+                                Component.onCompleted: requestPaint()
+                            }
+
+                            Rectangle {
+                                anchors.left: parent.left
+                                anchors.top: parent.top
+                                anchors.margins: shellWindow ? shellWindow.scaled(10) : 10
+                                radius: shellWindow ? shellWindow.edgeRadius : 10
+                                gradient: Gradient {
+                                    GradientStop { position: 0.0; color: "#0f2740" }
+                                    GradientStop { position: 1.0; color: "#091420" }
+                                }
+                                border.color: root.toneColor(root.wallboardStatusTone)
+                                border.width: 1
+                                implicitWidth: compactPreviewMissionColumn.implicitWidth + ((shellWindow ? shellWindow.scaled(12) : 12) * 2)
+                                implicitHeight: compactPreviewMissionColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(8) : 8) * 2)
+                                opacity: 0.96
+
+                                Column {
+                                    id: compactPreviewMissionColumn
+                                    anchors.centerIn: parent
+                                    spacing: 1
+
+                                    Text {
+                                        text: "MISSION DECK"
+                                        color: shellWindow ? shellWindow.accentBlue : "#38b6ff"
+                                        font.pixelSize: shellWindow ? shellWindow.captionSize : 9
+                                        font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                    }
+
+                                    Text {
+                                        text: String(panel["mission_call_sign"] || "M9-DEMO")
+                                        color: shellWindow ? shellWindow.textStrong : "#f4fbff"
+                                        font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                        font.bold: true
+                                        font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                    }
+
+                                    Text {
+                                        text: root.missionModeEnglish
+                                        color: shellWindow ? shellWindow.textSecondary : "#83acc8"
+                                        font.pixelSize: shellWindow ? shellWindow.captionSize : 9
+                                        font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                anchors.margins: shellWindow ? shellWindow.scaled(10) : 10
+                                radius: shellWindow ? shellWindow.edgeRadius : 10
+                                gradient: Gradient {
+                                    GradientStop { position: 0.0; color: "#0f2740" }
+                                    GradientStop { position: 1.0; color: "#091420" }
+                                }
+                                border.color: root.toneColor(String(liveAnchorData["tone"] || "neutral"))
+                                border.width: 1
+                                implicitWidth: compactPreviewAnchorColumn.implicitWidth + ((shellWindow ? shellWindow.scaled(12) : 12) * 2)
+                                implicitHeight: compactPreviewAnchorColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(8) : 8) * 2)
+                                opacity: 0.96
+
+                                Column {
+                                    id: compactPreviewAnchorColumn
+                                    anchors.centerIn: parent
+                                    spacing: 1
+
+                                    Text {
+                                        text: "ANCHOR BUS"
+                                        color: shellWindow ? shellWindow.accentCyan : "#72f3ff"
+                                        font.pixelSize: shellWindow ? shellWindow.captionSize : 9
+                                        font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                    }
+
+                                    Text {
+                                        text: compactMessage(String(liveAnchorData["valid_instance"] || "--"), "--", 12)
+                                        color: shellWindow ? shellWindow.textStrong : "#f4fbff"
+                                        font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                        font.bold: true
+                                        font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                    }
+
+                                    Text {
+                                        text: compactMessage(String(liveAnchorData["board_status"] || sampleTimestamp), sampleTimestamp, 24)
+                                        color: shellWindow ? shellWindow.textSecondary : "#83acc8"
+                                        font.pixelSize: shellWindow ? shellWindow.captionSize : 9
+                                        font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                anchors.top: parent.top
+                                anchors.topMargin: shellWindow ? shellWindow.scaled(12) : 12
+                                width: parent.width * 0.28
+                                height: shellWindow ? shellWindow.scaled(4) : 4
+                                radius: height / 2
+                                gradient: Gradient {
+                                    orientation: Gradient.Horizontal
+                                    GradientStop { position: 0.0; color: "transparent" }
+                                    GradientStop { position: 0.24; color: root.traceTone }
+                                    GradientStop { position: 0.5; color: root.accentCyan }
+                                    GradientStop { position: 0.76; color: root.traceTone }
+                                    GradientStop { position: 1.0; color: "transparent" }
+                                }
+                                opacity: 0.82
+                            }
+
+                            Flow {
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.bottom: parent.bottom
+                                anchors.margins: shellWindow ? shellWindow.scaled(10) : 10
+                                spacing: shellWindow ? shellWindow.compactGap : 8
+
+                                Repeater {
+                                    model: root.compactPreviewOverlayModel
+
+                                    delegate: Rectangle {
+                                        readonly property var overlayMetric: modelData
+                                        radius: shellWindow ? shellWindow.edgeRadius : 10
+                                        gradient: Gradient {
+                                            GradientStop { position: 0.0; color: Qt.lighter(root.toneFill(overlayMetric["tone"]), 1.14) }
+                                            GradientStop { position: 1.0; color: root.toneFill(overlayMetric["tone"]) }
+                                        }
+                                        border.color: root.toneColor(overlayMetric["tone"])
+                                        border.width: 1
+                                        height: compactPreviewOverlayColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(7) : 7) * 2)
+                                        width: Math.max(shellWindow ? shellWindow.scaled(110) : 110, compactPreviewOverlayColumn.implicitWidth + (shellWindow ? shellWindow.scaled(20) : 20))
+
+                                        Column {
+                                            id: compactPreviewOverlayColumn
+                                            anchors.centerIn: parent
+                                            spacing: 1
+
+                                            Text {
+                                                text: overlayMetric["label"]
+                                                color: shellWindow ? shellWindow.textMuted : "#4e7392"
+                                                font.pixelSize: shellWindow ? shellWindow.captionSize : 9
+                                                font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                            }
+
+                                            Text {
+                                                text: overlayMetric["value"]
+                                                color: shellWindow ? shellWindow.textStrong : "#f4fbff"
+                                                font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                                font.bold: true
+                                                font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                            }
                                         }
                                     }
                                 }
@@ -5210,6 +5817,7 @@ PanelFrame {
 
                         delegate: Item {
                             readonly property var hotspot: modelData
+                            readonly property int hotspotIntensityPercent: Math.round(Number(hotspot["intensity"] || 0) * 100)
                             readonly property real pulseSize: (shellWindow ? shellWindow.scaled(22) : 22) + (hotspot["intensity"] * (shellWindow ? shellWindow.scaled(20) : 20))
                             readonly property real anchorX: root.worldX(hotspot["longitude"], mapStage.width)
                             readonly property real anchorY: root.worldY(hotspot["latitude"], mapStage.height)
@@ -5247,6 +5855,17 @@ PanelFrame {
                             }
 
                             Rectangle {
+                                y: (parent.height / 2) - (height / 2)
+                                x: leftLabel ? labelPlate.x + labelPlate.width : (parent.width / 2)
+                                width: leftLabel
+                                    ? Math.max(0, (parent.width / 2) - (labelPlate.x + labelPlate.width))
+                                    : Math.max(0, labelPlate.x - (parent.width / 2))
+                                height: 1
+                                color: root.toneColor(hotspot["tone"])
+                                opacity: 0.52
+                            }
+
+                            Rectangle {
                                 id: labelPlate
                                 y: (parent.height - height) / 2
                                 x: leftLabel
@@ -5261,6 +5880,30 @@ PanelFrame {
                                 border.width: 1
                                 implicitWidth: labelColumn.implicitWidth + ((shellWindow ? shellWindow.scaled(14) : 14) * 2)
                                 implicitHeight: labelColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(8) : 8) * 2)
+
+                                Rectangle {
+                                    anchors.fill: parent
+                                    anchors.margins: 1
+                                    radius: parent.radius - 1
+                                    color: "transparent"
+                                    border.color: "#102f48"
+                                    border.width: 1
+                                    opacity: 0.84
+                                }
+
+                                Rectangle {
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.top: parent.top
+                                    height: shellWindow ? shellWindow.scaled(2) : 2
+                                    gradient: Gradient {
+                                        GradientStop { position: 0.0; color: "transparent" }
+                                        GradientStop { position: 0.28; color: root.toneColor(hotspot["tone"]) }
+                                        GradientStop { position: 0.72; color: Qt.lighter(root.toneColor(hotspot["tone"]), 1.16) }
+                                        GradientStop { position: 1.0; color: "transparent" }
+                                    }
+                                    opacity: 0.76
+                                }
 
                                 Column {
                                     id: labelColumn
@@ -5279,6 +5922,13 @@ PanelFrame {
                                         color: shellWindow ? shellWindow.textMuted : "#4e7392"
                                         font.pixelSize: shellWindow ? shellWindow.captionSize : 10
                                         font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                    }
+
+                                    Text {
+                                        text: String(hotspotIntensityPercent) + "% mesh load"
+                                        color: shellWindow ? shellWindow.textPrimary : "#d5eeff"
+                                        font.pixelSize: shellWindow ? shellWindow.captionSize : 9
+                                        font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
                                     }
                                 }
                             }
@@ -5417,6 +6067,7 @@ PanelFrame {
                     }
 
                     Rectangle {
+                        id: aircraftDataPlate
                         radius: shellWindow ? shellWindow.edgeRadius : 10
                         color: "#081321"
                         border.color: shellWindow ? shellWindow.accentCyan : "#72f3ff"
@@ -5428,13 +6079,37 @@ PanelFrame {
                         implicitWidth: aircraftColumn.implicitWidth + ((shellWindow ? shellWindow.scaled(14) : 14) * 2)
                         implicitHeight: aircraftColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(8) : 8) * 2)
 
+                        Rectangle {
+                            anchors.fill: parent
+                            anchors.margins: 1
+                            radius: parent.radius - 1
+                            color: "transparent"
+                            border.color: "#102f48"
+                            border.width: 1
+                            opacity: 0.84
+                        }
+
+                        Rectangle {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            height: shellWindow ? shellWindow.scaled(2) : 2
+                            gradient: Gradient {
+                                GradientStop { position: 0.0; color: "transparent" }
+                                GradientStop { position: 0.28; color: shellWindow ? shellWindow.accentCyan : "#72f3ff" }
+                                GradientStop { position: 0.72; color: shellWindow ? shellWindow.panelGlowStrong : "#6fdcff" }
+                                GradientStop { position: 1.0; color: "transparent" }
+                            }
+                            opacity: 0.78
+                        }
+
                         Column {
                             id: aircraftColumn
                             anchors.centerIn: parent
                             spacing: shellWindow ? shellWindow.scaled(1) : 1
 
                             Text {
-                                text: String(panel["mission_call_sign"] || "M9-DEMO") + " / 当前机位"
+                                text: String(panel["mission_call_sign"] || "M9-DEMO") + " / 当前机位锁定"
                                 color: shellWindow ? shellWindow.textStrong : "#f4fbff"
                                 font.pixelSize: shellWindow ? shellWindow.captionSize : 11
                                 font.bold: true
@@ -5446,6 +6121,197 @@ PanelFrame {
                                 color: shellWindow ? shellWindow.textPrimary : "#d5eeff"
                                 font.pixelSize: shellWindow ? shellWindow.captionSize : 10
                                 font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                            }
+
+                            Text {
+                                text: root.altitudeLabel + "  " + root.speedLabel + "  " + root.headingLabel
+                                color: shellWindow ? shellWindow.textSecondary : "#83acc8"
+                                font.pixelSize: shellWindow ? shellWindow.captionSize : 9
+                                font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        y: aircraftMarker.y + (aircraftMarker.height / 2)
+                        x: aircraftMarker.leftTag
+                            ? aircraftDataPlate.x + aircraftDataPlate.width
+                            : aircraftMarker.x + aircraftMarker.width
+                        width: aircraftMarker.leftTag
+                            ? Math.max(0, aircraftMarker.x - (aircraftDataPlate.x + aircraftDataPlate.width))
+                            : Math.max(0, aircraftDataPlate.x - (aircraftMarker.x + aircraftMarker.width))
+                        height: 1
+                        color: shellWindow ? shellWindow.accentCyan : "#72f3ff"
+                        opacity: 0.56
+                    }
+
+                    Rectangle {
+                        id: wallboardCommandBar
+                        z: 1
+                        visible: width >= (shellWindow ? shellWindow.scaled(260) : 260)
+                        anchors.horizontalCenter: projectionChamber.horizontalCenter
+                        anchors.bottom: footerAuditRail.top
+                        anchors.bottomMargin: shellWindow ? shellWindow.scaled(12) : 12
+                        width: Math.min(
+                            projectionChamber.width - ((shellWindow ? shellWindow.scaled(20) : 20) * 2),
+                            shellWindow ? shellWindow.scaled(compactCardLayout ? 436 : 640) : (compactCardLayout ? 436 : 640)
+                        )
+                        radius: shellWindow ? shellWindow.edgeRadius : 10
+                        gradient: Gradient {
+                            GradientStop { position: 0.0; color: "#10283f" }
+                            GradientStop { position: 0.3; color: "#0d1f32" }
+                            GradientStop { position: 1.0; color: "#081320" }
+                        }
+                        border.color: root.traceStrong
+                        border.width: 1
+                        implicitHeight: wallboardCommandLayout.implicitHeight + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
+
+                        Rectangle {
+                            anchors.fill: parent
+                            anchors.margins: 1
+                            radius: parent.radius - 1
+                            color: "transparent"
+                            border.color: "#12344f"
+                            border.width: 1
+                            opacity: 0.84
+                        }
+
+                        Rectangle {
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.top: parent.top
+                            height: shellWindow ? shellWindow.scaled(2) : 2
+                            gradient: Gradient {
+                                GradientStop { position: 0.0; color: "transparent" }
+                                GradientStop { position: 0.18; color: root.accentBlue }
+                                GradientStop { position: 0.5; color: root.panelGlowStrong }
+                                GradientStop { position: 0.82; color: root.accentCyan }
+                                GradientStop { position: 1.0; color: "transparent" }
+                            }
+                            opacity: 0.8
+                        }
+
+                        Rectangle {
+                            anchors.horizontalCenter: parent.horizontalCenter
+                            anchors.top: parent.top
+                            anchors.bottom: parent.bottom
+                            width: 1
+                            color: root.traceStrong
+                            opacity: 0.14
+                        }
+
+                        RowLayout {
+                            id: wallboardCommandLayout
+                            anchors.fill: parent
+                            anchors.margins: shellWindow ? shellWindow.scaled(10) : 10
+                            spacing: shellWindow ? shellWindow.compactGap : 8
+
+                            ColumnLayout {
+                                Layout.preferredWidth: parent.width * 0.34
+                                Layout.minimumWidth: 0
+                                spacing: 1
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: root.globalWallboardLabel
+                                    color: shellWindow ? shellWindow.accentCyan : "#72f3ff"
+                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                    font.letterSpacing: shellWindow ? shellWindow.scaled(1) : 1
+                                    wrapMode: Text.WrapAnywhere
+                                }
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: root.globalWallboardDetail
+                                    color: shellWindow ? shellWindow.textSecondary : "#83acc8"
+                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                    font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                    wrapMode: Text.WordWrap
+                                }
+                            }
+
+                            Item {
+                                Layout.fillWidth: true
+                                implicitHeight: wallboardBannerFlow.implicitHeight
+
+                                Flow {
+                                    id: wallboardBannerFlow
+                                    anchors.right: parent.right
+                                    width: parent.width
+                                    spacing: shellWindow ? shellWindow.compactGap : 8
+
+                                    Repeater {
+                                        model: root.wallboardBannerModel
+
+                                        delegate: Rectangle {
+                                            readonly property var bannerData: modelData
+                                            radius: shellWindow ? shellWindow.edgeRadius : 10
+                                            gradient: Gradient {
+                                                GradientStop { position: 0.0; color: Qt.lighter(root.toneFill(bannerData["tone"]), 1.12) }
+                                                GradientStop { position: 1.0; color: root.toneFill(bannerData["tone"]) }
+                                            }
+                                            border.color: root.toneColor(bannerData["tone"])
+                                            border.width: 1
+                                            height: wallboardBannerColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(7) : 7) * 2)
+                                            width: Math.max(shellWindow ? shellWindow.scaled(126) : 126, wallboardBannerColumn.implicitWidth + (shellWindow ? shellWindow.scaled(22) : 22))
+
+                                            Rectangle {
+                                                anchors.fill: parent
+                                                anchors.margins: 1
+                                                radius: parent.radius - 1
+                                                color: "transparent"
+                                                border.color: "#102f48"
+                                                border.width: 1
+                                                opacity: 0.82
+                                            }
+
+                                            Rectangle {
+                                                anchors.left: parent.left
+                                                anchors.right: parent.right
+                                                anchors.top: parent.top
+                                                height: shellWindow ? shellWindow.scaled(2) : 2
+                                                gradient: Gradient {
+                                                    GradientStop { position: 0.0; color: "transparent" }
+                                                    GradientStop { position: 0.28; color: root.toneColor(bannerData["tone"]) }
+                                                    GradientStop { position: 0.72; color: Qt.lighter(root.toneColor(bannerData["tone"]), 1.16) }
+                                                    GradientStop { position: 1.0; color: "transparent" }
+                                                }
+                                                opacity: 0.76
+                                            }
+
+                                            Column {
+                                                id: wallboardBannerColumn
+                                                anchors.centerIn: parent
+                                                spacing: 1
+
+                                                Text {
+                                                    text: bannerData["label"]
+                                                    color: shellWindow ? shellWindow.textMuted : "#4e7392"
+                                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 9
+                                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                                }
+
+                                                Text {
+                                                    text: bannerData["value"]
+                                                    color: shellWindow ? shellWindow.textStrong : "#f4fbff"
+                                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                                    font.bold: true
+                                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                                }
+
+                                                Text {
+                                                    text: bannerData["detail"]
+                                                    color: shellWindow ? shellWindow.textSecondary : "#83acc8"
+                                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 9
+                                                    font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                                    maximumLineCount: 2
+                                                    elide: Text.ElideRight
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

@@ -2829,18 +2829,45 @@ ApplicationWindow {
             anchors.topMargin: root.scaled(10)
             radius: root.edgeRadius
             gradient: Gradient {
-                GradientStop { position: 0.0; color: "#143553" }
+                GradientStop { position: 0.0; color: "#164160" }
+                GradientStop { position: 0.42; color: "#10263c" }
                 GradientStop { position: 1.0; color: "#0b1726" }
             }
             border.color: "#1f668f"
             border.width: 1
             implicitWidth: centerBerthColumn.implicitWidth + (root.scaled(14) * 2)
             implicitHeight: centerBerthColumn.implicitHeight + (root.scaled(8) * 2)
+            opacity: 0.98
+
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                height: root.scaled(2)
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: "transparent" }
+                    GradientStop { position: 0.2; color: root.accentBlue }
+                    GradientStop { position: 0.5; color: root.panelGlowStrong }
+                    GradientStop { position: 0.82; color: root.accentCyan }
+                    GradientStop { position: 1.0; color: "transparent" }
+                }
+                opacity: 0.82
+            }
+
+            Rectangle {
+                anchors.fill: parent
+                anchors.margins: 1
+                radius: parent.radius - 1
+                color: "transparent"
+                border.color: "#123652"
+                border.width: 1
+                opacity: 0.78
+            }
 
             Column {
                 id: centerBerthColumn
                 anchors.centerIn: parent
-                spacing: 1
+                spacing: root.scaled(2)
 
                 Text {
                     text: "CENTER THEATER"
@@ -2855,6 +2882,25 @@ ApplicationWindow {
                     color: root.textMuted
                     font.pixelSize: root.captionSize
                     font.family: root.uiFamily
+                }
+
+                Text {
+                    text: String(root.centerPanelData["mission_call_sign"] || "--") + " / " + String(root.centerControlSummary["link_profile"] || "--")
+                    color: root.textPrimary
+                    font.pixelSize: root.captionSize
+                    font.bold: true
+                    font.family: root.monoFamily
+                    horizontalAlignment: Text.AlignHCenter
+                }
+
+                Text {
+                    text: String(root.liveAnchor["valid_instance"] || "--") + " / " + root.recommendedScenarioId
+                    color: root.textSecondary
+                    font.pixelSize: root.captionSize
+                    font.family: root.uiFamily
+                    horizontalAlignment: Text.AlignHCenter
+                    elide: Text.ElideRight
+                    width: root.scaled(180)
                 }
             }
         }
