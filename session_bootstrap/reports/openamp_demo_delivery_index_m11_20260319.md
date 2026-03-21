@@ -4,6 +4,16 @@ Date: 2026-03-19
 
 Scope: final docs-only index for the existing `openamp_control_plane_demo` cockpit. M11 adds no product behavior and no new launcher.
 
+## 2026-03-22 Follow-up
+
+After the M11 snapshot, the next minimal convergence pass was:
+
+- baseline live user wording is kept on `PyTorch live` / `PyTorch signed live`
+- backend state still preserves the truthful technical mode as `legacy_sha` or `signed_manifest_v1`
+- Scene 3 default remains the archived PyTorch reference; the `2026-03-17` baseline `300 / 300` run stays historical evidence rather than the default operator branch
+
+See: `session_bootstrap/reports/openamp_demo_baseline_semantics_alignment_20260322.md`
+
 ## Launch
 
 Supported launch command from the repo root:

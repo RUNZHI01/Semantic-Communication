@@ -651,6 +651,26 @@ class RunRemoteReconstructionTest(unittest.TestCase):
         self.assertEqual(support["label"], "PyTorch signed live 已支持")
         self.assertIn("PyTorch signed-admission live path is supported.", support["note"])
 
+    def test_describe_demo_variant_support_marks_baseline_expected_sha_live_without_legacy_user_label(self) -> None:
+        access = make_access(
+            {
+                "REMOTE_SNR_BASELINE": "12",
+                "REMOTE_BATCH_BASELINE": "1",
+                "INFERENCE_BASELINE_EXPECTED_SHA256": "b" * 64,
+            }
+        )
+
+        support = inference_runner.describe_demo_variant_support(access, variant="baseline")
+
+        self.assertEqual(support["status"], "ready")
+        self.assertEqual(support["mode"], "legacy_sha")
+        self.assertEqual(support["label"], "PyTorch live 已支持")
+        self.assertEqual(support["tone"], "neutral")
+        self.assertTrue(support["launch_allowed"])
+        self.assertIn("expected-SHA admission (legacy_sha)", support["note"])
+        self.assertIn("historical live evidence", support["note"])
+        self.assertNotIn("legacy live", support["label"])
+
     def test_live_job_constructor_passes_generated_uint32_job_id_to_wrapper_and_hook(self) -> None:
         access = make_access(
             {

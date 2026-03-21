@@ -18,6 +18,7 @@ The UI keeps the system story explicit:
 - final `FIT-01`, `FIT-02`, `FIT-03` state, including `FIT-03` pre-fix FAIL -> post-fix PASS history
 - trusted-current performance positioning with the data-plane/control-plane boundary called out explicitly
 - default third-act baseline = `2026-03-12` archived PyTorch reference; the `2026-03-17` dual-path live status remains linked as historical evidence
+- when baseline live is available, the user-facing cockpit now keeps the label on `PyTorch live` / `PyTorch signed live`; the backend JSON still preserves the technical admission mode as `legacy_sha` or `signed_manifest_v1`
 - explicit mode split for the operator: `4-core Linux performance mode` vs `3-core Linux + RTOS demo mode`
 - operator launch commands and source-of-truth document links
 
@@ -58,7 +59,7 @@ The demo keeps the legacy path intact by default. Current and Baseline are confi
 - the signed bundle is verified locally with the supplied public key before the wrapper launches
 - wrapper traces and manifests carry the signed-manifest metadata for the user-facing demo
 - the live control hook now emits `SIGNED_ADMISSION_BEGIN/CHUNK/SIGNATURE/COMMIT` before the unchanged 44-byte `JOB_REQ`
-- if Baseline signed admission is not configured or fails local verification, the demo stays explicit: Baseline live falls back to legacy expected-SHA admission when available, otherwise the UI keeps the formal archived baseline comparison only
+- if Baseline signed admission is not configured or fails local verification, the demo stays explicit: Baseline live falls back to expected-SHA admission when available, the UI still labels that path as `PyTorch live`, and the backend state keeps `mode=legacy_sha`; otherwise the UI keeps the formal archived baseline comparison only
 
 The same override can also be carried in the active inference env file with:
 
