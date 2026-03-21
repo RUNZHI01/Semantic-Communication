@@ -29,7 +29,7 @@ Item {
     )
     readonly property bool landingWide: shellWindow ? shellWindow.viewportWidth >= 1320 : width >= 1320
     readonly property bool landingShortHeight: shellWindow ? shellWindow.shortViewport : height < 780
-    readonly property int railWidth: shellWindow ? shellWindow.scaled(landingWide ? 138 : 134) : 138
+    readonly property int railWidth: shellWindow ? shellWindow.scaled(landingWide ? 132 : 134) : 132
     readonly property int landingStageLedgerWidth: shellWindow ? shellWindow.scaled(landingWide ? 298 : 268) : 298
     readonly property int flightSidebarWidth: shellWindow ? shellWindow.scaled(shellWindow.wideLayout ? 316 : 292) : 316
     readonly property int flightStageHeight: shellWindow ? shellWindow.scaled(shellWindow.compactLayout ? 332 : 478) : 478
@@ -193,35 +193,39 @@ Item {
         landingStageSubtitle + "  ·  " + (shellWindow ? shellWindow.activeSourceLabel : "--"),
         landingShortHeight ? 76 : 132
     )
-    readonly property int landingWideStageHeight: shellWindow ? shellWindow.scaled(landingShortHeight ? 256 : 284) : 284
-    readonly property int landingStackedStageHeight: shellWindow ? shellWindow.scaled(landingShortHeight ? 296 : 348) : 348
-    readonly property string landingStageSubtitle: "真实地理底图回到第一视觉层，板态与弱网收束到两侧细轨，底部仅保留命令坞站。"
+    readonly property int landingWideStageMinHeight: shellWindow ? shellWindow.scaled(landingShortHeight ? 276 : 340) : 340
+    readonly property int landingStackedStageHeight: shellWindow ? shellWindow.scaled(landingShortHeight ? 320 : 392) : 392
+    readonly property int landingDeckGap: shellWindow ? shellWindow.scaled(landingWide ? 8 : 10) : (landingWide ? 8 : 10)
+    readonly property string landingStageSubtitle: "真实地理底图继续占据第一视觉层，系统与弱网压成两侧连续细轨，底部坞站收口为同一块甲板托盘。"
     readonly property string mapCtaLabel: landingShortHeight ? "飞行合同" : "进入飞行合同"
     readonly property string dockCtaLabel: landingShortHeight ? "执行页" : "展开执行页"
     readonly property color landingDeckPanelColor: shellWindow
-        ? Qt.rgba(shellWindow.surfaceGlass.r, shellWindow.surfaceGlass.g, shellWindow.surfaceGlass.b, 0.28)
+        ? Qt.rgba(shellWindow.surfaceGlass.r, shellWindow.surfaceGlass.g, shellWindow.surfaceGlass.b, 0.16)
         : "#152333"
     readonly property color landingDeckBorderTone: shellWindow
-        ? Qt.rgba(shellWindow.borderStrong.r, shellWindow.borderStrong.g, shellWindow.borderStrong.b, 0.28)
+        ? Qt.rgba(shellWindow.panelGlowStrong.r, shellWindow.panelGlowStrong.g, shellWindow.panelGlowStrong.b, 0.18)
         : "#5f88a6"
     readonly property color landingRailDivider: shellWindow
-        ? Qt.rgba(shellWindow.borderSubtle.r, shellWindow.borderSubtle.g, shellWindow.borderSubtle.b, 0.48)
+        ? Qt.rgba(shellWindow.borderSubtle.r, shellWindow.borderSubtle.g, shellWindow.borderSubtle.b, 0.32)
         : "#49657d"
     readonly property color landingRailFill: shellWindow
-        ? Qt.rgba(shellWindow.surfaceGlass.r, shellWindow.surfaceGlass.g, shellWindow.surfaceGlass.b, 0.26)
+        ? Qt.rgba(shellWindow.surfaceGlass.r, shellWindow.surfaceGlass.g, shellWindow.surfaceGlass.b, 0.18)
         : "#8c0f1720"
     readonly property color landingRailBorder: shellWindow
-        ? Qt.rgba(shellWindow.borderSubtle.r, shellWindow.borderSubtle.g, shellWindow.borderSubtle.b, 0.22)
+        ? Qt.rgba(shellWindow.panelGlowStrong.r, shellWindow.panelGlowStrong.g, shellWindow.panelGlowStrong.b, 0.16)
         : "#49657d"
     readonly property color landingStageFill: shellWindow
-        ? Qt.rgba(shellWindow.surfaceQuiet.r, shellWindow.surfaceQuiet.g, shellWindow.surfaceQuiet.b, 0.14)
+        ? Qt.rgba(shellWindow.surfaceGlass.r, shellWindow.surfaceGlass.g, shellWindow.surfaceGlass.b, 0.08)
         : "#62081119"
     readonly property color landingStageBorder: shellWindow
-        ? Qt.rgba(shellWindow.panelGlowStrong.r, shellWindow.panelGlowStrong.g, shellWindow.panelGlowStrong.b, 0.16)
+        ? Qt.rgba(shellWindow.panelGlowStrong.r, shellWindow.panelGlowStrong.g, shellWindow.panelGlowStrong.b, 0.22)
         : "#58b2da"
     readonly property color landingDockFill: shellWindow
-        ? Qt.rgba(shellWindow.surfaceGlass.r, shellWindow.surfaceGlass.g, shellWindow.surfaceGlass.b, 0.24)
+        ? Qt.rgba(shellWindow.surfaceGlass.r, shellWindow.surfaceGlass.g, shellWindow.surfaceGlass.b, 0.18)
         : "#7d0f1720"
+    readonly property color landingDockBorder: shellWindow
+        ? Qt.rgba(shellWindow.panelGlowStrong.r, shellWindow.panelGlowStrong.g, shellWindow.panelGlowStrong.b, 0.14)
+        : "#58b2da"
 
     function compact(text, limit) {
         if (shellWindow)
@@ -1759,7 +1763,7 @@ Item {
                 ColumnLayout {
                     anchors.fill: parent
                     anchors.margins: shellWindow ? shellWindow.scaled(12) : 12
-                    spacing: shellWindow ? shellWindow.zoneGap : 14
+                    spacing: root.landingDeckGap
 
                     RowLayout {
                         Layout.fillWidth: true
@@ -1783,7 +1787,7 @@ Item {
                         }
 
                         Text {
-                            Layout.preferredWidth: shellWindow ? shellWindow.scaled(440) : 440
+                            Layout.preferredWidth: shellWindow ? shellWindow.scaled(384) : 384
                             text: root.landingDeckSupportText
                             color: shellWindow ? shellWindow.textSecondary : "#9aa8b1"
                             font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
@@ -1795,8 +1799,8 @@ Item {
 
                     RowLayout {
                         Layout.fillWidth: true
-                        Layout.preferredHeight: root.landingWideStageHeight
-                        Layout.maximumHeight: root.landingWideStageHeight
+                        Layout.fillHeight: true
+                        Layout.minimumHeight: root.landingWideStageMinHeight
                         spacing: shellWindow ? shellWindow.zoneGap : 14
 
                         ShellCard {
@@ -1832,6 +1836,10 @@ Item {
                                     model: root.landingSystemRailModel
                                     delegate: landingRailReadoutDelegate
                                 }
+                            }
+
+                            Item {
+                                Layout.fillHeight: true
                             }
 
                             InsetPanel {
@@ -1950,15 +1958,45 @@ Item {
                                 }
                             }
 
-                            Text {
+                            Item {
+                                Layout.fillHeight: true
+                            }
+
+                            InsetPanel {
                                 Layout.fillWidth: true
-                                text: root.landingWeakRailLine
-                                color: shellWindow ? shellWindow.textSecondary : "#9aa8b1"
-                                font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
-                                font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
-                                wrapMode: Text.WrapAnywhere
-                                maximumLineCount: 3
-                                elide: Text.ElideRight
+                                shellWindow: root.shellWindow
+                                accentColor: shellWindow ? shellWindow.accentMint : "#93bea5"
+                                minimalChrome: true
+                                showAccentRail: false
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: "在线锚点 / LIVE ANCHOR"
+                                    color: shellWindow ? shellWindow.accentMint : "#93bea5"
+                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                    font.letterSpacing: shellWindow ? shellWindow.scaled(0.6) : 0.6
+                                }
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: root.anchorValue + "  ·  " + root.anchorStatus
+                                    color: shellWindow ? shellWindow.textStrong : "#f5efe4"
+                                    font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
+                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                    wrapMode: Text.WrapAnywhere
+                                }
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: root.anchorProbeBrief
+                                    color: shellWindow ? shellWindow.textSecondary : "#9aa8b1"
+                                    font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
+                                    font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                    wrapMode: Text.WordWrap
+                                    maximumLineCount: 3
+                                    elide: Text.ElideRight
+                                }
                             }
                         }
                     }
@@ -1968,13 +2006,53 @@ Item {
                         shellWindow: root.shellWindow
                         accentColor: shellWindow ? shellWindow.accentIce : "#86c7d4"
                         fillColor: root.landingDockFill
-                        borderColor: root.landingRailBorder
-                        padding: shellWindow ? shellWindow.scaled(12) : 12
-                        contentSpacing: shellWindow ? shellWindow.scaled(6) : 6
+                        borderColor: root.landingDockBorder
+                        padding: shellWindow ? shellWindow.scaled(10) : 10
+                        contentSpacing: shellWindow ? shellWindow.scaled(7) : 7
                         minimalChrome: true
                         eyebrow: "指挥坞站 / COMMAND DOCK"
                         title: "命令坞站与快速入口"
-                        subtitle: ""
+                        subtitle: root.landingLaunchBrief
+
+                        Flow {
+                            Layout.fillWidth: true
+                            spacing: shellWindow ? shellWindow.compactGap : 8
+
+                            Repeater {
+                                model: root.landingDockChipModel
+
+                                delegate: ToneChip {
+                                    shellWindow: root.shellWindow
+                                    label: String(modelData["label"] || "--")
+                                    value: String(modelData["value"] || "--")
+                                    tone: String(modelData["tone"] || "neutral")
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 1
+                            gradient: Gradient {
+                                orientation: Gradient.Horizontal
+                                GradientStop { position: 0.0; color: "transparent" }
+                                GradientStop {
+                                    position: 0.2
+                                    color: shellWindow
+                                        ? Qt.rgba(shellWindow.accentIce.r, shellWindow.accentIce.g, shellWindow.accentIce.b, 0.12)
+                                        : "#1f86c7d4"
+                                }
+                                GradientStop { position: 0.5; color: root.landingRailDivider }
+                                GradientStop {
+                                    position: 0.8
+                                    color: shellWindow
+                                        ? Qt.rgba(shellWindow.accentGold.r, shellWindow.accentGold.g, shellWindow.accentGold.b, 0.12)
+                                        : "#1fc6ab7d"
+                                }
+                                GradientStop { position: 1.0; color: "transparent" }
+                            }
+                            opacity: 0.92
+                        }
 
                         GridLayout {
                             Layout.fillWidth: true
@@ -2008,33 +2086,16 @@ Item {
                                     wrapMode: Text.WrapAnywhere
                                 }
 
-                                Flow {
+                                Text {
                                     Layout.fillWidth: true
-                                    spacing: shellWindow ? shellWindow.compactGap : 8
-
-                                    Repeater {
-                                        model: [
-                                            {
-                                                "label": "渲染",
-                                                "value": shellWindow && shellWindow.softwareRenderEnabled ? "软件安全" : "图形优先",
-                                                "tone": shellWindow && shellWindow.softwareRenderEnabled ? "warning" : "online"
-                                            },
-                                            {
-                                                "label": "桥接",
-                                                "value": shellWindow && shellWindow.bridgeAvailable ? "仓库在线" : "桥接缺失",
-                                                "tone": shellWindow && shellWindow.bridgeAvailable ? "online" : "warning"
-                                            }
-                                        ]
-
-                                        delegate: ToneChip {
-                                            shellWindow: root.shellWindow
-                                            label: String(modelData["label"] || "--")
-                                            value: String(modelData["value"] || "--")
-                                            tone: String(modelData["tone"] || "neutral")
-                                        }
-                                    }
+                                    text: root.landingLaunchBrief
+                                    color: shellWindow ? shellWindow.textSecondary : "#9aa8b1"
+                                    font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
+                                    font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                    wrapMode: Text.WordWrap
+                                    maximumLineCount: 2
+                                    elide: Text.ElideRight
                                 }
-
                             }
 
                             InsetPanel {
@@ -2084,6 +2145,18 @@ Item {
                                     }
                                 }
 
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: root.actionPreviewList.length > 0
+                                        ? "landing 页只展示首批实时动作，完整合同仍在执行页统一收口。"
+                                        : "当前没有开放动作，坞站继续保持只读合同镜像。"
+                                    color: shellWindow ? shellWindow.textSecondary : "#9aa8b1"
+                                    font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
+                                    font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                    wrapMode: Text.WordWrap
+                                    maximumLineCount: 2
+                                    elide: Text.ElideRight
+                                }
                             }
 
                             InsetPanel {
@@ -2104,6 +2177,17 @@ Item {
                                     font.letterSpacing: shellWindow ? shellWindow.scaled(0.7) : 0.7
                                 }
 
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: root.anchorProbeBrief
+                                    color: shellWindow ? shellWindow.textSecondary : "#9aa8b1"
+                                    font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
+                                    font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                    wrapMode: Text.WordWrap
+                                    maximumLineCount: 2
+                                    elide: Text.ElideRight
+                                }
+
                                 RowLayout {
                                     Layout.fillWidth: true
                                     spacing: shellWindow ? shellWindow.compactGap : 8
@@ -2122,15 +2206,24 @@ Item {
                                             anchors.margins: shellWindow ? shellWindow.scaled(10) : 10
                                             spacing: shellWindow ? shellWindow.scaled(2) : 2
 
-                                        Text {
-                                            Layout.fillWidth: true
-                                            text: root.mapCtaLabel + " / FLIGHT"
-                                            color: shellWindow ? shellWindow.textStrong : "#f5efe4"
-                                            font.pixelSize: shellWindow ? shellWindow.bodyEmphasisSize : 14
-                                            font.weight: Font.DemiBold
-                                            font.family: shellWindow ? shellWindow.displayFamily : "Noto Sans CJK SC"
+                                            Text {
+                                                Layout.fillWidth: true
+                                                text: root.mapCtaLabel + " / FLIGHT"
+                                                color: shellWindow ? shellWindow.textStrong : "#f5efe4"
+                                                font.pixelSize: shellWindow ? shellWindow.bodyEmphasisSize : 14
+                                                font.weight: Font.DemiBold
+                                                font.family: shellWindow ? shellWindow.displayFamily : "Noto Sans CJK SC"
+                                            }
+
+                                            Text {
+                                                Layout.fillWidth: true
+                                                text: shellWindow ? shellWindow.activeSourceLabel : "--"
+                                                color: shellWindow ? shellWindow.textMuted : "#6f7f8a"
+                                                font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
+                                                font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                                elide: Text.ElideRight
+                                            }
                                         }
-                                    }
 
                                         MouseArea {
                                             anchors.fill: parent
@@ -2154,15 +2247,26 @@ Item {
                                             anchors.margins: shellWindow ? shellWindow.scaled(10) : 10
                                             spacing: shellWindow ? shellWindow.scaled(2) : 2
 
-                                        Text {
-                                            Layout.fillWidth: true
-                                            text: root.dockCtaLabel + " / ACTIONS"
-                                            color: shellWindow ? shellWindow.textStrong : "#f5efe4"
-                                            font.pixelSize: shellWindow ? shellWindow.bodyEmphasisSize : 14
-                                            font.weight: Font.DemiBold
-                                            font.family: shellWindow ? shellWindow.displayFamily : "Noto Sans CJK SC"
+                                            Text {
+                                                Layout.fillWidth: true
+                                                text: root.dockCtaLabel + " / ACTIONS"
+                                                color: shellWindow ? shellWindow.textStrong : "#f5efe4"
+                                                font.pixelSize: shellWindow ? shellWindow.bodyEmphasisSize : 14
+                                                font.weight: Font.DemiBold
+                                                font.family: shellWindow ? shellWindow.displayFamily : "Noto Sans CJK SC"
+                                            }
+
+                                            Text {
+                                                Layout.fillWidth: true
+                                                text: shellWindow
+                                                    ? String(shellWindow.enabledBottomActions) + " LIVE / " + String(shellWindow.bottomActions.length) + " TOTAL"
+                                                    : "--"
+                                                color: shellWindow ? shellWindow.textMuted : "#6f7f8a"
+                                                font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
+                                                font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                                elide: Text.ElideRight
+                                            }
                                         }
-                                    }
 
                                         MouseArea {
                                             anchors.fill: parent
@@ -2213,7 +2317,7 @@ Item {
                         id: stackedColumn
                         anchors.fill: parent
                         anchors.margins: shellWindow ? shellWindow.scaled(12) : 12
-                        spacing: shellWindow ? shellWindow.zoneGap : 14
+                        spacing: root.landingDeckGap
 
                         RowLayout {
                             Layout.fillWidth: true
@@ -2238,7 +2342,7 @@ Item {
 
                             Text {
                                 visible: stackedDeck.width >= (shellWindow ? shellWindow.scaled(620) : 620)
-                                Layout.preferredWidth: shellWindow ? shellWindow.scaled(280) : 280
+                                Layout.preferredWidth: shellWindow ? shellWindow.scaled(260) : 260
                                 text: root.landingDeckSupportText
                                 color: shellWindow ? shellWindow.textSecondary : "#9aa8b1"
                                 font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
@@ -2390,11 +2494,28 @@ Item {
                             shellWindow: root.shellWindow
                             accentColor: shellWindow ? shellWindow.accentIce : "#86c7d4"
                             fillColor: root.landingDockFill
-                            borderColor: root.landingRailBorder
+                            borderColor: root.landingDockBorder
+                            contentSpacing: shellWindow ? shellWindow.scaled(7) : 7
                             minimalChrome: true
                             eyebrow: "指挥坞站 / COMMAND DOCK"
                             title: "命令坞站与快速入口"
-                            subtitle: ""
+                            subtitle: root.landingLaunchBrief
+
+                            Flow {
+                                Layout.fillWidth: true
+                                spacing: shellWindow ? shellWindow.compactGap : 8
+
+                                Repeater {
+                                    model: root.landingDockChipModel
+
+                                    delegate: ToneChip {
+                                        shellWindow: root.shellWindow
+                                        label: String(modelData["label"] || "--")
+                                        value: String(modelData["value"] || "--")
+                                        tone: String(modelData["tone"] || "neutral")
+                                    }
+                                }
+                            }
 
                             GridLayout {
                                 Layout.fillWidth: true
@@ -2427,33 +2548,6 @@ Item {
                                         wrapMode: Text.WrapAnywhere
                                     }
 
-                                    Flow {
-                                        Layout.fillWidth: true
-                                        spacing: shellWindow ? shellWindow.compactGap : 8
-
-                                        Repeater {
-                                            model: [
-                                                {
-                                                    "label": "渲染",
-                                                    "value": shellWindow && shellWindow.softwareRenderEnabled ? "软件安全" : "图形优先",
-                                                    "tone": shellWindow && shellWindow.softwareRenderEnabled ? "warning" : "online"
-                                                },
-                                                {
-                                                    "label": "桥接",
-                                                    "value": shellWindow && shellWindow.bridgeAvailable ? "仓库在线" : "桥接缺失",
-                                                    "tone": shellWindow && shellWindow.bridgeAvailable ? "online" : "warning"
-                                                }
-                                            ]
-
-                                            delegate: ToneChip {
-                                                shellWindow: root.shellWindow
-                                                label: String(modelData["label"] || "--")
-                                                value: String(modelData["value"] || "--")
-                                                tone: String(modelData["tone"] || "neutral")
-                                            }
-                                        }
-                                    }
-
                                     Text {
                                         Layout.fillWidth: true
                                         text: root.landingLaunchBrief
@@ -2461,7 +2555,7 @@ Item {
                                         font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
                                         font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
                                         wrapMode: Text.WordWrap
-                                        maximumLineCount: 1
+                                        maximumLineCount: 2
                                         elide: Text.ElideRight
                                     }
                                 }
@@ -2521,7 +2615,7 @@ Item {
                                         font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
                                         font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
                                         wrapMode: Text.WordWrap
-                                        maximumLineCount: 1
+                                        maximumLineCount: 2
                                         elide: Text.ElideRight
                                     }
                                 }
@@ -2551,7 +2645,7 @@ Item {
                                         font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
                                         font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
                                         wrapMode: Text.WordWrap
-                                        maximumLineCount: 1
+                                        maximumLineCount: 2
                                         elide: Text.ElideRight
                                     }
 
@@ -2565,16 +2659,31 @@ Item {
                                             color: shellWindow ? Qt.rgba(shellWindow.surfaceQuiet.r, shellWindow.surfaceQuiet.g, shellWindow.surfaceQuiet.b, 0.72) : "#1a2230"
                                             border.color: shellWindow ? Qt.rgba(shellWindow.accentIce.r, shellWindow.accentIce.g, shellWindow.accentIce.b, 0.34) : "#86c7d4"
                                             border.width: 1
-                                            implicitHeight: stackedMapCtaLabel.implicitHeight + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
+                                            implicitHeight: stackedMapCtaColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
 
-                                            Text {
-                                                id: stackedMapCtaLabel
-                                                anchors.centerIn: parent
-                                                text: root.mapCtaLabel
-                                                color: shellWindow ? shellWindow.textStrong : "#f5efe4"
-                                                font.pixelSize: shellWindow ? shellWindow.bodyEmphasisSize : 14
-                                                font.weight: Font.DemiBold
-                                                font.family: shellWindow ? shellWindow.displayFamily : "Noto Sans CJK SC"
+                                            ColumnLayout {
+                                                id: stackedMapCtaColumn
+                                                anchors.fill: parent
+                                                anchors.margins: shellWindow ? shellWindow.scaled(10) : 10
+                                                spacing: shellWindow ? shellWindow.scaled(2) : 2
+
+                                                Text {
+                                                    Layout.fillWidth: true
+                                                    text: root.mapCtaLabel
+                                                    color: shellWindow ? shellWindow.textStrong : "#f5efe4"
+                                                    font.pixelSize: shellWindow ? shellWindow.bodyEmphasisSize : 14
+                                                    font.weight: Font.DemiBold
+                                                    font.family: shellWindow ? shellWindow.displayFamily : "Noto Sans CJK SC"
+                                                }
+
+                                                Text {
+                                                    Layout.fillWidth: true
+                                                    text: shellWindow ? shellWindow.activeSourceLabel : "--"
+                                                    color: shellWindow ? shellWindow.textMuted : "#6f7f8a"
+                                                    font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
+                                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                                    elide: Text.ElideRight
+                                                }
                                             }
 
                                             MouseArea {
@@ -2591,16 +2700,33 @@ Item {
                                             color: shellWindow ? Qt.rgba(shellWindow.surfaceQuiet.r, shellWindow.surfaceQuiet.g, shellWindow.surfaceQuiet.b, 0.72) : "#1a2230"
                                             border.color: shellWindow ? Qt.rgba(shellWindow.accentGold.r, shellWindow.accentGold.g, shellWindow.accentGold.b, 0.4) : "#c6ab7d"
                                             border.width: 1
-                                            implicitHeight: stackedDockCtaLabel.implicitHeight + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
+                                            implicitHeight: stackedDockCtaColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
 
-                                            Text {
-                                                id: stackedDockCtaLabel
-                                                anchors.centerIn: parent
-                                                text: root.dockCtaLabel
-                                                color: shellWindow ? shellWindow.textStrong : "#f5efe4"
-                                                font.pixelSize: shellWindow ? shellWindow.bodyEmphasisSize : 14
-                                                font.weight: Font.DemiBold
-                                                font.family: shellWindow ? shellWindow.displayFamily : "Noto Sans CJK SC"
+                                            ColumnLayout {
+                                                id: stackedDockCtaColumn
+                                                anchors.fill: parent
+                                                anchors.margins: shellWindow ? shellWindow.scaled(10) : 10
+                                                spacing: shellWindow ? shellWindow.scaled(2) : 2
+
+                                                Text {
+                                                    Layout.fillWidth: true
+                                                    text: root.dockCtaLabel
+                                                    color: shellWindow ? shellWindow.textStrong : "#f5efe4"
+                                                    font.pixelSize: shellWindow ? shellWindow.bodyEmphasisSize : 14
+                                                    font.weight: Font.DemiBold
+                                                    font.family: shellWindow ? shellWindow.displayFamily : "Noto Sans CJK SC"
+                                                }
+
+                                                Text {
+                                                    Layout.fillWidth: true
+                                                    text: shellWindow
+                                                        ? String(shellWindow.enabledBottomActions) + " LIVE / " + String(shellWindow.bottomActions.length) + " TOTAL"
+                                                        : "--"
+                                                    color: shellWindow ? shellWindow.textMuted : "#6f7f8a"
+                                                    font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
+                                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                                    elide: Text.ElideRight
+                                                }
                                             }
 
                                             MouseArea {
