@@ -20,7 +20,7 @@ Rectangle {
     color: shellWindow
         ? Qt.rgba(fillColor.r, fillColor.g, fillColor.b, prominent ? 0.94 : 0.9)
         : fillColor
-    border.color: shellWindow ? Qt.rgba(accentColor.r, accentColor.g, accentColor.b, prominent ? 0.62 : 0.44) : accentColor
+    border.color: shellWindow ? Qt.rgba(accentColor.r, accentColor.g, accentColor.b, prominent ? 0.62 : 0.38) : accentColor
     border.width: 1
     implicitHeight: content.implicitHeight + (padding * 2)
 
@@ -28,25 +28,11 @@ Rectangle {
         anchors.fill: parent
         radius: parent.radius
         gradient: Gradient {
-            GradientStop { position: 0.0; color: "#16ffffff" }
-            GradientStop { position: 0.28; color: "#08ffffff" }
-            GradientStop { position: 1.0; color: "#00000000" }
+            GradientStop { position: 0.0; color: "#18ffffff" }
+            GradientStop { position: 0.18; color: "#08ffffff" }
+            GradientStop { position: 1.0; color: "#06000000" }
         }
-        opacity: root.prominent ? 0.44 : 0.32
-    }
-
-    Rectangle {
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.bottom: parent.bottom
-        height: Math.max(parent.height * 0.38, root.radius * 1.5)
-        radius: parent.radius
-        gradient: Gradient {
-            GradientStop { position: 0.0; color: "#00000000" }
-            GradientStop { position: 0.44; color: "#12000000" }
-            GradientStop { position: 1.0; color: "#2b000000" }
-        }
-        opacity: 0.84
+        opacity: root.prominent ? 0.42 : 0.28
     }
 
     Rectangle {
@@ -61,11 +47,11 @@ Rectangle {
             orientation: Gradient.Horizontal
             GradientStop { position: 0.0; color: "transparent" }
             GradientStop { position: 0.18; color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.16) }
-            GradientStop { position: 0.5; color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.84) }
+            GradientStop { position: 0.5; color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.9) }
             GradientStop { position: 0.82; color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.16) }
             GradientStop { position: 1.0; color: "transparent" }
         }
-        opacity: 0.9
+        opacity: 0.94
     }
 
     Rectangle {
@@ -80,21 +66,29 @@ Rectangle {
         radius: width / 2
         gradient: Gradient {
             GradientStop { position: 0.0; color: "transparent" }
-            GradientStop { position: 0.16; color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.2) }
-            GradientStop { position: 0.48; color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.9) }
-            GradientStop { position: 0.82; color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.24) }
+            GradientStop { position: 0.16; color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.18) }
+            GradientStop { position: 0.48; color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.94) }
+            GradientStop { position: 0.82; color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.22) }
             GradientStop { position: 1.0; color: "transparent" }
         }
     }
 
     Rectangle {
-        width: parent.width * 0.44
-        height: parent.height * 0.7
+        width: parent.width * 0.28
+        height: parent.height * 0.42
         radius: width / 2
         color: root.accentColor
-        opacity: root.prominent ? 0.08 : 0.05
-        x: -width * 0.16
-        y: -height * 0.24
+        opacity: root.prominent ? 0.07 : 0.04
+        x: parent.width - (width * 0.7)
+        y: -height * 0.2
+    }
+
+    Rectangle {
+        anchors.fill: parent
+        radius: parent.radius
+        color: "transparent"
+        border.color: Qt.rgba(1, 1, 1, 0.1)
+        border.width: 1
     }
 
     Rectangle {
@@ -102,9 +96,8 @@ Rectangle {
         anchors.margins: 1
         radius: parent.radius - 1
         color: "transparent"
-        border.color: "#0effffff"
+        border.color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.16)
         border.width: 1
-        opacity: 0.7
     }
 
     ColumnLayout {

@@ -12,6 +12,7 @@ Rectangle {
     property bool prominent: false
 
     readonly property color accentColor: shellWindow ? shellWindow.toneColor(tone) : "#86c7d4"
+    readonly property bool structuredValue: /^[A-Za-z0-9_:\-./%°,+\s]+$/.test(String(root.value || ""))
     readonly property color topFill: shellWindow ? Qt.lighter(shellWindow.surfaceRaised, 1.04) : "#1a2430"
     readonly property color bottomFill: shellWindow ? Qt.darker(shellWindow.surfaceQuiet, 1.08) : "#0c151d"
 
@@ -118,8 +119,10 @@ Rectangle {
                 ? shellWindow.bodyEmphasisSize + (root.prominent ? shellWindow.scaled(2) : shellWindow.scaled(1))
                 : (root.prominent ? 16 : 14)
             font.weight: Font.DemiBold
-            font.family: shellWindow ? shellWindow.displayFamily : "Noto Serif CJK SC"
-            font.letterSpacing: shellWindow ? shellWindow.scaled(0.16) : 0.16
+            font.family: shellWindow
+                ? (root.structuredValue ? shellWindow.monoFamily : shellWindow.uiFamily)
+                : "Noto Sans CJK SC"
+            font.letterSpacing: shellWindow ? shellWindow.scaled(root.structuredValue ? 0.18 : 0.06) : 0.12
             wrapMode: Text.WordWrap
             maximumLineCount: prominent ? 3 : 2
             elide: Text.ElideRight

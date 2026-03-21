@@ -8,9 +8,12 @@ from cockpit_native.qt_app import (
     available_qtlocation_providers,
     apply_repo_runtime_env,
     build_launch_options,
+    build_runtime_theme_plan,
     normalize_map_backend,
     normalize_map_provider,
     normalize_map_tile_mode,
+    resolve_default_world_map_backdrop,
+    resolve_font_family,
     resolve_repo_runtime_cache_root,
     resolve_optional_repo_path,
     resolve_qtlocation_plugin_name,
@@ -48,12 +51,12 @@ class QtAppLaunchOptionsTest(unittest.TestCase):
 
     def test_resolve_optional_repo_path_returns_file_uri(self) -> None:
         resolved = resolve_optional_repo_path(
-            "cockpit_native/qml/assets/world-map.svg",
+            "cockpit_native/qml/assets/world-map-backdrop.svg",
             project_root=PROJECT_ROOT,
         )
 
         self.assertTrue(resolved.startswith("file://"))
-        self.assertIn("/cockpit_native/qml/assets/world-map.svg", resolved)
+        self.assertIn("/cockpit_native/qml/assets/world-map-backdrop.svg", resolved)
 
     def test_build_launch_options_reads_map_env(self) -> None:
         options = build_launch_options(
@@ -63,7 +66,7 @@ class QtAppLaunchOptionsTest(unittest.TestCase):
                 "COCKPIT_NATIVE_MAP_BACKEND": "svg",
                 "COCKPIT_NATIVE_MAP_PROVIDER": "osm",
                 "COCKPIT_NATIVE_MAP_TILE_ROOT": "/tmp/ui_ref_mylocation/bin/dianzi_gaode_ArcgisServerTiles/_alllayers",
-                "COCKPIT_NATIVE_WORLD_MAP_BACKDROP": "cockpit_native/qml/assets/world-map.svg",
+                "COCKPIT_NATIVE_WORLD_MAP_BACKDROP": "cockpit_native/qml/assets/world-map-backdrop.svg",
             },
         )
 
@@ -73,6 +76,15 @@ class QtAppLaunchOptionsTest(unittest.TestCase):
         self.assertEqual(options["mapTileMode"], "local_arcgis_cache")
         self.assertTrue(str(options["mapTileRoot"]).startswith("file://"))
         self.assertTrue(str(options["worldMapBackdropSource"]).startswith("file://"))
+
+    def test_build_launch_options_defaults_to_repo_backdrop(self) -> None:
+        options = build_launch_options(project_root=PROJECT_ROOT, env={})
+        self.assertIn("/cockpit_native/qml/assets/world-map-backdrop.svg", str(options["worldMapBackdropSource"]))
+
+    def test_resolve_default_world_map_backdrop_uses_repo_asset(self) -> None:
+        resolved = resolve_default_world_map_backdrop(PROJECT_ROOT)
+        self.assertTrue(resolved.startswith("file://"))
+        self.assertIn("/cockpit_native/qml/assets/world-map-backdrop.svg", resolved)
 
     def test_resolve_repo_runtime_cache_root_is_repo_local(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -115,6 +127,20 @@ class QtAppLaunchOptionsTest(unittest.TestCase):
     def test_available_qtlocation_providers_returns_strings(self) -> None:
         providers = available_qtlocation_providers()
         self.assertTrue(all(isinstance(provider, str) for provider in providers))
+
+    def test_resolve_font_family_prefers_first_available_match(self) -> None:
+        resolved = resolve_font_family(
+            ["Noto Sans CJK SC", "Ubuntu Sans"],
+            available_families=["Ubuntu Sans", "DejaVu Sans"],
+            fallback_family="Sans Serif",
+        )
+        self.assertEqual(resolved, "Ubuntu Sans")
+
+    def test_build_runtime_theme_plan_contains_palette_entries(self) -> None:
+        theme_plan = build_runtime_theme_plan()
+        self.assertEqual(theme_plan["themeProfile"], "native_cockpit_runtime_v2")
+        self.assertIn("sceneTop", theme_plan["themePalette"])
+        self.assertIn("accentIce", theme_plan["themePalette"])
 
 
 if __name__ == "__main__":

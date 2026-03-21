@@ -29,6 +29,7 @@ Item {
     property bool showScenarioBadge: true
     property bool showInfoPanels: true
     property bool preferBottomBannerDock: false
+    property string backdropSource: ""
 
     property string mapProvider: "auto"
     property string pluginName: "osm"
@@ -49,6 +50,7 @@ Item {
     readonly property string providerLabel: pluginName.length > 0 ? pluginName.toUpperCase() : "OSM"
     readonly property bool localTileCacheRequested: tileMode === "local_arcgis_cache"
     readonly property bool localTileCacheRegistered: localTileCacheRequested && tileRoot.length > 0
+    readonly property bool backdropActive: backdropSource.length > 0 && mapBackdrop.status === Image.Ready
     readonly property string tileFeedLabel: "QtLocation / " + providerLabel + " 实时底图"
     readonly property string tileFeedDetail: localTileCacheRequested
         ? (localTileCacheRegistered
@@ -271,7 +273,7 @@ Item {
             bearing: 0
             tilt: 0
             copyrightsVisible: true
-            opacity: landingMode ? 0.78 : 0.94
+            opacity: landingMode ? (root.backdropActive ? 0.36 : 0.58) : (root.backdropActive ? 0.66 : 0.76)
 
             MapPolyline {
                 visible: root.trackCoordinates.length > 1
@@ -378,12 +380,30 @@ Item {
             }
         }
 
+        Image {
+            id: mapBackdrop
+            anchors.fill: parent
+            visible: root.backdropActive
+            source: root.backdropSource
+            fillMode: Image.PreserveAspectFit
+            smooth: true
+            asynchronous: true
+            mipmap: true
+            opacity: root.landingMode ? 0.34 : 0.18
+        }
+
+        Rectangle {
+            anchors.fill: mapBackdrop
+            visible: mapBackdrop.visible
+            color: root.landingMode ? "#12182633" : "#0d18212a"
+        }
+
         Rectangle {
             anchors.fill: parent
             gradient: Gradient {
-                GradientStop { position: 0.0; color: root.landingMode ? "#36081218" : "#1b081218" }
-                GradientStop { position: 0.42; color: "#0d12202a" }
-                GradientStop { position: 1.0; color: root.landingMode ? "#52091218" : "#2a091218" }
+                GradientStop { position: 0.0; color: root.landingMode ? "#4a071018" : "#28071118" }
+                GradientStop { position: 0.42; color: "#11182322" }
+                GradientStop { position: 1.0; color: root.landingMode ? "#52071118" : "#32071118" }
             }
         }
 
@@ -393,8 +413,8 @@ Item {
             anchors.top: parent.top
             height: parent.height * 0.28
             gradient: Gradient {
-                GradientStop { position: 0.0; color: "#7b08121b" }
-                GradientStop { position: 0.48; color: "#2908121b" }
+                GradientStop { position: 0.0; color: "#7805121b" }
+                GradientStop { position: 0.48; color: "#2208121b" }
                 GradientStop { position: 1.0; color: "#0008121b" }
             }
         }
@@ -406,8 +426,8 @@ Item {
             height: parent.height * 0.34
             gradient: Gradient {
                 GradientStop { position: 0.0; color: "#0008121b" }
-                GradientStop { position: 0.42; color: "#2208121b" }
-                GradientStop { position: 1.0; color: "#8508121b" }
+                GradientStop { position: 0.42; color: "#2408121b" }
+                GradientStop { position: 1.0; color: "#7608111b" }
             }
         }
 

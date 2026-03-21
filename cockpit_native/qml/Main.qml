@@ -13,6 +13,7 @@ ApplicationWindow {
     readonly property var metrics: DataUtils.objectOrEmpty((typeof screenMetrics !== "undefined") ? screenMetrics : null)
     readonly property var insets: DataUtils.objectOrEmpty((typeof safeAreaInsets !== "undefined") ? safeAreaInsets : null)
     readonly property var options: DataUtils.objectOrEmpty((typeof launchOptions !== "undefined") ? launchOptions : null)
+    readonly property var themePalette: DataUtils.objectOrEmpty(options["themePalette"])
 
     readonly property var leftPanelData: DataUtils.objectOrEmpty(zones["left_status_panel"])
     readonly property var centerPanelData: DataUtils.objectOrEmpty(zones["center_tactical_view"])
@@ -40,52 +41,52 @@ ApplicationWindow {
     readonly property int designWidth: 1440
     readonly property int designHeight: 900
 
-    readonly property string displayFamily: "Noto Serif CJK SC"
-    readonly property string uiFamily: "Noto Sans CJK SC"
-    readonly property string monoFamily: "JetBrains Mono"
+    readonly property string displayFamily: String(options["displayFontFamily"] || options["uiFontFamily"] || "Ubuntu Sans")
+    readonly property string uiFamily: String(options["uiFontFamily"] || "Ubuntu Sans")
+    readonly property string monoFamily: String(options["monoFontFamily"] || "Ubuntu Sans Mono")
 
-    readonly property color sceneTop: "#05080c"
-    readonly property color sceneMid: "#09111a"
-    readonly property color sceneBottom: "#0f171f"
-    readonly property color haloCool: "#183846"
-    readonly property color haloWarm: "#5c4227"
-    readonly property color shellExterior: "#0a1117"
-    readonly property color shellInterior: "#121b23"
-    readonly property color surfaceRaised: "#17222c"
-    readonly property color surfaceQuiet: "#0d151c"
-    readonly property color surfaceGlass: "#1b2833"
-    readonly property color borderSubtle: "#31424f"
-    readonly property color borderStrong: "#c3a174"
-    readonly property color accentIce: "#8dd8e4"
-    readonly property color accentGold: "#d4b283"
-    readonly property color accentMint: "#9fd1b0"
-    readonly property color accentRose: "#d18a80"
-    readonly property color textStrong: "#f6f1e7"
-    readonly property color textPrimary: "#dbe2e6"
-    readonly property color textSecondary: "#9aaab4"
-    readonly property color textMuted: "#6d7d88"
-    readonly property color dataLine: "#1b2a33"
-    readonly property color dataLineStrong: "#344651"
-    readonly property color panelHighlight: "#243542"
-    readonly property color panelGlowSoft: "#8dd8e4"
-    readonly property color canopyTop: "#1a252f"
-    readonly property color canopyBottom: "#0a0f14"
+    readonly property color sceneTop: themeColor("sceneTop", "#040c16")
+    readonly property color sceneMid: themeColor("sceneMid", "#081521")
+    readonly property color sceneBottom: themeColor("sceneBottom", "#0a111b")
+    readonly property color haloCool: themeColor("haloCool", "#12314d")
+    readonly property color haloWarm: themeColor("haloWarm", "#16314a")
+    readonly property color shellExterior: themeColor("shellExterior", "#07111a")
+    readonly property color shellInterior: themeColor("shellInterior", "#0b1722")
+    readonly property color surfaceRaised: themeColor("surfaceRaised", "#101d2a")
+    readonly property color surfaceQuiet: themeColor("surfaceQuiet", "#09131d")
+    readonly property color surfaceGlass: themeColor("surfaceGlass", "#132131")
+    readonly property color borderSubtle: themeColor("borderSubtle", "#203245")
+    readonly property color borderStrong: themeColor("borderStrong", "#3d6f92")
+    readonly property color accentIce: themeColor("accentIce", "#74dcff")
+    readonly property color accentGold: themeColor("accentGold", "#f2bf67")
+    readonly property color accentMint: themeColor("accentMint", "#73e5b0")
+    readonly property color accentRose: themeColor("accentRose", "#ff7f8c")
+    readonly property color textStrong: themeColor("textStrong", "#f4fbff")
+    readonly property color textPrimary: themeColor("textPrimary", "#d4e0ec")
+    readonly property color textSecondary: themeColor("textSecondary", "#8ea5bb")
+    readonly property color textMuted: themeColor("textMuted", "#5f768b")
+    readonly property color dataLine: themeColor("dataLine", "#112232")
+    readonly property color dataLineStrong: themeColor("dataLineStrong", "#1d3950")
+    readonly property color panelHighlight: themeColor("panelHighlight", "#17344b")
+    readonly property color panelGlowSoft: themeColor("panelGlowSoft", "#52dcff")
+    readonly property color canopyTop: themeColor("canopyTop", "#102131")
+    readonly property color canopyBottom: themeColor("canopyBottom", "#09111a")
 
     readonly property color panelColor: surfaceRaised
     readonly property color panelColorRaised: surfaceGlass
     readonly property color panelColorSoft: surfaceQuiet
     readonly property color cardColor: surfaceRaised
     readonly property color borderSoft: borderSubtle
-    readonly property color accentBlue: "#a7bdca"
+    readonly property color accentBlue: themeColor("accentBlue", "#94bad8")
     readonly property color accentCyan: accentIce
     readonly property color accentAmber: accentGold
     readonly property color accentGreen: accentMint
     readonly property color accentRed: accentRose
     readonly property color gridLine: dataLine
     readonly property color gridLineStrong: dataLineStrong
-    readonly property color shellDockTop: "#22323d"
-    readonly property color shellDockMid: "#141e27"
-    readonly property color shellDockBottom: "#0b1118"
+    readonly property color shellDockTop: themeColor("shellDockTop", "#12283d")
+    readonly property color shellDockMid: themeColor("shellDockMid", "#0c1724")
+    readonly property color shellDockBottom: themeColor("shellDockBottom", "#08111a")
     readonly property color panelGlowStrong: panelGlowSoft
     readonly property color panelTraceStrong: borderStrong
 
@@ -334,6 +335,10 @@ ApplicationWindow {
 
     function scaled(value) {
         return Math.max(1, Math.round(value * uiScale))
+    }
+
+    function themeColor(name, fallback) {
+        return themePalette[name] || fallback
     }
 
     function primaryLabel(text) {
