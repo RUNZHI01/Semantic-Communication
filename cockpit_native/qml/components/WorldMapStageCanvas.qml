@@ -29,14 +29,14 @@ Item {
     property bool preferBottomBannerDock: false
 
     readonly property int mapInset: shellWindow ? shellWindow.scaled(landingMode ? 16 : 20) : (landingMode ? 16 : 20)
-    readonly property int overlayMargin: shellWindow ? shellWindow.scaled(landingMode ? 14 : 16) : (landingMode ? 14 : 16)
+    readonly property int overlayMargin: shellWindow ? shellWindow.scaled(landingMode ? 12 : 16) : (landingMode ? 12 : 16)
     readonly property bool minimalBanner: landingMode && bannerEyebrow.length === 0
     readonly property int bannerPadding: shellWindow
-        ? shellWindow.scaled(minimalBanner ? 10 : (landingMode ? 12 : 11))
-        : (minimalBanner ? 10 : (landingMode ? 12 : 11))
+        ? shellWindow.scaled(minimalBanner ? 8 : (landingMode ? 10 : 11))
+        : (minimalBanner ? 8 : (landingMode ? 10 : 11))
     readonly property int bannerGap: shellWindow
-        ? shellWindow.scaled(minimalBanner ? 5 : (landingMode ? 7 : 6))
-        : (minimalBanner ? 5 : (landingMode ? 7 : 6))
+        ? shellWindow.scaled(minimalBanner ? 4 : (landingMode ? 6 : 6))
+        : (minimalBanner ? 4 : (landingMode ? 6 : 6))
     readonly property color oceanTop: landingMode ? "#173b52" : "#17304b"
     readonly property color oceanBottom: landingMode ? "#060e15" : "#050d15"
     readonly property color landFill: landingMode ? "#4f6f83" : "#53758f"
@@ -87,21 +87,21 @@ Item {
             )
             : (
                 bannerDockedBottom
-                    ? (landingMode ? (minimalBanner ? 260 : 300) : 340)
-                    : (landingMode ? 280 : 260)
+                    ? (landingMode ? (minimalBanner ? 220 : 260) : 340)
+                    : (landingMode ? 250 : 260)
             ),
         Math.min(
             width - (overlayMargin * 2),
             shellWindow
                 ? shellWindow.scaled(
                     bannerDockedBottom
-                        ? (landingMode ? (minimalBanner ? 340 : 420) : 500)
-                        : (landingMode ? 360 : 560)
+                        ? (landingMode ? (minimalBanner ? 300 : 360) : 500)
+                        : (landingMode ? 320 : 560)
                 )
                 : (
                     bannerDockedBottom
-                        ? (landingMode ? (minimalBanner ? 340 : 420) : 500)
-                        : (landingMode ? 360 : 560)
+                        ? (landingMode ? (minimalBanner ? 300 : 360) : 500)
+                        : (landingMode ? 320 : 560)
                 )
         )
     )
@@ -761,11 +761,13 @@ Item {
                 : root.overlayMargin + (shellWindow ? shellWindow.scaled(root.landingMode ? 8 : 6) : (root.landingMode ? 8 : 6)))
         radius: shellWindow ? shellWindow.scaled(root.landingMode ? 14 : 13) : (root.landingMode ? 14 : 13)
         gradient: Gradient {
-            GradientStop { position: 0.0; color: root.landingMode ? "#bc101b26" : "#d40b1621" }
-            GradientStop { position: 0.54; color: root.landingMode ? "#9409101b" : "#bb09111a" }
-            GradientStop { position: 1.0; color: root.landingMode ? "#6b060d14" : "#8d071018" }
+            GradientStop { position: 0.0; color: root.landingMode ? "#8e101b24" : "#d40b1621" }
+            GradientStop { position: 0.54; color: root.landingMode ? "#68091019" : "#bb09111a" }
+            GradientStop { position: 1.0; color: root.landingMode ? "#3d060d12" : "#8d071018" }
         }
-        border.color: root.landingMode ? Qt.lighter(root.mapGlow, 1.06) : Qt.rgba(root.mapGlow.r, root.mapGlow.g, root.mapGlow.b, 0.72)
+        border.color: root.landingMode
+            ? Qt.rgba(root.mapGlow.r, root.mapGlow.g, root.mapGlow.b, 0.54)
+            : Qt.rgba(root.mapGlow.r, root.mapGlow.g, root.mapGlow.b, 0.72)
         border.width: 1
 
         Rectangle {
@@ -819,7 +821,7 @@ Item {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
-            anchors.leftMargin: root.bannerPadding + (root.landingMode ? (shellWindow ? shellWindow.scaled(10) : 10) : 0)
+            anchors.leftMargin: root.bannerPadding + ((root.landingMode && !root.minimalBanner) ? (shellWindow ? shellWindow.scaled(10) : 10) : 0)
             anchors.rightMargin: root.bannerPadding
             anchors.topMargin: root.bannerPadding
             anchors.bottomMargin: root.bannerPadding
