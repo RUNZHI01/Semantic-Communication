@@ -29,58 +29,58 @@ ApplicationWindow {
     readonly property int designWidth: 1440
     readonly property int designHeight: 900
 
-    readonly property string displayFamily: "Noto Sans CJK SC"
-    readonly property string uiFamily: "Noto Sans CJK SC"
-    readonly property string monoFamily: "JetBrains Mono"
+    readonly property string displayFamily: "Ubuntu Sans"
+    readonly property string uiFamily: "Ubuntu Sans"
+    readonly property string monoFamily: "Ubuntu Sans Mono"
 
-    readonly property color bgColorDeep: "#020710"
-    readonly property color bgColorMid: "#071629"
-    readonly property color bgColorLight: "#0f3359"
-    readonly property color bgColorHaze: "#173f67"
-    readonly property color shellColor: "#07101d"
-    readonly property color shellColorRaised: "#0b1727"
-    readonly property color shellColorInset: "#071522"
-    readonly property color shellColorGlass: "#0d2031"
-    readonly property color panelColor: "#0a1523"
-    readonly property color panelColorRaised: "#102239"
-    readonly property color panelColorSoft: "#0c1a2b"
-    readonly property color cardColor: "#112743"
-    readonly property color cardColorSoft: "#0c1829"
-    readonly property color borderSoft: "#214666"
-    readonly property color borderStrong: "#5ac7ff"
-    readonly property color accentBlue: "#4ebcff"
-    readonly property color accentBlueSoft: "#2f86be"
-    readonly property color accentCyan: "#9ff1ff"
-    readonly property color accentGreen: "#42f0bc"
-    readonly property color accentAmber: "#ffbf52"
-    readonly property color accentRed: "#ff7b7b"
-    readonly property color textStrong: "#f6fbff"
-    readonly property color textPrimary: "#d7efff"
-    readonly property color textSecondary: "#8db2cc"
-    readonly property color textMuted: "#5a778e"
-    readonly property color textTertiary: "#4b667d"
-    readonly property color gridLine: "#132b42"
-    readonly property color gridLineStrong: "#24567d"
-    readonly property color shellStageTop: "#153f67"
-    readonly property color shellStageMid: "#0a1d31"
-    readonly property color shellStageBottom: "#05101a"
-    readonly property color shellDockTop: "#112c47"
-    readonly property color shellDockMid: "#0a1828"
-    readonly property color shellDockBottom: "#06101a"
-    readonly property color panelGlowStrong: "#6fdcff"
-    readonly property color panelTraceStrong: "#1f5b86"
-    readonly property color panelTrace: "#143754"
-    readonly property color panelTraceSoft: "#0d2940"
-    readonly property color shellGlowOuter: "#2c89c6"
-    readonly property color shellGlowSoft: "#143754"
-    readonly property color shellFabricTop: "#14314c"
-    readonly property color shellFabricMid: "#0a1726"
-    readonly property color shellFabricBottom: "#06101a"
-    readonly property color shellCanopyTop: "#1b4f7b"
-    readonly property color shellCanopyMid: "#0d2236"
-    readonly property color shellCanopyBottom: "#07111c"
-    readonly property color shellCanopyEdge: "#255d88"
-    readonly property color shellDeckAura: "#1c5d89"
+    readonly property color bgColorDeep: "#050b12"
+    readonly property color bgColorMid: "#091729"
+    readonly property color bgColorLight: "#103155"
+    readonly property color bgColorHaze: "#1a4e7a"
+    readonly property color shellColor: "#07111b"
+    readonly property color shellColorRaised: "#0b1623"
+    readonly property color shellColorInset: "#07131d"
+    readonly property color shellColorGlass: "#0d1d2c"
+    readonly property color panelColor: "#0a1522"
+    readonly property color panelColorRaised: "#101f31"
+    readonly property color panelColorSoft: "#0b1724"
+    readonly property color cardColor: "#11253c"
+    readonly property color cardColorSoft: "#0b1623"
+    readonly property color borderSoft: "#1b4364"
+    readonly property color borderStrong: "#5fbfff"
+    readonly property color accentBlue: "#5ab7ff"
+    readonly property color accentBlueSoft: "#2b78a9"
+    readonly property color accentCyan: "#8fe6ff"
+    readonly property color accentGreen: "#3fe0b3"
+    readonly property color accentAmber: "#ffbf55"
+    readonly property color accentRed: "#ff7a7a"
+    readonly property color textStrong: "#f1f7ff"
+    readonly property color textPrimary: "#d2e8ff"
+    readonly property color textSecondary: "#88abc5"
+    readonly property color textMuted: "#577086"
+    readonly property color textTertiary: "#465c70"
+    readonly property color gridLine: "#143046"
+    readonly property color gridLineStrong: "#2a648f"
+    readonly property color shellStageTop: "#14324d"
+    readonly property color shellStageMid: "#0a1827"
+    readonly property color shellStageBottom: "#060d16"
+    readonly property color shellDockTop: "#11283f"
+    readonly property color shellDockMid: "#091522"
+    readonly property color shellDockBottom: "#050c14"
+    readonly property color panelGlowStrong: "#78d8ff"
+    readonly property color panelTraceStrong: "#23577c"
+    readonly property color panelTrace: "#14344d"
+    readonly property color panelTraceSoft: "#0d2437"
+    readonly property color shellGlowOuter: "#2e7fb0"
+    readonly property color shellGlowSoft: "#123149"
+    readonly property color shellFabricTop: "#13304a"
+    readonly property color shellFabricMid: "#091522"
+    readonly property color shellFabricBottom: "#050c14"
+    readonly property color shellCanopyTop: "#18405f"
+    readonly property color shellCanopyMid: "#0b1a29"
+    readonly property color shellCanopyBottom: "#07111b"
+    readonly property color shellCanopyEdge: "#285f86"
+    readonly property color shellDeckAura: "#1a567f"
 
     readonly property real widthScale: Math.max(0.78, Math.min(1.18, Number(metrics["width"] || designWidth) / designWidth))
     readonly property real heightScale: Math.max(0.78, Math.min(1.18, Number(metrics["height"] || designHeight) / designHeight))
@@ -1770,6 +1770,7 @@ ApplicationWindow {
                     }
 
                     Rectangle {
+                        visible: false
                         Layout.fillWidth: true
                         Layout.minimumWidth: 0
                         Layout.alignment: Qt.AlignTop
@@ -2507,7 +2508,7 @@ ApplicationWindow {
                             Text {
                                 Layout.fillWidth: true
                                 text: "把中心墙板、左右轨与执行坞站压进同一成品壳体，让整个 native cockpit 读起来更像完成态产品，而不是若干强面板的并列。"
-                                visible: root.showDashboardDeckMetrics
+                                visible: false
                                 color: root.textSecondary
                                 font.pixelSize: root.captionSize
                                 font.family: root.uiFamily
@@ -2537,7 +2538,7 @@ ApplicationWindow {
 
                     Flow {
                         Layout.fillWidth: true
-                        visible: root.showDashboardDeckMetrics && root.wideLayout
+                        visible: false
                         spacing: root.compactGap
 
                         Repeater {
@@ -2603,6 +2604,7 @@ ApplicationWindow {
                     }
 
                     Rectangle {
+                        visible: false
                         Layout.fillWidth: true
                         Layout.alignment: root.centeredCommandStage ? Qt.AlignHCenter : 0
                         Layout.preferredWidth: root.centeredCommandStage
@@ -3152,7 +3154,7 @@ ApplicationWindow {
                                 Layout.columnSpan: root.wideLayout ? root.wideCenterSpan : (root.mediumLayout ? 2 : 1)
                                 Layout.fillWidth: true
                                 Layout.fillHeight: root.wideLayout
-                                Layout.minimumHeight: root.scaled(root.wideLayout ? 520 : 400)
+                                Layout.minimumHeight: root.scaled(root.wideLayout ? 560 : 420)
                                 shellWindow: root
                                 panelData: root.centerPanelData
                             }
