@@ -31,12 +31,15 @@ class DemoRepoAdapterTest(unittest.TestCase):
     def test_ui_state_exposes_expected_zones(self) -> None:
         ui_state = self.adapter.load_contract_bundle().ui_state
         center_panel = ui_state["zones"]["center_tactical_view"]
+        footer_note = ui_state["zones"]["bottom_action_strip"]["footer_note"]
 
         self.assertIn("zones", ui_state)
+        self.assertEqual(ui_state["meta"]["launch_hint"], "bash ./session_bootstrap/scripts/run_cockpit_native.sh")
         self.assertIn("left_status_panel", ui_state["zones"])
         self.assertIn("center_tactical_view", ui_state["zones"])
         self.assertIn("right_weak_network_panel", ui_state["zones"])
         self.assertIn("bottom_action_strip", ui_state["zones"])
+        self.assertIn("run_cockpit_native.sh", footer_note)
         self.assertEqual(center_panel["mission_call_sign"], "M9-DEMO")
         self.assertEqual(center_panel["feed_contract"]["api_path"], "/api/aircraft-position")
         self.assertEqual(center_panel["feed_contract"]["active_source_kind"], "backend_stub")

@@ -222,7 +222,7 @@ class DemoRepoAdapter:
                     "note": str(aircraft_position.get("source_api_path") or "/api/aircraft-position"),
                 },
             ],
-            "footer_note": "默认执行 `python3 -m cockpit_native`；若需强制软件渲染，可追加 `--software-render`。",
+            "footer_note": "默认执行 `bash ./session_bootstrap/scripts/run_cockpit_native.sh`；该入口会自动使用 repo 内 venv 并带软件渲染安全参数。",
         }
 
         return {
@@ -233,7 +233,7 @@ class DemoRepoAdapter:
                 "snapshot_path": str(snapshot_path),
                 "layout_strategy": "adaptive_zones",
                 "design_direction": "resolution-independent logical zones with scalable type, spacing, and safe-area padding",
-                "launch_hint": "python3 -m cockpit_native",
+                "launch_hint": "bash ./session_bootstrap/scripts/run_cockpit_native.sh",
             },
             "zones": {
                 "left_status_panel": left_panel,

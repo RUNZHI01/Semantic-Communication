@@ -31,6 +31,11 @@ class AvailabilityTest(unittest.TestCase):
         self.assertIn("available", payload)
         self.assertEqual(payload["aircraft_contract"], "aircraft_position.v1")
         self.assertEqual(payload["recommended_scenario_id"], "snr10_bestcurrent")
+        self.assertEqual(payload["launch_hint"], "bash ./session_bootstrap/scripts/run_cockpit_native.sh")
+        self.assertEqual(
+            payload["smoke_check_hint"],
+            "bash ./session_bootstrap/scripts/run_cockpit_native.sh --smoke-import-check",
+        )
 
 
 if __name__ == "__main__":

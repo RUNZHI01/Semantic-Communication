@@ -18,6 +18,6 @@ def availability_report() -> dict[str, Any]:
         "dependency": "PySide6",
         "available": available,
         "status": "ready" if available else "missing",
-        "smoke_check_hint": "python3 -m cockpit_native --smoke-import-check",
-        "launch_hint": "python3 -m cockpit_native",
+        "smoke_check_hint": "bash ./session_bootstrap/scripts/run_cockpit_native.sh --smoke-import-check",
+        "launch_hint": "bash ./session_bootstrap/scripts/run_cockpit_native.sh",
     }
