@@ -33,3 +33,21 @@ Force software rendering from the start:
 ```bash
 python3 -m cockpit_native --software-render
 ```
+
+Capture an offscreen screenshot through the repo-local venv launcher:
+
+```bash
+bash ./session_bootstrap/scripts/run_cockpit_native_capture.sh
+```
+
+Default output:
+
+```text
+./cockpit_native/runtime/captures/cockpit_native_latest.png
+```
+
+Override the output path if needed:
+
+```bash
+bash ./session_bootstrap/scripts/run_cockpit_native_capture.sh --output /tmp/cockpit_native.png
+```
