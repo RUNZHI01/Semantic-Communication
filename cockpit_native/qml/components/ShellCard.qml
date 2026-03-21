@@ -16,6 +16,10 @@ Item {
     property int contentSpacing: shellWindow ? shellWindow.compactGap : 8
 
     readonly property bool hasHeader: eyebrow.length > 0 || title.length > 0 || subtitle.length > 0
+    readonly property color topFill: Qt.lighter(root.fillColor, 1.06)
+    readonly property color bottomFill: Qt.darker(root.fillColor, 1.12)
+    readonly property color deepFill: Qt.darker(root.fillColor, 1.24)
+    readonly property color rimTone: Qt.lighter(root.borderColor, 1.04)
 
     default property alias contentData: contentLayout.data
 
@@ -24,9 +28,11 @@ Item {
     Rectangle {
         anchors.fill: parent
         radius: root.radius
-        color: Qt.rgba(root.fillColor.r, root.fillColor.g, root.fillColor.b, 0.96)
-        border.color: Qt.rgba(root.borderColor.r, root.borderColor.g, root.borderColor.b, 0.88)
-        border.width: 1
+        gradient: Gradient {
+            GradientStop { position: 0.0; color: Qt.rgba(root.topFill.r, root.topFill.g, root.topFill.b, 0.98) }
+            GradientStop { position: 0.26; color: Qt.rgba(root.fillColor.r, root.fillColor.g, root.fillColor.b, 0.97) }
+            GradientStop { position: 1.0; color: Qt.rgba(root.bottomFill.r, root.bottomFill.g, root.bottomFill.b, 0.98) }
+        }
     }
 
     Rectangle {
@@ -38,6 +44,20 @@ Item {
             GradientStop { position: 1.0; color: "#00000000" }
         }
         opacity: 0.48
+    }
+
+    Rectangle {
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        height: Math.max(parent.height * 0.38, root.radius * 1.8)
+        radius: parent.radius
+        gradient: Gradient {
+            GradientStop { position: 0.0; color: "#00000000" }
+            GradientStop { position: 0.44; color: "#10000000" }
+            GradientStop { position: 1.0; color: Qt.rgba(root.deepFill.r, root.deepFill.g, root.deepFill.b, 0.84) }
+        }
+        opacity: 0.82
     }
 
     Rectangle {
@@ -89,11 +109,30 @@ Item {
     }
 
     Rectangle {
+        width: parent.width * 0.24
+        height: parent.height * 0.22
+        radius: shellWindow ? shellWindow.edgeRadius : 12
+        color: "#0f000000"
+        rotation: -10
+        x: parent.width - (width * 0.8)
+        y: -height * 0.24
+    }
+
+    Rectangle {
         anchors.fill: parent
         anchors.margins: 1
         radius: parent.radius - 1
         color: "transparent"
-        border.color: "#0cffffff"
+        border.color: root.rimTone
+        border.width: 1
+    }
+
+    Rectangle {
+        anchors.fill: parent
+        anchors.margins: shellWindow ? shellWindow.scaled(5) : 5
+        radius: parent.radius - (shellWindow ? shellWindow.scaled(5) : 5)
+        color: "transparent"
+        border.color: Qt.rgba(root.borderColor.r, root.borderColor.g, root.borderColor.b, 0.22)
         border.width: 1
     }
 
@@ -130,6 +169,7 @@ Item {
                     font.pixelSize: shellWindow ? shellWindow.sectionTitleSize : 22
                     font.weight: Font.DemiBold
                     font.family: shellWindow ? shellWindow.displayFamily : "Noto Serif CJK SC"
+                    font.letterSpacing: shellWindow ? shellWindow.scaled(0.2) : 0.2
                     wrapMode: Text.WordWrap
                 }
 
@@ -151,8 +191,15 @@ Item {
             visible: root.hasHeader && contentLayout.children.length > 0
             Layout.fillWidth: true
             Layout.preferredHeight: 1
-            color: shellWindow ? shellWindow.dataLineStrong : "#33434f"
-            opacity: 0.72
+            gradient: Gradient {
+                orientation: Gradient.Horizontal
+                GradientStop { position: 0.0; color: "transparent" }
+                GradientStop { position: 0.18; color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.2) }
+                GradientStop { position: 0.5; color: shellWindow ? shellWindow.dataLineStrong : "#33434f" }
+                GradientStop { position: 0.82; color: Qt.rgba(root.borderColor.r, root.borderColor.g, root.borderColor.b, 0.22) }
+                GradientStop { position: 1.0; color: "transparent" }
+            }
+            opacity: 0.82
         }
 
         ColumnLayout {

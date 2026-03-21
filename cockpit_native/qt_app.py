@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -47,12 +48,60 @@ OFFSCREEN_CAPTURE_ENV_VARS = {
     "QT_QPA_PLATFORM": "offscreen",
 }
 
+MAP_BACKEND_ENV = "COCKPIT_NATIVE_MAP_BACKEND"
+WORLD_MAP_BACKDROP_ENV = "COCKPIT_NATIVE_WORLD_MAP_BACKDROP"
+VALID_MAP_BACKENDS = {"auto", "canvas", "svg", "qtlocation"}
+
 
 @dataclass
 class QtCockpitRuntime:
     app: Any
     engine: Any
     root_window: Any
+
+
+def _optional_module_available(module_name: str) -> bool:
+    try:
+        return importlib.util.find_spec(module_name) is not None
+    except ModuleNotFoundError:
+        return False
+
+
+def normalize_map_backend(raw_value: str | None) -> str:
+    candidate = str(raw_value or "").strip().lower()
+    return candidate if candidate in VALID_MAP_BACKENDS else "auto"
+
+
+def resolve_optional_repo_path(raw_value: str | None, *, project_root: Path | None = None) -> str:
+    candidate = str(raw_value or "").strip()
+    if not candidate:
+        return ""
+
+    resolved_root = (project_root or Path(__file__).resolve().parent.parent).resolve()
+    resolved_path = Path(candidate)
+    if not resolved_path.is_absolute():
+        resolved_path = resolved_root / resolved_path
+    return resolved_path.resolve().as_uri()
+
+
+def build_launch_options(
+    project_root: Path | None = None,
+    *,
+    software_render: bool = False,
+    env: Mapping[str, str] | None = None,
+) -> dict[str, object]:
+    resolved_env = os.environ if env is None else env
+    return {
+        "softwareRender": bool(software_render),
+        "mapBackend": normalize_map_backend(resolved_env.get(MAP_BACKEND_ENV)),
+        "qtLocationAvailable": _optional_module_available("PySide6.QtLocation"),
+        "qtPositioningAvailable": _optional_module_available("PySide6.QtPositioning"),
+        "qtSvgAvailable": _optional_module_available("PySide6.QtSvg"),
+        "worldMapBackdropSource": resolve_optional_repo_path(
+            resolved_env.get(WORLD_MAP_BACKDROP_ENV),
+            project_root=project_root,
+        ),
+    }
 
 
 def apply_software_renderer_env(target: MutableMapping[str, str] | None = None) -> MutableMapping[str, str]:
@@ -154,7 +203,10 @@ def _create_cockpit_runtime(
     engine.rootContext().setContextProperty("cockpitBridgeAvailable", True)
     engine.rootContext().setContextProperty("safeAreaInsets", _resolve_safe_area_insets(safe_area_insets))
     engine.rootContext().setContextProperty("screenMetrics", screen_metrics)
-    engine.rootContext().setContextProperty("launchOptions", {"softwareRender": bool(software_render)})
+    engine.rootContext().setContextProperty(
+        "launchOptions",
+        build_launch_options(project_root=project_root, software_render=software_render),
+    )
 
     qml_path = Path(__file__).resolve().parent / "qml" / "Main.qml"
     engine.load(str(qml_path))
