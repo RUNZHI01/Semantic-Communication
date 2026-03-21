@@ -25,19 +25,19 @@ Item {
     readonly property int overlayMargin: shellWindow ? shellWindow.scaled(landingMode ? 14 : 16) : (landingMode ? 14 : 16)
     readonly property int bannerPadding: shellWindow ? shellWindow.scaled(landingMode ? 12 : 11) : (landingMode ? 12 : 11)
     readonly property int bannerGap: shellWindow ? shellWindow.scaled(landingMode ? 7 : 6) : (landingMode ? 7 : 6)
-    readonly property color oceanTop: landingMode ? "#2a5879" : "#183250"
-    readonly property color oceanBottom: landingMode ? "#0b1721" : "#071019"
-    readonly property color landFill: landingMode ? "#769fb8" : "#456a82"
-    readonly property color landFillBright: landingMode ? "#a6cadb" : "#6388a2"
+    readonly property color oceanTop: landingMode ? "#234c69" : "#17304b"
+    readonly property color oceanBottom: landingMode ? "#09131c" : "#050d15"
+    readonly property color landFill: landingMode ? "#6f96ae" : "#53758f"
+    readonly property color landFillBright: landingMode ? "#99bece" : "#7598ae"
     readonly property color coastlineColor: shellWindow ? Qt.lighter(shellWindow.accentCyan, 1.04) : "#8fe6ff"
     readonly property color gridMinor: shellWindow ? shellWindow.gridLine : "#123147"
     readonly property color gridMajor: shellWindow ? shellWindow.gridLineStrong : "#245b80"
-    readonly property color labelColor: shellWindow ? Qt.lighter(shellWindow.textSecondary, 1.08) : "#8fa7bb"
+    readonly property color labelColor: shellWindow ? Qt.lighter(shellWindow.textMuted, 1.2) : "#8fa7bb"
     readonly property color mapGlow: shellWindow ? shellWindow.panelGlowStrong : "#78d8ff"
     readonly property color markerColor: shellWindow ? shellWindow.accentCyan : "#8fe6ff"
     readonly property color emphasisColor: shellWindow ? shellWindow.accentAmber : "#ffbf55"
-    readonly property color overlayCardColor: landingMode ? "#ce0a111a" : "#de0a1320"
-    readonly property color overlayCardColorSoft: landingMode ? "#a8060d14" : "#bc09111b"
+    readonly property color overlayCardColor: landingMode ? "#d70c1721" : "#d90a1320"
+    readonly property color overlayCardColorSoft: landingMode ? "#9b07111a" : "#aa081119"
     readonly property bool hasCurrentPoint: isFinite(Number(currentPoint["longitude"])) && isFinite(Number(currentPoint["latitude"]))
     readonly property bool compactStage: width < (shellWindow ? shellWindow.scaled(620) : 620)
     readonly property real markerX: hasCurrentPoint ? projectX(Number(currentPoint["longitude"])) : width * 0.5
@@ -302,7 +302,8 @@ Item {
 
             var ocean = ctx.createLinearGradient(0, 0, 0, canvasHeight)
             ocean.addColorStop(0.0, root.oceanTop)
-            ocean.addColorStop(0.48, root.landingMode ? "#14314b" : "#10253a")
+            ocean.addColorStop(0.34, root.landingMode ? "#1a3852" : "#11253a")
+            ocean.addColorStop(0.62, root.landingMode ? "#10263a" : "#0d1d2d")
             ocean.addColorStop(1.0, root.oceanBottom)
             ctx.fillStyle = ocean
             ctx.fillRect(0, 0, canvasWidth, canvasHeight)
@@ -371,11 +372,13 @@ Item {
                 var shadowPolygon = root.continentPolygons[polygonIndex]
                 ctx.save()
                 ctx.translate(0, 3)
-                drawPolygon(ctx, shadowPolygon, "rgba(5,13,22,0.34)", "rgba(0,0,0,0)")
+                drawPolygon(ctx, shadowPolygon, "rgba(5,13,22,0.36)", "rgba(0,0,0,0)")
                 ctx.restore()
 
-                var fillColor = polygonIndex % 2 === 0 ? root.landFill : root.landFillBright
-                drawPolygon(ctx, polygon, fillColor, root.landingMode ? "rgba(194,239,255,0.66)" : "rgba(172,236,255,0.54)")
+                var fillColor = polygonIndex % 3 === 0
+                    ? root.landFillBright
+                    : (polygonIndex % 2 === 0 ? root.landFill : Qt.darker(root.landFill, 1.04))
+                drawPolygon(ctx, polygon, fillColor, Qt.rgba(root.coastlineColor.r, root.coastlineColor.g, root.coastlineColor.b, root.landingMode ? 0.62 : 0.5))
             }
 
             ctx.beginPath()
@@ -582,9 +585,9 @@ Item {
                 : root.overlayMargin + (shellWindow ? shellWindow.scaled(root.landingMode ? 8 : 6) : (root.landingMode ? 8 : 6)))
         radius: shellWindow ? shellWindow.scaled(root.landingMode ? 14 : 13) : (root.landingMode ? 14 : 13)
         gradient: Gradient {
-            GradientStop { position: 0.0; color: root.landingMode ? "#d512202b" : "#d30b1621" }
-            GradientStop { position: 0.58; color: root.landingMode ? "#bf0a1220" : "#bd09111a" }
-            GradientStop { position: 1.0; color: root.landingMode ? "#98081018" : "#9c071018" }
+            GradientStop { position: 0.0; color: root.landingMode ? "#d212202b" : "#d40b1621" }
+            GradientStop { position: 0.54; color: root.landingMode ? "#b80a1220" : "#bb09111a" }
+            GradientStop { position: 1.0; color: root.landingMode ? "#86081018" : "#8d071018" }
         }
         border.color: root.landingMode ? Qt.lighter(root.mapGlow, 1.06) : Qt.rgba(root.mapGlow.r, root.mapGlow.g, root.mapGlow.b, 0.72)
         border.width: 1
