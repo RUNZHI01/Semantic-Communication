@@ -37,7 +37,7 @@ Item {
     property string tileFormat: "png"
 
     readonly property int mapInset: shellWindow ? shellWindow.scaled(landingMode ? 16 : 20) : (landingMode ? 16 : 20)
-    readonly property int overlayMargin: shellWindow ? shellWindow.scaled(landingMode ? 14 : 16) : (landingMode ? 14 : 16)
+    readonly property int overlayMargin: shellWindow ? shellWindow.scaled(landingMode ? 12 : 16) : (landingMode ? 12 : 16)
     readonly property bool compactStage: width < 780
     readonly property bool stackedBanner: width < (landingMode ? 620 : 780)
     readonly property bool bannerDockedBottom: preferBottomBannerDock
@@ -271,7 +271,7 @@ Item {
             bearing: 0
             tilt: 0
             copyrightsVisible: true
-            opacity: 0.98
+            opacity: landingMode ? 0.78 : 0.94
 
             MapPolyline {
                 visible: root.trackCoordinates.length > 1
@@ -379,6 +379,15 @@ Item {
         }
 
         Rectangle {
+            anchors.fill: parent
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: root.landingMode ? "#36081218" : "#1b081218" }
+                GradientStop { position: 0.42; color: "#0d12202a" }
+                GradientStop { position: 1.0; color: root.landingMode ? "#52091218" : "#2a091218" }
+            }
+        }
+
+        Rectangle {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
@@ -481,11 +490,13 @@ Item {
             : root.overlayMargin
         width: Math.min(
             root.stackedBanner ? parent.width - (root.overlayMargin * 2) : parent.width * (root.bannerDockedBottom ? 0.48 : 0.52),
-            shellWindow ? shellWindow.scaled(root.bannerDockedBottom ? (root.landingMode ? 420 : 500) : (root.landingMode ? 520 : 560)) : (root.bannerDockedBottom ? (root.landingMode ? 420 : 500) : (root.landingMode ? 520 : 560))
+            shellWindow
+                ? shellWindow.scaled(root.bannerDockedBottom ? (root.landingMode ? 360 : 500) : (root.landingMode ? 420 : 560))
+                : (root.bannerDockedBottom ? (root.landingMode ? 360 : 500) : (root.landingMode ? 420 : 560))
         )
         shellWindow: root.shellWindow
         accentColor: root.trackColor
-        prominent: true
+        prominent: !root.landingMode
         visible: root.bannerTitle.length > 0 || root.bannerText.length > 0 || (root.bannerChips && root.bannerChips.length > 0)
 
         Text {

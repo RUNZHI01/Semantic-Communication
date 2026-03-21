@@ -30,6 +30,7 @@ Item {
     readonly property var launchOptions: shellWindow && shellWindow.options ? shellWindow.options : ({})
     readonly property string requestedMapBackend: normalizeBackend(String(launchOptions["mapBackend"] || "auto"))
     readonly property string requestedMapProvider: String(launchOptions["mapProvider"] || "auto")
+    readonly property bool softwareRenderRequested: !!launchOptions["softwareRender"]
     readonly property var qtLocationProviders: launchOptions["qtLocationProviders"] || []
     readonly property string qtLocationPluginName: String(launchOptions["qtLocationPluginName"] || "")
     readonly property bool qtLocationAvailable: !!launchOptions["qtLocationAvailable"]
@@ -110,6 +111,8 @@ Item {
             return localBackdropReady ? "svg" : (qtLocationBackendReady ? "qtlocation" : "canvas")
         if (requestedMapBackend === "canvas")
             return "canvas"
+        if (softwareRenderRequested)
+            return localBackdropReady ? "svg" : "canvas"
         if (qtLocationBackendReady)
             return "qtlocation"
         if (localBackdropReady)

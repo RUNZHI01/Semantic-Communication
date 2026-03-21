@@ -29,23 +29,25 @@ Item {
     )
     readonly property bool landingWide: shellWindow ? shellWindow.viewportWidth >= 1320 : width >= 1320
     readonly property bool landingShortHeight: shellWindow ? shellWindow.shortViewport : height < 780
-    readonly property int railWidth: shellWindow ? shellWindow.scaled(landingWide ? 222 : 212) : 222
+    readonly property int railWidth: shellWindow ? shellWindow.scaled(landingWide ? 204 : 198) : 204
     readonly property int landingStageLedgerWidth: shellWindow ? shellWindow.scaled(landingWide ? 298 : 268) : 298
     readonly property int flightSidebarWidth: shellWindow ? shellWindow.scaled(shellWindow.wideLayout ? 316 : 292) : 316
     readonly property int flightStageHeight: shellWindow ? shellWindow.scaled(shellWindow.compactLayout ? 332 : 478) : 478
     readonly property int flightStackedStageHeight: shellWindow ? shellWindow.scaled(shellWindow.compactLayout ? 316 : 372) : 372
-    readonly property var landingStatusList: shellWindow ? shellWindow.previewItems(statusRows, landingWide ? 2 : 3) : []
+    readonly property var landingStatusList: shellWindow ? shellWindow.previewItems(statusRows, 2) : []
     readonly property var landingScenarioList: shellWindow ? shellWindow.previewItems(scenarioList, 1) : []
     readonly property var timingPreviewList: shellWindow ? shellWindow.previewItems(stageTimingList, shellWindow.compactLayout ? 3 : 4) : []
     readonly property var evidencePreviewList: shellWindow ? shellWindow.previewItems(evidenceList, 4) : []
     readonly property var scenarioDeckList: shellWindow ? shellWindow.previewItems(scenarioList, shellWindow.wideLayout ? 4 : 3) : []
     readonly property var landingJumpList: shellWindow ? DataUtils.arrayOrEmpty(shellWindow.landingJumpModel) : []
-    readonly property var landingWeakMetricList: shellWindow ? DataUtils.arrayOrEmpty(shellWindow.landingWeakMetricModel) : []
+    readonly property var landingWeakMetricList: shellWindow
+        ? shellWindow.previewItems(shellWindow.landingWeakMetricModel, landingWide ? 4 : 2)
+        : []
     readonly property var landingTelemetryPreviewList: shellWindow
-        ? shellWindow.previewItems(shellWindow.landingTelemetryModel, landingWide ? 4 : 2)
+        ? shellWindow.previewItems(shellWindow.landingTelemetryModel, landingWide ? 3 : 2)
         : []
     readonly property var actionPreviewList: shellWindow ? shellWindow.previewItems(actionList, 2) : []
-    readonly property int landingTelemetryColumns: landingWide ? 4 : ((shellWindow ? shellWindow.viewportWidth : width) >= 720 ? 2 : 1)
+    readonly property int landingTelemetryColumns: landingWide ? 3 : ((shellWindow ? shellWindow.viewportWidth : width) >= 720 ? 2 : 1)
     readonly property int landingJumpColumns: (shellWindow ? shellWindow.viewportWidth : width) >= 720 ? 2 : 1
     readonly property int landingActionColumns: landingWide ? 2 : ((shellWindow ? shellWindow.viewportWidth : width) >= 720 ? 2 : 1)
     readonly property var flightContractModel: [
@@ -90,9 +92,9 @@ Item {
         (shellWindow ? shellWindow.activeSourceLabel : "--") + "  ·  " + anchorProbeSummary,
         landingShortHeight ? 88 : 120
     )
-    readonly property int landingWideStageHeight: shellWindow ? shellWindow.scaled(landingShortHeight ? 348 : 428) : 428
-    readonly property int landingStackedStageHeight: shellWindow ? shellWindow.scaled(landingShortHeight ? 308 : 356) : 356
-    readonly property string landingStageSubtitle: "世界地图保持主墙位，系统回注、弱网策略与执行门控全部退到支撑轨。"
+    readonly property int landingWideStageHeight: shellWindow ? shellWindow.scaled(landingShortHeight ? 392 : 516) : 516
+    readonly property int landingStackedStageHeight: shellWindow ? shellWindow.scaled(landingShortHeight ? 344 : 430) : 430
+    readonly property string landingStageSubtitle: "地图先占主墙，系统回注、弱网策略与执行门控全部退到支撑层。"
     readonly property string mapCtaLabel: landingShortHeight ? "飞行合同" : "进入飞行合同"
     readonly property string dockCtaLabel: landingShortHeight ? "执行坞站" : "进入执行坞站"
 
@@ -1619,6 +1621,7 @@ Item {
                                 }
 
                                 Flow {
+                                    visible: !root.landingShortHeight
                                     Layout.fillWidth: true
                                     spacing: shellWindow ? shellWindow.compactGap : 8
 
@@ -1791,7 +1794,7 @@ Item {
 
                                 ColumnLayout {
                                     Layout.fillWidth: true
-                                    visible: root.landingScenarioList.length > 0
+                                    visible: root.landingScenarioList.length > 0 && !root.landingShortHeight
                                     spacing: shellWindow ? shellWindow.compactGap : 8
 
                                     Repeater {
@@ -2072,6 +2075,7 @@ Item {
                             }
 
                             Flow {
+                                visible: !root.landingShortHeight
                                 Layout.fillWidth: true
                                 spacing: shellWindow ? shellWindow.compactGap : 8
 
