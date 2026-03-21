@@ -511,12 +511,17 @@ Item {
         width: Math.min(
             root.stackedBanner ? parent.width - (root.overlayMargin * 2) : parent.width * (root.bannerDockedBottom ? 0.48 : 0.52),
             shellWindow
-                ? shellWindow.scaled(root.bannerDockedBottom ? (root.landingMode ? 360 : 500) : (root.landingMode ? 420 : 560))
-                : (root.bannerDockedBottom ? (root.landingMode ? 360 : 500) : (root.landingMode ? 420 : 560))
+                ? shellWindow.scaled(root.bannerDockedBottom ? (root.landingMode ? 420 : 500) : (root.landingMode ? 460 : 560))
+                : (root.bannerDockedBottom ? (root.landingMode ? 420 : 500) : (root.landingMode ? 460 : 560))
         )
         shellWindow: root.shellWindow
         accentColor: root.trackColor
         prominent: !root.landingMode
+        minimalChrome: root.landingMode
+        showAccentRail: !root.landingMode
+        fillColor: shellWindow
+            ? Qt.rgba(shellWindow.surfaceGlass.r, shellWindow.surfaceGlass.g, shellWindow.surfaceGlass.b, root.landingMode ? 0.76 : 0.92)
+            : "#c0142634"
         visible: root.bannerTitle.length > 0 || root.bannerText.length > 0 || (root.bannerChips && root.bannerChips.length > 0)
 
         Text {
