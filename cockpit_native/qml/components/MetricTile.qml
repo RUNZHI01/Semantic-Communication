@@ -12,11 +12,17 @@ Rectangle {
     property bool prominent: false
 
     readonly property color accentColor: shellWindow ? shellWindow.toneColor(tone) : "#86c7d4"
+    readonly property color topFill: shellWindow ? Qt.lighter(shellWindow.surfaceRaised, 1.04) : "#1a2430"
+    readonly property color bottomFill: shellWindow ? Qt.darker(shellWindow.surfaceQuiet, 1.08) : "#0c151d"
 
     radius: shellWindow ? shellWindow.cardRadius : 16
-    color: shellWindow
-        ? Qt.rgba(shellWindow.surfaceQuiet.r, shellWindow.surfaceQuiet.g, shellWindow.surfaceQuiet.b, prominent ? 0.94 : 0.88)
-        : "#0f161d"
+    gradient: Gradient {
+        GradientStop { position: 0.0; color: Qt.rgba(root.topFill.r, root.topFill.g, root.topFill.b, prominent ? 0.97 : 0.94) }
+        GradientStop { position: 0.38; color: shellWindow
+            ? Qt.rgba(shellWindow.surfaceQuiet.r, shellWindow.surfaceQuiet.g, shellWindow.surfaceQuiet.b, prominent ? 0.95 : 0.9)
+            : "#0f161d" }
+        GradientStop { position: 1.0; color: Qt.rgba(root.bottomFill.r, root.bottomFill.g, root.bottomFill.b, 0.98) }
+    }
     border.color: shellWindow ? Qt.rgba(accentColor.r, accentColor.g, accentColor.b, prominent ? 0.76 : 0.54) : "#86c7d4"
     border.width: 1
     implicitHeight: body.implicitHeight + ((shellWindow ? shellWindow.cardPadding : 14) * 2)
@@ -34,6 +40,25 @@ Rectangle {
 
     Rectangle {
         anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.top: parent.top
+        anchors.leftMargin: shellWindow ? shellWindow.scaled(10) : 10
+        anchors.rightMargin: shellWindow ? shellWindow.scaled(10) : 10
+        height: shellWindow ? shellWindow.scaled(2) : 2
+        radius: height / 2
+        gradient: Gradient {
+            orientation: Gradient.Horizontal
+            GradientStop { position: 0.0; color: "transparent" }
+            GradientStop { position: 0.16; color: Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0.14) }
+            GradientStop { position: 0.5; color: Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0.74) }
+            GradientStop { position: 0.84; color: Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0.14) }
+            GradientStop { position: 1.0; color: "transparent" }
+        }
+        opacity: 0.88
+    }
+
+    Rectangle {
+        anchors.left: parent.left
         anchors.top: parent.top
         anchors.bottom: parent.bottom
         anchors.leftMargin: shellWindow ? shellWindow.scaled(6) : 6
@@ -43,6 +68,16 @@ Rectangle {
         radius: width / 2
         color: accentColor
         opacity: 0.84
+    }
+
+    Rectangle {
+        width: parent.width * 0.34
+        height: parent.height * 0.64
+        radius: width / 2
+        color: accentColor
+        opacity: prominent ? 0.08 : 0.05
+        x: parent.width - (width * 0.74)
+        y: -height * 0.16
     }
 
     Rectangle {
@@ -84,6 +119,7 @@ Rectangle {
                 : (root.prominent ? 16 : 14)
             font.weight: Font.DemiBold
             font.family: shellWindow ? shellWindow.displayFamily : "Noto Serif CJK SC"
+            font.letterSpacing: shellWindow ? shellWindow.scaled(0.16) : 0.16
             wrapMode: Text.WordWrap
             maximumLineCount: prominent ? 3 : 2
             elide: Text.ElideRight

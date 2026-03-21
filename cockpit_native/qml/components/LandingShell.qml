@@ -29,7 +29,11 @@ Item {
     )
     readonly property bool landingWide: shellWindow ? shellWindow.viewportWidth >= shellWindow.scaled(1320) : width >= 1320
     readonly property bool landingShortHeight: shellWindow ? shellWindow.shortViewport : height < 780
-    readonly property int railWidth: shellWindow ? shellWindow.scaled(landingWide ? 236 : 220) : 236
+    readonly property int railWidth: shellWindow ? shellWindow.scaled(landingWide ? 222 : 212) : 222
+    readonly property int landingStageLedgerWidth: shellWindow ? shellWindow.scaled(landingWide ? 298 : 268) : 298
+    readonly property int flightSidebarWidth: shellWindow ? shellWindow.scaled(shellWindow.wideLayout ? 316 : 292) : 316
+    readonly property int flightStageHeight: shellWindow ? shellWindow.scaled(shellWindow.compactLayout ? 332 : 478) : 478
+    readonly property int flightStackedStageHeight: shellWindow ? shellWindow.scaled(shellWindow.compactLayout ? 316 : 372) : 372
     readonly property var landingStatusList: shellWindow ? shellWindow.previewItems(statusRows, landingWide ? 2 : 3) : []
     readonly property var landingScenarioList: shellWindow ? shellWindow.previewItems(scenarioList, 1) : []
     readonly property var timingPreviewList: shellWindow ? shellWindow.previewItems(stageTimingList, shellWindow.compactLayout ? 3 : 4) : []
@@ -44,15 +48,50 @@ Item {
     readonly property int landingTelemetryColumns: landingWide ? 4 : ((shellWindow ? shellWindow.viewportWidth : width) >= (shellWindow ? shellWindow.scaled(720) : 720) ? 2 : 1)
     readonly property int landingJumpColumns: (shellWindow ? shellWindow.viewportWidth : width) >= (shellWindow ? shellWindow.scaled(720) : 720) ? 2 : 1
     readonly property int landingActionColumns: landingWide ? 2 : ((shellWindow ? shellWindow.viewportWidth : width) >= (shellWindow ? shellWindow.scaled(720) : 720) ? 2 : 1)
+    readonly property var flightContractModel: [
+        {
+            "label": "源状态",
+            "value": String(centerPanel["source_status"] || "--"),
+            "detail": String(feedContract["active_source_kind"] || "--"),
+            "tone": "online"
+        },
+        {
+            "label": "接口",
+            "value": String(centerPanel["source_api_path"] || "--"),
+            "detail": String(feedContract["active_source_label"] || "--"),
+            "tone": "neutral"
+        },
+        {
+            "label": "采样时间",
+            "value": String(sampleData["captured_at"] || "--"),
+            "detail": String(sampleData["source"] || "contract sample"),
+            "tone": "neutral"
+        },
+        {
+            "label": "回退语义",
+            "value": compact(centerPanel["fallback_note"] || "--", 54),
+            "detail": String(centerPanel["ownership_note"] || "--"),
+            "tone": "warning"
+        }
+    ]
     readonly property string landingBriefText: compact(shellWindow ? shellWindow.landingSummaryText : "", landingShortHeight ? 88 : 120)
     readonly property string landingTruthBrief: compact(shellWindow ? shellWindow.truthNoteValue : "", landingShortHeight ? 96 : 132)
     readonly property string landingLaunchBrief: compact(shellWindow ? shellWindow.launchHint : "--", landingShortHeight ? 40 : 56)
+    readonly property string anchorProbeBrief: compact(anchorProbeSummary, landingShortHeight ? 72 : 104)
     readonly property string recommendedScenarioBrief: compact(
         String(recommendedScenario["summary"] || recommendedScenario["operator_note"] || "延续仓库现有弱网推荐剧本。"),
         landingShortHeight ? 72 : 96
     )
-    readonly property int landingWideStageHeight: shellWindow ? shellWindow.scaled(landingShortHeight ? 292 : 316) : 316
-    readonly property int landingStackedStageHeight: shellWindow ? shellWindow.scaled(landingShortHeight ? 258 : 286) : 286
+    readonly property string landingStageLedgerText: compact(
+        shellWindow ? shellWindow.landingSummaryText : "",
+        landingShortHeight ? 100 : 148
+    )
+    readonly property string landingStageLedgerSupport: compact(
+        (shellWindow ? shellWindow.activeSourceLabel : "--") + "  ·  " + anchorProbeSummary,
+        landingShortHeight ? 88 : 120
+    )
+    readonly property int landingWideStageHeight: shellWindow ? shellWindow.scaled(landingShortHeight ? 320 : 362) : 362
+    readonly property int landingStackedStageHeight: shellWindow ? shellWindow.scaled(landingShortHeight ? 276 : 316) : 316
     readonly property string landingStageSubtitle: "世界地图保持主墙位，系统回注、弱网策略与执行门控全部退到支撑轨。"
     readonly property string mapCtaLabel: landingShortHeight ? "飞行合同" : "进入飞行合同"
     readonly property string dockCtaLabel: landingShortHeight ? "执行坞站" : "进入执行坞站"
@@ -496,6 +535,15 @@ Item {
         }
 
         Rectangle {
+            anchors.fill: parent
+            anchors.margins: shellWindow ? shellWindow.scaled(5) : 5
+            radius: parent.radius - (shellWindow ? shellWindow.scaled(5) : 5)
+            color: "transparent"
+            border.color: "#0dffffff"
+            border.width: 1
+        }
+
+        Rectangle {
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
@@ -508,6 +556,44 @@ Item {
                 GradientStop { position: 0.82; color: Qt.rgba(shellWindow.accentIce.r, shellWindow.accentIce.g, shellWindow.accentIce.b, 0.28) }
                 GradientStop { position: 1.0; color: "transparent" }
             }
+        }
+
+        Rectangle {
+            anchors.left: parent.left
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            anchors.leftMargin: shellWindow ? shellWindow.scaled(6) : 6
+            anchors.topMargin: shellWindow ? shellWindow.scaled(18) : 18
+            anchors.bottomMargin: shellWindow ? shellWindow.scaled(18) : 18
+            width: shellWindow ? shellWindow.scaled(3) : 3
+            radius: width / 2
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: "transparent" }
+                GradientStop { position: 0.18; color: Qt.rgba(shellWindow.accentGold.r, shellWindow.accentGold.g, shellWindow.accentGold.b, 0.18) }
+                GradientStop { position: 0.52; color: Qt.rgba(shellWindow.accentGold.r, shellWindow.accentGold.g, shellWindow.accentGold.b, 0.84) }
+                GradientStop { position: 0.84; color: Qt.rgba(shellWindow.accentIce.r, shellWindow.accentIce.g, shellWindow.accentIce.b, 0.26) }
+                GradientStop { position: 1.0; color: "transparent" }
+            }
+            opacity: 0.92
+        }
+
+        Rectangle {
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            anchors.rightMargin: shellWindow ? shellWindow.scaled(6) : 6
+            anchors.topMargin: shellWindow ? shellWindow.scaled(32) : 32
+            anchors.bottomMargin: shellWindow ? shellWindow.scaled(32) : 32
+            width: shellWindow ? shellWindow.scaled(2) : 2
+            radius: width / 2
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: "transparent" }
+                GradientStop { position: 0.16; color: Qt.rgba(shellWindow.accentIce.r, shellWindow.accentIce.g, shellWindow.accentIce.b, 0.14) }
+                GradientStop { position: 0.5; color: Qt.rgba(shellWindow.accentIce.r, shellWindow.accentIce.g, shellWindow.accentIce.b, 0.7) }
+                GradientStop { position: 0.84; color: Qt.rgba(shellWindow.accentGold.r, shellWindow.accentGold.g, shellWindow.accentGold.b, 0.18) }
+                GradientStop { position: 1.0; color: "transparent" }
+            }
+            opacity: 0.72
         }
 
         ColumnLayout {
@@ -687,134 +773,9 @@ Item {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
 
-                    GridLayout {
+                    Loader {
                         anchors.fill: parent
-                        columns: shellWindow && shellWindow.wideLayout ? 2 : 1
-                        columnSpacing: shellWindow ? shellWindow.zoneGap : 14
-                        rowSpacing: shellWindow ? shellWindow.zoneGap : 14
-
-                        ShellCard {
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            shellWindow: root.shellWindow
-                            accentColor: shellWindow ? shellWindow.accentIce : "#86c7d4"
-                            eyebrow: "FLIGHT STAGE / 飞行合同"
-                            title: shellWindow ? shellWindow.missionCallSignValue + " · " + shellWindow.aircraftIdValue : "飞行合同"
-                            subtitle: shellWindow ? shellWindow.activeSourceLabel : ""
-
-                            Item {
-                                Layout.fillWidth: true
-                                Layout.fillHeight: true
-                                implicitHeight: shellWindow ? shellWindow.scaled(shellWindow.compactLayout ? 300 : 420) : 420
-
-                                WorldMapStage {
-                                    anchors.fill: parent
-                                    shellWindow: root.shellWindow
-                                    trackData: root.trackData
-                                    currentPoint: root.currentPoint
-                                    headingDeg: root.headingDeg
-                                    currentLabel: shellWindow ? shellWindow.missionCallSignValue : ""
-                                    currentDetail: shellWindow ? shellWindow.activeSourceLabel : ""
-                                    anchorLabel: root.anchorValue
-                                    scenarioLabel: root.recommendedScenarioLabel
-                                    scenarioTone: shellWindow ? shellWindow.liveAnchorTone : "neutral"
-                                    landingMode: false
-                                    bannerEyebrow: "FLIGHT CONTRACT / LIVE TRACK"
-                                    bannerTitle: shellWindow ? shellWindow.landingMapBannerTitle : ""
-                                    bannerText: shellWindow ? shellWindow.landingMapBannerText : ""
-                                    bannerChips: shellWindow ? shellWindow.landingStageChipModel : []
-                                }
-                            }
-                        }
-
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            spacing: shellWindow ? shellWindow.zoneGap : 14
-
-                            ShellCard {
-                                Layout.fillWidth: true
-                                shellWindow: root.shellWindow
-                                accentColor: shellWindow ? shellWindow.accentGold : "#c6ab7d"
-                                eyebrow: "TELEMETRY / 遥测摘要"
-                                title: "高度、航向、定位与采样"
-                                subtitle: "Flight contract 继续从仓库合同对象回填。"
-
-                                GridLayout {
-                                    Layout.fillWidth: true
-                                    columns: shellWindow && shellWindow.compactLayout ? 1 : 2
-                                    columnSpacing: shellWindow ? shellWindow.compactGap : 8
-                                    rowSpacing: shellWindow ? shellWindow.compactGap : 8
-
-                                    Repeater {
-                                        model: shellWindow ? shellWindow.landingTelemetryModel : []
-
-                                        delegate: MetricTile {
-                                            shellWindow: root.shellWindow
-                                            Layout.fillWidth: true
-                                            label: modelData["label"]
-                                            value: modelData["value"]
-                                            detail: modelData["detail"]
-                                            tone: modelData["tone"]
-                                        }
-                                    }
-                                }
-                            }
-
-                            ShellCard {
-                                Layout.fillWidth: true
-                                Layout.fillHeight: true
-                                shellWindow: root.shellWindow
-                                accentColor: shellWindow ? shellWindow.accentMint : "#93bea5"
-                                eyebrow: "CONTRACT / 数据合同"
-                                title: "来源状态、接口与回退说明"
-                                subtitle: "保留中国语义优先的合同描述，同时直连 repo 字段。"
-
-                                GridLayout {
-                                    Layout.fillWidth: true
-                                    columns: 1
-                                    rowSpacing: shellWindow ? shellWindow.compactGap : 8
-
-                                    Repeater {
-                                        model: [
-                                            {
-                                                "label": "源状态",
-                                                "value": String(root.centerPanel["source_status"] || "--"),
-                                                "detail": String(feedContract["active_source_kind"] || "--"),
-                                                "tone": "online"
-                                            },
-                                            {
-                                                "label": "接口",
-                                                "value": String(root.centerPanel["source_api_path"] || "--"),
-                                                "detail": String(feedContract["active_source_label"] || "--"),
-                                                "tone": "neutral"
-                                            },
-                                            {
-                                                "label": "采样时间",
-                                                "value": String(sampleData["captured_at"] || "--"),
-                                                "detail": String(sampleData["source"] || "contract sample"),
-                                                "tone": "neutral"
-                                            },
-                                            {
-                                                "label": "回退语义",
-                                                "value": compact(root.centerPanel["fallback_note"] || "--", 54),
-                                                "detail": String(root.centerPanel["ownership_note"] || "--"),
-                                                "tone": "warning"
-                                            }
-                                        ]
-
-                                        delegate: MetricTile {
-                                            shellWindow: root.shellWindow
-                                            Layout.fillWidth: true
-                                            label: modelData["label"]
-                                            value: modelData["value"]
-                                            detail: modelData["detail"]
-                                            tone: modelData["tone"]
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                        sourceComponent: shellWindow && shellWindow.wideLayout ? flightWideComponent : flightStackedComponent
                     }
                 }
 
@@ -1235,6 +1196,389 @@ Item {
     }
 
     Component {
+        id: flightWideComponent
+
+        Item {
+            anchors.fill: parent
+
+            RowLayout {
+                anchors.fill: parent
+                spacing: shellWindow ? shellWindow.zoneGap : 14
+
+                ColumnLayout {
+                    Layout.preferredWidth: root.flightSidebarWidth
+                    Layout.minimumWidth: root.flightSidebarWidth
+                    Layout.maximumWidth: root.flightSidebarWidth
+                    Layout.fillHeight: true
+                    spacing: shellWindow ? shellWindow.zoneGap : 14
+
+                    ShellCard {
+                        Layout.fillWidth: true
+                        shellWindow: root.shellWindow
+                        accentColor: shellWindow ? shellWindow.accentGold : "#c6ab7d"
+                        eyebrow: "MAP SIDEBAR / 合同边栏"
+                        title: "遥测、采样与任务摘要"
+                        subtitle: "借用 QDashBoard 的边栏分区，让地图主视区保持整块可读。"
+
+                        Flow {
+                            Layout.fillWidth: true
+                            spacing: shellWindow ? shellWindow.compactGap : 8
+
+                            Repeater {
+                                model: shellWindow ? shellWindow.landingStageChipModel : []
+
+                                delegate: ToneChip {
+                                    shellWindow: root.shellWindow
+                                    label: modelData["label"]
+                                    value: modelData["value"]
+                                    tone: modelData["tone"]
+                                }
+                            }
+                        }
+
+                        GridLayout {
+                            Layout.fillWidth: true
+                            columns: 1
+                            rowSpacing: shellWindow ? shellWindow.compactGap : 8
+
+                            Repeater {
+                                model: shellWindow ? shellWindow.landingTelemetryModel : []
+
+                                delegate: MetricTile {
+                                    shellWindow: root.shellWindow
+                                    Layout.fillWidth: true
+                                    label: modelData["label"]
+                                    value: modelData["value"]
+                                    detail: modelData["detail"]
+                                    tone: modelData["tone"]
+                                }
+                            }
+                        }
+                    }
+
+                    ShellCard {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        shellWindow: root.shellWindow
+                        accentColor: shellWindow ? shellWindow.accentMint : "#93bea5"
+                        eyebrow: "CONTRACT / 数据合同"
+                        title: "来源状态、接口与回退说明"
+                        subtitle: root.anchorProbeBrief
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            radius: shellWindow ? shellWindow.edgeRadius : 12
+                            color: shellWindow ? shellWindow.surfaceQuiet : "#0f161d"
+                            border.color: shellWindow ? shellWindow.borderSubtle : "#2a3944"
+                            border.width: 1
+                            implicitHeight: flightSidebarSummary.implicitHeight + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
+
+                            ColumnLayout {
+                                id: flightSidebarSummary
+                                anchors.fill: parent
+                                anchors.margins: shellWindow ? shellWindow.scaled(10) : 10
+                                spacing: shellWindow ? shellWindow.scaled(3) : 3
+
+                                Text {
+                                    text: "边栏摘要 / SIDEBAR NOTE"
+                                    color: shellWindow ? shellWindow.accentMint : "#93bea5"
+                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                    font.letterSpacing: shellWindow ? shellWindow.scaled(0.6) : 0.6
+                                }
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: root.landingTruthBrief
+                                    color: shellWindow ? shellWindow.textPrimary : "#d7dde2"
+                                    font.pixelSize: shellWindow ? shellWindow.bodySize : 13
+                                    font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                    wrapMode: Text.WordWrap
+                                    maximumLineCount: 3
+                                    elide: Text.ElideRight
+                                }
+                            }
+                        }
+
+                        GridLayout {
+                            Layout.fillWidth: true
+                            columns: 1
+                            rowSpacing: shellWindow ? shellWindow.compactGap : 8
+
+                            Repeater {
+                                model: root.flightContractModel
+
+                                delegate: MetricTile {
+                                    shellWindow: root.shellWindow
+                                    Layout.fillWidth: true
+                                    label: modelData["label"]
+                                    value: modelData["value"]
+                                    detail: modelData["detail"]
+                                    tone: modelData["tone"]
+                                }
+                            }
+                        }
+                    }
+                }
+
+                ShellCard {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    Layout.minimumWidth: shellWindow ? shellWindow.scaled(700) : 700
+                    shellWindow: root.shellWindow
+                    accentColor: shellWindow ? shellWindow.accentIce : "#86c7d4"
+                    eyebrow: "FLIGHT STAGE / 飞行合同"
+                    title: shellWindow ? shellWindow.missionCallSignValue + " · " + shellWindow.aircraftIdValue : "飞行合同"
+                    subtitle: shellWindow ? shellWindow.activeSourceLabel : ""
+
+                    Item {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        implicitHeight: root.flightStageHeight
+
+                        WorldMapStage {
+                            anchors.fill: parent
+                            shellWindow: root.shellWindow
+                            trackData: root.trackData
+                            currentPoint: root.currentPoint
+                            headingDeg: root.headingDeg
+                            currentLabel: shellWindow ? shellWindow.missionCallSignValue : ""
+                            currentDetail: shellWindow ? shellWindow.activeSourceLabel : ""
+                            anchorLabel: root.anchorValue
+                            scenarioLabel: root.recommendedScenarioLabel
+                            scenarioTone: shellWindow ? shellWindow.liveAnchorTone : "neutral"
+                            landingMode: false
+                            bannerEyebrow: "FLIGHT CONTRACT / LIVE TRACK"
+                            bannerTitle: shellWindow ? shellWindow.landingMapBannerTitle : ""
+                            bannerText: shellWindow ? shellWindow.landingMapBannerText : ""
+                            bannerChips: shellWindow ? shellWindow.landingStageChipModel : []
+                        }
+
+                        InsetPanel {
+                            anchors.left: parent.left
+                            anchors.top: parent.top
+                            anchors.leftMargin: shellWindow ? shellWindow.scaled(16) : 16
+                            anchors.topMargin: shellWindow ? shellWindow.scaled(76) : 76
+                            width: Math.min(
+                                parent.width - ((shellWindow ? shellWindow.scaled(32) : 32) * 2),
+                                root.landingStageLedgerWidth
+                            )
+                            shellWindow: root.shellWindow
+                            accentColor: shellWindow ? shellWindow.accentGold : "#c6ab7d"
+                            fillColor: "#d509121a"
+                            prominent: true
+
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: shellWindow ? shellWindow.scaled(3) : 3
+
+                                Text {
+                                    text: "MAP CONTEXT / 主视区摘要"
+                                    color: shellWindow ? shellWindow.accentGold : "#c6ab7d"
+                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                    font.letterSpacing: shellWindow ? shellWindow.scaled(0.7) : 0.7
+                                }
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: root.landingStageLedgerText
+                                    color: shellWindow ? shellWindow.textStrong : "#f5efe4"
+                                    font.pixelSize: shellWindow ? shellWindow.bodySize : 13
+                                    font.weight: Font.DemiBold
+                                    font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                    wrapMode: Text.WordWrap
+                                    maximumLineCount: 3
+                                    elide: Text.ElideRight
+                                }
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: root.landingStageLedgerSupport
+                                    color: shellWindow ? shellWindow.textSecondary : "#9aa8b1"
+                                    font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
+                                    font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                    wrapMode: Text.WordWrap
+                                    maximumLineCount: 2
+                                    elide: Text.ElideRight
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Component {
+        id: flightStackedComponent
+
+        Item {
+            anchors.fill: parent
+
+            Flickable {
+                id: flightStackedScroller
+                anchors.fill: parent
+                contentWidth: width
+                contentHeight: flightStackedColumn.implicitHeight
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+                interactive: contentHeight > height
+
+                ScrollBar.vertical: ScrollBar {
+                    policy: flightStackedScroller.interactive ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
+                }
+
+                ColumnLayout {
+                    id: flightStackedColumn
+                    width: flightStackedScroller.width
+                    spacing: shellWindow ? shellWindow.zoneGap : 14
+
+                    ShellCard {
+                        Layout.fillWidth: true
+                        shellWindow: root.shellWindow
+                        accentColor: shellWindow ? shellWindow.accentIce : "#86c7d4"
+                        eyebrow: "FLIGHT STAGE / 飞行合同"
+                        title: shellWindow ? shellWindow.missionCallSignValue + " · " + shellWindow.aircraftIdValue : "飞行合同"
+                        subtitle: shellWindow ? shellWindow.activeSourceLabel : ""
+
+                        Item {
+                            Layout.fillWidth: true
+                            implicitHeight: root.flightStackedStageHeight
+
+                            WorldMapStage {
+                                anchors.fill: parent
+                                shellWindow: root.shellWindow
+                                trackData: root.trackData
+                                currentPoint: root.currentPoint
+                                headingDeg: root.headingDeg
+                                currentLabel: shellWindow ? shellWindow.missionCallSignValue : ""
+                                currentDetail: shellWindow ? shellWindow.activeSourceLabel : ""
+                                anchorLabel: root.anchorValue
+                                scenarioLabel: root.recommendedScenarioLabel
+                                scenarioTone: shellWindow ? shellWindow.liveAnchorTone : "neutral"
+                                landingMode: false
+                                bannerEyebrow: "FLIGHT CONTRACT / LIVE TRACK"
+                                bannerTitle: shellWindow ? shellWindow.landingMapBannerTitle : ""
+                                bannerText: shellWindow ? shellWindow.landingMapBannerText : ""
+                                bannerChips: shellWindow ? shellWindow.landingStageChipModel : []
+                            }
+                        }
+                    }
+
+                    ShellCard {
+                        Layout.fillWidth: true
+                        shellWindow: root.shellWindow
+                        accentColor: shellWindow ? shellWindow.accentGold : "#c6ab7d"
+                        eyebrow: "MAP SIDEBAR / 遥测边栏"
+                        title: "遥测、采样与任务摘要"
+                        subtitle: root.anchorProbeBrief
+
+                        Flow {
+                            Layout.fillWidth: true
+                            spacing: shellWindow ? shellWindow.compactGap : 8
+
+                            Repeater {
+                                model: shellWindow ? shellWindow.landingStageChipModel : []
+
+                                delegate: ToneChip {
+                                    shellWindow: root.shellWindow
+                                    label: modelData["label"]
+                                    value: modelData["value"]
+                                    tone: modelData["tone"]
+                                }
+                            }
+                        }
+
+                        GridLayout {
+                            Layout.fillWidth: true
+                            columns: shellWindow && shellWindow.compactLayout ? 1 : 2
+                            columnSpacing: shellWindow ? shellWindow.compactGap : 8
+                            rowSpacing: shellWindow ? shellWindow.compactGap : 8
+
+                            Repeater {
+                                model: shellWindow ? shellWindow.landingTelemetryModel : []
+
+                                delegate: MetricTile {
+                                    shellWindow: root.shellWindow
+                                    Layout.fillWidth: true
+                                    label: modelData["label"]
+                                    value: modelData["value"]
+                                    detail: modelData["detail"]
+                                    tone: modelData["tone"]
+                                }
+                            }
+                        }
+                    }
+
+                    ShellCard {
+                        Layout.fillWidth: true
+                        shellWindow: root.shellWindow
+                        accentColor: shellWindow ? shellWindow.accentMint : "#93bea5"
+                        eyebrow: "CONTRACT / 数据合同"
+                        title: "来源状态、接口与回退说明"
+                        subtitle: "边栏语义继续直连 repo-backed 字段。"
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            radius: shellWindow ? shellWindow.edgeRadius : 12
+                            color: shellWindow ? shellWindow.surfaceQuiet : "#0f161d"
+                            border.color: shellWindow ? shellWindow.borderSubtle : "#2a3944"
+                            border.width: 1
+                            implicitHeight: flightStackedSummary.implicitHeight + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
+
+                            ColumnLayout {
+                                id: flightStackedSummary
+                                anchors.fill: parent
+                                anchors.margins: shellWindow ? shellWindow.scaled(10) : 10
+                                spacing: shellWindow ? shellWindow.scaled(3) : 3
+
+                                Text {
+                                    text: root.landingTruthBrief
+                                    color: shellWindow ? shellWindow.textPrimary : "#d7dde2"
+                                    font.pixelSize: shellWindow ? shellWindow.bodySize : 13
+                                    font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                    wrapMode: Text.WordWrap
+                                    maximumLineCount: 3
+                                    elide: Text.ElideRight
+                                }
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: shellWindow ? shellWindow.launchHint : "--"
+                                    color: shellWindow ? shellWindow.textSecondary : "#9aa8b1"
+                                    font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
+                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                    wrapMode: Text.WrapAnywhere
+                                }
+                            }
+                        }
+
+                        GridLayout {
+                            Layout.fillWidth: true
+                            columns: 1
+                            rowSpacing: shellWindow ? shellWindow.compactGap : 8
+
+                            Repeater {
+                                model: root.flightContractModel
+
+                                delegate: MetricTile {
+                                    shellWindow: root.shellWindow
+                                    Layout.fillWidth: true
+                                    label: modelData["label"]
+                                    value: modelData["value"]
+                                    detail: modelData["detail"]
+                                    tone: modelData["tone"]
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Component {
         id: landingWideComponent
 
         Item {
@@ -1277,18 +1621,14 @@ Item {
                                 title: "板态摘要与事实边界"
                                 subtitle: "继续呈现仓库快照、心跳、事件与事实边界。"
 
-                                Rectangle {
+                                InsetPanel {
                                     Layout.fillWidth: true
-                                    radius: shellWindow ? shellWindow.edgeRadius : 12
-                                    color: shellWindow ? shellWindow.surfaceQuiet : "#0f161d"
-                                    border.color: shellWindow ? shellWindow.borderSubtle : "#2a3944"
-                                    border.width: 1
-                                    implicitHeight: systemBriefColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
+                                    shellWindow: root.shellWindow
+                                    accentColor: shellWindow ? shellWindow.accentGold : "#c6ab7d"
 
                                     ColumnLayout {
                                         id: systemBriefColumn
-                                        anchors.fill: parent
-                                        anchors.margins: shellWindow ? shellWindow.scaled(10) : 10
+                                        Layout.fillWidth: true
                                         spacing: shellWindow ? shellWindow.scaled(3) : 3
 
                                         Text {
@@ -1471,15 +1811,116 @@ Item {
                                 }
                             }
 
-                            GridLayout {
+                            RowLayout {
                                 Layout.fillWidth: true
-                                columns: 4
-                                columnSpacing: shellWindow ? shellWindow.compactGap : 8
-                                rowSpacing: shellWindow ? shellWindow.compactGap : 8
+                                spacing: shellWindow ? shellWindow.zoneGap : 12
 
-                                Repeater {
-                                    model: root.landingTelemetryPreviewList
-                                    delegate: landingTelemetryReadoutDelegate
+                                GridLayout {
+                                    Layout.fillWidth: true
+                                    Layout.alignment: Qt.AlignTop
+                                    columns: 2
+                                    columnSpacing: shellWindow ? shellWindow.compactGap : 8
+                                    rowSpacing: shellWindow ? shellWindow.compactGap : 8
+
+                                    Repeater {
+                                        model: root.landingTelemetryPreviewList
+                                        delegate: landingTelemetryReadoutDelegate
+                                    }
+                                }
+
+                                InsetPanel {
+                                    Layout.preferredWidth: shellWindow ? shellWindow.scaled(240) : 240
+                                    Layout.maximumWidth: shellWindow ? shellWindow.scaled(260) : 260
+                                    Layout.alignment: Qt.AlignTop
+                                    shellWindow: root.shellWindow
+                                    accentColor: shellWindow ? shellWindow.accentIce : "#86c7d4"
+                                    prominent: true
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: "STAGE LEDGER / 主墙摘记"
+                                        color: shellWindow ? shellWindow.accentIce : "#86c7d4"
+                                        font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                        font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                        font.letterSpacing: shellWindow ? shellWindow.scaled(0.7) : 0.7
+                                    }
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: root.landingStageLedgerText
+                                        color: shellWindow ? shellWindow.textStrong : "#f5efe4"
+                                        font.pixelSize: shellWindow ? shellWindow.bodySize : 13
+                                        font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                        wrapMode: Text.WordWrap
+                                        maximumLineCount: 4
+                                        elide: Text.ElideRight
+                                    }
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: root.landingStageLedgerSupport
+                                        color: shellWindow ? shellWindow.textSecondary : "#9aa8b1"
+                                        font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
+                                        font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                        wrapMode: Text.WordWrap
+                                        maximumLineCount: 3
+                                        elide: Text.ElideRight
+                                    }
+
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: shellWindow ? shellWindow.compactGap : 8
+
+                                        Rectangle {
+                                            Layout.fillWidth: true
+                                            radius: shellWindow ? shellWindow.edgeRadius : 12
+                                            color: shellWindow ? shellWindow.toneFill("online") : "#102033"
+                                            border.color: shellWindow ? shellWindow.accentIce : "#86c7d4"
+                                            border.width: 1
+                                            implicitHeight: shellWindow ? shellWindow.scaled(38) : 38
+
+                                            Text {
+                                                anchors.centerIn: parent
+                                                text: "飞行合同 / Flight"
+                                                color: shellWindow ? shellWindow.textStrong : "#f5efe4"
+                                                font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
+                                                font.weight: Font.DemiBold
+                                                font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                            }
+
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: if (shellWindow) shellWindow.currentPage = 2
+                                            }
+                                        }
+
+                                        Rectangle {
+                                            Layout.fillWidth: true
+                                            radius: shellWindow ? shellWindow.edgeRadius : 12
+                                            color: shellWindow ? shellWindow.toneFill("warning") : "#251f18"
+                                            border.color: shellWindow ? shellWindow.accentGold : "#c6ab7d"
+                                            border.width: 1
+                                            implicitHeight: shellWindow ? shellWindow.scaled(38) : 38
+
+                                            Text {
+                                                anchors.centerIn: parent
+                                                text: "执行坞站 / Dock"
+                                                color: shellWindow ? shellWindow.textStrong : "#f5efe4"
+                                                font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
+                                                font.weight: Font.DemiBold
+                                                font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                            }
+
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: if (shellWindow) shellWindow.currentPage = 4
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -1499,18 +1940,14 @@ Item {
                                 title: root.recommendedScenarioLabel
                                 subtitle: "在线锚点 " + root.anchorValue + "  ·  " + root.anchorStatus
 
-                                Rectangle {
+                                InsetPanel {
                                     Layout.fillWidth: true
-                                    radius: shellWindow ? shellWindow.edgeRadius : 12
-                                    color: shellWindow ? shellWindow.surfaceQuiet : "#0f161d"
-                                    border.color: shellWindow ? shellWindow.borderSubtle : "#2a3944"
-                                    border.width: 1
-                                    implicitHeight: weakSummaryColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
+                                    shellWindow: root.shellWindow
+                                    accentColor: shellWindow ? shellWindow.accentMint : "#93bea5"
 
                                     ColumnLayout {
                                         id: weakSummaryColumn
-                                        anchors.fill: parent
-                                        anchors.margins: shellWindow ? shellWindow.scaled(10) : 10
+                                        Layout.fillWidth: true
                                         spacing: shellWindow ? shellWindow.scaled(3) : 3
 
                                         Text {
@@ -1618,26 +2055,38 @@ Item {
                             Layout.fillWidth: true
                             spacing: shellWindow ? shellWindow.zoneGap : 12
 
-                            Rectangle {
+                            InsetPanel {
                                 Layout.fillWidth: true
-                                radius: shellWindow ? shellWindow.edgeRadius : 12
-                                color: shellWindow ? shellWindow.surfaceQuiet : "#0f161d"
-                                border.color: shellWindow ? shellWindow.borderSubtle : "#2a3944"
-                                border.width: 1
-                                implicitHeight: launchHintText.implicitHeight + ((shellWindow ? shellWindow.scaled(8) : 8) * 2)
+                                shellWindow: root.shellWindow
+                                accentColor: shellWindow ? shellWindow.accentIce : "#86c7d4"
 
                                 Text {
-                                    id: launchHintText
-                                    anchors.left: parent.left
-                                    anchors.right: parent.right
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    anchors.leftMargin: shellWindow ? shellWindow.scaled(10) : 10
-                                    anchors.rightMargin: shellWindow ? shellWindow.scaled(10) : 10
+                                    Layout.fillWidth: true
+                                    text: "LAUNCH / 安全启动"
+                                    color: shellWindow ? shellWindow.accentIce : "#86c7d4"
+                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                    font.letterSpacing: shellWindow ? shellWindow.scaled(0.7) : 0.7
+                                }
+
+                                Text {
+                                    Layout.fillWidth: true
                                     text: shellWindow ? shellWindow.launchHint : "--"
                                     color: shellWindow ? shellWindow.textPrimary : "#d7dde2"
                                     font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
                                     font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
-                                    elide: Text.ElideMiddle
+                                    wrapMode: Text.WrapAnywhere
+                                }
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: root.anchorProbeBrief
+                                    color: shellWindow ? shellWindow.textSecondary : "#9aa8b1"
+                                    font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
+                                    font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                    wrapMode: Text.WordWrap
+                                    maximumLineCount: 2
+                                    elide: Text.ElideRight
                                 }
                             }
 
@@ -1816,6 +2265,101 @@ Item {
                                 delegate: landingTelemetryReadoutDelegate
                             }
                         }
+
+                        InsetPanel {
+                            Layout.fillWidth: true
+                            shellWindow: root.shellWindow
+                            accentColor: shellWindow ? shellWindow.accentIce : "#86c7d4"
+                            prominent: true
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: "STAGE LEDGER / 主墙摘记"
+                                color: shellWindow ? shellWindow.accentIce : "#86c7d4"
+                                font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                font.letterSpacing: shellWindow ? shellWindow.scaled(0.7) : 0.7
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: root.landingStageLedgerText
+                                color: shellWindow ? shellWindow.textStrong : "#f5efe4"
+                                font.pixelSize: shellWindow ? shellWindow.bodySize : 13
+                                font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                wrapMode: Text.WordWrap
+                                maximumLineCount: 4
+                                elide: Text.ElideRight
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: root.landingStageLedgerSupport
+                                color: shellWindow ? shellWindow.textSecondary : "#9aa8b1"
+                                font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
+                                font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                wrapMode: Text.WordWrap
+                                maximumLineCount: 3
+                                elide: Text.ElideRight
+                            }
+
+                            GridLayout {
+                                Layout.fillWidth: true
+                                columns: root.landingJumpColumns
+                                columnSpacing: shellWindow ? shellWindow.compactGap : 8
+                                rowSpacing: shellWindow ? shellWindow.compactGap : 8
+
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    radius: shellWindow ? shellWindow.edgeRadius : 12
+                                    color: shellWindow ? shellWindow.toneFill("online") : "#102033"
+                                    border.color: shellWindow ? shellWindow.accentIce : "#86c7d4"
+                                    border.width: 1
+                                    implicitHeight: shellWindow ? shellWindow.scaled(38) : 38
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "飞行合同 / Flight"
+                                        color: shellWindow ? shellWindow.textStrong : "#f5efe4"
+                                        font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
+                                        font.weight: Font.DemiBold
+                                        font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                    }
+
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: if (shellWindow) shellWindow.currentPage = 2
+                                    }
+                                }
+
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    radius: shellWindow ? shellWindow.edgeRadius : 12
+                                    color: shellWindow ? shellWindow.toneFill("warning") : "#251f18"
+                                    border.color: shellWindow ? shellWindow.accentGold : "#c6ab7d"
+                                    border.width: 1
+                                    implicitHeight: shellWindow ? shellWindow.scaled(38) : 38
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "执行坞站 / Dock"
+                                        color: shellWindow ? shellWindow.textStrong : "#f5efe4"
+                                        font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
+                                        font.weight: Font.DemiBold
+                                        font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                    }
+
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: if (shellWindow) shellWindow.currentPage = 4
+                                    }
+                                }
+                            }
+                        }
                     }
 
                     GridLayout {
@@ -1832,18 +2376,14 @@ Item {
                             title: "会话、事件与快照"
                             subtitle: "继续呈现仓库快照、心跳、事件与事实边界。"
 
-                            Rectangle {
+                            InsetPanel {
                                 Layout.fillWidth: true
-                                radius: shellWindow ? shellWindow.edgeRadius : 12
-                                color: shellWindow ? shellWindow.surfaceQuiet : "#0f161d"
-                                border.color: shellWindow ? shellWindow.borderSubtle : "#2a3944"
-                                border.width: 1
-                                implicitHeight: stackedSystemBriefColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
+                                shellWindow: root.shellWindow
+                                accentColor: shellWindow ? shellWindow.accentGold : "#c6ab7d"
 
                                 ColumnLayout {
                                     id: stackedSystemBriefColumn
-                                    anchors.fill: parent
-                                    anchors.margins: shellWindow ? shellWindow.scaled(10) : 10
+                                    Layout.fillWidth: true
                                     spacing: shellWindow ? shellWindow.scaled(3) : 3
 
                                     Text {
@@ -1911,18 +2451,14 @@ Item {
                             title: root.recommendedScenarioLabel
                             subtitle: "在线锚点 " + root.anchorValue + "  ·  " + root.anchorStatus
 
-                            Rectangle {
+                            InsetPanel {
                                 Layout.fillWidth: true
-                                radius: shellWindow ? shellWindow.edgeRadius : 12
-                                color: shellWindow ? shellWindow.surfaceQuiet : "#0f161d"
-                                border.color: shellWindow ? shellWindow.borderSubtle : "#2a3944"
-                                border.width: 1
-                                implicitHeight: stackedWeakBriefColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
+                                shellWindow: root.shellWindow
+                                accentColor: shellWindow ? shellWindow.accentMint : "#93bea5"
 
                                 ColumnLayout {
                                     id: stackedWeakBriefColumn
-                                    anchors.fill: parent
-                                    anchors.margins: shellWindow ? shellWindow.scaled(10) : 10
+                                    Layout.fillWidth: true
                                     spacing: shellWindow ? shellWindow.scaled(3) : 3
 
                                     Text {
@@ -2027,19 +2563,24 @@ Item {
                             }
                         }
 
-                        Rectangle {
+                        InsetPanel {
                             Layout.fillWidth: true
-                            radius: shellWindow ? shellWindow.edgeRadius : 12
-                            color: shellWindow ? shellWindow.surfaceQuiet : "#0f161d"
-                            border.color: shellWindow ? shellWindow.borderSubtle : "#2a3944"
-                            border.width: 1
-                            implicitHeight: stackedLaunchColumn.implicitHeight + ((shellWindow ? shellWindow.cardPadding : 14) * 2)
+                            shellWindow: root.shellWindow
+                            accentColor: shellWindow ? shellWindow.accentIce : "#86c7d4"
 
                             ColumnLayout {
                                 id: stackedLaunchColumn
-                                anchors.fill: parent
-                                anchors.margins: shellWindow ? shellWindow.cardPadding : 14
+                                Layout.fillWidth: true
                                 spacing: shellWindow ? shellWindow.compactGap : 8
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: "LAUNCH / 安全启动"
+                                    color: shellWindow ? shellWindow.accentIce : "#86c7d4"
+                                    font.pixelSize: shellWindow ? shellWindow.captionSize : 10
+                                    font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
+                                    font.letterSpacing: shellWindow ? shellWindow.scaled(0.7) : 0.7
+                                }
 
                                 Text {
                                     Layout.fillWidth: true
@@ -2048,6 +2589,17 @@ Item {
                                     font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
                                     font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
                                     wrapMode: Text.WrapAnywhere
+                                }
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: root.anchorProbeBrief
+                                    color: shellWindow ? shellWindow.textSecondary : "#9aa8b1"
+                                    font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
+                                    font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+                                    wrapMode: Text.WordWrap
+                                    maximumLineCount: 2
+                                    elide: Text.ElideRight
                                 }
 
                                 Rectangle {
