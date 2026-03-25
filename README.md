@@ -7,6 +7,17 @@
 - **团队名称：** 逃离荒岛队
 - **当前对外定位：** 不是 generic TVM/MNN 优化项目，而是部署在飞腾平台上的、可运行、可管控、可安全停机的弱网语义视觉回传系统。
 
+## 先读这里
+
+- **新接手专家优先阅读：** [`EXPERT_HANDOFF.md`](EXPERT_HANDOFF.md)
+- **准备 GitHub 发布前先检查：** [`GITHUB_PUBLISH_CHECKLIST.md`](GITHUB_PUBLISH_CHECKLIST.md)
+
+仓库当前主要由三条主线组成：
+
+- `session_bootstrap/`：性能调优、真机 benchmark、OpenAMP demo、证据与 runbook
+- `openamp_mock/`：最小控制面 mock 与协议/边界测试
+- `cockpit_native/`：承接现有 demo 合同的原生 Qt/QML 演示座舱
+
 ## 当前最佳成绩
 
 | 路线 | 指标 | 数值 |

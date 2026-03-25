@@ -418,6 +418,9 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(payload["project"]["name"], "飞腾多核弱网安全语义视觉回传系统")
         self.assertEqual(payload["mode"]["effective_label"], "仅展示证据")
         self.assertIn("current_status", payload["board"])
+        self.assertIn("latest_live_status", payload)
+        self.assertIn("PyTorch reference archive", payload["latest_live_status"]["headline"])
+        self.assertEqual(payload["latest_live_status"]["baseline"]["completed"], "300 / 300 (archive)")
         self.assertIn("fits", payload)
         self.assertIsInstance(payload["fits"], list)
 
@@ -1104,7 +1107,11 @@ class DemoHTTPServerTest(unittest.TestCase):
             payload["live"]["trusted_sha"],
         )
         self.assertEqual(payload["live"]["variant_support"]["baseline"]["mode"], "legacy_sha")
-        self.assertEqual(payload["live"]["variant_support"]["baseline"]["label"], "PyTorch legacy live")
+        self.assertEqual(payload["live"]["variant_support"]["baseline"]["label"], "PyTorch live 已支持")
+        self.assertIn(
+            "expected-SHA admission (legacy_sha)",
+            payload["live"]["variant_support"]["baseline"]["note"],
+        )
         self.assertTrue(payload["live"]["variant_support"]["baseline"]["launch_allowed"])
         self.assertFalse(payload["active_inference"]["running"])
         self.assertEqual(payload["active_inference"]["queue_depth"], 0)
@@ -1454,9 +1461,9 @@ class DemoHTTPServerTest(unittest.TestCase):
                             "variant": "baseline",
                             "status": "ready",
                             "mode": "legacy_sha",
-                            "label": "PyTorch legacy live",
+                            "label": "PyTorch live 已支持",
                             "tone": "online",
-                            "note": "PyTorch live path is still using the legacy SHA allowlist.",
+                            "note": "PyTorch live path currently uses expected-SHA admission (legacy_sha).",
                             "supported": True,
                             "launch_allowed": True,
                         },
@@ -1474,9 +1481,9 @@ class DemoHTTPServerTest(unittest.TestCase):
                             "variant": "baseline",
                             "status": "ready",
                             "mode": "legacy_sha",
-                            "label": "PyTorch legacy live",
+                            "label": "PyTorch live 已支持",
                             "tone": "online",
-                            "note": "PyTorch live path is still using the legacy SHA allowlist.",
+                            "note": "PyTorch live path currently uses expected-SHA admission (legacy_sha).",
                             "supported": True,
                             "launch_allowed": True,
                         },
@@ -1598,9 +1605,9 @@ class DemoHTTPServerTest(unittest.TestCase):
                         "variant": "baseline",
                         "status": "ready",
                         "mode": "legacy_sha",
-                        "label": "PyTorch legacy live",
+                        "label": "PyTorch live 已支持",
                         "tone": "online",
-                        "note": "PyTorch live path is still using the legacy SHA allowlist.",
+                        "note": "PyTorch live path currently uses expected-SHA admission (legacy_sha).",
                         "supported": True,
                         "launch_allowed": True,
                     },
@@ -1614,7 +1621,7 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(payload["live"]["admission"]["key_id"], "demo-live-20260316")
         self.assertTrue(payload["live"]["admission"]["verified_locally"])
         self.assertEqual(payload["live"]["variant_support"]["current"]["label"], "Current signed live 已支持")
-        self.assertEqual(payload["live"]["variant_support"]["baseline"]["label"], "PyTorch legacy live")
+        self.assertEqual(payload["live"]["variant_support"]["baseline"]["label"], "PyTorch live 已支持")
         self.assertTrue(payload["live"]["variant_support"]["baseline"]["launch_allowed"])
         self.assertEqual(payload["job_manifest_gate"]["admission_mode"], "signed_manifest_v1")
         self.assertEqual(payload["job_manifest_gate"]["variant"], "current")
@@ -2513,6 +2520,9 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertIn('id="safetyDrawer"', body)
         self.assertIn('id="compareViewerBoard"', body)
         self.assertIn('id="compareViewerSampleLabel"', body)
+        self.assertIn('id="baselineProgressTitle"', body)
+        self.assertIn("PyTorch reference 300 张图", body)
+        self.assertIn("运行 PyTorch live 数据面 300 张图", body)
         self.assertIn('<script src="/app.js"></script>', body)
 
     def test_app_js_serves_dashboard_javascript(self) -> None:
@@ -2561,6 +2571,9 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertIn('"/api/recover"', body)
         self.assertIn("selectedCompareViewerSample", body)
         self.assertIn('document.getElementById("compareViewerBoard")', body)
+        self.assertIn("baselineLiveDisplayLabel", body)
+        self.assertIn("PyTorch reference archive", body)
+        self.assertIn("PyTorch signed live", body)
 
     def test_app_css_serves_dashboard_stylesheet(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
