@@ -2103,6 +2103,37 @@ function buildCompactProgressMeta(progress, result) {
   return `${modeLabel} ｜ 计数来源：${progressSourceLabel(progress.count_source)} ｜ 剩余 ${progress.remaining_count} 张`;
 }
 
+function baselineLiveDisplayLabel(support) {
+  return support?.mode === "signed_manifest_v1" ? "PyTorch signed live" : "PyTorch live";
+}
+
+function baselineProgressHeading(result, support) {
+  const liveLabel = baselineLiveDisplayLabel(support);
+  const liveActive = Boolean(result) && (result.request_state === "running" || result.execution_mode === "live");
+  return liveActive
+    ? { label: liveLabel, title: `${liveLabel} 300 张图` }
+    : { label: "PyTorch reference", title: "PyTorch reference 300 张图" };
+}
+
+function defaultBaselineProgress(snapshot) {
+  const expectedCount = Math.max(Number(snapshot?.guided_demo?.comparison?.baseline_source?.output_count || 300), 0) || 300;
+  return {
+    expected_count: expectedCount,
+    completed_count: expectedCount,
+    remaining_count: 0,
+    percent: 100,
+    label: "Archive Ready",
+    tone: "neutral",
+    count_label: `${expectedCount} / ${expectedCount} (archive)`,
+    current_stage: "默认展示 archived PyTorch reference",
+    count_source: "pytorch_reference_manifest",
+  };
+}
+
+function baselineProgressMetaText(support) {
+  return `第三幕默认显示 archived PyTorch reference；${baselineLiveDisplayLabel(support)} 只在操作员显式触发时进入 live flow，2026-03-17 dual-path 继续只作历史 evidence。`;
+}
+
 function renderLiveProgress(progress) {
   const normalized = renderProgressFrame(
     progress,
@@ -2141,14 +2172,14 @@ function renderLiveProgress(progress) {
 }
 
 function renderComparisonProgressCards() {
-  const baselineDefaultProgress = state.baselineResult?.live_progress || {
-    expected_count: state.snapshot?.guided_demo?.comparison?.baseline_source?.output_count || 300,
-    completed_count: 0,
-    count_label: `0 / ${state.snapshot?.guided_demo?.comparison?.baseline_source?.output_count || 300}`,
-    label: "等待启动",
-    current_stage: "等待启动 PyTorch live",
-    count_source: "demo_default",
-  };
+  const baselineSupport = state.systemStatus?.live?.variant_support?.baseline || {};
+  const baselineHeading = baselineProgressHeading(state.baselineResult, baselineSupport);
+  const baselineLabel = document.getElementById("baselineProgressLabel");
+  const baselineTitle = document.getElementById("baselineProgressTitle");
+  if (baselineLabel) baselineLabel.textContent = baselineHeading.label;
+  if (baselineTitle) baselineTitle.textContent = baselineHeading.title;
+
+  const baselineDefaultProgress = state.baselineResult?.live_progress || defaultBaselineProgress(state.snapshot);
   const baselineProgress = renderProgressFrame(
     baselineDefaultProgress,
     {
@@ -2162,7 +2193,7 @@ function renderComparisonProgressCards() {
     },
     state.baselineResult
       ? buildCompactProgressMeta(normalizeProgress(state.baselineResult?.live_progress || null), state.baselineResult)
-      : "尚未开始 PyTorch live。"
+      : baselineProgressMetaText(baselineSupport)
   );
   const currentProgress = renderProgressFrame(
     state.currentResult?.live_progress || null,
@@ -2295,6 +2326,7 @@ function compareViewerPaneState(snapshot, variant) {
   if (!compareSample) return null;
   const fallback = variant === "baseline" ? compareSample.baseline : compareSample.current;
   const latest = variant === "baseline" ? state.baselineResult : state.currentResult;
+  const baselineSupport = state.systemStatus?.live?.variant_support?.baseline || {};
   const useLatest = resultMatchesSelectedSample(latest, compareSample.index);
   const source = useLatest ? latest : fallback;
   const quality = {
@@ -2302,13 +2334,17 @@ function compareViewerPaneState(snapshot, variant) {
     ssim: source?.quality?.ssim ?? fallback?.quality?.ssim,
   };
 
-  let badgeLabel = variant === "baseline" ? "reference archive" : "current archive";
+  let badgeLabel = variant === "baseline" ? "PyTorch reference archive" : "current archive";
   let badgeTone = variant === "baseline" ? "neutral" : "degraded";
   if (useLatest && source.execution_mode === "live") {
-    badgeLabel = source.request_state === "running" ? "latest live status" : "latest live result";
+    badgeLabel = variant === "baseline"
+      ? `${baselineLiveDisplayLabel(baselineSupport)} ${source.request_state === "running" ? "status" : "result"}`
+      : source.request_state === "running" ? "latest live status" : "latest live result";
     badgeTone = "online";
   } else if (useLatest) {
-    badgeLabel = "latest result";
+    badgeLabel = variant === "baseline" && source.execution_mode === "reference"
+      ? "PyTorch reference archive"
+      : "latest result";
     badgeTone = variant === "baseline" ? "neutral" : "degraded";
   }
 
@@ -2354,13 +2390,14 @@ function renderCompareViewer(snapshot) {
   const compareSample = selectedCompareViewerSample(snapshot);
   const currentPane = compareViewerPaneState(snapshot, "current");
   const baselinePane = compareViewerPaneState(snapshot, "baseline");
+  const baselineSupport = state.systemStatus?.live?.variant_support?.baseline || {};
   const sampleLabel = compareSample?.sample?.label || "等待样例";
   const sampleTitle = compareSample?.sample?.title || "";
   document.getElementById("compareViewerSampleLabel").textContent = sampleTitle
     ? `${sampleLabel} | ${sampleTitle}`
     : sampleLabel;
   document.getElementById("compareViewerModeNote").textContent =
-    "性能卡片沿用 4-core 正式口径；下方样例只展示 Current / PyTorch 的 live 或 archive provenance。";
+    `性能卡片沿用 4-core 正式口径；第三幕默认显示 archived PyTorch reference，${baselineLiveDisplayLabel(baselineSupport)} 只在操作员显式触发时出现，2026-03-17 dual-path baseline live 仅保留历史 evidence。`;
 
   if (!compareSample) {
     document.getElementById("compareViewerContext").innerHTML = "";
@@ -2532,6 +2569,7 @@ function renderActLamps(systemStatus) {
 function applyLaunchPolicy(systemStatus) {
   const currentSupport = systemStatus.live?.variant_support?.current || {};
   const baselineSupport = systemStatus.live?.variant_support?.baseline || {};
+  const baselineLiveLabel = baselineLiveDisplayLabel(baselineSupport);
   const boardBusy = String(systemStatus.live?.guard_state || "").toUpperCase() === "JOB_ACTIVE";
   const boardBusyReason = "板端当前 guard_state=JOB_ACTIVE；demo 保守阻断新的 live launch，不自动 SAFE_STOP。";
   const currentBlocked = boardBusy || currentSupport.launch_allowed === false;
@@ -2556,21 +2594,19 @@ function applyLaunchPolicy(systemStatus) {
     ? "运行 Current signed 数据面 300 张图"
     : "运行 Current 数据面 300 张图";
   baselineButton.textContent = baselineSupport.launch_allowed === false
-    ? "PyTorch 参考基线（归档）"
-    : baselineSupport.mode === "signed_manifest_v1"
-      ? "运行 PyTorch signed 数据面 300 张图"
-      : "运行 PyTorch 数据面 300 张图";
+    ? "PyTorch reference（归档）"
+    : `运行 ${baselineLiveLabel} 数据面 300 张图`;
   runAllButton.textContent = baselineSupport.launch_allowed === false
-    ? "PyTorch 参考 + Current 当前未开放 live"
-    : "一键顺序运行 PyTorch + Current 数据面 300 张图";
+    ? "PyTorch reference + Current 当前未开放 live"
+    : `一键顺序运行 ${baselineLiveLabel} + Current 数据面 300 张图`;
   if (opsCurrentButton) {
     opsCurrentButton.textContent = currentSupport.mode === "signed_manifest_v1" ? "Current Signed" : "Current Live";
   }
   if (opsBaselineButton) {
     opsBaselineButton.textContent = baselineSupport.launch_allowed === false
-      ? "Reference Archive"
-      : baselineSupport.mode === "signed_manifest_v1"
-        ? "PyTorch Signed"
+      ? "PyTorch Reference"
+      : baselineLiveLabel === "PyTorch signed live"
+        ? "PyTorch Signed Live"
         : "PyTorch Live";
   }
 
@@ -2870,12 +2906,13 @@ async function runCurrentInference() {
 }
 
 async function runBaseline() {
+  const baselineSupport = state.systemStatus?.live?.variant_support?.baseline || {};
   state.baselineResult = await runInferenceAction(
     "/api/run-baseline",
     "baseline",
     "baselineResult",
     "act3",
-    "正在执行 PyTorch 在线推进..."
+    `正在执行 ${baselineLiveDisplayLabel(baselineSupport)} 在线推进...`
   );
 }
 

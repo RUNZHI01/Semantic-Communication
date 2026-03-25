@@ -267,18 +267,18 @@
           <article class="panel-lite progress-summary-card">
             <div class="progress-summary-head">
               <div>
-                <div class="label">PyTorch Reference</div>
-                <h3>PyTorch live 300 张图</h3>
+                <div class="label" id="baselineProgressLabel">PyTorch reference</div>
+                <h3 id="baselineProgressTitle">PyTorch reference 300 张图</h3>
               </div>
-              <div class="status-pill tone-neutral" id="baselineProgressBadge">等待触发</div>
+              <div class="status-pill tone-neutral" id="baselineProgressBadge">Archive Ready</div>
             </div>
-            <div class="progress-summary-count" id="baselineProgressCount">0 / 300</div>
-            <div class="compact-copy progress-summary-stage" id="baselineProgressStage">等待触发。</div>
+            <div class="progress-summary-count" id="baselineProgressCount">300 / 300 (archive)</div>
+            <div class="compact-copy progress-summary-stage" id="baselineProgressStage">当前阶段：默认展示 archived PyTorch reference</div>
             <div class="progress-axis-shell progress-axis-shell-compact">
               <div class="progress-track"><span class="progress-fill" id="baselineProgressBar"></span><span class="progress-marker" id="baselineProgressMarker"></span></div>
               <div class="progress-axis-labels" id="baselineProgressAxis"></div>
             </div>
-            <div class="compact-copy progress-summary-meta" id="baselineProgressMeta">尚未开始 PyTorch live。</div>
+            <div class="compact-copy progress-summary-meta" id="baselineProgressMeta">第三幕默认显示 archived PyTorch reference；PyTorch live 只在操作员显式触发时进入 live flow。</div>
           </article>
           <article class="panel-lite progress-summary-card">
             <div class="progress-summary-head">
@@ -310,9 +310,9 @@
         </article>
         <div id="comparisonBoard" class="comparison-board"></div>
         <div class="inline-actions">
-          <button id="runBaselineButton" class="button button-secondary" type="button">运行 PyTorch 数据面 300 张图</button>
+          <button id="runBaselineButton" class="button button-secondary" type="button">运行 PyTorch live 数据面 300 张图</button>
           <button id="runCurrentAgainButton" class="button button-primary" type="button">运行 Current 数据面 300 张图</button>
-          <button id="runAllButton" class="button button-secondary" type="button">一键顺序运行 PyTorch + Current 数据面 300 张图</button>
+          <button id="runAllButton" class="button button-secondary" type="button">一键顺序运行 PyTorch live + Current 数据面 300 张图</button>
         </div>
         <div class="panel-lite" id="comparisonRunNote">第三幕会明确区分语义回传数据面结果与 OpenAMP 控制面边界，并单独标注 4-core performance mode / 3-core demo mode。</div>
       </section>
