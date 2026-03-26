@@ -10,7 +10,7 @@ import select
 import struct
 import sys
 import time
-from typing import Any
+from typing import Any, Callable
 import zlib
 
 
@@ -28,6 +28,11 @@ JOB_ACK_STRUCT = struct.Struct("<III")
 HEARTBEAT_STRUCT = struct.Struct("<IIII")
 HEARTBEAT_ACK_STRUCT = struct.Struct("<II")
 JOB_DONE_STRUCT = struct.Struct("<IIII")
+SIGNED_ADMISSION_BEGIN_STRUCT = struct.Struct("<BBH32sIII")
+SIGNED_ADMISSION_CHUNK_HEADER_STRUCT = struct.Struct("<32sIII")
+SIGNED_ADMISSION_SIGNATURE_HEADER_STRUCT = struct.Struct("<32sII")
+SIGNED_ADMISSION_COMMIT_STRUCT = struct.Struct("<32sIIII")
+SIGNED_ADMISSION_ACK_STRUCT = struct.Struct("<32sIIII")
 
 FLAG_NAME_TO_WIRE = {
     "payload": 1,
@@ -49,6 +54,38 @@ GUARD_STATE_NAMES = {
     4: "DENY_PENDING",
     5: "FAULT_LATCHED",
 }
+SIGNED_ADMISSION_STAGE_NAMES = {
+    1: "BEGIN",
+    2: "CHUNK",
+    3: "SIGNATURE",
+    4: "COMMIT",
+}
+SIGNED_ADMISSION_ACK_STATUS_NAMES = {
+    0: "ACCEPTED",
+    1: "DUPLICATE",
+    2: "OUT_OF_RANGE",
+    3: "CRC_ERROR",
+    4: "TOO_LARGE",
+    5: "READY",
+}
+SIGNED_ADMISSION_PHASE_TO_STAGE = {
+    "SIGNED_ADMISSION_BEGIN": 1,
+    "SIGNED_ADMISSION_CHUNK": 2,
+    "SIGNED_ADMISSION_SIGNATURE": 3,
+    "SIGNED_ADMISSION_COMMIT": 4,
+}
+SIGNED_ADMISSION_PHASE_TO_MESSAGE_TYPE = {
+    "SIGNED_ADMISSION_BEGIN": MessageType.SIGNED_ADMISSION_BEGIN,
+    "SIGNED_ADMISSION_CHUNK": MessageType.SIGNED_ADMISSION_CHUNK,
+    "SIGNED_ADMISSION_SIGNATURE": MessageType.SIGNED_ADMISSION_SIGNATURE,
+    "SIGNED_ADMISSION_COMMIT": MessageType.SIGNED_ADMISSION_COMMIT,
+}
+SIGNED_ADMISSION_SUCCESS_STATUS_BY_PHASE = {
+    "SIGNED_ADMISSION_BEGIN": {0, 1},
+    "SIGNED_ADMISSION_CHUNK": {0, 1},
+    "SIGNED_ADMISSION_SIGNATURE": {0, 1},
+    "SIGNED_ADMISSION_COMMIT": {5},
+}
 DEFAULT_GUARD_STATE = 0
 CONTROL_PATH_FAULT_CODE = int(FaultCode.NONE)
 INPUT_RANGE_FAULT_CODE = int(FaultCode.ILLEGAL_PARAM_RANGE)
@@ -59,8 +96,8 @@ def parse_args() -> argparse.Namespace:
         description=(
             "Minimal Linux-side OpenAMP/RPMsg bridge for the phase-5 control plane. "
             "Direct mode preserves the existing STATUS_REQ probe. Hook mode also forwards "
-            "minimal binary JOB_REQ/HEARTBEAT/JOB_DONE/SAFE_STOP frames and parses "
-            "JOB_ACK/HEARTBEAT_ACK/STATUS_RESP results."
+            "minimal binary JOB_REQ/HEARTBEAT/JOB_DONE/SAFE_STOP frames, signed-admission "
+            "sideband frames, and parses JOB_ACK/HEARTBEAT_ACK/STATUS_RESP/SIGNED_ADMISSION_ACK results."
         )
     )
     parser.add_argument(
@@ -111,8 +148,8 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help=(
             "Read wrapper hook event JSON from stdin. OPENAMP_PHASE/event.phase decides the phase. "
-            "STATUS_REQ stays unchanged; JOB_REQ/HEARTBEAT/JOB_DONE/SAFE_STOP are forwarded as "
-            "minimal binary control frames. Unsupported phases are denied locally."
+            "STATUS_REQ stays unchanged; JOB_REQ/HEARTBEAT/JOB_DONE/SAFE_STOP and "
+            "SIGNED_ADMISSION_* are forwarded as control frames. Unsupported phases are denied locally."
         ),
     )
     parser.add_argument(
@@ -237,6 +274,14 @@ def safe_runtime_state_name(value: int) -> str:
     return RUNTIME_STATE_WIRE_TO_NAME.get(value, f"UNKNOWN_{value:#x}")
 
 
+def safe_signed_admission_stage_name(value: int) -> str:
+    return SIGNED_ADMISSION_STAGE_NAMES.get(value, f"UNKNOWN_{value:#x}")
+
+
+def safe_signed_admission_ack_status_name(value: int) -> str:
+    return SIGNED_ADMISSION_ACK_STATUS_NAMES.get(value, f"UNKNOWN_{value:#x}")
+
+
 def describe_transport_failure(*, phase: str, rpmsg_dev: Path, err: BaseException) -> tuple[str, str, str, str]:
     if isinstance(err, PermissionError) or (
         isinstance(err, OSError) and err.errno in {errno.EACCES, errno.EPERM}
@@ -312,6 +357,16 @@ def parse_frame(payload: bytes) -> dict[str, Any]:
         result["job_req"] = parse_job_req_payload(body)
     elif msg_type == int(MessageType.JOB_ACK):
         result["job_ack"] = parse_job_ack_payload(body)
+    elif msg_type == int(MessageType.SIGNED_ADMISSION_BEGIN):
+        result["signed_admission_begin"] = parse_signed_admission_begin_payload(body)
+    elif msg_type == int(MessageType.SIGNED_ADMISSION_CHUNK):
+        result["signed_admission_chunk"] = parse_signed_admission_chunk_payload(body)
+    elif msg_type == int(MessageType.SIGNED_ADMISSION_SIGNATURE):
+        result["signed_admission_signature"] = parse_signed_admission_signature_payload(body)
+    elif msg_type == int(MessageType.SIGNED_ADMISSION_COMMIT):
+        result["signed_admission_commit"] = parse_signed_admission_commit_payload(body)
+    elif msg_type == int(MessageType.SIGNED_ADMISSION_ACK):
+        result["signed_admission_ack"] = parse_signed_admission_ack_payload(body)
     return result
 
 
@@ -452,6 +507,139 @@ def parse_job_ack_payload(payload: bytes) -> dict[str, Any]:
             "fault_name": safe_fault_name(fault_code),
             "guard_state": guard_state,
             "guard_state_name": safe_guard_state_name(guard_state),
+        }
+    )
+    return result
+
+
+def parse_signed_admission_begin_payload(payload: bytes) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "payload_len": len(payload),
+        "parsed": False,
+    }
+    if len(payload) != SIGNED_ADMISSION_BEGIN_STRUCT.size:
+        result["parse_error"] = "unexpected_signed_admission_begin_size"
+        return result
+    (
+        admission_type,
+        key_slot,
+        signature_algorithm,
+        manifest_sha256,
+        manifest_len,
+        signature_len,
+        chunk_size,
+    ) = SIGNED_ADMISSION_BEGIN_STRUCT.unpack(payload)
+    result.update(
+        {
+            "parsed": True,
+            "admission_type": admission_type,
+            "key_slot": key_slot,
+            "signature_algorithm": signature_algorithm,
+            "manifest_sha256": manifest_sha256.hex(),
+            "manifest_len": manifest_len,
+            "signature_len": signature_len,
+            "chunk_size": chunk_size,
+        }
+    )
+    return result
+
+
+def parse_signed_admission_chunk_payload(payload: bytes) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "payload_len": len(payload),
+        "parsed": False,
+    }
+    if len(payload) < SIGNED_ADMISSION_CHUNK_HEADER_STRUCT.size:
+        result["parse_error"] = "short_signed_admission_chunk"
+        return result
+    manifest_sha256, offset, chunk_len, chunk_crc32 = SIGNED_ADMISSION_CHUNK_HEADER_STRUCT.unpack_from(payload)
+    chunk_data = payload[SIGNED_ADMISSION_CHUNK_HEADER_STRUCT.size:]
+    result.update(
+        {
+            "manifest_sha256": manifest_sha256.hex(),
+            "offset": offset,
+            "chunk_len": chunk_len,
+            "chunk_crc32": chunk_crc32,
+            "chunk_data_hex": chunk_data.hex(),
+            "actual_chunk_len": len(chunk_data),
+        }
+    )
+    if len(chunk_data) != chunk_len:
+        result["parse_error"] = "signed_admission_chunk_length_mismatch"
+        return result
+    result["parsed"] = True
+    return result
+
+
+def parse_signed_admission_signature_payload(payload: bytes) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "payload_len": len(payload),
+        "parsed": False,
+    }
+    if len(payload) < SIGNED_ADMISSION_SIGNATURE_HEADER_STRUCT.size:
+        result["parse_error"] = "short_signed_admission_signature"
+        return result
+    manifest_sha256, signature_len, signature_crc32 = SIGNED_ADMISSION_SIGNATURE_HEADER_STRUCT.unpack_from(payload)
+    signature_data = payload[SIGNED_ADMISSION_SIGNATURE_HEADER_STRUCT.size:]
+    result.update(
+        {
+            "manifest_sha256": manifest_sha256.hex(),
+            "signature_len": signature_len,
+            "signature_crc32": signature_crc32,
+            "signature_hex": signature_data.hex(),
+            "actual_signature_len": len(signature_data),
+        }
+    )
+    if len(signature_data) != signature_len:
+        result["parse_error"] = "signed_admission_signature_length_mismatch"
+        return result
+    result["parsed"] = True
+    return result
+
+
+def parse_signed_admission_commit_payload(payload: bytes) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "payload_len": len(payload),
+        "parsed": False,
+    }
+    if len(payload) != SIGNED_ADMISSION_COMMIT_STRUCT.size:
+        result["parse_error"] = "unexpected_signed_admission_commit_size"
+        return result
+    manifest_sha256, manifest_crc32, signature_crc32, manifest_len, signature_len = (
+        SIGNED_ADMISSION_COMMIT_STRUCT.unpack(payload)
+    )
+    result.update(
+        {
+            "parsed": True,
+            "manifest_sha256": manifest_sha256.hex(),
+            "manifest_crc32": manifest_crc32,
+            "signature_crc32": signature_crc32,
+            "manifest_len": manifest_len,
+            "signature_len": signature_len,
+        }
+    )
+    return result
+
+
+def parse_signed_admission_ack_payload(payload: bytes) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "payload_len": len(payload),
+        "parsed": False,
+    }
+    if len(payload) != SIGNED_ADMISSION_ACK_STRUCT.size:
+        result["parse_error"] = "unexpected_signed_admission_ack_size"
+        return result
+    manifest_sha256, stage, status, offset, accepted_len = SIGNED_ADMISSION_ACK_STRUCT.unpack(payload)
+    result.update(
+        {
+            "parsed": True,
+            "manifest_sha256": manifest_sha256.hex(),
+            "stage": stage,
+            "stage_name": safe_signed_admission_stage_name(stage),
+            "status": status,
+            "status_name": safe_signed_admission_ack_status_name(status),
+            "offset": offset,
+            "accepted_len": accepted_len,
         }
     )
     return result
@@ -779,6 +967,185 @@ def classify_job_probe(
         note=(
             "A response arrived after JOB_REQ, but it is not a decodable JOB_ACK frame. "
             "The wrapper must deny locally."
+        ),
+    )
+
+
+def build_signed_admission_transport_summary(
+    *,
+    phase: str,
+    tx_parsed: dict[str, Any],
+    rx_parsed: dict[str, Any] | None,
+    acknowledged: bool,
+    stage: int,
+    status: int | None,
+    offset: int,
+    accepted_len: int,
+    manifest_sha256: str,
+    source: str,
+    transport_status: str,
+    protocol_semantics: str,
+    note: str,
+) -> dict[str, Any]:
+    summary = {
+        "phase": phase,
+        "acknowledged": acknowledged,
+        "stage": stage,
+        "stage_name": safe_signed_admission_stage_name(stage),
+        "offset": offset,
+        "accepted_len": accepted_len,
+        "manifest_sha256": manifest_sha256,
+        "source": source,
+        "transport_status": transport_status,
+        "protocol_semantics": protocol_semantics,
+        "note": note,
+        "tx_frame": tx_parsed,
+        "rx_frame": rx_parsed,
+    }
+    if status is not None:
+        summary["ack_status"] = status
+        summary["ack_status_name"] = safe_signed_admission_ack_status_name(status)
+    else:
+        summary["ack_status"] = None
+        summary["ack_status_name"] = "NONE"
+    return summary
+
+
+def classify_signed_admission_probe(
+    *,
+    phase: str,
+    tx_bytes: bytes,
+    rx_bytes: bytes,
+    rx_timeout: bool,
+) -> dict[str, Any]:
+    tx_parsed = parse_frame(tx_bytes)
+    tx_payload = tx_parsed.get(phase.lower(), {})
+    expected_stage = SIGNED_ADMISSION_PHASE_TO_STAGE.get(phase, 0)
+    manifest_sha256 = str(tx_payload.get("manifest_sha256") or "")
+    if rx_timeout:
+        return build_signed_admission_transport_summary(
+            phase=phase,
+            tx_parsed=tx_parsed,
+            rx_parsed=None,
+            acknowledged=False,
+            stage=expected_stage,
+            status=None,
+            offset=0,
+            accepted_len=0,
+            manifest_sha256=manifest_sha256,
+            source="linux_bridge_transport_guard",
+            transport_status="tx_ok_rx_timeout",
+            protocol_semantics="not_verified",
+            note=(
+                f"{phase} was written to /dev/rpmsg0 but no SIGNED_ADMISSION_ACK arrived before timeout. "
+                "Treat signed sideband semantics as unverified."
+            ),
+        )
+    rx_parsed = parse_frame(rx_bytes)
+    if rx_bytes == tx_bytes:
+        return build_signed_admission_transport_summary(
+            phase=phase,
+            tx_parsed=tx_parsed,
+            rx_parsed=rx_parsed,
+            acknowledged=False,
+            stage=expected_stage,
+            status=None,
+            offset=0,
+            accepted_len=0,
+            manifest_sha256=manifest_sha256,
+            source="linux_bridge_transport_guard",
+            transport_status="transport_echo_only",
+            protocol_semantics="not_implemented",
+            note=(
+                f"Received an exact echo of the transmitted {phase} frame. "
+                "That is not a firmware-backed SIGNED_ADMISSION_ACK."
+            ),
+        )
+    if rx_parsed.get("is_protocol_frame") and rx_parsed.get("msg_type") == int(MessageType.SIGNED_ADMISSION_ACK):
+        signed_ack = rx_parsed.get("signed_admission_ack", {})
+        if signed_ack.get("parsed"):
+            ack_stage = int(signed_ack["stage"])
+            ack_status = int(signed_ack["status"])
+            if ack_stage != expected_stage:
+                return build_signed_admission_transport_summary(
+                    phase=phase,
+                    tx_parsed=tx_parsed,
+                    rx_parsed=rx_parsed,
+                    acknowledged=False,
+                    stage=ack_stage,
+                    status=ack_status,
+                    offset=int(signed_ack["offset"]),
+                    accepted_len=int(signed_ack["accepted_len"]),
+                    manifest_sha256=str(signed_ack["manifest_sha256"]),
+                    source="linux_bridge_transport_guard",
+                    transport_status="signed_admission_ack_stage_mismatch",
+                    protocol_semantics="partially_verified",
+                    note=(
+                        "Received SIGNED_ADMISSION_ACK, but firmware reported a stage that does not match "
+                        f"the transmitted {phase} frame."
+                    ),
+                )
+            acknowledged = ack_status in SIGNED_ADMISSION_SUCCESS_STATUS_BY_PHASE.get(phase, set())
+            return build_signed_admission_transport_summary(
+                phase=phase,
+                tx_parsed=tx_parsed,
+                rx_parsed=rx_parsed,
+                acknowledged=acknowledged,
+                stage=ack_stage,
+                status=ack_status,
+                offset=int(signed_ack["offset"]),
+                accepted_len=int(signed_ack["accepted_len"]),
+                manifest_sha256=str(signed_ack["manifest_sha256"]),
+                source="firmware_signed_admission_ack",
+                transport_status=(
+                    "signed_admission_ack_received"
+                    if acknowledged
+                    else "signed_admission_ack_received_negative"
+                ),
+                protocol_semantics="implemented",
+                note=(
+                    "Received a decodable SIGNED_ADMISSION_ACK frame from firmware."
+                    if acknowledged
+                    else (
+                        "Received a decodable SIGNED_ADMISSION_ACK frame, but firmware did not accept the "
+                        f"{phase} stage."
+                    )
+                ),
+            )
+        return build_signed_admission_transport_summary(
+            phase=phase,
+            tx_parsed=tx_parsed,
+            rx_parsed=rx_parsed,
+            acknowledged=False,
+            stage=expected_stage,
+            status=None,
+            offset=0,
+            accepted_len=0,
+            manifest_sha256=manifest_sha256,
+            source="linux_bridge_transport_guard",
+            transport_status="signed_admission_ack_received_unparsed_payload",
+            protocol_semantics="partially_verified",
+            note=(
+                "Received SIGNED_ADMISSION_ACK msg_type but the payload shape does not match the expected "
+                "48-byte layout."
+            ),
+        )
+    return build_signed_admission_transport_summary(
+        phase=phase,
+        tx_parsed=tx_parsed,
+        rx_parsed=rx_parsed,
+        acknowledged=False,
+        stage=expected_stage,
+        status=None,
+        offset=0,
+        accepted_len=0,
+        manifest_sha256=manifest_sha256,
+        source="linux_bridge_transport_guard",
+        transport_status="unexpected_response",
+        protocol_semantics="not_verified",
+        note=(
+            f"A response arrived after {phase}, but it is not a decodable SIGNED_ADMISSION_ACK frame. "
+            "Treat signed sideband semantics as unresolved."
         ),
     )
 
@@ -1368,6 +1735,53 @@ def persist_job_exchange_artifacts(
     return {name: str(path) for name, path in artifacts.items()}
 
 
+def persist_signed_admission_exchange_artifacts(
+    *,
+    output_dir: Path,
+    hook_event: dict[str, Any],
+    tx_bytes: bytes,
+    rx_bytes: bytes,
+    summary: dict[str, Any],
+    txn: dict[str, Any],
+) -> dict[str, str]:
+    phase_slug = str(summary["phase"]).strip().lower()
+    artifacts = {
+        "stdin_event": output_dir / "stdin_event.json",
+        "tx_raw": output_dir / f"{phase_slug}_tx.bin",
+        "tx_hex": output_dir / f"{phase_slug}_tx.hex",
+        "tx_json": output_dir / f"{phase_slug}_tx.json",
+        "rx_raw": output_dir / "signed_admission_ack_rx.bin",
+        "rx_hex": output_dir / "signed_admission_ack_rx.hex",
+        "rx_json": output_dir / "signed_admission_ack_rx.json",
+        "summary": output_dir / "bridge_summary.json",
+    }
+    write_json(artifacts["stdin_event"], hook_event or {})
+    write_raw(artifacts["tx_raw"], tx_bytes)
+    write_hex(artifacts["tx_hex"], tx_bytes)
+    write_json(
+        artifacts["tx_json"],
+        {
+            "captured_at": now_iso(),
+            "byte_len": len(tx_bytes),
+            "hex": tx_bytes.hex(),
+            "parsed_frame": summary["tx_frame"],
+        },
+    )
+    write_raw(artifacts["rx_raw"], rx_bytes)
+    write_hex(artifacts["rx_hex"], rx_bytes)
+    write_json(
+        artifacts["rx_json"],
+        {
+            "captured_at": now_iso(),
+            "byte_len": len(rx_bytes),
+            "hex": rx_bytes.hex(),
+            "rx_timeout": txn["rx_timeout"],
+            "parsed_frame": summary["rx_frame"],
+        },
+    )
+    return {name: str(path) for name, path in artifacts.items()}
+
+
 def persist_heartbeat_exchange_artifacts(
     *,
     output_dir: Path,
@@ -1566,7 +1980,7 @@ def run_status_probe(
         {
             "generated_at": now_iso(),
             "job_id": job_id,
-            "seq": args.seq,
+            "seq": int(summary.get("tx_frame", {}).get("seq", args.seq)),
             "rpmsg_ctrl": str(rpmsg_ctrl),
             "rpmsg_dev": str(rpmsg_dev),
             "device_status": device_status,
@@ -1604,6 +2018,19 @@ def decode_sha256_hex(raw: Any) -> bytes:
     return sha_bytes
 
 
+def decode_frame_hex(raw: Any, *, field_name: str) -> bytes:
+    text = str(raw or "").strip()
+    if not text:
+        raise ValueError(f"{field_name} is required.")
+    try:
+        payload = bytes.fromhex(text)
+    except ValueError as err:
+        raise ValueError(f"{field_name} must be a valid hex string.") from err
+    if not payload:
+        raise ValueError(f"{field_name} must not be empty.")
+    return payload
+
+
 def coerce_positive_int(raw: Any, label: str) -> int:
     try:
         value = int(raw)
@@ -1632,6 +2059,38 @@ def map_runtime_state(raw: Any) -> int:
     if text in RUNTIME_STATE_NAME_TO_WIRE:
         return RUNTIME_STATE_NAME_TO_WIRE[text]
     return 0
+
+
+def build_tx_frame_from_hook(
+    *,
+    args: argparse.Namespace,
+    hook_event: dict[str, Any],
+    phase: str,
+    msg_type: MessageType,
+    payload_builder: Callable[[dict[str, Any]], bytes] | None = None,
+) -> bytes:
+    payload = hook_event.get("payload") if isinstance(hook_event, dict) else None
+    if isinstance(payload, dict) and payload.get("tx_frame_hex"):
+        tx_bytes = decode_frame_hex(payload.get("tx_frame_hex"), field_name="tx_frame_hex")
+        parsed = parse_frame(tx_bytes)
+        if not parsed.get("is_protocol_frame"):
+            raise ValueError("tx_frame_hex must decode to a complete control frame.")
+        if not parsed.get("is_valid_header_crc"):
+            raise ValueError("tx_frame_hex must contain a control frame with a valid header CRC.")
+        if int(parsed.get("msg_type", -1)) != int(msg_type):
+            raise ValueError(
+                f"tx_frame_hex msg_type {parsed.get('msg_name')} does not match expected {phase}."
+            )
+        return tx_bytes
+    if payload_builder is None:
+        raise ValueError(f"{phase} hook event must contain tx_frame_hex.")
+    tx_payload = payload_builder(hook_event)
+    return build_frame(
+        msg_type=msg_type,
+        seq=args.seq,
+        job_id=derive_job_id(args, hook_event),
+        payload=tx_payload,
+    )
 
 
 def build_job_req_payload_from_hook(hook_event: dict[str, Any]) -> bytes:
@@ -1767,6 +2226,49 @@ def build_status_local_summary(
     return summary
 
 
+def build_signed_admission_local_summary(
+    *,
+    args: argparse.Namespace,
+    output_dir: Path,
+    phase: str,
+    hook_event: dict[str, Any],
+    note: str,
+    source: str = "linux_bridge_local_guard",
+    transport_status: str = "not_attempted",
+    protocol_semantics: str = "not_available",
+    device_status: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    stage = SIGNED_ADMISSION_PHASE_TO_STAGE.get(phase, 0)
+    summary = {
+        "generated_at": now_iso(),
+        "bridge_mode": "hook" if args.hook_stdin else "direct",
+        "phase": phase,
+        "acknowledged": False,
+        "stage": stage,
+        "stage_name": safe_signed_admission_stage_name(stage),
+        "ack_status": None,
+        "ack_status_name": "NONE",
+        "offset": 0,
+        "accepted_len": 0,
+        "manifest_sha256": "",
+        "source": source,
+        "transport_status": transport_status,
+        "protocol_semantics": protocol_semantics,
+        "note": note,
+        "job_id": derive_job_id(args, hook_event),
+        "rpmsg_ctrl": args.rpmsg_ctrl,
+        "rpmsg_dev": args.rpmsg_dev,
+        "output_dir": str(output_dir),
+        "hook_event": hook_event or {},
+    }
+    if device_status is not None:
+        summary["device_status"] = device_status
+    write_json(output_dir / "bridge_summary.json", summary)
+    if hook_event:
+        write_json(output_dir / "stdin_event.json", hook_event)
+    return summary
+
+
 def build_job_done_local_summary(
     *,
     args: argparse.Namespace,
@@ -1874,22 +2376,22 @@ def run_job_probe(
         if args.require_devices:
             require_existing_device(rpmsg_ctrl, "--rpmsg-ctrl")
             require_existing_device(rpmsg_dev, "--rpmsg-dev")
-        job_payload = build_job_req_payload_from_hook(hook_event)
+        tx_bytes = build_tx_frame_from_hook(
+            args=args,
+            hook_event=hook_event,
+            phase=phase,
+            msg_type=MessageType.JOB_REQ,
+            payload_builder=build_job_req_payload_from_hook,
+        )
     except ValueError as err:
         return build_local_deny_summary(
             args=args,
             output_dir=output_dir,
             phase=phase,
             hook_event=hook_event,
-            note=f"JOB_REQ hook payload is not encodable as the minimal binary payload: {err}",
+            note=f"JOB_REQ hook payload is not encodable as the control frame: {err}",
         )
     job_id = derive_job_id(args, hook_event)
-    tx_bytes = build_frame(
-        msg_type=MessageType.JOB_REQ,
-        seq=args.seq,
-        job_id=job_id,
-        payload=job_payload,
-    )
     try:
         txn = transact(
             rpmsg_dev=rpmsg_dev,
@@ -1927,7 +2429,7 @@ def run_job_probe(
         {
             "generated_at": now_iso(),
             "job_id": job_id,
-            "seq": args.seq,
+            "seq": int(summary.get("tx_frame", {}).get("seq", args.seq)),
             "rpmsg_ctrl": str(rpmsg_ctrl),
             "rpmsg_dev": str(rpmsg_dev),
             "device_status": device_status,
@@ -1941,6 +2443,103 @@ def run_job_probe(
         }
     )
     summary["artifact_paths"] = persist_job_exchange_artifacts(
+        output_dir=output_dir,
+        hook_event=hook_event,
+        tx_bytes=tx_bytes,
+        rx_bytes=txn["rx_bytes"],
+        summary=summary,
+        txn=txn,
+    )
+    write_json(output_dir / "bridge_summary.json", summary)
+    return summary
+
+
+def run_signed_admission_probe(
+    *,
+    args: argparse.Namespace,
+    output_dir: Path,
+    phase: str,
+    hook_event: dict[str, Any],
+) -> dict[str, Any]:
+    rpmsg_ctrl = Path(args.rpmsg_ctrl)
+    rpmsg_dev = Path(args.rpmsg_dev)
+    device_status = preflight_devices(
+        rpmsg_ctrl=rpmsg_ctrl,
+        rpmsg_dev=rpmsg_dev,
+        require_devices=args.require_devices,
+    )
+    try:
+        if args.require_devices:
+            require_existing_device(rpmsg_ctrl, "--rpmsg-ctrl")
+            require_existing_device(rpmsg_dev, "--rpmsg-dev")
+        msg_type = SIGNED_ADMISSION_PHASE_TO_MESSAGE_TYPE.get(phase)
+        if msg_type is None:
+            raise ValueError(f"unsupported signed admission phase {phase!r}")
+        tx_bytes = build_tx_frame_from_hook(
+            args=args,
+            hook_event=hook_event,
+            phase=phase,
+            msg_type=msg_type,
+        )
+    except ValueError as err:
+        return build_signed_admission_local_summary(
+            args=args,
+            output_dir=output_dir,
+            phase=phase,
+            hook_event=hook_event,
+            note=f"{phase} hook payload is not encodable as the control frame: {err}",
+        )
+    job_id = derive_job_id(args, hook_event)
+    try:
+        txn = transact(
+            rpmsg_dev=rpmsg_dev,
+            tx_bytes=tx_bytes,
+            response_timeout_sec=args.response_timeout_sec,
+            settle_timeout_sec=args.settle_timeout_sec,
+            max_rx_bytes=args.max_rx_bytes,
+            drain_before_send=args.drain_before_send,
+        )
+    except (OSError, TimeoutError, SystemExit) as err:
+        source, transport_status, protocol_semantics, note = describe_transport_failure(
+            phase=phase,
+            rpmsg_dev=rpmsg_dev,
+            err=err,
+        )
+        return build_signed_admission_local_summary(
+            args=args,
+            output_dir=output_dir,
+            phase=phase,
+            hook_event=hook_event,
+            note=note,
+            source=source,
+            transport_status=transport_status,
+            protocol_semantics=protocol_semantics,
+            device_status=device_status,
+        )
+    summary = classify_signed_admission_probe(
+        phase=phase,
+        tx_bytes=tx_bytes,
+        rx_bytes=txn["rx_bytes"],
+        rx_timeout=txn["rx_timeout"],
+    )
+    summary.update(
+        {
+            "generated_at": now_iso(),
+            "job_id": job_id,
+            "seq": int(summary.get("tx_frame", {}).get("seq", args.seq)),
+            "rpmsg_ctrl": str(rpmsg_ctrl),
+            "rpmsg_dev": str(rpmsg_dev),
+            "device_status": device_status,
+            "bridge_mode": "hook",
+            "hook_event_phase": hook_event.get("phase") if isinstance(hook_event, dict) else None,
+            "hook_event_payload": hook_event.get("payload") if isinstance(hook_event, dict) else None,
+            "written_bytes": txn["written_bytes"],
+            "drained_bytes_hex": txn["drained_bytes"].hex(),
+            "rx_bytes_hex": txn["rx_bytes"].hex(),
+            "output_dir": str(output_dir),
+        }
+    )
+    summary["artifact_paths"] = persist_signed_admission_exchange_artifacts(
         output_dir=output_dir,
         hook_event=hook_event,
         tx_bytes=tx_bytes,
@@ -2271,6 +2870,16 @@ def main() -> int:
         print(json.dumps(summary, ensure_ascii=False))
         return 0 if summary.get("decision") == "ALLOW" else 2
 
+    if phase in SIGNED_ADMISSION_PHASE_TO_MESSAGE_TYPE and args.hook_stdin:
+        summary = run_signed_admission_probe(
+            args=args,
+            output_dir=output_dir,
+            phase=phase,
+            hook_event=hook_event,
+        )
+        print(json.dumps(summary, ensure_ascii=False))
+        return 0 if summary.get("acknowledged") else 2
+
     if phase == "HEARTBEAT" and args.hook_stdin:
         summary = run_heartbeat_probe(
             args=args,
@@ -2307,8 +2916,9 @@ def main() -> int:
         phase=phase,
         hook_event=hook_event,
         note=(
-            "This bridge phase only forwards STATUS_REQ in direct mode and STATUS_REQ/JOB_REQ/HEARTBEAT/"
-            "JOB_DONE/SAFE_STOP in hook mode. Later phases remain locally denied until firmware support is implemented."
+            "This bridge phase only forwards STATUS_REQ in direct mode and STATUS_REQ/JOB_REQ/"
+            "SIGNED_ADMISSION_*/HEARTBEAT/JOB_DONE/SAFE_STOP in hook mode. Later phases remain "
+            "locally denied until firmware support is implemented."
         ),
     )
     print(json.dumps(summary, ensure_ascii=False))

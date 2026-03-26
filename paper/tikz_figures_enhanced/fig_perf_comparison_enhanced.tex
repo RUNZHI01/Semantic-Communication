@@ -1,0 +1,188 @@
+% 图 4.4 性能对比柱状图（重绘加强版）
+% 基于 CICC0903540 技术文档 4.2.2 - TVM 优化效果
+\documentclass[tikz,border=10pt]{standalone}
+
+% 强制全局样式与配色
+\usepackage{amssymb, amsmath}
+\usepackage{fontspec}
+\usepackage{xeCJK}
+\setCJKmainfont{SimHei}
+\usepackage{tikz}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usetikzlibrary{
+  arrows.meta, positioning, shapes.geometric, calc,
+  backgrounds, fit, decorations.pathreplacing, patterns
+}
+
+% 低饱和度马卡龙配色
+\definecolor{mBlue}{HTML}{AEC6CF}
+\definecolor{mPink}{HTML}{FFD1DC}
+\definecolor{mGreen}{HTML}{B1D8B7}
+\definecolor{mPurple}{HTML}{B39EB5}
+\definecolor{mYellow}{HTML}{FDFD96}
+\definecolor{mGray}{HTML}{E5E4E2}
+\definecolor{mDark}{HTML}{4A4A4A}
+
+% 全局 TikZ 样式
+\tikzset{
+  >=stealth,
+  thick,
+  draw=mDark,
+  legendbox/.style={
+    rectangle, draw=mDark!50, rounded corners=3pt,
+    fill=mGray!15, inner sep=5pt, font=\tiny\sffamily},
+}
+
+\begin{document}
+\begin{tikzpicture}
+  \begin{axis}[
+    ybar,
+    bar width=0.8cm,
+    width=14cm,
+    height=8cm,
+    ylabel={推理时间 (ms/image)},
+    ylabel style={font=\sffamily\small, color=mDark},
+    xlabel={优化方案对比（Places365 数据集，300张图片）},
+    xlabel style={font=\sffamily\small, color=mDark},
+    symbolic x coords={
+      Baseline\\(Payload),
+      Current\\(Payload),
+      Rebuild\\(Current),
+      Incremental\\(Current),
+      Baseline\\(端到端),
+      Current\\(端到端),
+      MNN\\(端到端)
+    },
+    xtick=data,
+    x tick label style={font=\sffamily\scriptsize, color=mDark, align=center},
+    ymin=0, ymax=2600,
+    ytick={0, 500, 1000, 1500, 2000, 2500},
+    grid=major,
+    grid style={draw=mGray, thin},
+    legend style={
+      at={(0.5,1.05)},
+      anchor=south,
+      legend columns=3,
+      font=\sffamily\tiny,
+      draw=mDark!50,
+      fill=mGray!15,
+      rounded corners=2pt
+    },
+    nodes near coords,
+    nodes near coords style={
+      font=\sffamily\tiny,
+      color=mDark,
+      /pgf/number format/.cd,
+      fixed,
+      precision=1,
+      /pgf/number format/assume math mode
+    },
+  ]
+    % Payload 对比（Scheme A）
+    \addplot[fill=mPink!60, draw=mDark] coordinates {
+      (Baseline\\(Payload), 1829.28)
+      (Current\\(Payload), 0)
+      (Rebuild\\(Current), 0)
+      (Incremental\\(Current), 0)
+      (Baseline\\(端到端), 0)
+      (Current\\(端到端), 0)
+      (MNN\\(端到端), 0)
+    };
+
+    \addplot[fill=mGreen!60, draw=mDark] coordinates {
+      (Baseline\\(Payload), 0)
+      (Current\\(Payload), 152.846)
+      (Rebuild\\(Current), 0)
+      (Incremental\\(Current), 0)
+      (Baseline\\(端到端), 0)
+      (Current\\(端到端), 0)
+      (MNN\\(端到端), 0)
+    };
+
+    % Current-only 对比（Scheme B）
+    \addplot[fill=mYellow!60, draw=mDark] coordinates {
+      (Baseline\\(Payload), 0)
+      (Current\\(Payload), 0)
+      (Rebuild\\(Current), 2479.246)
+      (Incremental\\(Current), 0)
+      (Baseline\\(端到端), 0)
+      (Current\\(端到端), 0)
+      (MNN\\(端到端), 0)
+    };
+
+    \addplot[fill=mBlue!60, draw=mDark] coordinates {
+      (Baseline\\(Payload), 0)
+      (Current\\(Payload), 0)
+      (Rebuild\\(Current), 0)
+      (Incremental\\(Current), 152.36)
+      (Baseline\\(端到端), 0)
+      (Current\\(端到端), 0)
+      (MNN\\(端到端), 0)
+    };
+
+    % 真实端到端重建（最终结论）
+    \addplot[fill=mPink!60, draw=mDark] coordinates {
+      (Baseline\\(Payload), 0)
+      (Current\\(Payload), 0)
+      (Rebuild\\(Current), 0)
+      (Incremental\\(Current), 0)
+      (Baseline\\(端到端), 1830.3)
+      (Current\\(端到端), 0)
+      (MNN\\(端到端), 0)
+    };
+
+    \addplot[fill=mPurple!60, draw=mDark] coordinates {
+      (Baseline\\(Payload), 0)
+      (Current\\(Payload), 0)
+      (Rebuild\\(Current), 0)
+      (Incremental\\(Current), 0)
+      (Baseline\\(端到端), 0)
+      (Current\\(端到端), 255.931)
+      (MNN\\(端到端), 0)
+    };
+
+    \addplot[fill=mGreen!60, draw=mDark] coordinates {
+      (Baseline\\(Payload), 0)
+      (Current\\(Payload), 0)
+      (Rebuild\\(Current), 0)
+      (Incremental\\(Current), 0)
+      (Baseline\\(端到端), 0)
+      (Current\\(端到端), 0)
+      (MNN\\(端到端), 410)
+    };
+
+    \legend{
+      Baseline (Payload),
+      Current (Payload),
+      Rebuild-only,
+      Incremental,
+      Baseline (真实),
+      Current (真实),
+      MNN
+    }
+  \end{axis}
+
+  % ========== 信息密度拉满：性能提升标注 ==========
+  \node[legendbox, anchor=north west] at (0.5, 7.5)
+    [align=left, text width=5.5cm] {
+    \textbf{性能提升归因分析}\\[2pt]
+    • Payload 对比：91.64\% 提升（1829 $\to$ 153 ms）\\
+    • Current-only：93.85\% 提升（2479 $\to$ 152 ms）\\
+    • 端到端重建：86.02\% 提升（1830 $\to$ 256 ms）\\
+    • MNN 动态支持：1.85$\times$ 加速（平均 410 ms）
+  };
+
+  % ========== 图例（右下角）==========
+  \node[legendbox, anchor=south east] at (13.5, 0.5)
+    [align=left, text width=4.8cm] {
+    \textbf{图例}\\[1pt]
+    \colorbox{mPink!60}{\rule{0.16cm}{0.12cm}\hspace{0.05cm}} Baseline 路线\\
+    \colorbox{mGreen!60}{\rule{0.16cm}{0.12cm}\hspace{0.05cm}} Current 路线\\
+    \colorbox{mPurple!60}{\rule{0.16cm}{0.12cm}\hspace{0.05cm}} TVM 端到端\\
+    \colorbox{mYellow!60}{\rule{0.16cm}{0.12cm}\hspace{0.05cm}} Rebuild-only\\[1pt]
+    测试平台：飞腾派 ARMv8.0 Cortex-A72\\
+    测试数据：Places365（256$\times$256, 300张）
+  };
+\end{tikzpicture}
+\end{document}

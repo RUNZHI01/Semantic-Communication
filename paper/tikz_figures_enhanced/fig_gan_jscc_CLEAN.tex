@@ -1,0 +1,146 @@
+% 图 1.2 GAN-based JSCC 结构图（精简专业版）
+% 特点：去除杂乱装饰，避免元素重叠，保持顶会标准的简洁美学
+\documentclass[tikz,border=10pt]{standalone}
+
+\usepackage{amssymb, amsmath}
+\usepackage{fontspec}
+\usepackage{xeCJK}
+\setCJKmainfont{SimHei}
+\usepackage{tikz}
+\usetikzlibrary{
+  arrows.meta, positioning, shapes.geometric, calc,
+  backgrounds, fit, decorations.pathreplacing
+}
+
+% 低饱和度马卡龙配色
+\definecolor{mBlue}{HTML}{AEC6CF}
+\definecolor{mPink}{HTML}{FFD1DC}
+\definecolor{mGreen}{HTML}{B1D8B7}
+\definecolor{mPurple}{HTML}{B39EB5}
+\definecolor{mYellow}{HTML}{FDFD96}
+\definecolor{mGray}{HTML}{E5E4E2}
+\definecolor{mDark}{HTML}{4A4A4A}
+
+\tikzset{
+  >=stealth, thick, draw=mDark,
+  % 主要模块：统一大小，避免视觉混乱
+  mainblock/.style={
+    rectangle, rounded corners=3pt, draw=mDark, align=center,
+    font=\sffamily\small, minimum width=2.2cm, minimum height=0.9cm, inner sep=5pt},
+  % 微观模块：简化，不完全展开
+  micro/.style={
+    rectangle, rounded corners=2pt, draw=mDark!70, align=center,
+    font=\sffamily\tiny, minimum height=0.4cm, inner sep=2pt},
+  % 张量标注：统一样式
+  ts/.style={font=\tiny\sffamily, color=mDark!75},
+  % 箭头：统一粗细
+  arr/.style={-{Stealth[length=4pt]}, thick, draw=mDark},
+  darr/.style={-{Stealth[length=4pt]}, thick, draw=mDark, dashed},
+  % 图例：简洁
+  legendbox/.style={
+    rectangle, draw=mDark!50, rounded corners=3pt,
+    fill=mGray!15, inner sep=5pt, font=\tiny\sffamily},
+}
+
+\begin{document}
+\begin{tikzpicture}[
+  node distance=0.7cm and 1.3cm,
+]
+  % ========== 主数据流（单行布局，避免重叠）==========
+  \node[mainblock, fill=mGray!50] (img) {$\mathbf{x}$};
+  \node[mainblock, fill=mBlue!40, right=1.3cm of img] (enc) {Encoder};
+  \node[mainblock, fill=mBlue!40, right=1.3cm of enc] (pwr) {功率控制};
+  \node[mainblock, fill=mGreen!50, right=1.3cm of pwr] (awgn) {AWGN};
+  \node[mainblock, fill=mPurple!40, right=1.3cm of awgn] (gen) {Generator};
+  \node[mainblock, fill=mGray!50, right=1.3cm of gen] (out) {$\hat{\mathbf{x}}$};
+
+  % ========== 主流程连线（单层标注，避免拥挤）==========
+  \draw[arr] (img) -- (enc)
+    node[pos=0.5, above=3pt, ts] {$1{\times}3{\times}256{\times}256$};
+
+  \draw[arr] (enc) -- (pwr)
+    node[pos=0.5, above=3pt, ts] {$\mathbf{y} \in \mathbb{R}^{1{\times}32^3}$};
+
+  \draw[arr] (pwr) -- (awgn)
+    node[pos=0.5, above=3pt, ts] {$\sqrt{P}\mathbf{y}$};
+
+  \draw[arr] (awgn) -- (gen)
+    node[pos=0.5, above=3pt, ts] {$\hat{\mathbf{y}} = \sqrt{P}\mathbf{y} + \mathbf{n}$};
+
+  \draw[arr] (gen) -- (out)
+    node[pos=0.5, above=3pt, ts] {$1{\times}3{\times}256{\times}256$};
+
+  % ========== Discriminator（简化布局）==========
+  \node[mainblock, fill=mPink!40, below=1.8cm of awgn, dashed, minimum width=2.5cm] (disc)
+    {Discriminator\\{\tiny 仅训练}};
+
+  \draw[darr] (img.south) -- ++(0,-0.5) -| (disc.west)
+    node[pos=0.15, left=2pt, ts] {$\mathbf{x}$};
+
+  \draw[darr] (out.south) -- ++(0,-0.5) -| (disc.east)
+    node[pos=0.15, right=2pt, ts] {$\hat{\mathbf{x}}$};
+
+  \draw[darr] (awgn.south) -- (disc.north)
+    node[pos=0.5, right=2pt, ts] {$\hat{\mathbf{y}}$};
+
+  % ========== Encoder 微观结构（精简，不完全展开）==========
+  \node[micro, fill=mBlue!30, below=1.0cm of enc, xshift=-1.0cm] (e1) {Conv};
+  \node[micro, fill=mBlue!30, right=0.15cm of e1] (e2) {BN};
+  \node[micro, fill=mBlue!30, right=0.15cm of e2] (e3) {ReLU};
+  \node[micro, fill=mBlue!25, right=0.2cm of e3, minimum width=1.0cm] (e4) {Res$\times$2};
+
+  \draw[arr, -, thin] (e1) -- (e2) -- (e3) -- (e4);
+  \draw[arr, dashed, thin, mDark!60] (enc.south) -- (e2.north);
+
+  \node[ts, below=0.2cm of e1] {$3{\to}64$};
+  \node[ts, below=0.2cm of e4] {$256{\to}32$};
+
+  % ========== Generator 微观结构（精简）==========
+  \node[micro, fill=mPurple!30, below=1.0cm of gen, xshift=-1.0cm] (g1) {Conv};
+  \node[micro, fill=mPurple!30, right=0.15cm of g1] (g2) {BN};
+  \node[micro, fill=mPurple!30, right=0.15cm of g2] (g3) {ReLU};
+  \node[micro, fill=mPurple!25, right=0.2cm of g3, minimum width=1.0cm] (g4) {Res$\times$5};
+
+  \draw[arr, -, thin] (g1) -- (g2) -- (g3) -- (g4);
+  \draw[arr, dashed, thin, mDark!60] (gen.south) -- (g2.north);
+
+  \node[ts, below=0.2cm of g1] {$32{\to}256$};
+  \node[ts, below=0.2cm of g4] {$256{\to}3$};
+
+  % ========== 背景分组（淡化，避免视觉干扰）==========
+  \begin{scope}[on background layer]
+    \node[fit=(img)(enc)(pwr)(e1)(e4),
+      fill=mBlue!8, draw=mDark!30, dashed,
+      rounded corners=5pt, inner sep=8pt] {};
+
+    \node[fit=(gen)(out)(g1)(g4),
+      fill=mPurple!8, draw=mDark!30, dashed,
+      rounded corners=5pt, inner sep=8pt] {};
+  \end{scope}
+
+  % 标签（简洁，不遮挡）
+  \node[above=0.35cm of enc, font=\sffamily\scriptsize, color=mDark!80] {发送端};
+  \node[above=0.35cm of gen, font=\sffamily\scriptsize, color=mDark!80] {接收端};
+
+  % ========== 核心数学公式（左上角，紧凑排版）==========
+  \node[legendbox, anchor=north west] at ([xshift=5pt, yshift=-5pt]current bounding box.north west)
+    [align=left, text width=4.2cm] {
+    \textbf{训练损失}\\[2pt]
+    $L_t = \lambda L_G + \alpha L_{\text{MSE}} + \beta L_{\text{LPIPS}}$\\[1pt]
+    $L_G = -\mathbb{E}[\log D(G(\hat{\mathbf{y}}), \hat{\mathbf{y}})]$\\[1pt]
+    $L_D = -\mathbb{E}[\log D(\mathbf{x}, \mathbf{y})]$\\
+    \hspace{1.2cm}$- \mathbb{E}[\log(1{-}D(\hat{\mathbf{x}}, \hat{\mathbf{y}}))]$
+  };
+
+  % ========== 图例（右下角，精简）==========
+  \node[legendbox, anchor=south east] at ([xshift=-5pt, yshift=5pt]current bounding box.south east)
+    [align=left, text width=4.0cm] {
+    \textbf{图例}\\[1pt]
+    \colorbox{mBlue!40}{\rule{0.15cm}{0.1cm}} 编码 \quad
+    \colorbox{mPurple!40}{\rule{0.15cm}{0.1cm}} 解码 \quad
+    \colorbox{mGreen!50}{\rule{0.15cm}{0.1cm}} 信道\\[1pt]
+    实线：推理 \quad 虚线：训练\\[2pt]
+    SNR $= 10\log_{10}(\|\mathbf{y}\|^2/\sigma^2)$ dB
+  };
+\end{tikzpicture}
+\end{document}

@@ -1,0 +1,67 @@
+% 图 1.1 系统概述图 — 基于 CICC0903540 技术文档 1.1
+\documentclass[tikz,border=8pt]{standalone}
+\input{_preamble}
+\begin{document}
+\begin{tikzpicture}[
+  node distance=0.55cm and 1.4cm,
+  block/.style={
+    rectangle, rounded corners=3pt, draw=mDark, align=center,
+    font=\small\sffamily, semithick,
+    minimum width=2.5cm, minimum height=0.85cm, inner sep=5pt},
+  hw/.style={
+    rectangle, rounded corners=3pt, draw=mDark, align=center,
+    font=\footnotesize\sffamily, semithick,
+    minimum width=2.5cm, minimum height=0.5cm, inner sep=4pt},
+  arr/.style={-{Stealth[length=4pt]}, draw=mDark, semithick},
+  sect/.style={font=\footnotesize\sffamily\bfseries, color=mDark},
+]
+  % 发送端
+  \node[sect] (sectTx) {发送端};
+  \node[block, fill=mBlue!40, below=0.4cm of sectTx] (enc)
+    {Encoder\\{\footnotesize 语义特征提取}};
+  \node[block, fill=mBlue!40, below=0.5cm of enc] (quant)
+    {量化压缩};
+  \node[hw, fill=mGray!60, below=0.4cm of quant] (pc)
+    {上位机 (i7-13700H + RTX 4060)};
+
+  % 信道
+  \node[sect, right=4.5cm of sectTx] (sectCh) {传输信道};
+  \node[block, fill=mGreen!50, below=0.4cm of sectCh] (ch)
+    {OpenSSH\\{\footnotesize 安全传输通道}};
+
+  % 接收端
+  \node[sect, right=4.5cm of sectCh] (sectRx) {接收端};
+  \node[block, fill=mPurple!40, below=0.4cm of sectRx] (gen)
+    {Generator\\{\footnotesize 图像解码与重建}};
+  \node[block, fill=mPurple!40, below=0.5cm of gen] (opt)
+    {TVM / MNN\\{\footnotesize 推理加速}};
+  \node[hw, fill=mGray!60, below=0.4cm of opt] (ft)
+    {飞腾派 (ARMv8, 4 核)};
+
+  % 连线：张量标注放在箭头旁，避免与块重叠
+  \draw[arr] (enc) -- (quant)
+    node[pos=0.5, left=1pt, ts] {$1{\times}32{\times}32{\times}32$};
+  \draw[arr] (quant.east) -- ++(0.6,0) |- (ch.west)
+    node[pos=0.25, above=4pt, ts] {隐式张量};
+  \draw[arr] (ch.east) -- ++(0.6,0) |- (gen.west)
+    node[pos=0.25, above=4pt, ts] {$\hat{\mathbf{y}}$};
+  \draw[arr] (gen) -- (opt)
+    node[pos=0.5, left=1pt, ts] {$1{\times}3{\times}256{\times}256$};
+
+  \begin{scope}[on background layer]
+    \node[fit=(enc)(quant)(pc), fill=mBlue!15, draw=mDark!30,
+      rounded corners=4pt, inner sep=5pt, semithick] {};
+    \node[fit=(gen)(opt)(ft), fill=mPurple!15, draw=mDark!30,
+      rounded corners=4pt, inner sep=5pt, semithick] {};
+  \end{scope}
+
+  % 图例（预留边距）
+  \node[legendbox, anchor=north east] at ([xshift=-4pt, yshift=-4pt]current bounding box.south east)
+    [align=left, text width=3.2cm] {
+    \textbf{图例}\\[1pt]
+    \colorbox{mBlue!40}{\rule{0.14cm}{0.1cm}\hspace{0.05cm}} 编码 \quad
+    \colorbox{mPurple!40}{\rule{0.14cm}{0.1cm}\hspace{0.05cm}} 解码 \quad
+    \colorbox{mGreen!50}{\rule{0.14cm}{0.1cm}\hspace{0.05cm}} 信道
+  };
+\end{tikzpicture}
+\end{document}

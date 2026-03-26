@@ -125,6 +125,26 @@ PanelFrame {
                 opacity: 0.82
             }
 
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.leftMargin: shellWindow ? shellWindow.scaled(14) : 14
+                anchors.rightMargin: shellWindow ? shellWindow.scaled(14) : 14
+                height: shellWindow ? shellWindow.scaled(2) : 2
+                radius: height / 2
+                gradient: Gradient {
+                    orientation: Gradient.Horizontal
+                    GradientStop { position: 0.0; color: "transparent" }
+                    GradientStop { position: 0.15; color: "rgba(78,190,255,0.06)" }
+                    GradientStop { position: 0.45; color: "rgba(78,190,255,0.52)" }
+                    GradientStop { position: 0.55; color: "rgba(78,190,255,0.44)" }
+                    GradientStop { position: 0.85; color: "rgba(78,190,255,0.08)" }
+                    GradientStop { position: 1.0; color: "transparent" }
+                }
+                opacity: 0.74
+            }
+
             GridLayout {
                 id: heroLayout
                 anchors.fill: parent
@@ -143,7 +163,7 @@ PanelFrame {
 
                         Text {
                             Layout.fillWidth: true
-                            text: panel["title"] || "执行坞站 / Action Dock"
+                            text: panel["title"] || "操作窗 · 执行坞站"
                             color: shellWindow ? shellWindow.accentBlue : "#38b6ff"
                             font.pixelSize: shellWindow ? shellWindow.eyebrowSize : 10
                             font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
@@ -178,7 +198,7 @@ PanelFrame {
                     }
 
                     Text {
-                        text: "ACTION DOCK / EXECUTION BUS"
+                        text: "执行链路已接线"
                         color: shellWindow ? shellWindow.textSecondary : "#83acc8"
                         font.pixelSize: shellWindow ? shellWindow.captionSize : 11
                         font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"

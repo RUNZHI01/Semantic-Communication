@@ -1,0 +1,87 @@
+% 图 4.1 TVM 编译流水线（精简专业版）
+% 特点：水平流水线，清晰标注，无元素重叠
+\documentclass[tikz,border=10pt]{standalone}
+
+\usepackage{amssymb, amsmath}
+\usepackage{fontspec}
+\usepackage{xeCJK}
+\setCJKmainfont{SimHei}
+\usepackage{tikz}
+\usetikzlibrary{
+  arrows.meta, positioning, shapes.geometric, calc,
+  backgrounds, fit, decorations.pathreplacing
+}
+
+\definecolor{mBlue}{HTML}{AEC6CF}
+\definecolor{mGreen}{HTML}{B1D8B7}
+\definecolor{mPurple}{HTML}{B39EB5}
+\definecolor{mGray}{HTML}{E5E4E2}
+\definecolor{mDark}{HTML}{4A4A4A}
+
+\tikzset{
+  >=stealth, thick, draw=mDark,
+  stage/.style={
+    rectangle, rounded corners=3pt, draw=mDark, align=center,
+    font=\sffamily\small, minimum height=0.85cm, inner sep=5pt,
+    minimum width=2.0cm},
+  ts/.style={font=\tiny\sffamily, color=mDark!75},
+  arr/.style={-{Stealth[length=4pt]}, thick, draw=mDark},
+  legendbox/.style={
+    rectangle, draw=mDark!50, rounded corners=3pt,
+    fill=mGray!15, inner sep=5pt, font=\tiny\sffamily},
+}
+
+\begin{document}
+\begin{tikzpicture}[
+  node distance=0.6cm and 0.9cm,
+]
+  % ========== 主流水线 ==========
+  \node[stage, fill=mBlue!40] (import) {模型导入\\{\footnotesize PyTorch}};
+  \node[stage, fill=mBlue!40, right=0.9cm of import] (relax) {Relax IR\\{\footnotesize 高层IR}};
+  \node[stage, fill=mBlue!40, right=0.9cm of relax] (te) {TE\\{\footnotesize 张量式}};
+  \node[stage, fill=mGreen!50, right=0.9cm of te] (tuning) {MetaSchedule\\{\footnotesize 调优}};
+  \node[stage, fill=mBlue!40, right=0.9cm of tuning] (tir) {TIR\\{\footnotesize 底层IR}};
+  \node[stage, fill=mPurple!40, right=0.9cm of tir] (codegen) {机器码\\{\footnotesize .so}};
+
+  % ========== 连线（单层标注）==========
+  \draw[arr] (import) -- (relax)
+    node[pos=0.5, above=2pt, ts] {ONNX};
+
+  \draw[arr] (relax) -- (te)
+    node[pos=0.5, above=2pt, ts] {FuseOps};
+
+  \draw[arr] (te) -- (tuning)
+    node[pos=0.5, above=2pt, ts] {schedule};
+
+  \draw[arr] (tuning) -- (tir)
+    node[pos=0.5, above=2pt, ts] {JSON};
+
+  \draw[arr] (tir) -- (codegen)
+    node[pos=0.5, above=2pt, ts] {LLVM};
+
+  % ========== 下方说明（紧凑，不重叠）==========
+  \node[ts, below=0.4cm of import, text width=2.0cm, align=center] {torch.onnx\\onnxsim};
+  \node[ts, below=0.4cm of relax, text width=2.0cm, align=center] {算子融合\\常量折叠};
+  \node[ts, below=0.4cm of te, text width=2.0cm, align=center] {循环切分\\矢量化};
+  \node[ts, below=0.4cm of tuning, text width=2.0cm, align=center] {RPC Runner\\Cost Model};
+  \node[ts, below=0.4cm of tir, text width=2.0cm, align=center] {内存重排\\循环展开};
+  \node[ts, below=0.4cm of codegen, text width=2.0cm, align=center] {cortex-a72\\+neon};
+
+  % ========== 顶部标注 ==========
+  \draw[decorate, decoration={brace, amplitude=3pt, raise=2pt}, draw=mDark, thick]
+    (import.north west) -- (codegen.north east)
+    node[midway, above=6pt, font=\sffamily\small\bfseries, color=mDark]
+    {TVM 端到端编译流水线};
+
+  % ========== 图例 ==========
+  \node[legendbox, anchor=south east] at ([xshift=-5pt, yshift=5pt]current bounding box.south east)
+    [align=left, text width=4.0cm] {
+    \textbf{图例}\\[1pt]
+    \colorbox{mBlue!40}{\rule{0.14cm}{0.1cm}} IR \quad
+    \colorbox{mGreen!50}{\rule{0.14cm}{0.1cm}} 调优 \quad
+    \colorbox{mPurple!40}{\rule{0.14cm}{0.1cm}} 产物\\[2pt]
+    Target: cortex-a72 + neon (4核)\\
+    输入: $1{\times}32^3$ \quad 输出: $1{\times}3{\times}256^2$
+  };
+\end{tikzpicture}
+\end{document}

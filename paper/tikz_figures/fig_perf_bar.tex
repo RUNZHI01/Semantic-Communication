@@ -1,0 +1,46 @@
+% 优化效果对比 — 基于 CICC0903540 技术文档 4.2.2 与 4.4.3
+% 300 张图片端到端：MNN 123s (1.85x)；TVM current 255.931 ms/image
+\documentclass[tikz,border=8pt]{standalone}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\input{_preamble}
+\begin{document}
+\begin{tikzpicture}
+\begin{axis}[
+  ybar, width=10cm, height=6cm,
+  bar width=18pt, ymin=0, ymax=250,
+  ylabel={总耗时 (s)}, ylabel style={font=\small\sffamily, color=mDark},
+  symbolic x coords={原始并行, TVM优化, MNN优化},
+  xtick=data, xticklabel style={font=\small\sffamily, color=mDark},
+  yticklabel style={font=\small, color=mDark},
+  nodes near coords, nodes near coords style={font=\small\bfseries, color=mDark},
+  every node near coord/.append style={above=2pt},
+  axis lines*=left, enlarge x limits=0.35,
+  grid=major, major grid style={line width=0.2pt, draw=mDark!60},
+]
+  \addplot[fill=mBlue!40, draw=mDark] coordinates
+    {(原始并行,228) (TVM优化,77) (MNN优化,123)};
+\end{axis}
+\begin{axis}[
+  width=10cm, height=6cm,
+  ymin=0, ymax=3.5,
+  ylabel={加速比 ($\times$)}, ylabel style={font=\small\sffamily, color=mDark},
+  axis y line*=right, axis x line=none,
+  symbolic x coords={原始并行, TVM优化, MNN优化},
+  xtick=\empty, yticklabel style={font=\small, color=mDark},
+  enlarge x limits=0.35,
+]
+  \addplot[mark=diamond*, mark size=4pt, thick, color=mDark, line width=1pt]
+    coordinates {(原始并行,1.00) (TVM优化,2.96) (MNN优化,1.85)};
+  \addlegendentry{加速比}
+\end{axis}
+
+% 图例（预留边距，避免与坐标轴重叠）
+\node[legendbox, anchor=north west] at ([xshift=6pt, yshift=-6pt]current bounding box.south west)
+  [align=left, text width=3.8cm] {
+  \textbf{图例}\\[1pt]
+  柱：总耗时(s) \quad 菱形：加速比\\
+  TVM 300张 77s \quad MNN 300张 123s
+};
+\end{tikzpicture}
+\end{document}

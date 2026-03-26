@@ -66,6 +66,11 @@
 | OpenAMP demo 交接清单 / handoff manifest（M10） | `reports/openamp_demo_handoff_manifest_m10_20260319.md` |
 | OpenAMP demo 最终交付索引（M11） | `reports/openamp_demo_delivery_index_m11_20260319.md` |
 | 集成 OpenAMP demo dashboard 启动器 | `scripts/run_openamp_demo.sh` |
+| cockpit_native 原生座舱答辩讲稿 | `runbooks/cockpit_native_demo_talk_track_2026-03-24.md` |
+| cockpit_native demo packet 索引 | `runbooks/cockpit_native_demo_packet_index_2026-03-24.md` |
+| cockpit_native 一键彩排脚本 | `scripts/run_cockpit_native_demo_rehearsal.sh` |
+| cockpit_native GO / NO-GO 摘要 | `scripts/print_cockpit_native_go_no_go.sh` |
+| cockpit_native 交付包构建脚本 | `scripts/build_cockpit_native_demo_packet.sh` |
 | OpenAMP demo 软件说明 | `demo/openamp_control_plane_demo/README.md` |
 | 只读板级状态探针 | `scripts/probe_openamp_board_status.py` |
 | 四幕演示 runbook | `reports/openamp_control_plane_evidence_package_20260315/demo_four_act_runbook.md` |
@@ -333,6 +338,8 @@ bash scripts/send_continue_hourly.sh --start-in-min 1 --count 8
 - 默认发送到 `main`，会继续复用 `oc-tui --session main` 的历史对话，而不是新开会话；
 - 可直接用 `--start-in-min 1` 表示从未来 1 分钟开始；
 - 默认每 20 分钟发一次带“最近对话锚点”的 `继续` 提示，尽量优先续接最新上下文；
+- 在本仓库里，auto-continue 现在默认会把目标锁定到 `tvm-飞腾派项目`，即使最近聊天里出现别的工程，也会优先回到本项目清单继续推进；
+- 如需改成别的固定项目，可加 `--project-focus "你的项目名"`；
 - 自动续跑生成的助手回复不会再被当成下一轮锚点，避免脚本自我续写；
 - 如果会话尾部自上次成功自动发送后完全没变化，脚本默认会先跳过 1 轮，再在下一轮重发一次；
 - 如需改成“主对话里上一轮任务真正结束后，再发下一条继续”，可加：`--schedule-mode after-complete`；这个模式现在会在发送前先等待 `main` 会话上一轮任务结束，而不是只等待脚本自己上一条 auto-continue 的 run；
