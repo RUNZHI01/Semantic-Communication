@@ -1,8 +1,8 @@
 # RPC Readiness Checklist
 
-- generated_at: 2026-03-10T22:46:17+08:00
-- env_file: session_bootstrap/config/rpc_tune_current_safe.baseline_seeded_warm_start.recommended_cortex_a72_neon.2026-03-10.phytium_pi.env
-- overall_status: BLOCKED
+- generated_at: 2026-03-10T23:15:50+08:00
+- env_file: /home/tianxing/tvm_metaschedule_execution_project/session_bootstrap/config/rpc_tune_current_safe.baseline_seeded_warm_start.recommended_cortex_a72_neon.2026-03-10.phytium_pi.env
+- overall_status: PASS
 
 | 检查项 | 状态 | 证据 |
 |---|---|---|
@@ -21,8 +21,8 @@
 | RPC Tune：真调优护栏一致（require_real -> runner=rpc 且 trials>0） | 满足 | TUNE_REQUIRE_REAL=1; TUNE_RUNNER=rpc; TUNE_TOTAL_TRIALS=500 |
 | RPC Tune：warm-start DB 路径有效（baseline-seeded 模式必需） | 满足 | TUNE_EXISTING_DB=./session_bootstrap/tmp/rpc_tune_output_20260306_195752/tuning_logs; resolved=/home/tianxing/tvm_metaschedule_execution_project/./session_bootstrap/tmp/rpc_tune_output_20260306_195752/tuning_logs; files=ok |
 | RPC Tune：TUNE_OUTPUT_DIR 可写 | 满足 | TUNE_OUTPUT_DIR=./session_bootstrap/tmp/phytium_baseline_seeded_warm_start_current_incremental_20260310; resolved=/home/tianxing/tvm_metaschedule_execution_project/./session_bootstrap/tmp/phytium_baseline_seeded_warm_start_current_incremental_20260310 |
-| RPC Tune：Tracker 端口可达（100.121.87.73:9190） | 不满足 | host=100.121.87.73; port=9190 |
+| RPC Tune：Tracker 端口可达（100.121.87.73:9190） | 满足 | host=100.121.87.73; port=9190 |
 
 ## 阻断项（最小修复）
 
-- Tracker 未运行或不可达，先运行 manage_rpc_services.sh start-tracker。
+- 无阻断项。

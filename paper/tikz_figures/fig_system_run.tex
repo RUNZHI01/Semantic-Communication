@@ -1,0 +1,71 @@
+% 图 3 系统运行 — 基于 CICC0903540 技术文档 3
+\documentclass[tikz,border=8pt]{standalone}
+\input{_preamble}
+\begin{document}
+\begin{tikzpicture}[
+  node distance=0.5cm and 1.2cm,
+  block/.style={
+    rectangle, rounded corners=3pt, draw=mDark, align=center,
+    font=\small\sffamily, semithick,
+    minimum width=2.5cm, minimum height=0.75cm, inner sep=4pt},
+  sub/.style={
+    rectangle, rounded corners=2pt, draw=mDark!60, align=center,
+    font=\scriptsize\sffamily, color=mDark,
+    minimum width=2.0cm, minimum height=0.5cm, inner sep=3pt},
+  arr/.style={-{Stealth[length=4pt]}, draw=mDark, semithick},
+  sect/.style={font=\footnotesize\sffamily\bfseries, color=mDark},
+]
+  \node[sect] (sectHost) {上位机};
+  \node[block, fill=mBlue!40, below=0.35cm of sectHost] (load)
+    {模型加载\\{\footnotesize test\_sub.py}};
+  \node[block, fill=mBlue!40, below=0.4cm of load] (enc)
+    {Encoder 推理\\{\footnotesize 语义特征提取}};
+  \node[block, fill=mBlue!40, below=0.4cm of enc] (quant)
+    {量化打包\\{\footnotesize scale, zero\_point}};
+  \node[sub, fill=mGray!40, below=0.2cm of quant] (sshInit)
+    {SSHClient, AutoAddPolicy, compress};
+
+  \node[block, fill=mGreen!50, right=2.6cm of quant] (trans)
+    {OpenSSH 传输\\{\footnotesize SFTP 连接池}};
+  \node[sub, fill=mGray!40, below=0.2cm of trans] (sftpOpt)
+    {aes128-ctr, 16--64MB 分块, mmap};
+
+  \node[block, fill=mPurple!40, right=2.6cm of trans] (recv)
+    {接收 latent\\{\footnotesize .pt 文件}};
+  \node[block, fill=mPurple!40, below=0.4cm of recv] (dequant)
+    {去量化 + AWGN};
+  \node[block, fill=mPurple!40, below=0.4cm of dequant] (gen)
+    {Generator 推理\\{\footnotesize TVM / MNN}};
+  \node[block, fill=mPurple!40, below=0.4cm of gen] (save)
+    {PNG 落盘};
+  \node[sect, above=0.35cm of recv] (sectPi) {飞腾派};
+
+  \draw[arr] (load) -- (enc);
+  \draw[arr] (enc) -- (quant)
+    node[pos=0.5, left=2pt, ts] {$1{\times}32{\times}32{\times}32$};
+  \draw[arr] (quant.east) -- (trans.west)
+    node[pos=0.5, above=4pt, ts] {语义张量};
+  \draw[arr] (trans.east) -- (recv.west)
+    node[pos=0.5, above=4pt, ts] {$\hat{\mathbf{y}}$};
+  \draw[arr] (recv) -- (dequant);
+  \draw[arr] (dequant) -- (gen);
+  \draw[arr] (gen) -- (save)
+    node[pos=0.5, left=2pt, ts] {PNG};
+
+  \begin{scope}[on background layer]
+    \node[fit=(load)(enc)(quant)(sshInit), fill=mBlue!12, draw=mDark!25,
+      rounded corners=4pt, inner sep=5pt, semithick] {};
+    \node[fit=(recv)(dequant)(gen)(save), fill=mPurple!12, draw=mDark!25,
+      rounded corners=4pt, inner sep=5pt, semithick] {};
+  \end{scope}
+
+  % 图例（预留边距，避免与飞腾派列重叠）
+  \node[legendbox, anchor=north east] at ([xshift=-5pt, yshift=-5pt]current bounding box.south east)
+    [align=left, text width=3cm] {
+    \textbf{图例}\\[1pt]
+    \colorbox{mBlue!40}{\rule{0.15cm}{0.1cm}\hspace{0.06cm}} 上位机 \quad
+    \colorbox{mPurple!40}{\rule{0.15cm}{0.1cm}\hspace{0.06cm}} 飞腾派 \quad
+    \colorbox{mGreen!50}{\rule{0.15cm}{0.1cm}\hspace{0.06cm}} 传输
+  };
+\end{tikzpicture}
+\end{document}

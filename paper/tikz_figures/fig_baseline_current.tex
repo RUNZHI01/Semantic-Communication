@@ -1,0 +1,53 @@
+% 图 4.3 TVM 优化逻辑流程图 — 基于 CICC0903540 技术文档 4.2.1 与 4.2.3
+\documentclass[tikz,border=8pt]{standalone}
+\input{_preamble}
+\begin{document}
+\begin{tikzpicture}[
+  node distance=0.6cm and 0.6cm,
+  stage/.style={
+    rectangle, draw=mDark, fill=mBlue!40,
+    minimum width=1.9cm, minimum height=0.6cm,
+    font=\scriptsize\sffamily, align=center, rounded corners=3pt,
+    semithick, inner sep=6pt},
+  arrow/.style={-{Stealth[length=4pt]}, semithick, draw=mDark},
+  lbl/.style={font=\scriptsize\sffamily\bfseries, color=mDark},
+]
+  \node[lbl] (t1) {1};
+  \node[stage, right=0.25cm of t1] (b1) {compat};
+  \node[stage, right=0.6cm of b1] (c1) {safe runtime};
+  \draw[arrow] (b1) -- (c1);
+
+  \node[lbl, below=0.6cm of t1] (t2) {2};
+  \node[stage, right=0.25cm of t2] (b2) {generic};
+  \node[stage, right=0.6cm of b2] (c2) {cortex-a72};
+  \draw[arrow] (b2) -- (c2);
+
+  \node[lbl, below=0.6cm of t2] (t3) {3};
+  \node[stage, right=0.25cm of t3] (b3) {rebuild};
+  \node[stage, right=0.6cm of b3] (c3) {增量调优};
+  \draw[arrow] (b3) -- (c3);
+
+  \node[lbl, below=0.6cm of t3] (t4) {4};
+  \node[stage, right=0.25cm of t4] (b4) {payload};
+  \node[stage, right=0.6cm of b4] (c4) {真实重建};
+  \draw[arrow] (b4) -- (c4);
+
+  \node[lbl, below=0.6cm of t4] (t5) {5};
+  \node[stage, right=0.25cm of t5] (b5) {人工};
+  \node[stage, right=0.6cm of b5] (c5) {SHA guard};
+  \draw[arrow] (b5) -- (c5);
+
+  \draw[decorate, decoration={brace, amplitude=2pt, raise=1pt}, semithick, draw=mGray]
+    (b1.north west) -- (c5.south east)
+    node[midway, above=8pt, font=\scriptsize\sffamily\bfseries, color=mDark]
+    {baseline $\rightarrow$ current};
+
+  % 图例（预留边距）
+  \node[legendbox, anchor=north east] at ([xshift=-5pt, yshift=-5pt]current bounding box.south east)
+    [align=left, text width=3cm] {
+    \textbf{图例}\\[1pt]
+    1 运行时 \quad 2 target \quad 3 调优\\
+    4 评测 \quad 5 治理
+  };
+\end{tikzpicture}
+\end{document}

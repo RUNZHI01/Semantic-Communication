@@ -24,6 +24,9 @@ def build_parser() -> argparse.ArgumentParser:
         default=str(default_capture_output_path()),
         help="Output image path. Defaults to cockpit_native/runtime/captures/cockpit_native_latest.png",
     )
+    parser.add_argument("--page", type=int, default=None, help="Page index to capture.")
+    parser.add_argument("--width", type=int, default=None, help="Window width.")
+    parser.add_argument("--height", type=int, default=None, help="Window height.")
     return parser
 
 
@@ -32,7 +35,12 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        saved_path = capture_native_cockpit(output_path=Path(args.output))
+        saved_path = capture_native_cockpit(
+            output_path=Path(args.output),
+            page_index=args.page,
+            window_width=args.width,
+            window_height=args.height,
+        )
     except RuntimeError as exc:
         print(str(exc), file=sys.stderr)
         return 1

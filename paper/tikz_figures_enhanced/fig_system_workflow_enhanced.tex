@@ -1,0 +1,209 @@
+% 图 3.1 系统运行流程图（重绘加强版）
+% 基于 CICC0903540 技术文档 3.0 - 系统运行详细流程
+\documentclass[tikz,border=10pt]{standalone}
+
+% 强制全局样式与配色
+\usepackage{amssymb, amsmath}
+\usepackage{fontspec}
+\usepackage{xeCJK}
+\setCJKmainfont{SimHei}
+\usepackage{tikz}
+\usetikzlibrary{
+  arrows.meta, positioning, shapes.geometric, calc,
+  backgrounds, fit, decorations.pathreplacing, patterns, shapes.symbols
+}
+
+% 低饱和度马卡龙配色
+\definecolor{mBlue}{HTML}{AEC6CF}
+\definecolor{mPink}{HTML}{FFD1DC}
+\definecolor{mGreen}{HTML}{B1D8B7}
+\definecolor{mPurple}{HTML}{B39EB5}
+\definecolor{mYellow}{HTML}{FDFD96}
+\definecolor{mGray}{HTML}{E5E4E2}
+\definecolor{mDark}{HTML}{4A4A4A}
+
+% 全局 TikZ 样式
+\tikzset{
+  >=stealth,
+  thick,
+  draw=mDark,
+  step/.style={
+    rectangle, rounded corners=3pt, draw=mDark, align=center,
+    font=\sffamily\scriptsize, minimum height=0.8cm, inner sep=5pt,
+    minimum width=3.5cm},
+  decision/.style={
+    diamond, draw=mDark, align=center,
+    font=\sffamily\tiny, inner sep=3pt, aspect=2.5},
+  micro/.style={
+    rectangle, rounded corners=2pt, draw=mDark!70, align=center,
+    font=\sffamily\tiny, minimum height=0.35cm, inner sep=2pt},
+  ts/.style={font=\tiny\sffamily, color=mDark!80},
+  arr/.style={-{Stealth[length=4pt]}, thick, draw=mDark},
+  legendbox/.style={
+    rectangle, draw=mDark!50, rounded corners=3pt,
+    fill=mGray!15, inner sep=5pt, font=\tiny\sffamily},
+}
+
+\begin{document}
+\begin{tikzpicture}[
+  node distance=0.6cm and 1.2cm,
+]
+  % ========== 上位机侧（发送端）==========
+  \node[step, fill=mBlue!40] (start) {1. 上位机执行\\test\_sub.py};
+
+  \node[step, fill=mBlue!40, below=0.6cm of start] (load)
+    {2. 加载 Encoder 模型\\设置为 eval 模式};
+
+  \node[step, fill=mBlue!40, below=0.6cm of load] (encode)
+    {3. 语义特征提取\\$\mathbf{x} \to \mathbf{y}$};
+
+  \node[micro, fill=mBlue!30, right=0.2cm of encode, xshift=0.8cm] (e1) {Conv};
+  \node[micro, fill=mBlue!30, below=0.15cm of e1] (e2) {BN};
+  \node[micro, fill=mBlue!30, below=0.15cm of e2] (e3) {ReLU};
+  \node[micro, fill=mBlue!25, below=0.15cm of e3] (e4) {Res$\times$2};
+  \draw[arr, dashed, thin, mDark!60] (encode.east) |- (e2.west);
+
+  \node[step, fill=mBlue!40, below=0.6cm of encode] (quant)
+    {4. 量化压缩\\计算参数打包};
+
+  \node[ts, right=0.15cm of quant] {$\approx$32KB};
+
+  % ========== 传输信道 ==========
+  \node[step, fill=mGreen!50, below=0.6cm of quant] (ssh)
+    {5. OpenSSH 传输\\AES-128-CTR 加密};
+
+  \node[micro, fill=mGreen!40, right=0.2cm of ssh, xshift=0.8cm] (s1) {SFTP Pool};
+  \node[micro, fill=mGreen!40, below=0.15cm of s1] (s2) {Chunk 64MB};
+  \node[micro, fill=mGreen!40, below=0.15cm of s2] (s3) {mmap 读取};
+  \draw[arr, dashed, thin, mDark!60] (ssh.east) |- (s2.west);
+
+  \node[step, fill=mGreen!50, below=0.6cm of ssh] (trigger)
+    {6. 远程触发\\decoder.py 执行};
+
+  % ========== 飞腾派侧（接收端）==========
+  \node[step, fill=mPurple!40, below=0.6cm of trigger] (receive)
+    {7. 飞腾派接收\\隐式张量 $\hat{\mathbf{y}}$};
+
+  \node[step, fill=mPurple!40, below=0.6cm of receive] (awgn)
+    {8. AWGN 扰动注入\\$\hat{\mathbf{y}} = \sqrt{P}\mathbf{y} + \mathbf{n}$};
+
+  \node[decision, fill=mYellow!50, below=0.8cm of awgn] (opt)
+    {优化路线?};
+
+  % TVM 路线
+  \node[step, fill=mPurple!40, below left=0.6cm and 1.0cm of opt] (tvm)
+    {9a. TVM 推理\\Relax VM 执行};
+
+  \node[micro, fill=mPurple!30, below=0.15cm of tvm] (t1) {load .so};
+  \node[micro, fill=mPurple!30, below=0.15cm of t1] (t2) {VM init};
+  \node[micro, fill=mPurple!30, below=0.15cm of t2] (t3) {main()};
+
+  % MNN 路线
+  \node[step, fill=mPurple!40, below right=0.6cm and 1.0cm of opt] (mnn)
+    {9b. MNN 推理\\Session API};
+
+  \node[micro, fill=mPurple!30, below=0.15cm of mnn] (m1) {resizeTensor};
+  \node[micro, fill=mPurple!30, below=0.15cm of m1] (m2) {resizeSession};
+  \node[micro, fill=mPurple!30, below=0.15cm of m2] (m3) {runSession};
+
+  % 汇聚
+  \node[step, fill=mPurple!40, below=2.8cm of opt] (decode)
+    {10. 图像解码\\$\hat{\mathbf{y}} \to \hat{\mathbf{x}}$};
+
+  \node[step, fill=mPurple!40, below=0.6cm of decode] (save)
+    {11. PNG 落盘\\保存到指定目录};
+
+  \node[step, fill=mGray!50, below=0.6cm of save] (end)
+    {完成};
+
+  % ========== 连线 ==========
+  \draw[arr] (start) -- (load)
+    node[pos=0.5, right=2pt, ts] {PyTorch};
+
+  \draw[arr] (load) -- (encode)
+    node[pos=0.5, right=2pt, ts] {禁用梯度};
+
+  \draw[arr] (encode) -- (quant)
+    node[pos=0.5, right=2pt, ts] {$1{\times}32{\times}32{\times}32$};
+
+  \draw[arr] (quant) -- (ssh)
+    node[pos=0.5, right=2pt, ts] {隐式张量};
+
+  \draw[arr] (ssh) -- (trigger)
+    node[pos=0.5, right=2pt, ts] {Port 22};
+
+  \draw[arr] (trigger) -- (receive)
+    node[pos=0.5, right=2pt, ts] {SSH 连接};
+
+  \draw[arr] (receive) -- (awgn)
+    node[pos=0.5, right=2pt, ts] {SNR 设定};
+
+  \draw[arr] (awgn) -- (opt);
+
+  % 分支
+  \draw[arr] (opt) -| (tvm)
+    node[pos=0.2, above=1pt, ts] {静态};
+
+  \draw[arr] (opt) -| (mnn)
+    node[pos=0.2, above=1pt, ts] {动态};
+
+  % 汇聚
+  \draw[arr] (tvm) |- (decode);
+  \draw[arr] (mnn) |- (decode);
+
+  \draw[arr] (decode) -- (save)
+    node[pos=0.5, right=2pt, ts] {$1{\times}3{\times}H{\times}W$};
+
+  \draw[arr] (save) -- (end);
+
+  % ========== 层次化表达：背景分组 ==========
+  \begin{scope}[on background layer]
+    % 上位机区域
+    \node[fit=(start)(load)(encode)(quant)(e1)(e2)(e3)(e4),
+      fill=mBlue!12, draw=mDark!40, dashed,
+      rounded corners=5pt, inner sep=10pt] {};
+
+    \node[above=0.3cm of start, font=\sffamily\footnotesize\bfseries, color=mDark]
+      {上位机（i7-13700H + RTX 4060）};
+
+    % 传输信道区域
+    \node[fit=(ssh)(trigger)(s1)(s2)(s3),
+      fill=mGreen!12, draw=mDark!40, dashed,
+      rounded corners=5pt, inner sep=10pt] {};
+
+    % 飞腾派区域
+    \node[fit=(receive)(awgn)(opt)(tvm)(mnn)(decode)(save)(t1)(t2)(t3)(m1)(m2)(m3),
+      fill=mPurple!12, draw=mDark!40, dashed,
+      rounded corners=5pt, inner sep=10pt] {};
+
+    \node[left=0.3cm of receive, font=\sffamily\footnotesize\bfseries, color=mDark]
+      {飞腾派（ARMv8 Cortex-A72）};
+  \end{scope}
+
+  % ========== 信息密度拉满：关键参数标注 ==========
+  \node[legendbox, anchor=north west] at ([xshift=5pt, yshift=-5pt]current bounding box.north west)
+    [align=left, text width=4.8cm] {
+    \textbf{关键配置参数}\\[2pt]
+    • 上位机脚本：\texttt{test\_sub.py}\\
+    • Encoder 模式：\texttt{eval}（禁用 Dropout/BN）\\
+    • 量化方法：参数打包（$\approx$32KB）\\
+    • SSH 加密：AES-128-CTR\\
+    • SFTP 配置：Window 1GB, Chunk 64MB\\
+    • TVM 产物：\texttt{optimized\_model.so}\\
+    • MNN 模型：\texttt{decoder.mnn}\\
+    • SNR 设定：10 dB（AWGN 信道）
+  };
+
+  % ========== 图例（右下角）==========
+  \node[legendbox, anchor=south east] at ([xshift=-5pt, yshift=5pt]current bounding box.south east)
+    [align=left, text width=4.5cm] {
+    \textbf{图例}\\[1pt]
+    \colorbox{mBlue!40}{\rule{0.16cm}{0.12cm}\hspace{0.05cm}} 上位机端\\
+    \colorbox{mGreen!50}{\rule{0.16cm}{0.12cm}\hspace{0.05cm}} 传输信道\\
+    \colorbox{mPurple!40}{\rule{0.16cm}{0.12cm}\hspace{0.05cm}} 飞腾派端\\[1pt]
+    TVM 路线：静态形状（256$\times$256）\\
+    MNN 路线：动态形状（$H{\times}W$ 可变）\\[1pt]
+    测试结果：300 张图片端到端重建
+  };
+\end{tikzpicture}
+\end{document}

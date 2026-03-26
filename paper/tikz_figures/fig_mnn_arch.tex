@@ -1,0 +1,65 @@
+% 图 4.5 MNN 概述示意图 — 基于 CICC0903540 技术文档 4.3
+\documentclass[tikz,border=8pt]{standalone}
+\input{_preamble}
+\begin{document}
+\begin{tikzpicture}[
+  x=1.0cm, y=1.0cm,
+  node distance=0.5cm and 0.7cm,
+  box/.style={
+    rectangle, draw=mDark, fill=mBlue!40,
+    minimum height=0.8cm, font=\small\sffamily, align=center,
+    rounded corners=4pt, semithick, inner sep=5pt},
+  subbox/.style={
+    rectangle, draw=mDark!80, fill=mGray!50,
+    minimum height=0.65cm, font=\scriptsize\sffamily, align=center,
+    rounded corners=3pt},
+  arr/.style={-{Stealth[length=4pt]}, semithick, draw=mDark},
+  lbl/.style={font=\footnotesize\sffamily\bfseries, color=mDark},
+]
+  \node[box, minimum width=11cm] (input)
+    {输入模型（TensorFlow / TFLite / Caffe / ONNX）};
+
+  \node[lbl, below=0.8cm of input.west, anchor=west] (cvt) {Converter};
+  \node[subbox, minimum width=4.8cm, below=0.25cm of cvt.south west, anchor=north west] (fe)
+    {Frontend（格式解析）};
+  \node[subbox, minimum width=4.8cm, right=0.5cm of fe] (go)
+    {Graph Optimizer（算子融合）};
+
+  \node[lbl, below=0.9cm of fe.south west, anchor=west] (int) {Interpreter};
+  \node[subbox, minimum width=4.8cm, below=0.25cm of int.south west, anchor=north west] (eng)
+    {Engine（调度/内存管理）};
+  \node[subbox, minimum width=4.8cm, right=0.5cm of eng] (be)
+    {Backend（CPU/GPU/NPU）};
+
+  \node[subbox, minimum width=3.2cm, below=0.6cm of eng] (geo)
+    {几何计算\\{\scriptsize\color{mDark!80} 光栅算子分解}};
+  \node[subbox, minimum width=3.2cm, right=0.5cm of geo] (semi)
+    {半自动搜索\\{\scriptsize\color{mDark!80} 最优后端选择}};
+  \node[subbox, minimum width=2.6cm, right=0.5cm of semi] (neon)
+    {NEON/汇编\\{\scriptsize\color{mDark!80} 底层加速}};
+
+  \draw[arr] (input.south) -- ++(0,-0.3) -| (fe.north);
+  \draw[arr] (fe) -- (go);
+  \draw[arr] (go.south) -- ++(0,-0.25) -| (eng.north);
+  \draw[arr] (eng) -- (be);
+  \draw[arr] (eng.south) -- ++(0,-0.15) -| (geo.north);
+  \draw[arr] (geo) -- (semi);
+  \draw[arr] (semi) -- (neon);
+
+  \begin{scope}[on background layer]
+    \node[fit=(cvt)(fe)(go), fill=mBlue!25, draw=mDark!50,
+      rounded corners=5pt, inner xsep=8pt, inner ysep=6pt, semithick] {};
+    \node[fit=(int)(eng)(be)(geo)(semi)(neon), fill=mPurple!25, draw=mDark!50,
+      rounded corners=5pt, inner xsep=8pt, inner ysep=6pt, semithick] {};
+  \end{scope}
+
+  % 图例（预留边距）
+  \node[legendbox, anchor=north east] at ([xshift=-6pt, yshift=-6pt]current bounding box.south east)
+    [align=left, text width=3.8cm] {
+    \textbf{图例}\\[1pt]
+    \colorbox{mBlue!40}{\rule{0.15cm}{0.1cm}\hspace{0.06cm}} Converter \quad
+    \colorbox{mPurple!40}{\rule{0.15cm}{0.1cm}\hspace{0.06cm}} Interpreter\\
+    61原子+45转换+16复合 $\to$ 光栅+原子 $O(1055)$
+  };
+\end{tikzpicture}
+\end{document}

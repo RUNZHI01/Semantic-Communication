@@ -1,0 +1,111 @@
+% 图 1.1 系统架构图（精简专业版）
+% 特点：清晰布局，避免元素重叠，专业简洁
+\documentclass[tikz,border=10pt]{standalone}
+
+\usepackage{amssymb, amsmath}
+\usepackage{fontspec}
+\usepackage{xeCJK}
+\setCJKmainfont{SimHei}
+\usepackage{tikz}
+\usetikzlibrary{
+  arrows.meta, positioning, shapes.geometric, calc,
+  backgrounds, fit, decorations.pathreplacing
+}
+
+\definecolor{mBlue}{HTML}{AEC6CF}
+\definecolor{mPink}{HTML}{FFD1DC}
+\definecolor{mGreen}{HTML}{B1D8B7}
+\definecolor{mPurple}{HTML}{B39EB5}
+\definecolor{mGray}{HTML}{E5E4E2}
+\definecolor{mDark}{HTML}{4A4A4A}
+
+\tikzset{
+  >=stealth, thick, draw=mDark,
+  block/.style={
+    rectangle, rounded corners=3pt, draw=mDark, align=center,
+    font=\sffamily\small, minimum height=0.85cm, inner sep=5pt},
+  ts/.style={font=\tiny\sffamily, color=mDark!75},
+  arr/.style={-{Stealth[length=4pt]}, thick, draw=mDark},
+  legendbox/.style={
+    rectangle, draw=mDark!50, rounded corners=3pt,
+    fill=mGray!15, inner sep=5pt, font=\tiny\sffamily},
+}
+
+\begin{document}
+\begin{tikzpicture}[
+  node distance=0.6cm and 2.0cm,
+]
+  % ========== 发送端 ==========
+  \node[font=\sffamily\footnotesize\bfseries, color=mDark] (txLabel) {发送端};
+
+  \node[block, fill=mBlue!40, below=0.4cm of txLabel, minimum width=2.5cm] (enc)
+    {Encoder\\{\footnotesize 语义提取}};
+
+  \node[block, fill=mBlue!40, below=0.5cm of enc, minimum width=2.5cm] (quant)
+    {量化压缩};
+
+  \node[block, fill=mGray!60, below=0.4cm of quant, minimum width=2.5cm,
+    font=\sffamily\scriptsize] (pc)
+    {上位机\\i7-13700H + RTX 4060};
+
+  % ========== 传输信道 ==========
+  \node[font=\sffamily\footnotesize\bfseries, color=mDark, right=4.5cm of txLabel] (chLabel)
+    {传输信道};
+
+  \node[block, fill=mGreen!50, below=0.4cm of chLabel, minimum width=2.2cm] (ssh)
+    {OpenSSH\\{\footnotesize AES-128-CTR}};
+
+  % ========== 接收端 ==========
+  \node[font=\sffamily\footnotesize\bfseries, color=mDark, right=4.5cm of chLabel] (rxLabel)
+    {接收端};
+
+  \node[block, fill=mPurple!40, below=0.4cm of rxLabel, minimum width=2.5cm] (gen)
+    {Generator\\{\footnotesize 图像重建}};
+
+  \node[block, fill=mPurple!40, below=0.5cm of gen, minimum width=2.5cm] (opt)
+    {推理加速\\{\footnotesize TVM / MNN}};
+
+  \node[block, fill=mGray!60, below=0.4cm of opt, minimum width=2.5cm,
+    font=\sffamily\scriptsize] (ft)
+    {飞腾派\\ARMv8 Cortex-A72};
+
+  % ========== 连线 ==========
+  \draw[arr] (enc) -- (quant)
+    node[pos=0.5, right=2pt, ts] {$1{\times}32^3$};
+
+  \draw[arr] (quant.east) -- ++(0.7,0) |- (ssh.west)
+    node[pos=0.2, above=2pt, ts] {隐式张量};
+
+  \draw[arr] (ssh.east) -- ++(0.7,0) |- (gen.west)
+    node[pos=0.2, above=2pt, ts] {$\hat{\mathbf{y}}$};
+
+  \draw[arr] (gen) -- (opt)
+    node[pos=0.5, right=2pt, ts] {$1{\times}3{\times}256^2$};
+
+  % ========== 背景分组 ==========
+  \begin{scope}[on background layer]
+    \node[fit=(txLabel)(enc)(quant)(pc),
+      fill=mBlue!10, draw=mDark!30, dashed,
+      rounded corners=5pt, inner sep=8pt] {};
+
+    \node[fit=(chLabel)(ssh),
+      fill=mGreen!10, draw=mDark!30, dashed,
+      rounded corners=5pt, inner sep=8pt] {};
+
+    \node[fit=(rxLabel)(gen)(opt)(ft),
+      fill=mPurple!10, draw=mDark!30, dashed,
+      rounded corners=5pt, inner sep=8pt] {};
+  \end{scope}
+
+  % ========== 图例 ==========
+  \node[legendbox, anchor=south east] at ([xshift=-5pt, yshift=5pt]current bounding box.south east)
+    [align=left, text width=3.8cm] {
+    \textbf{图例}\\[1pt]
+    \colorbox{mBlue!40}{\rule{0.14cm}{0.1cm}} 编码 \quad
+    \colorbox{mPurple!40}{\rule{0.14cm}{0.1cm}} 解码 \quad
+    \colorbox{mGreen!50}{\rule{0.14cm}{0.1cm}} 通道\\[2pt]
+    数据集：Open Images V7 (110k)\\
+    测试集：Places365 (300张)
+  };
+\end{tikzpicture}
+\end{document}

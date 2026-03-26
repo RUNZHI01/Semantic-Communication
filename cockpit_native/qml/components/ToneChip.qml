@@ -22,10 +22,21 @@ Rectangle {
             : "#152029" }
         GradientStop { position: 1.0; color: Qt.rgba(root.bottomFill.r, root.bottomFill.g, root.bottomFill.b, prominent ? 0.88 : 0.78) }
     }
-    border.color: shellWindow ? Qt.rgba(accentColor.r, accentColor.g, accentColor.b, prominent ? 0.62 : 0.34) : "#86c7d4"
+    border.color: shellWindow ? Qt.rgba(accentColor.r, accentColor.g, accentColor.b, prominent ? 0.62 : (chipHover.containsMouse ? 0.52 : 0.34)) : "#86c7d4"
     border.width: 1
+    scale: chipHover.containsMouse ? 1.02 : 1.0
     implicitWidth: content.implicitWidth + ((shellWindow ? shellWindow.scaled(prominent ? 13 : 10) : 10) * 2)
     implicitHeight: content.implicitHeight + ((shellWindow ? shellWindow.scaled(prominent ? 8 : 6) : 6) * 2)
+
+    Behavior on scale { NumberAnimation { duration: 120 } }
+    Behavior on border.color { ColorAnimation { duration: 120 } }
+
+    MouseArea {
+        id: chipHover
+        anchors.fill: parent
+        hoverEnabled: true
+        acceptedButtons: Qt.NoButton
+    }
 
     Rectangle {
         anchors.fill: parent

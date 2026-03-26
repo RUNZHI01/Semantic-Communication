@@ -1,0 +1,43 @@
+% 图 4.2 TVM 端到端优化过程流程图 — 基于 CICC0903540 技术文档 4.2.1
+\documentclass[tikz,border=8pt]{standalone}
+\input{_preamble}
+\begin{document}
+\begin{tikzpicture}[
+  node distance=0.5cm and 1.1cm,
+  flowstep/.style={
+    rectangle, rounded corners=3pt, draw=mDark, align=center,
+    font=\small\sffamily, semithick,
+    minimum width=1.8cm, minimum height=0.75cm, inner sep=4pt},
+  flowtool/.style={
+    rectangle, rounded corners=2pt, draw=mDark!60, align=center,
+    font=\scriptsize\sffamily, color=mDark,
+    minimum height=0.5cm, inner sep=3pt},
+  arr/.style={-{Stealth[length=4pt]}, draw=mDark, semithick},
+]
+  \node[flowstep, fill=mBlue!40] (pt) {\texttt{.pt}};
+  \node[flowtool, fill=mGray!40, below=0.18cm of pt] {torch.onnx.export};
+  \node[flowstep, fill=mBlue!40, right=1.1cm of pt] (onnx) {ONNX};
+  \node[flowtool, fill=mGray!40, below=0.18cm of onnx] {onnxsim};
+  \node[flowstep, fill=mBlue!40, right=1.1cm of onnx] (simp) {简化 ONNX};
+  \node[flowtool, fill=mGray!40, below=0.18cm of simp] {from\_onnx};
+  \node[flowstep, fill=mGreen!50, right=1.1cm of simp] (relax) {Relax IR};
+  \node[flowtool, fill=mGray!40, below=0.18cm of relax] {MetaSchedule};
+  \node[flowstep, fill=mPurple!40, right=1.1cm of relax] (so) {\texttt{.so}};
+  \node[flowtool, fill=mGray!40, below=0.18cm of so] {export\_library};
+
+  \draw[arr] (pt) -- (onnx);
+  \draw[arr] (onnx) -- (simp)
+    node[pos=0.5, above=3pt, ts] {onnxsim};
+  \draw[arr] (simp) -- (relax)
+    node[pos=0.5, above=3pt, ts] {from\_onnx};
+  \draw[arr] (relax) -- (so)
+    node[pos=0.5, above=3pt, ts] {export\_library};
+
+  % 图例（预留边距）
+  \node[legendbox, anchor=north east] at ([xshift=-5pt, yshift=-5pt]current bounding box.south east)
+    [align=left, text width=2.8cm] {
+    \textbf{图例}\\[1pt]
+    宿主机 $\to$ 飞腾派 RPC
+  };
+\end{tikzpicture}
+\end{document}

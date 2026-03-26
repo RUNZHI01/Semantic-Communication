@@ -1,0 +1,49 @@
+% 图 4.3.1 几何计算机制 — 基于 CICC0903540 技术文档 4.3.1
+\documentclass[tikz,border=8pt]{standalone}
+\input{_preamble}
+\begin{document}
+\begin{tikzpicture}[
+  x=1.1cm, y=1.0cm,
+  node distance=0.6cm and 0.8cm,
+  big/.style={
+    rectangle, draw=mDark, fill=mBlue!40,
+    minimum width=2.2cm, minimum height=0.9cm,
+    font=\small\sffamily, align=center, rounded corners=4pt,
+    semithick, inner sep=5pt},
+  small/.style={
+    rectangle, draw=mDark!80, fill=mGreen!50,
+    minimum width=1.9cm, minimum height=0.7cm,
+    font=\scriptsize\sffamily, align=center, rounded corners=3pt},
+  arr/.style={-{Stealth[length=4pt]}, semithick, draw=mDark},
+  lbl/.style={font=\scriptsize, color=mGray},
+]
+  \node[big] (trans) {转换算子\\{\scriptsize\color{mDark!80} 转置、切片}};
+  \node[big, right=0.6cm of trans] (comp) {复合算子\\{\scriptsize\color{mDark!80} 卷积、池化}};
+
+  \node[small, below=1.1cm of trans] (raster) {光栅算子\\{\scriptsize\color{mDark!80} 坐标映射}};
+  \node[small, below=1.1cm of comp] (atomic) {原子算子\\{\scriptsize\color{mDark!80} 加减乘除}};
+
+  \draw[arr] (trans.south) -- ++(0,-0.4) -| (raster.north);
+  \draw[arr] (comp.south) -- ++(0,-0.4) -| (atomic.north);
+  \node at ($(trans)!0.5!(comp)+(0,-0.55)$) [lbl] {几何计算分解};
+
+  \node[below=0.35cm of raster, lbl] {优化后 $O(1055)$};
+  \node[below=0.35cm of atomic, lbl] {约减少 46\%};
+
+  \begin{scope}[on background layer]
+    \node[fit=(trans)(comp), fill=mBlue!25, draw=mDark!50,
+      rounded corners=5pt, inner sep=6pt, semithick] {};
+    \node[fit=(raster)(atomic), fill=mGreen!35, draw=mDark!50,
+      rounded corners=5pt, inner sep=6pt, semithick] {};
+  \end{scope}
+
+  % 图例（预留边距）
+  \node[legendbox, anchor=north east] at ([xshift=-5pt, yshift=-5pt]current bounding box.south east)
+    [align=left, text width=3.5cm] {
+    \textbf{图例}\\[1pt]
+    \colorbox{mBlue!40}{\rule{0.15cm}{0.1cm}\hspace{0.06cm}} 高层 \quad
+    \colorbox{mGreen!50}{\rule{0.15cm}{0.1cm}\hspace{0.06cm}} 底层\\
+    region: strides + offsets
+  };
+\end{tikzpicture}
+\end{document}

@@ -39,8 +39,11 @@ Item {
             : (String(currentPageEntry["label"] || shellWindow.topTitle) + " / " + shellWindow.currentPageSummary))
         : ""
     readonly property string heroEyebrow: landingPage
-        ? "飞腾派原生座舱 / PHASE 6 NATIVE COCKPIT"
-        : (String(currentPageEntry["label"] || "座舱页面") + " / ACTIVE PAGE")
+        ? "飞腾原生座舱 · 演示驾驶舱"
+        : String(currentPageEntry["label"] || "座舱页面")
+    readonly property int headerBandMinHeight: shellWindow
+        ? shellWindow.scaled(landingPage ? 52 : 68)
+        : (landingPage ? 52 : 68)
     readonly property string heroTitle: shellWindow
         ? (landingPage ? shellWindow.topTitle : String(currentPageEntry["label"] || shellWindow.topTitle))
         : "飞腾原生座舱"
@@ -91,7 +94,9 @@ Item {
                     : Qt.rgba(goldAccent.r, goldAccent.g, goldAccent.b, 0.56))
                 : "#b4946c"
             border.width: 1
-            implicitHeight: topRailGrid.implicitHeight + (root.topRailPadding * 2)
+            implicitHeight: Math.max(
+                root.headerBandMinHeight,
+                topRailGrid.implicitHeight + (root.topRailPadding * 2))
 
             Rectangle {
                 anchors.fill: parent
@@ -146,7 +151,7 @@ Item {
                 id: topRailGrid
                 anchors.fill: parent
                 anchors.margins: root.topRailPadding
-                columns: root.landingPage ? 1 : (root.compactTopRail ? 1 : 3)
+                columns: 1
                 columnSpacing: shellWindow ? shellWindow.zoneGap : 12
                 rowSpacing: shellWindow ? shellWindow.compactGap : 8
 
@@ -227,7 +232,9 @@ Item {
                                 text: root.heroTitle
                                 color: shellWindow ? shellWindow.textStrong : "#f5efe4"
                                 font.pixelSize: shellWindow
-                                    ? (root.landingPage ? shellWindow.sectionTitleSize + shellWindow.scaled(2) : shellWindow.sectionTitleSize)
+                                    ? (root.landingPage
+                                        ? shellWindow.sectionTitleSize + shellWindow.scaled(2)
+                                        : shellWindow.bodyEmphasisSize + shellWindow.scaled(4))
                                     : 24
                                 font.weight: Font.DemiBold
                                 font.family: shellWindow ? shellWindow.displayFamily : "Noto Serif CJK SC"
@@ -377,7 +384,7 @@ Item {
                 }
 
                 Rectangle {
-                    visible: !root.landingPage
+                    visible: false
                     Layout.fillWidth: true
                     radius: shellWindow ? shellWindow.edgeRadius + shellWindow.scaled(1) : 13
                     color: shellWindow ? Qt.rgba(shellWindow.surfaceQuiet.r, shellWindow.surfaceQuiet.g, shellWindow.surfaceQuiet.b, 0.78) : "#101820"
@@ -547,15 +554,23 @@ Item {
 
                     delegate: Rectangle {
                         readonly property bool selected: Number(modelData["index"]) === root.currentIndex
+                        property bool hovered: false
 
                         radius: shellWindow ? shellWindow.edgeRadius + shellWindow.scaled(1) : 13
                         color: selected
                             ? Qt.rgba(shellWindow.surfaceGlass.r, shellWindow.surfaceGlass.g, shellWindow.surfaceGlass.b, 0.64)
-                            : Qt.rgba(shellWindow.surfaceRaised.r, shellWindow.surfaceRaised.g, shellWindow.surfaceRaised.b, 0.36)
+                            : hovered
+                                ? Qt.rgba(shellWindow.surfaceGlass.r, shellWindow.surfaceGlass.g, shellWindow.surfaceGlass.b, 0.38)
+                                : Qt.rgba(shellWindow.surfaceRaised.r, shellWindow.surfaceRaised.g, shellWindow.surfaceRaised.b, 0.36)
                         border.color: selected
                             ? Qt.rgba(goldAccent.r, goldAccent.g, goldAccent.b, 0.56)
-                            : Qt.rgba(shellWindow.borderSubtle.r, shellWindow.borderSubtle.g, shellWindow.borderSubtle.b, 0.34)
+                            : hovered
+                                ? Qt.rgba(goldAccent.r, goldAccent.g, goldAccent.b, 0.28)
+                                : Qt.rgba(shellWindow.borderSubtle.r, shellWindow.borderSubtle.g, shellWindow.borderSubtle.b, 0.34)
                         border.width: 1
+
+                        Behavior on color { ColorAnimation { duration: 160 } }
+                        Behavior on border.color { ColorAnimation { duration: 160 } }
                         implicitWidth: root.stackNav
                             ? Math.max(shellWindow ? shellWindow.scaled(146) : 146, navColumn.implicitWidth + ((shellWindow ? shellWindow.scaled(18) : 18) * 2))
                             : navColumn.implicitWidth + ((shellWindow ? shellWindow.scaled(18) : 18) * 2)
@@ -601,6 +616,7 @@ Item {
                             }
 
                             Text {
+                                visible: false
                                 text: modelData["english"]
                                 color: selected ? goldAccent : shellWindow.textMuted
                                 font.pixelSize: shellWindow ? shellWindow.captionSize : 10
@@ -614,6 +630,8 @@ Item {
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
                             onClicked: root.pageRequested(Number(modelData["index"]))
+                            onEntered: parent.hovered = true
+                            onExited: parent.hovered = false
                         }
                     }
                 }

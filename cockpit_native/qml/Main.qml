@@ -90,8 +90,8 @@ ApplicationWindow {
     readonly property color panelGlowStrong: panelGlowSoft
     readonly property color panelTraceStrong: borderStrong
 
-    readonly property real widthScale: Math.max(0.72, Math.min(1.16, Number(metrics["width"] || designWidth) / designWidth))
-    readonly property real heightScale: Math.max(0.72, Math.min(1.16, Number(metrics["height"] || designHeight) / designHeight))
+    readonly property real widthScale: Math.max(0.88, Math.min(2.0, Number(metrics["width"] || designWidth) / designWidth))
+    readonly property real heightScale: Math.max(0.88, Math.min(2.0, Number(metrics["height"] || designHeight) / designHeight))
     readonly property real uiScale: Math.min(widthScale, heightScale)
 
     readonly property int safeLeft: Number(insets["left"] || 0)
@@ -107,21 +107,21 @@ ApplicationWindow {
     readonly property bool compactLayout: !wideLayout && !mediumLayout
     readonly property bool shortViewport: viewportHeight < 780
 
-    readonly property int outerPadding: scaled(compactLayout ? 10 : 14)
-    readonly property int shellPadding: scaled(compactLayout ? 12 : 16)
-    readonly property int zoneGap: scaled(compactLayout ? 9 : 12)
+    readonly property int outerPadding: scaled(compactLayout ? 6 : 10)
+    readonly property int shellPadding: scaled(compactLayout ? 8 : 12)
+    readonly property int zoneGap: scaled(compactLayout ? 7 : 10)
     readonly property int compactGap: scaled(7)
     readonly property int panelPadding: scaled(compactLayout ? 12 : 16)
     readonly property int cardPadding: scaled(compactLayout ? 10 : 12)
     readonly property int panelRadius: scaled(22)
     readonly property int cardRadius: scaled(16)
     readonly property int edgeRadius: scaled(13)
-    readonly property int headerTitleSize: scaled(compactLayout ? 27 : 32)
-    readonly property int sectionTitleSize: scaled(compactLayout ? 19 : 24)
-    readonly property int bodyEmphasisSize: scaled(compactLayout ? 14 : 15)
-    readonly property int bodySize: scaled(13)
-    readonly property int captionSize: scaled(10)
-    readonly property int eyebrowSize: scaled(10)
+    readonly property int headerTitleSize: scaled(compactLayout ? 32 : 42)
+    readonly property int sectionTitleSize: scaled(compactLayout ? 24 : 32)
+    readonly property int bodyEmphasisSize: scaled(compactLayout ? 17 : 20)
+    readonly property int bodySize: scaled(16)
+    readonly property int captionSize: scaled(14)
+    readonly property int eyebrowSize: scaled(13)
 
     readonly property string topTitle: primaryLabel(meta["title"] || "飞腾原生座舱")
     readonly property string topSubtitle: String(
@@ -329,6 +329,7 @@ ApplicationWindow {
 
     minimumWidth: 760
     minimumHeight: 600
+    flags: Qt.Window
     visible: true
     color: sceneBottom
     title: topTitle
@@ -379,12 +380,12 @@ ApplicationWindow {
 
     function toneFill(tone) {
         if (tone === "online")
-            return "#18231d"
+            return "#0f2a22"
         if (tone === "warning" || tone === "degraded")
-            return "#251f18"
+            return "#2a2014"
         if (tone === "danger")
-            return "#26191a"
-        return "#152029"
+            return "#2c161c"
+        return "#122838"
     }
 
     function formattedMetric(value, decimals, suffix) {
@@ -432,8 +433,11 @@ ApplicationWindow {
     Component.onCompleted: {
         var availableWidth = Math.max(minimumWidth, Number(metrics["width"] || designWidth))
         var availableHeight = Math.max(minimumHeight, Number(metrics["height"] || designHeight))
-        width = Math.max(minimumWidth, Math.min(Math.round(availableWidth * 0.97), scaled(1760)))
-        height = Math.max(minimumHeight, Math.min(availableHeight, scaled(1020)))
+        var titleBarOffset = 40
+        width = Math.max(minimumWidth, Math.round(availableWidth * 0.92))
+        height = Math.max(minimumHeight, Math.round((availableHeight - titleBarOffset) * 0.92))
+        x = Math.max(0, Math.round((availableWidth - width) / 2))
+        y = Math.max(0, Math.round((availableHeight - height - titleBarOffset) / 2))
     }
 
     Rectangle {
@@ -446,49 +450,27 @@ ApplicationWindow {
     }
 
     Rectangle {
-        width: root.width * 0.62
-        height: root.height * 0.68
-        radius: width / 2
-        color: root.haloCool
-        opacity: 0.16
-        x: -width * 0.18
-        y: -height * 0.12
-    }
-
-    Rectangle {
-        width: root.width * 0.38
-        height: root.height * 0.46
-        radius: width / 2
-        color: root.haloWarm
-        opacity: 0.11
-        x: root.width - (width * 0.8)
-        y: root.height * 0.1
-    }
-
-    Item {
         anchors.fill: parent
-        opacity: 0.13
+        color: "transparent"
 
-        Repeater {
-            model: 10
-
-            delegate: Rectangle {
-                width: parent ? parent.width : 0
-                height: 1
-                color: index % 2 === 0 ? root.dataLineStrong : root.dataLine
-                y: index * ((parent ? parent.height : 0) / 9)
-            }
+        Rectangle {
+            width: parent.width * 0.5
+            height: parent.height * 0.5
+            radius: width / 2
+            x: parent.width * 0.68
+            y: -height * 0.22
+            color: root.haloCool
+            opacity: 0.06
         }
 
-        Repeater {
-            model: 18
-
-            delegate: Rectangle {
-                width: 1
-                height: parent ? parent.height : 0
-                color: index % 3 === 0 ? root.dataLineStrong : root.dataLine
-                x: index * ((parent ? parent.width : 0) / 17)
-            }
+        Rectangle {
+            width: parent.width * 0.4
+            height: parent.height * 0.4
+            radius: width / 2
+            x: -width * 0.16
+            y: parent.height * 0.62
+            color: root.haloWarm
+            opacity: 0.04
         }
     }
 

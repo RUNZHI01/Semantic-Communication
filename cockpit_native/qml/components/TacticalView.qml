@@ -327,14 +327,25 @@ PanelFrame {
 
                         delegate: Rectangle {
                             readonly property var chipData: modelData
+                            property bool chipHov: chipHovArea.containsMouse
                             radius: shellWindow ? shellWindow.edgeRadius : 12
                             color: root.toneFill(chipData["tone"])
                             border.color: root.toneColor(chipData["tone"])
                             border.width: 1
+                            scale: chipHov ? 1.02 : 1.0
                             height: headerChipColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(8) : 8) * 2)
                             width: compactLayout
                                 ? Math.max((headerChipFlow.width - headerChipFlow.spacing) / 2, shellWindow ? shellWindow.scaled(140) : 140)
                                 : (shellWindow ? shellWindow.scaled(172) : 172)
+
+                            Behavior on scale { NumberAnimation { duration: 120 } }
+
+                            MouseArea {
+                                id: chipHovArea
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                acceptedButtons: Qt.NoButton
+                            }
 
                             Column {
                                 id: headerChipColumn
@@ -496,12 +507,32 @@ PanelFrame {
 
                         delegate: Rectangle {
                             readonly property var metricData: modelData
+                            property bool railHov: railHovArea.containsMouse
                             width: parent.width
                             radius: shellWindow ? shellWindow.edgeRadius : 12
                             color: root.toneFill(metricData["tone"])
-                            border.color: root.toneColor(metricData["tone"])
+                            border.color: Qt.rgba(root.toneColor(metricData["tone"]).r, root.toneColor(metricData["tone"]).g, root.toneColor(metricData["tone"]).b, railHov ? 1.0 : 0.7)
                             border.width: 1
                             implicitHeight: railEntryColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(8) : 8) * 2)
+                            opacity: 0
+                            scale: railHov ? 1.02 : 1.0
+
+                            Behavior on scale { NumberAnimation { duration: 120 } }
+                            Behavior on border.color { ColorAnimation { duration: 120 } }
+
+                            Component.onCompleted: railEntranceAnim.start()
+                            SequentialAnimation {
+                                id: railEntranceAnim
+                                PauseAnimation { duration: index * 80 }
+                                NumberAnimation { target: parent; property: "opacity"; from: 0; to: 1; duration: 260; easing.type: Easing.OutCubic }
+                            }
+
+                            MouseArea {
+                                id: railHovArea
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                acceptedButtons: Qt.NoButton
+                            }
 
                             Column {
                                 id: railEntryColumn
@@ -561,6 +592,29 @@ PanelFrame {
                 border.width: 1
                 implicitHeight: recommendationColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(12) : 12) * 2)
 
+                Rectangle {
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.leftMargin: shellWindow ? shellWindow.scaled(10) : 10
+                    anchors.rightMargin: shellWindow ? shellWindow.scaled(10) : 10
+                    height: 2
+                    radius: 1
+                    gradient: Gradient {
+                        orientation: Gradient.Horizontal
+                        GradientStop { position: 0.0; color: "transparent" }
+                        GradientStop { position: 0.3; color: Qt.rgba(root.toneColor(root.recommendedScenarioTone).r, root.toneColor(root.recommendedScenarioTone).g, root.toneColor(root.recommendedScenarioTone).b, 0.4) }
+                        GradientStop { position: 0.7; color: Qt.rgba(root.toneColor(root.recommendedScenarioTone).r, root.toneColor(root.recommendedScenarioTone).g, root.toneColor(root.recommendedScenarioTone).b, 0.2) }
+                        GradientStop { position: 1.0; color: "transparent" }
+                    }
+
+                    SequentialAnimation on opacity {
+                        loops: Animation.Infinite
+                        NumberAnimation { from: 0.5; to: 1.0; duration: 1400; easing.type: Easing.InOutSine }
+                        NumberAnimation { from: 1.0; to: 0.5; duration: 1400; easing.type: Easing.InOutSine }
+                    }
+                }
+
                 Column {
                     id: recommendationColumn
                     anchors.left: parent.left
@@ -614,12 +668,32 @@ PanelFrame {
 
                 delegate: Rectangle {
                     readonly property var metricData: modelData
+                    property bool btmHov: btmHovArea.containsMouse
                     Layout.fillWidth: true
                     radius: shellWindow ? shellWindow.edgeRadius : 12
                     color: root.toneFill(metricData["tone"])
-                    border.color: root.toneColor(metricData["tone"])
+                    border.color: Qt.rgba(root.toneColor(metricData["tone"]).r, root.toneColor(metricData["tone"]).g, root.toneColor(metricData["tone"]).b, btmHov ? 1.0 : 0.7)
                     border.width: 1
                     implicitHeight: bottomMetricColumn.implicitHeight + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
+                    opacity: 0
+                    scale: btmHov ? 1.015 : 1.0
+
+                    Behavior on scale { NumberAnimation { duration: 120 } }
+                    Behavior on border.color { ColorAnimation { duration: 120 } }
+
+                    Component.onCompleted: btmEntranceAnim.start()
+                    SequentialAnimation {
+                        id: btmEntranceAnim
+                        PauseAnimation { duration: index * 70 }
+                        NumberAnimation { target: parent; property: "opacity"; from: 0; to: 1; duration: 280; easing.type: Easing.OutCubic }
+                    }
+
+                    MouseArea {
+                        id: btmHovArea
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        acceptedButtons: Qt.NoButton
+                    }
 
                     Column {
                         id: bottomMetricColumn

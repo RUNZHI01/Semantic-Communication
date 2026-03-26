@@ -61,35 +61,35 @@ FONT_FILE_SUFFIXES = {".ttf", ".otf", ".ttc"}
 DEFAULT_WORLD_MAP_BACKDROP_RELATIVE_PATH = Path("cockpit_native") / "qml" / "assets" / "world-map-backdrop.svg"
 DEFAULT_THEME_PALETTE = {
     "sceneTop": "#0b1623",
-    "sceneMid": "#122234",
-    "sceneBottom": "#0f1824",
-    "haloCool": "#275674",
-    "haloWarm": "#36586c",
-    "shellExterior": "#101b27",
-    "shellInterior": "#162433",
-    "surfaceRaised": "#1a2a3a",
-    "surfaceQuiet": "#111c28",
-    "surfaceGlass": "#223448",
-    "borderSubtle": "#355369",
-    "borderStrong": "#7da8c6",
-    "accentIce": "#96e7ff",
-    "accentGold": "#e7c98e",
-    "accentMint": "#8ce3c0",
-    "accentRose": "#ff95a0",
-    "textStrong": "#f5fbff",
-    "textPrimary": "#d7e5f0",
-    "textSecondary": "#9fb4c5",
-    "textMuted": "#72879a",
-    "dataLine": "#1b3448",
-    "dataLineStrong": "#29516b",
-    "panelHighlight": "#294a62",
-    "panelGlowSoft": "#85ddff",
-    "canopyTop": "#1a3043",
-    "canopyBottom": "#101925",
-    "accentBlue": "#b8cee1",
-    "shellDockTop": "#21394f",
-    "shellDockMid": "#182637",
-    "shellDockBottom": "#101b27",
+    "sceneMid": "#0e1d2e",
+    "sceneBottom": "#091420",
+    "haloCool": "#3080d0",
+    "haloWarm": "#506090",
+    "shellExterior": "#0f1b28",
+    "shellInterior": "#162638",
+    "surfaceRaised": "#1a2e42",
+    "surfaceQuiet": "#111e2c",
+    "surfaceGlass": "#223a50",
+    "borderSubtle": "#2e4d64",
+    "borderStrong": "#5ea8d4",
+    "accentIce": "#7cddff",
+    "accentGold": "#f0b060",
+    "accentMint": "#40e8a0",
+    "accentRose": "#ff6088",
+    "textStrong": "#f0f6fa",
+    "textPrimary": "#c4d8e8",
+    "textSecondary": "#8aa4b8",
+    "textMuted": "#607888",
+    "dataLine": "#1a3044",
+    "dataLineStrong": "#284860",
+    "panelHighlight": "#284a66",
+    "panelGlowSoft": "#60b8e8",
+    "canopyTop": "#142838",
+    "canopyBottom": "#0a1620",
+    "accentBlue": "#78b8e0",
+    "shellDockTop": "#1c3248",
+    "shellDockMid": "#142434",
+    "shellDockBottom": "#0f1b28",
 }
 
 
@@ -238,6 +238,7 @@ def apply_repo_runtime_env(
 ) -> MutableMapping[str, str]:
     resolved = os.environ if target is None else target
     resolved.setdefault("XDG_CACHE_HOME", resolve_repo_runtime_cache_root(project_root))
+    resolved.setdefault("QML_XHR_ALLOW_FILE_READ", "1")
     return resolved
 
 
@@ -453,6 +454,9 @@ def capture_native_cockpit(
     *,
     settle_ms: int = 500,
     safe_area_insets: Mapping[str, int] | None = None,
+    page_index: int | None = None,
+    window_width: int | None = None,
+    window_height: int | None = None,
 ) -> Path:
     apply_offscreen_capture_env()
 
@@ -466,6 +470,12 @@ def capture_native_cockpit(
 
     resolved_output = output_path.resolve()
     resolved_output.parent.mkdir(parents=True, exist_ok=True)
+    if page_index is not None and hasattr(runtime.root_window, "setProperty"):
+        runtime.root_window.setProperty("currentPage", max(0, int(page_index)))
+    if window_width and hasattr(runtime.root_window, "setWidth"):
+        runtime.root_window.setWidth(max(760, int(window_width)))
+    if window_height and hasattr(runtime.root_window, "setHeight"):
+        runtime.root_window.setHeight(max(600, int(window_height)))
     runtime.root_window.show()
 
     failure: list[RuntimeError] = []

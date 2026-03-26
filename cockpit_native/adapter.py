@@ -4,12 +4,27 @@ from dataclasses import dataclass
 from functools import lru_cache
 import importlib.util
 import json
+import os
 from pathlib import Path
+import re
 from types import ModuleType
 from typing import Any
+import urllib.error
+import urllib.request
 
 
 JsonDict = dict[str, Any]
+DEFAULT_OPERATOR_API_BASE = "http://127.0.0.1:8079"
+OPERATOR_API_BASE_ENV = "COCKPIT_NATIVE_OPERATOR_API_BASE"
+AIRCRAFT_POSITION_MODE_ENV = "COCKPIT_NATIVE_AIRCRAFT_POSITION_MODE"
+OPERATOR_LOCATION_LATITUDE_ENV = "COCKPIT_NATIVE_OPERATOR_LATITUDE"
+OPERATOR_LOCATION_LONGITUDE_ENV = "COCKPIT_NATIVE_OPERATOR_LONGITUDE"
+OPERATOR_LOCATION_LABEL_ENV = "COCKPIT_NATIVE_OPERATOR_LOCATION_LABEL"
+OPERATOR_LOCATION_KIND_ENV = "COCKPIT_NATIVE_OPERATOR_LOCATION_KIND"
+FLIGHT_LATITUDE_ENV = "COCKPIT_NATIVE_FLIGHT_LATITUDE"
+FLIGHT_LONGITUDE_ENV = "COCKPIT_NATIVE_FLIGHT_LONGITUDE"
+FLIGHT_SOURCE_LABEL_ENV = "COCKPIT_NATIVE_FLIGHT_SOURCE_LABEL"
+FLIGHT_SOURCE_KIND_ENV = "COCKPIT_NATIVE_FLIGHT_SOURCE_KIND"
 
 
 @dataclass(frozen=True)
@@ -58,6 +73,9 @@ class DemoRepoAdapter:
         if not self.paths.archive_root.is_dir():
             raise FileNotFoundError(f"Missing event archive root: {self.paths.archive_root}")
 
+    def _report_path(self, relative: str) -> Path:
+        return self.paths.project_root / relative
+
     @lru_cache(maxsize=1)
     def _demo_data_module(self) -> ModuleType:
         module_name = "_cockpit_native_demo_data"
@@ -80,8 +98,52 @@ class DemoRepoAdapter:
         return snapshot_path, payload
 
     def load_aircraft_position_contract(self) -> JsonDict:
+        aircraft_position = self._load_aircraft_position_source()
+        return self._apply_aircraft_position_override(aircraft_position)
+
+    def _aircraft_position_mode(self) -> str:
+        candidate = str(os.environ.get(AIRCRAFT_POSITION_MODE_ENV, "") or "").strip().lower()
+        return candidate if candidate in {"auto", "live", "repo"} else "auto"
+
+    def _operator_api_base(self) -> str:
+        candidate = str(os.environ.get(OPERATOR_API_BASE_ENV, "") or "").strip()
+        if not candidate:
+            return DEFAULT_OPERATOR_API_BASE
+        if "://" not in candidate:
+            candidate = "http://" + candidate
+        return candidate.rstrip("/")
+
+    def _load_live_aircraft_position_contract(self) -> JsonDict | None:
+        request = urllib.request.Request(
+            self._operator_api_base() + "/api/aircraft-position",
+            method="GET",
+            headers={"Accept": "application/json"},
+        )
+        try:
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            with opener.open(request, timeout=1.2) as response:
+                body = response.read()
+        except (urllib.error.URLError, TimeoutError, ValueError):
+            return None
+        if not body:
+            return None
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return None
+        return dict(payload) if isinstance(payload, dict) else None
+
+    def _load_repo_aircraft_position_contract(self) -> JsonDict:
         demo_data = self._demo_data_module()
         return dict(demo_data.build_aircraft_position_snapshot())
+
+    def _load_aircraft_position_source(self) -> JsonDict:
+        mode = self._aircraft_position_mode()
+        if mode != "repo":
+            live_payload = self._load_live_aircraft_position_contract()
+            if live_payload is not None:
+                return live_payload
+        return self._load_repo_aircraft_position_contract()
 
     def load_weak_network_contract(self) -> JsonDict:
         demo_data = self._demo_data_module()
@@ -105,6 +167,181 @@ class DemoRepoAdapter:
             ui_state=ui_state,
         )
 
+    def _parse_markdown_key_values(self, path: Path) -> JsonDict:
+        if not path.is_file():
+            return {}
+        pairs: JsonDict = {}
+        pattern = re.compile(r"^\s*-\s*([A-Za-z0-9_]+):\s*(.+?)\s*$")
+        for line in path.read_text(encoding="utf-8").splitlines():
+            match = pattern.match(line)
+            if not match:
+                continue
+            key, value = match.groups()
+            pairs[key] = value
+        return pairs
+
+    def _float_value(self, value: object) -> float | None:
+        try:
+            return float(str(value).strip())
+        except (TypeError, ValueError):
+            return None
+
+    def _build_demo_story(self) -> JsonDict:
+        performance_report = self._report_path(
+            "session_bootstrap/reports/inference_compare_baseline_vs_currentsafe_rerun_20260311_114828.md"
+        )
+        parsed = self._parse_markdown_key_values(performance_report)
+        baseline_ms = self._float_value(parsed.get("baseline_run_median_ms"))
+        current_ms = self._float_value(parsed.get("current_run_median_ms"))
+        improvement_pct = self._float_value(parsed.get("improvement_pct"))
+        delta_ms = self._float_value(parsed.get("delta_run_median_ms"))
+
+        if baseline_ms is None:
+            baseline_ms = 1844.1
+        if current_ms is None:
+            current_ms = 153.778
+        if improvement_pct is None:
+            improvement_pct = 91.66
+        if delta_ms is None:
+            delta_ms = current_ms - baseline_ms
+
+        headline = {
+            "baseline_ms": round(baseline_ms, 3),
+            "current_ms": round(current_ms, 3),
+            "improvement_pct": round(improvement_pct, 2),
+            "delta_ms": round(delta_ms, 3),
+            "speedup_x": round(baseline_ms / current_ms, 1) if current_ms > 0 else 0.0,
+            "label": "Current trusted payload",
+            "summary": f"{baseline_ms:.1f} ms -> {current_ms:.3f} ms，Current 相比 baseline 提升 {improvement_pct:.2f}%。",
+            "callout": "当前可信结论是 Current 已明显快于 baseline，这一页应直接拿来做演示 headline。",
+            "report_path": str(performance_report.relative_to(self.paths.project_root)),
+        }
+
+        return {
+            "performance_headline": headline,
+            "flow": [
+                {
+                    "step_id": "demo_current",
+                    "title": "先打 Current 在线重建",
+                    "detail": headline["summary"],
+                    "action_id": "current_online_rebuild",
+                    "tone": "online",
+                },
+                {
+                    "step_id": "demo_reload",
+                    "title": "再讲合同刷新",
+                    "detail": "说明座舱不是 mock，点击后会重新读取当前 repo 快照和合同。",
+                    "action_id": "reload_contracts",
+                    "tone": "neutral",
+                },
+                {
+                    "step_id": "demo_probe",
+                    "title": "最后做板卡探测",
+                    "detail": "把 live 限制、探测结果和 SAFE_STOP 收口都放在执行页解释。",
+                    "action_id": "probe_live_board",
+                    "tone": "warning",
+                },
+            ],
+        }
+
+    def _env_float(self, name: str) -> float | None:
+        raw_value = str(os.environ.get(name, "") or "").strip()
+        if not raw_value:
+            return None
+        try:
+            return float(raw_value)
+        except ValueError:
+            return None
+
+    def _first_env_float(self, *names: str) -> float | None:
+        for name in names:
+            resolved = self._env_float(name)
+            if resolved is not None:
+                return resolved
+        return None
+
+    def _env_text(self, name: str) -> str:
+        return str(os.environ.get(name, "") or "").strip()
+
+    def _first_env_text(self, *names: str) -> str:
+        for name in names:
+            resolved = self._env_text(name)
+            if resolved:
+                return resolved
+        return ""
+
+    def _apply_aircraft_position_override(self, aircraft_position: JsonDict) -> JsonDict:
+        latitude = self._first_env_float(OPERATOR_LOCATION_LATITUDE_ENV, FLIGHT_LATITUDE_ENV)
+        longitude = self._first_env_float(OPERATOR_LOCATION_LONGITUDE_ENV, FLIGHT_LONGITUDE_ENV)
+        source_label = self._first_env_text(OPERATOR_LOCATION_LABEL_ENV, FLIGHT_SOURCE_LABEL_ENV)
+        source_kind = self._first_env_text(OPERATOR_LOCATION_KIND_ENV, FLIGHT_SOURCE_KIND_ENV)
+
+        if latitude is None and longitude is None and not source_label and not source_kind:
+            return aircraft_position
+
+        demo_data = self._demo_data_module()
+        payload = json.loads(json.dumps(aircraft_position, ensure_ascii=False))
+        position = dict(payload.get("position") or {})
+        if latitude is not None:
+            position["latitude"] = latitude
+        if longitude is not None:
+            position["longitude"] = longitude
+        payload["position"] = position
+        payload["source_label"] = source_label or str(payload.get("source_label") or "Configured operator location")
+        payload["source_kind"] = source_kind or "cockpit_config_override"
+        payload["source_status"] = "configured"
+        payload["source_note"] = (
+            "Cockpit-native 当前坐标来自 operator location 环境变量配置，不伪装成 live GPS。"
+        )
+        return dict(demo_data.build_aircraft_position_snapshot(payload))
+
+    def _build_position_source(self, aircraft_position: JsonDict) -> JsonDict:
+        feed_contract = aircraft_position.get("feed_contract") if isinstance(aircraft_position.get("feed_contract"), dict) else {}
+        position = aircraft_position.get("position") if isinstance(aircraft_position.get("position"), dict) else {}
+        latitude = position.get("latitude")
+        longitude = position.get("longitude")
+        source_kind = str(aircraft_position.get("source_kind") or feed_contract.get("active_source_kind") or "backend_stub")
+        source_status = str(aircraft_position.get("source_status") or "unknown")
+        configured_override = source_kind == "cockpit_config_override" or source_status == "configured"
+        api_path = str(aircraft_position.get("source_api_path") or feed_contract.get("api_path") or "/api/aircraft-position")
+        active_label = str(
+            aircraft_position.get("source_label")
+            if configured_override
+            else (feed_contract.get("active_source_label") or aircraft_position.get("source_label") or "Backend Stub Contract")
+        )
+        if configured_override:
+            configured_by = (
+                "env override: "
+                f"{OPERATOR_LOCATION_LATITUDE_ENV} / {OPERATOR_LOCATION_LONGITUDE_ENV} / {OPERATOR_LOCATION_LABEL_ENV}"
+            )
+            summary = "当前位置来自 cockpit_native operator location 配置，不是实时上位机 GPS。"
+        elif source_kind == "upper_computer_gps":
+            configured_by = f"upper-computer GPS -> {api_path}"
+            summary = "真实位置应由上位机 GPS 通过既有 aircraft-position contract 推送。"
+        else:
+            configured_by = "repo contract: aircraft_position.v1 default sample"
+            summary = (
+                "仓库当前没有 live aircraft feed；页面明确使用 repo-backed stub telemetry 默认样例坐标。"
+            )
+        coordinate_text = "--"
+        if isinstance(latitude, (int, float)) and isinstance(longitude, (int, float)):
+            coordinate_text = f"{float(latitude):.6f}°, {float(longitude):.6f}°"
+        return {
+            "label": active_label,
+            "kind": source_kind,
+            "status": source_status,
+            "configured_by": configured_by,
+            "api_path": api_path,
+            "coordinate_text": coordinate_text,
+            "summary": summary,
+            "override_hint": (
+                f"可通过 {OPERATOR_LOCATION_LATITUDE_ENV} / {OPERATOR_LOCATION_LONGITUDE_ENV} / "
+                f"{OPERATOR_LOCATION_LABEL_ENV} 覆盖；旧变量 {FLIGHT_LATITUDE_ENV} / "
+                f"{FLIGHT_LONGITUDE_ENV} / {FLIGHT_SOURCE_LABEL_ENV} 仍兼容，"
+                f"或继续沿用 {api_path}。"
+            ),
+        }
+
     def _build_ui_state(
         self,
         *,
@@ -121,7 +358,14 @@ class DemoRepoAdapter:
         weak_network_scenarios = weak_network.get("scenarios") if isinstance(weak_network.get("scenarios"), list) else []
         live_anchor = weak_network.get("live_anchor") if isinstance(weak_network.get("live_anchor"), dict) else {}
         recent_events = snapshot.get("recent_events") if isinstance(snapshot.get("recent_events"), list) else []
+        operator_snapshot = snapshot.get("operator") if isinstance(snapshot.get("operator"), dict) else {}
+        demo_story = self._build_demo_story()
+        operator_launch_commands = [
+            str(command) for command in operator_snapshot.get("launch_commands", []) if str(command).strip()
+        ]
+        operator_launch_command = operator_launch_commands[0] if operator_launch_commands else "bash ./session_bootstrap/scripts/run_openamp_demo.sh"
         last_event = recent_events[0] if recent_events else {}
+        position_source = self._build_position_source(aircraft_position)
 
         left_panel = {
             "title": "系统 / 板态",
@@ -171,6 +415,7 @@ class DemoRepoAdapter:
             "sample": dict(aircraft_position.get("sample") or {}),
             "feed_contract": dict(aircraft_position.get("feed_contract") or {}),
             "position": dict(aircraft_position.get("position") or {}),
+            "position_source": position_source,
             "kinematics": dict(aircraft_position.get("kinematics") or {}),
             "fix": dict(aircraft_position.get("fix") or {}),
             "track": aircraft_track,
@@ -192,37 +437,86 @@ class DemoRepoAdapter:
 
         bottom_actions = {
             "title": "操作条 / Action Strip",
+            "demo_story": demo_story,
             "actions": [
                 {
+                    "action_id": "current_online_rebuild",
+                    "label": "Current 在线重建",
+                    "tone": "online",
+                    "enabled": False,
+                    "interactive": True,
+                    "api_path": "/api/run-inference",
+                    "cta_label": "触发 Current",
+                    "note": "尝试调用本机 OpenAMP demo server 的 Current live 重建入口。",
+                    "limitation": (
+                        f"需要本机 operator server 在线（默认 {DEFAULT_OPERATOR_API_BASE}），"
+                        "且该服务内已有会话/板卡凭据。"
+                    ),
+                    "runtime_state": "待接线",
+                },
+                {
                     "action_id": "reload_contracts",
-                    "label": "重载合同",
+                    "label": "重载 cockpit 合同",
                     "tone": "online",
                     "enabled": True,
+                    "interactive": True,
+                    "cta_label": "立即重载",
                     "note": "重新读取仓库快照与合同构建器。",
+                    "runtime_state": "本地可用",
+                },
+                {
+                    "action_id": "probe_live_board",
+                    "label": "探测板卡状态",
+                    "tone": "neutral",
+                    "enabled": False,
+                    "interactive": True,
+                    "api_path": "/api/probe-board",
+                    "cta_label": "执行探测",
+                    "note": "调用 repo 现有只读板卡探测 API，刷新 remoteproc / RPMsg / firmware 状态。",
+                    "limitation": "若 operator server 未启动或尚未录入会话凭据，会返回明确限制说明。",
+                    "runtime_state": "待接线",
+                },
+                {
+                    "action_id": "recover_safe_stop",
+                    "label": "SAFE_STOP 收口",
+                    "tone": "warning",
+                    "enabled": False,
+                    "interactive": True,
+                    "api_path": "/api/recover",
+                    "cta_label": "执行收口",
+                    "note": "通过 operator server 触发 SAFE_STOP 恢复链路；若 live 不通则返回回放/限制说明。",
+                    "limitation": "这不是本地假动作，只有 OpenAMP demo server 在线时才会真正下发恢复。",
+                    "runtime_state": "待接线",
+                },
+                {
+                    "action_id": "baseline_live_check",
+                    "label": "Baseline 对照刷新",
+                    "tone": "neutral",
+                    "enabled": False,
+                    "interactive": True,
+                    "api_path": "/api/run-baseline",
+                    "cta_label": "刷新对照",
+                    "note": "调用 baseline 对照入口；若 live baseline 不可用，server 会明确回退到归档/受限状态。",
+                    "limitation": "baseline 侧仍受 repo 既有 live/demo 模式约束，不在 native shell 内伪造结果。",
+                    "runtime_state": "待接线",
                 },
                 {
                     "action_id": "show_snapshot_path",
                     "label": "快照路径",
                     "tone": "neutral",
                     "enabled": False,
+                    "interactive": False,
                     "note": str(snapshot_path.relative_to(self.paths.project_root)),
-                },
-                {
-                    "action_id": "recommended_link_profile",
-                    "label": "推荐弱网档",
-                    "tone": "warning",
-                    "enabled": False,
-                    "note": str(weak_network.get("recommended_scenario_id") or ""),
-                },
-                {
-                    "action_id": "aircraft_contract",
-                    "label": "飞机合同 API",
-                    "tone": "neutral",
-                    "enabled": False,
-                    "note": str(aircraft_position.get("source_api_path") or "/api/aircraft-position"),
+                    "runtime_state": "只读",
                 },
             ],
-            "footer_note": "默认执行 `bash ./session_bootstrap/scripts/run_cockpit_native.sh`；该入口会自动使用 repo 内 venv 并带软件渲染安全参数。",
+            "footer_note": (
+                "Native cockpit 默认入口是 `bash ./session_bootstrap/scripts/run_cockpit_native.sh`；"
+                f"live operator API 默认由 `{operator_launch_command}` 提供。"
+                "若 operator server 未启动，动作卡仍可点击，但会返回明确的受限状态。"
+            ),
+            "operator_api_base": DEFAULT_OPERATOR_API_BASE,
+            "operator_launch_command": operator_launch_command,
         }
 
         return {
@@ -234,6 +528,7 @@ class DemoRepoAdapter:
                 "layout_strategy": "adaptive_zones",
                 "design_direction": "resolution-independent logical zones with scalable type, spacing, and safe-area padding",
                 "launch_hint": "bash ./session_bootstrap/scripts/run_cockpit_native.sh",
+                "demo_story": demo_story,
             },
             "zones": {
                 "left_status_panel": left_panel,

@@ -171,6 +171,12 @@ PanelFrame {
                         implicitWidth: heroStamp.implicitWidth + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
                         implicitHeight: heroStamp.implicitHeight + ((shellWindow ? shellWindow.scaled(5) : 5) * 2)
 
+                        SequentialAnimation on border.color {
+                            loops: Animation.Infinite
+                            ColorAnimation { from: "#1d547c"; to: "#3a90c8"; duration: 1200; easing.type: Easing.InOutSine }
+                            ColorAnimation { from: "#3a90c8"; to: "#1d547c"; duration: 1200; easing.type: Easing.InOutSine }
+                        }
+
                         Text {
                             id: heroStamp
                             anchors.centerIn: parent
@@ -676,15 +682,28 @@ PanelFrame {
                     delegate: Rectangle {
                         readonly property var scenario: modelData
                         readonly property bool highlighted: String(scenario["scenario_id"] || "") === String(panel["recommended_scenario_id"] || "")
+                        property bool cardHovered: false
                         width: parent.width
                         radius: shellWindow ? shellWindow.cardRadius : 12
                         gradient: Gradient {
-                            GradientStop { position: 0.0; color: highlighted ? "#12304a" : "#0c1a27" }
-                            GradientStop { position: 1.0; color: highlighted ? "#0a1622" : "#09131d" }
+                            GradientStop { position: 0.0; color: cardHovered ? (highlighted ? "#1a4060" : "#122a3c") : (highlighted ? "#12304a" : "#0c1a27") }
+                            GradientStop { position: 1.0; color: cardHovered ? (highlighted ? "#102030" : "#0e1c28") : (highlighted ? "#0a1622" : "#09131d") }
                         }
                         border.width: 1
-                        border.color: highlighted ? "#3aaeff" : root.toneColor(scenario["tone"])
+                        border.color: cardHovered ? Qt.lighter(highlighted ? "#3aaeff" : root.toneColor(scenario["tone"]), 1.2) : (highlighted ? "#3aaeff" : root.toneColor(scenario["tone"]))
                         implicitHeight: cardColumn.implicitHeight + ((shellWindow ? shellWindow.cardPadding : 12) * 2)
+                        scale: cardHovered ? 1.012 : 1.0
+
+                        Behavior on scale { NumberAnimation { duration: 140 } }
+                        Behavior on border.color { ColorAnimation { duration: 140 } }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            acceptedButtons: Qt.NoButton
+                            onEntered: parent.cardHovered = true
+                            onExited: parent.cardHovered = false
+                        }
 
                         Rectangle {
                             anchors.fill: parent
@@ -750,6 +769,13 @@ PanelFrame {
                                     border.width: 1
                                     implicitWidth: badgeText.implicitWidth + ((shellWindow ? shellWindow.scaled(12) : 12) * 2)
                                     implicitHeight: badgeText.implicitHeight + ((shellWindow ? shellWindow.scaled(6) : 6) * 2)
+
+                                    SequentialAnimation on opacity {
+                                        running: !!scenario["recommended"]
+                                        loops: Animation.Infinite
+                                        NumberAnimation { from: 1.0; to: 0.6; duration: 1200; easing.type: Easing.InOutSine }
+                                        NumberAnimation { from: 0.6; to: 1.0; duration: 1200; easing.type: Easing.InOutSine }
+                                    }
 
                                     Text {
                                         id: badgeText

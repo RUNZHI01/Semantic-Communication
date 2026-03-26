@@ -14,6 +14,8 @@ Item {
     property string scenarioLabel: ""
     property string scenarioTone: "neutral"
     property bool landingMode: false
+    property bool stageActive: true
+    property bool preloadAssets: false
     property string bannerEyebrow: landingMode ? "全球指挥主舞台 / GLOBAL COMMAND STAGE" : "实时指挥舞台 / LIVE COMMAND STAGE"
     property string bannerTitle: currentLabel && currentLabel.length > 0
         ? currentLabel
@@ -107,18 +109,12 @@ Item {
     }
 
     function resolvedMapBackend() {
-        if (requestedMapBackend === "qtlocation")
-            return qtLocationBackendReady ? "qtlocation" : (localBackdropReady ? "svg" : "canvas")
-        if (requestedMapBackend === "svg")
-            return localBackdropReady ? "svg" : (qtLocationBackendReady ? "qtlocation" : "canvas")
         if (requestedMapBackend === "canvas")
             return "canvas"
-        if (preferLandingBackdropBackend)
-            return "svg"
-        if (qtLocationBackendReady)
-            return "qtlocation"
-        if (localBackdropReady)
-            return "svg"
+        if (requestedMapBackend === "qtlocation")
+            return qtLocationBackendReady ? "qtlocation" : "canvas"
+        if (requestedMapBackend === "svg")
+            return localBackdropReady ? "svg" : "canvas"
         return "canvas"
     }
 
@@ -205,6 +201,20 @@ Item {
         target: stageLoader.item
         property: "landingMode"
         value: root.landingMode
+    }
+
+    Binding {
+        when: stageLoader.item !== null
+        target: stageLoader.item
+        property: "stageActive"
+        value: root.stageActive
+    }
+
+    Binding {
+        when: stageLoader.item !== null
+        target: stageLoader.item
+        property: "preloadAssets"
+        value: root.preloadAssets
     }
 
     Binding {

@@ -1127,6 +1127,44 @@ function aircraftContractChip(label, value, tone = "neutral") {
   `;
 }
 
+function cockpitSignalCell(label, value, note, tone = "neutral") {
+  return `
+    <article class="cockpit-signal-cell" data-tone="${escapeHtml(tone)}">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+      <small>${escapeHtml(note || "")}</small>
+    </article>
+  `;
+}
+
+function cockpitBusCell(label, value, tone = "neutral") {
+  return `
+    <article class="cockpit-bus-cell" data-tone="${escapeHtml(tone)}">
+      <span>${escapeHtml(label)}</span>
+      <strong>${escapeHtml(value)}</strong>
+    </article>
+  `;
+}
+
+function aircraftRouteMarkup(track, aircraft) {
+  const points = Array.isArray(track) ? track.slice() : [];
+  const currentPoint = aircraft?.position || null;
+  if (currentPoint && Number.isFinite(Number(currentPoint.latitude)) && Number.isFinite(Number(currentPoint.longitude))) {
+    points.push(currentPoint);
+  }
+  if (points.length < 2) return "";
+  const encoded = points
+    .map((point) => {
+      const position = aircraftScreenPosition({ position: point });
+      return `${formatNumber(position.left, 2)},${formatNumber(position.top, 2)}`;
+    })
+    .join(" ");
+  return `
+    <polyline class="aircraft-route-glow" points="${encoded}"></polyline>
+    <polyline class="aircraft-route-line" points="${encoded}"></polyline>
+  `;
+}
+
 function aircraftTrailMarkup(track) {
   if (!Array.isArray(track) || !track.length) return "";
   const total = track.length;
@@ -1411,6 +1449,26 @@ function renderCockpitShell(snapshot, systemStatus) {
   document.getElementById("cockpitSummaryLine").textContent = compactSentence(systemStatus.execution_mode.summary || "等待执行模式。", 104);
   document.getElementById("cockpitTimestamp").textContent = `快照更新 ${snapshot.generated_at}`;
   document.getElementById("cockpitBoundaryNote").textContent = boundary;
+  const signalStrip = document.getElementById("cockpitSignalStrip");
+  if (signalStrip) {
+    signalStrip.innerHTML = [
+      cockpitSignalCell("Board Link", live.board_online ? "ONLINE" : "EVIDENCE", `fault=${live.last_fault_code || "UNKNOWN"}`, live.board_online ? "online" : "degraded"),
+      cockpitSignalCell("Guard State", live.guard_state || "UNKNOWN", compactSentence(systemStatus.execution_mode.label || "等待执行模式。", 30), live.board_online ? "online" : "neutral"),
+      cockpitSignalCell("Aircraft Feed", aircraftFeedStateLabel(aircraft), aircraftContractValue(aircraft), aircraftFeedTone(aircraft)),
+    ].join("");
+  }
+  const busGrid = document.getElementById("cockpitBusGrid");
+  if (busGrid) {
+    busGrid.innerHTML = [
+      cockpitBusCell("Link Profile", linkDirector.selected_profile_label || "Nominal", linkDirector.tone || "neutral"),
+      cockpitBusCell(
+        "Feed Sample",
+        `#${aircraft.sample?.sequence ?? 0} · ${compactTimestampLabel(aircraft.sample?.captured_at || aircraft.updated_at)}`,
+        aircraftFeedTone(aircraft)
+      ),
+      cockpitBusCell("Safety", safetyPanel.safe_stop_state || "UNKNOWN", safetyPanel.panel_tone || "neutral"),
+    ].join("");
+  }
 
   document.getElementById("missionStatStrip").innerHTML = [
     statCard("Board", live.board_online ? "ONLINE" : "EVIDENCE", `fault=${live.last_fault_code || "UNKNOWN"}`),
@@ -1431,7 +1489,10 @@ function renderCockpitShell(snapshot, systemStatus) {
     `${aircraft.mission_call_sign || "M9-DEMO"} / ${aircraft.aircraft_id || "FT-AIR-01"}`;
   document.getElementById("aircraftPositionText").textContent =
     `${formatCoordinate(aircraft.position?.latitude, "N", "S")} ｜ ${formatCoordinate(aircraft.position?.longitude, "E", "W")}`;
+  document.getElementById("aircraftRoute").innerHTML = aircraftRouteMarkup(aircraft.track || [], aircraft);
   document.getElementById("aircraftTrail").innerHTML = aircraftTrailMarkup(aircraft.track || []);
+  document.getElementById("aircraftStageSource").textContent =
+    `${linkDirector.selected_profile_label || "Nominal Link"} · ${aircraft.source_api_path || aircraft.feed_contract?.api_path || "/api/aircraft-position"}`;
   document.getElementById("aircraftReadoutGrid").innerHTML = [
     aircraftReadoutCard(
       "Feed State",

@@ -1,0 +1,89 @@
+% 图 1.2 GAN-based JSCC 结构图 — 基于 CICC0903540 技术文档 2.2
+\documentclass[tikz,border=8pt]{standalone}
+\input{_preamble}
+\begin{document}
+\begin{tikzpicture}[
+  node distance=0.6cm and 0.8cm,
+  block/.style={
+    rectangle, rounded corners=3pt, draw=mDark, align=center,
+    font=\small\sffamily, semithick,
+    minimum width=1.7cm, minimum height=0.75cm, inner sep=4pt},
+  io/.style={
+    rectangle, rounded corners=3pt, draw=mDark, align=center,
+    font=\small\sffamily, semithick,
+    minimum width=1.2cm, minimum height=0.65cm, inner sep=3pt},
+  ch/.style={
+    rectangle, rounded corners=3pt, draw=mDark, align=center,
+    font=\small\sffamily, semithick,
+    minimum width=1.5cm, minimum height=0.75cm, inner sep=3pt},
+  disc/.style={
+    rectangle, rounded corners=3pt, draw=mDark, align=center,
+    font=\small\sffamily, semithick, dashed,
+    minimum width=1.8cm, minimum height=0.7cm, inner sep=3pt},
+  micro/.style={
+    rectangle, rounded corners=2pt, draw=mDark!70, align=center,
+    font=\tiny\sffamily, inner sep=2pt, minimum height=0.35cm},
+  arr/.style={-{Stealth[length=3pt]}, draw=mDark, semithick},
+  darr/.style={-{Stealth[length=3pt]}, draw=mDark!70, semithick, dashed},
+]
+  % === 主流程（放宽横向间距）===
+  \node[io, fill=mGray!50] (img) {$\mathbf{x}$};
+  \node[block, fill=mBlue!40, right=0.8cm of img] (enc) {Encoder};
+  \node[block, fill=mBlue!40, right=0.8cm of enc] (pwr) {功率控制};
+  \node[ch, fill=mGreen!50, right=0.8cm of pwr] (awgn) {AWGN};
+  \node[block, fill=mPurple!40, right=0.8cm of awgn] (gen) {Generator};
+  \node[io, fill=mGray!50, right=0.8cm of gen] (out) {$\hat{\mathbf{x}}$};
+
+  % 张量标注（放在箭头上方，避免与下方重叠）
+  \draw[arr] (img) -- (enc)
+    node[pos=0.5, above=2pt, ts] {$1{\times}3{\times}256{\times}256$};
+  \draw[arr] (enc) -- (pwr)
+    node[pos=0.5, above=2pt, ts] {$\mathbf{y}$};
+  \draw[arr] (pwr) -- (awgn);
+  \draw[arr] (awgn) -- (gen)
+    node[pos=0.5, above=2pt, ts] {$\hat{\mathbf{y}}$};
+  \draw[arr] (gen) -- (out)
+    node[pos=0.5, above=2pt, ts] {$1{\times}3{\times}256{\times}256$};
+
+  % Discriminator 单独放下方，留足垂直间距
+  \node[disc, fill=mPink!40, below=1.2cm of awgn] (disc) {Discriminator\\{\tiny 仅训练}};
+  \draw[darr] (out.south) -- ++(0,-0.25) -| ++(-2.5,0) |- (disc.east);
+  \draw[darr] (awgn.south) -- (disc.north);
+
+  % === Encoder 微观（放在 Encoder 正下方，与 Disc 错开）===
+  \node[micro, fill=mBlue!30, below=0.65cm of enc] (e1) {Conv};
+  \node[micro, fill=mBlue!30, right=0.12cm of e1] (e2) {BN};
+  \node[micro, fill=mBlue!30, right=0.12cm of e2] (e3) {ReLU};
+  \node[micro, fill=mBlue!25, right=0.15cm of e3] (e4) {ResBlock$\times$2};
+  \draw[arr, -] (e1) -- (e2) -- (e3) -- (e4);
+  \draw[arr, dashed, mDark!60] (enc.south) -- (e2.north);
+
+  % === Generator 微观（放在 Generator 正下方）===
+  \node[micro, fill=mPurple!30, below=0.65cm of gen] (g1) {Conv};
+  \node[micro, fill=mPurple!30, right=0.12cm of g1] (g2) {BN};
+  \node[micro, fill=mPurple!30, right=0.12cm of g2] (g3) {ReLU};
+  \node[micro, fill=mPurple!25, right=0.15cm of g3] (g4) {ResBlock$\times$5};
+  \draw[arr, -] (g1) -- (g2) -- (g3) -- (g4);
+  \draw[arr, dashed, mDark!60] (gen.south) -- (g2.north);
+
+  % === 背景分组 ===
+  \begin{scope}[on background layer]
+    \node[fit=(img)(enc)(pwr), fill=mBlue!12, draw=mDark!25,
+      rounded corners=4pt, inner sep=5pt, semithick,
+      label={[font=\scriptsize\sffamily, color=mDark]above:发送端}] {};
+    \node[fit=(gen)(out), fill=mPurple!12, draw=mDark!25,
+      rounded corners=4pt, inner sep=5pt, semithick,
+      label={[font=\scriptsize\sffamily, color=mDark]above:接收端}] {};
+  \end{scope}
+
+  % === 图例（放在右下，预留边距）===
+  \node[legendbox, anchor=north east] at ([xshift=-3pt, yshift=-3pt]current bounding box.south east)
+    [align=left, text width=3.8cm] {
+    \textbf{图例}\\[1pt]
+    \colorbox{mBlue!40}{\rule{0.15cm}{0.1cm}\hspace{0.06cm}} 编码 \quad
+    \colorbox{mPurple!40}{\rule{0.15cm}{0.1cm}\hspace{0.06cm}} 解码 \quad
+    \colorbox{mGreen!50}{\rule{0.15cm}{0.1cm}\hspace{0.06cm}} 信道\\
+    实线：推理 \quad 虚线：训练
+  };
+\end{tikzpicture}
+\end{document}

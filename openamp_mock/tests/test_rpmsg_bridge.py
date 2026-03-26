@@ -3,6 +3,7 @@ from __future__ import annotations
 import errno
 import importlib.util
 from pathlib import Path
+import tempfile
 import unittest
 from unittest import mock
 
@@ -90,6 +91,147 @@ class OpenAmpRpmsgBridgeTest(unittest.TestCase):
         self.assertTrue(parsed["parsed"])
         self.assertEqual(parsed["flags"], 0)
         self.assertEqual(parsed["flag_name"], "unknown_0x0")
+
+    def test_run_signed_admission_probe_accepts_firmware_ack(self) -> None:
+        manifest_sha256 = "ab" * 32
+        tx_frame = bridge.build_frame(
+            msg_type=MessageType.SIGNED_ADMISSION_BEGIN,
+            seq=3,
+            job_id=7301,
+            payload=bridge.SIGNED_ADMISSION_BEGIN_STRUCT.pack(
+                1,
+                1,
+                1,
+                bytes.fromhex(manifest_sha256),
+                808,
+                71,
+                160,
+            ),
+        )
+        rx_frame = bridge.build_frame(
+            msg_type=MessageType.SIGNED_ADMISSION_ACK,
+            seq=3,
+            job_id=7301,
+            payload=bridge.SIGNED_ADMISSION_ACK_STRUCT.pack(
+                bytes.fromhex(manifest_sha256),
+                1,
+                0,
+                0,
+                808,
+            ),
+        )
+        args = bridge.argparse.Namespace(
+            rpmsg_ctrl="/dev/null",
+            rpmsg_dev="/dev/null",
+            require_devices=False,
+            response_timeout_sec=2.0,
+            settle_timeout_sec=0.05,
+            max_rx_bytes=4096,
+            drain_before_send=True,
+            seq=1,
+            hook_stdin=True,
+            job_id=0,
+        )
+        hook_event = {
+            "phase": "SIGNED_ADMISSION_BEGIN",
+            "payload": {
+                "job_id": 7301,
+                "tx_frame_hex": tx_frame.hex(),
+            },
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir_raw:
+            output_dir = Path(temp_dir_raw)
+            with mock.patch.object(
+                bridge,
+                "transact",
+                return_value={
+                    "drained_bytes": b"",
+                    "written_bytes": len(tx_frame),
+                    "rx_bytes": rx_frame,
+                    "rx_timeout": False,
+                },
+            ):
+                summary = bridge.run_signed_admission_probe(
+                    args=args,
+                    output_dir=output_dir,
+                    phase="SIGNED_ADMISSION_BEGIN",
+                    hook_event=hook_event,
+                )
+
+        self.assertTrue(summary["acknowledged"])
+        self.assertEqual(summary["source"], "firmware_signed_admission_ack")
+        self.assertEqual(summary["transport_status"], "signed_admission_ack_received")
+        self.assertEqual(summary["ack_status_name"], "ACCEPTED")
+        self.assertEqual(summary["stage_name"], "BEGIN")
+        self.assertEqual(summary["seq"], 3)
+        self.assertEqual(summary["tx_frame"]["msg_name"], "SIGNED_ADMISSION_BEGIN")
+
+    def test_run_job_probe_prefers_exact_tx_frame_from_hook(self) -> None:
+        tx_frame = bridge.build_frame(
+            msg_type=MessageType.JOB_REQ,
+            seq=7,
+            job_id=99,
+            payload=bridge.JOB_REQ_STRUCT.pack(
+                bytes.fromhex(FORMAL_TRUSTED_CURRENT_SHA),
+                60000,
+                1,
+                3,
+            ),
+        )
+        rx_frame = bridge.build_frame(
+            msg_type=MessageType.JOB_ACK,
+            seq=7,
+            job_id=99,
+            payload=bridge.JOB_ACK_STRUCT.pack(int(Decision.ALLOW), int(FaultCode.NONE), 2),
+        )
+        args = bridge.argparse.Namespace(
+            rpmsg_ctrl="/dev/null",
+            rpmsg_dev="/dev/null",
+            require_devices=False,
+            response_timeout_sec=2.0,
+            settle_timeout_sec=0.05,
+            max_rx_bytes=4096,
+            drain_before_send=True,
+            seq=1,
+            hook_stdin=True,
+            job_id=0,
+        )
+        hook_event = {
+            "phase": "JOB_REQ",
+            "payload": {
+                "job_id": 99,
+                "tx_frame_hex": tx_frame.hex(),
+                "expected_sha256": "0" * 64,
+                "deadline_ms": 1,
+                "expected_outputs": 1,
+                "job_flags": "payload",
+            },
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir_raw:
+            output_dir = Path(temp_dir_raw)
+            with mock.patch.object(
+                bridge,
+                "transact",
+                return_value={
+                    "drained_bytes": b"",
+                    "written_bytes": len(tx_frame),
+                    "rx_bytes": rx_frame,
+                    "rx_timeout": False,
+                },
+            ) as transact_mock:
+                summary = bridge.run_job_probe(
+                    args=args,
+                    output_dir=output_dir,
+                    phase="JOB_REQ",
+                    hook_event=hook_event,
+                )
+
+        self.assertEqual(transact_mock.call_args.kwargs["tx_bytes"], tx_frame)
+        self.assertEqual(summary["decision"], "ALLOW")
+        self.assertEqual(summary["seq"], 7)
+        self.assertEqual(summary["tx_frame"]["job_req"]["expected_sha256_hex"], FORMAL_TRUSTED_CURRENT_SHA)
 
     def test_build_heartbeat_payload_defaults_missing_progress_fields(self) -> None:
         payload = bridge.build_heartbeat_payload_from_hook(

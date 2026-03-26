@@ -1,0 +1,166 @@
+% 图 4.1 TVM 编译流水线（重绘加强版）
+% 基于 CICC0903540 技术文档 4.1 - TVM 优化编译器框架
+\documentclass[tikz,border=10pt]{standalone}
+
+% 强制全局样式与配色
+\usepackage{amssymb, amsmath}
+\usepackage{fontspec}
+\usepackage{xeCJK}
+\setCJKmainfont{SimHei}
+\usepackage{tikz}
+\usetikzlibrary{
+  arrows.meta, positioning, shapes.geometric, calc,
+  backgrounds, fit, decorations.pathreplacing, patterns, shapes.symbols
+}
+
+% 低饱和度马卡龙配色
+\definecolor{mBlue}{HTML}{AEC6CF}
+\definecolor{mPink}{HTML}{FFD1DC}
+\definecolor{mGreen}{HTML}{B1D8B7}
+\definecolor{mPurple}{HTML}{B39EB5}
+\definecolor{mYellow}{HTML}{FDFD96}
+\definecolor{mGray}{HTML}{E5E4E2}
+\definecolor{mDark}{HTML}{4A4A4A}
+
+% 全局 TikZ 样式
+\tikzset{
+  >=stealth,
+  thick,
+  draw=mDark,
+  stage/.style={
+    rectangle, rounded corners=3pt, draw=mDark, align=center,
+    font=\sffamily\small, minimum height=0.9cm, inner sep=5pt,
+    minimum width=2.2cm},
+  micro/.style={
+    rectangle, rounded corners=2pt, draw=mDark!70, align=center,
+    font=\sffamily\tiny, minimum height=0.4cm, inner sep=3pt},
+  ts/.style={font=\tiny\sffamily, color=mDark!80},
+  arr/.style={-{Stealth[length=4pt]}, thick, draw=mDark},
+  legendbox/.style={
+    rectangle, draw=mDark!50, rounded corners=3pt,
+    fill=mGray!15, inner sep=5pt, font=\tiny\sffamily},
+}
+
+\begin{document}
+\begin{tikzpicture}[
+  node distance=0.6cm and 0.8cm,
+]
+  % ========== 主流水线 ==========
+  \node[stage, fill=mBlue!40] (import)
+    {模型导入\\{\footnotesize PyTorch/ONNX}};
+
+  \node[stage, fill=mBlue!40, right=0.8cm of import] (relax)
+    {Relax IR\\{\footnotesize 高层次 IR}};
+
+  \node[stage, fill=mBlue!40, right=0.8cm of relax] (te)
+    {TE\\{\footnotesize 张量表达式}};
+
+  \node[stage, fill=mGreen!50, right=0.8cm of te] (tuning)
+    {MetaSchedule\\{\footnotesize Auto-tuning}};
+
+  \node[stage, fill=mBlue!40, right=0.8cm of tuning] (tir)
+    {TIR\\{\footnotesize 底层 IR}};
+
+  \node[stage, fill=mPurple!40, right=0.8cm of tir] (codegen)
+    {机器码\\{\footnotesize .so}};
+
+  % ========== 主流程连线 ==========
+  \draw[arr] (import) -- (relax)
+    node[pos=0.5, above=2pt, ts] {计算图};
+
+  \draw[arr] (relax) -- (te)
+    node[pos=0.5, above=2pt, ts] {FuseOps};
+
+  \draw[arr] (te) -- (tuning)
+    node[pos=0.5, above=2pt, ts] {schedule};
+
+  \draw[arr] (tuning) -- (tir)
+    node[pos=0.5, above=2pt, ts] {JSON DB};
+
+  \draw[arr] (tir) -- (codegen)
+    node[pos=0.5, above=2pt, ts] {LLVM};
+
+  % ========== 下方微观细节：每个阶段的关键操作 ==========
+  % PyTorch/ONNX 导入
+  \node[micro, fill=mBlue!30, below=0.7cm of import] (i1) {torch.onnx};
+  \node[micro, fill=mBlue!30, below=0.25cm of i1] (i2) {onnxsim};
+  \draw[arr, dashed, thin, mDark!60] (import.south) -- (i1.north);
+
+  % Relax IR 优化
+  \node[micro, fill=mBlue!30, below=0.7cm of relax] (r1) {算子融合};
+  \node[micro, fill=mBlue!30, below=0.25cm of r1] (r2) {常量折叠};
+  \draw[arr, dashed, thin, mDark!60] (relax.south) -- (r1.north);
+
+  % TE 张量表达式
+  \node[micro, fill=mBlue!30, below=0.7cm of te] (t1) {循环切分};
+  \node[micro, fill=mBlue!30, below=0.25cm of t1] (t2) {矢量化};
+  \draw[arr, dashed, thin, mDark!60] (te.south) -- (t1.north);
+
+  % MetaSchedule 调优
+  \node[micro, fill=mGreen!40, below=0.7cm of tuning] (m1) {搜索空间};
+  \node[micro, fill=mGreen!40, below=0.25cm of m1] (m2) {RPC Runner};
+  \node[micro, fill=mGreen!40, below=0.25cm of m2] (m3) {Cost Model};
+  \draw[arr, dashed, thin, mDark!60] (tuning.south) -- (m1.north);
+
+  % TIR 底层 IR
+  \node[micro, fill=mBlue!30, below=0.7cm of tir] (ti1) {内存重排};
+  \node[micro, fill=mBlue!30, below=0.25cm of ti1] (ti2) {循环展开};
+  \draw[arr, dashed, thin, mDark!60] (tir.south) -- (ti1.north);
+
+  % Codegen 机器码生成
+  \node[micro, fill=mPurple!30, below=0.7cm of codegen] (c1) {AArch64};
+  \node[micro, fill=mPurple!30, below=0.25cm of c1] (c2) {cortex-a72};
+  \node[micro, fill=mPurple!30, below=0.25cm of c2] (c3) {+neon};
+  \draw[arr, dashed, thin, mDark!60] (codegen.south) -- (c1.north);
+
+  % ========== 顶部：端到端流程标注 ==========
+  \draw[decorate, decoration={brace, amplitude=4pt, raise=3pt}, thick, draw=mDark]
+    (import.north west) -- (codegen.north east)
+    node[midway, above=8pt, font=\sffamily\small\bfseries, color=mDark]
+    {TVM 端到端编译流水线（baseline $\to$ current）};
+
+  % ========== 张量形状标注 ==========
+  \node[ts, below=2.8cm of import, anchor=north] {输入：$1{\times}32{\times}32{\times}32$};
+  \node[ts, below=2.8cm of codegen, anchor=north] {输出：$1{\times}3{\times}256{\times}256$};
+
+  % ========== 层次化表达：背景分组 ==========
+  \begin{scope}[on background layer]
+    % 前端解析与IR优化
+    \node[fit=(import)(relax)(te)(i1)(i2)(r1)(r2)(t1)(t2),
+      fill=mBlue!12, draw=mDark!40, dashed,
+      rounded corners=5pt, inner sep=8pt] {};
+
+    % MetaSchedule 调优
+    \node[fit=(tuning)(m1)(m2)(m3),
+      fill=mGreen!18, draw=mDark!40, dashed,
+      rounded corners=5pt, inner sep=8pt] {};
+
+    % 后端代码生成
+    \node[fit=(tir)(codegen)(ti1)(ti2)(c1)(c2)(c3),
+      fill=mPurple!12, draw=mDark!40, dashed,
+      rounded corners=5pt, inner sep=8pt] {};
+  \end{scope}
+
+  % ========== 信息密度拉满：调优配置细节 ==========
+  \node[legendbox, anchor=north west] at ([xshift=5pt, yshift=-5pt]current bounding box.north west)
+    [align=left, text width=4.8cm] {
+    \textbf{MetaSchedule 配置}\\[2pt]
+    • 调优策略：baseline-seeded warm-start\\
+    • 搜索预算：500 trials（增量）\\
+    • Runner：RPC (飞腾派远端)\\
+    • Cost Model：XGBoost\\
+    • 产物 SHA-256: \texttt{1946b08e...}
+  };
+
+  % ========== 图例（右下角）==========
+  \node[legendbox, anchor=south east] at ([xshift=-5pt, yshift=5pt]current bounding box.south east)
+    [align=left, text width=4.5cm] {
+    \textbf{图例}\\[1pt]
+    \colorbox{mBlue!40}{\rule{0.16cm}{0.12cm}\hspace{0.05cm}} IR层 \quad
+    \colorbox{mGreen!50}{\rule{0.16cm}{0.12cm}\hspace{0.05cm}} 调优层 \quad
+    \colorbox{mPurple!40}{\rule{0.16cm}{0.12cm}\hspace{0.05cm}} 代码生成\\[1pt]
+    Target: \texttt{\{"kind":"llvm", "mcpu":"cortex-a72",\\
+    \quad "mattr":["+neon"], "num-cores":4\}}
+  };
+\end{tikzpicture}
+\end{document}

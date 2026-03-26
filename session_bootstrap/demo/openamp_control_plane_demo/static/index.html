@@ -13,15 +13,19 @@
   <main class="cockpit-app">
     <section class="panel cockpit-shell" id="cockpitShell">
       <header class="cockpit-topbar">
-        <div class="cockpit-brand">
-          <p class="eyebrow">Mission Ops Engine</p>
-          <h1>飞腾多核弱网安全语义视觉回传系统</h1>
-          <p class="lede" id="cockpitHeadline">加载 cockpit state...</p>
+        <div class="cockpit-hero-stack">
+          <div class="cockpit-brand">
+            <p class="eyebrow">Avionics Mission Deck</p>
+            <h1>飞腾多核弱网安全语义视觉回传系统</h1>
+            <p class="lede" id="cockpitHeadline">加载 cockpit state...</p>
+          </div>
+          <div class="cockpit-signal-strip" id="cockpitSignalStrip" aria-live="polite"></div>
         </div>
         <div class="cockpit-status-cluster">
           <div class="mode-pill" id="cockpitModePill">准备中</div>
           <span class="hero-timestamp" id="cockpitTimestamp"></span>
           <p class="compact-copy" id="cockpitSummaryLine">等待执行模式。</p>
+          <div class="cockpit-bus-grid" id="cockpitBusGrid" aria-live="polite"></div>
         </div>
       </header>
 
@@ -29,23 +33,42 @@
         <section class="panel-lite flight-panel">
           <div class="cockpit-card-head">
             <div>
-              <div class="label">Flight Feed</div>
-              <h2>Aircraft Telemetry</h2>
+              <div class="label">Telemetry</div>
+              <h2>Aircraft Feed</h2>
             </div>
             <div class="cockpit-pill-row" id="flightFeedPills"></div>
           </div>
 
-          <div class="flight-stage" id="flightStage">
-            <div class="flight-stage-grid"></div>
-            <div class="flight-stage-ring ring-a"></div>
-            <div class="flight-stage-ring ring-b"></div>
-            <div class="flight-stage-ring ring-c"></div>
-            <div class="aircraft-trail" id="aircraftTrail"></div>
-            <div class="aircraft-vector" id="aircraftVector">
-              <span class="aircraft-vector-core"></span>
-              <div class="aircraft-vector-callout">
-                <strong id="aircraftCallsign">M9-DEMO</strong>
-                <small id="aircraftPositionText">等待后端位置信号</small>
+          <div class="flight-stage-shell">
+            <div class="flight-stage-frame">
+              <div class="flight-stage" id="flightStage">
+                <div class="flight-stage-grid"></div>
+                <div class="flight-stage-sweep"></div>
+                <div class="flight-stage-reticle"></div>
+                <div class="flight-stage-ring ring-a"></div>
+                <div class="flight-stage-ring ring-b"></div>
+                <div class="flight-stage-ring ring-c"></div>
+                <div class="flight-stage-band band-north"></div>
+                <div class="flight-stage-band band-south"></div>
+                <div class="flight-stage-axis axis-x"></div>
+                <div class="flight-stage-axis axis-y"></div>
+                <div class="flight-stage-label label-north">N</div>
+                <div class="flight-stage-label label-south">S</div>
+                <div class="flight-stage-label label-west">W</div>
+                <div class="flight-stage-label label-east">E</div>
+                <svg class="aircraft-route" id="aircraftRoute" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"></svg>
+                <div class="aircraft-trail" id="aircraftTrail"></div>
+                <div class="aircraft-vector" id="aircraftVector">
+                  <span class="aircraft-vector-core"></span>
+                  <div class="aircraft-vector-callout">
+                    <strong id="aircraftCallsign">M9-DEMO</strong>
+                    <small id="aircraftPositionText">等待后端位置信号</small>
+                  </div>
+                </div>
+                <div class="flight-stage-caption">
+                  <span class="flight-stage-tag">TACTICAL VIEW</span>
+                  <span id="aircraftStageSource">/api/aircraft-position</span>
+                </div>
               </div>
             </div>
           </div>
@@ -53,22 +76,20 @@
           <div class="aircraft-readout-grid" id="aircraftReadoutGrid"></div>
           <div class="aircraft-contract-strip" id="aircraftContractStrip">等待 aircraft contract。</div>
           <div class="compact-copy aircraft-feed-note" id="aircraftFeedNote">等待后端 aircraft position contract。</div>
-          <article class="panel-lite cockpit-subcard" id="latestLiveStatusCard">正在加载最新 live 双路径状态...</article>
+          <article class="panel-lite cockpit-subcard flight-verdict-card" id="latestLiveStatusCard">正在加载最新 live 双路径状态...</article>
         </section>
 
         <section class="panel-lite mission-stage-panel">
           <div class="cockpit-card-head">
             <div>
-              <div class="label">Mission Core</div>
-              <h2>Operator Console</h2>
+              <div class="label">Ops</div>
+              <h2>Execution Board</h2>
             </div>
             <div class="mission-stat-strip" id="missionStatStrip"></div>
           </div>
 
-          <div class="mission-stage-main">
-            <article class="mission-core-card" id="missionCoreCard">正在构建任务推进中枢...</article>
-            <article class="compare-peek-card" id="comparePeekCard">正在准备 compare 预览...</article>
-          </div>
+          <article class="mission-core-card" id="missionCoreCard">正在构建任务推进中枢...</article>
+          <article class="compare-peek-card" id="comparePeekCard">正在准备 compare 预览...</article>
 
           <div class="mission-action-dock" id="missionActionDock">
             <button id="opsProbeButton" class="button button-secondary" type="button">探测板卡</button>
@@ -81,9 +102,9 @@
         </section>
 
         <aside class="cockpit-sidebar">
-          <article class="panel-lite" id="weakNetworkConsole">正在加载弱网对照控制台...</article>
-          <article class="panel-lite" id="mainSafetyMirror">正在加载安全镜像...</article>
-          <article class="panel-lite operator-cue-shell" id="operatorCueShell">正在生成 operator cue...</article>
+          <article class="panel-lite cockpit-side-card" id="weakNetworkConsole">正在加载弱网对照控制台...</article>
+          <article class="panel-lite cockpit-side-card" id="mainSafetyMirror">正在加载安全镜像...</article>
+          <article class="panel-lite cockpit-side-card operator-cue-shell" id="operatorCueShell">正在生成 operator cue...</article>
         </aside>
       </div>
 

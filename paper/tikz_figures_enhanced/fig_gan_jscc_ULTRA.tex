@@ -1,0 +1,231 @@
+% 图 1.2 GAN-based JSCC 结构图（超级增强版）
+% 显著视觉差异：ResBlock详细展开 + 性能数据 + 层叠效果
+\documentclass[tikz,border=12pt]{standalone}
+
+\usepackage{amssymb, amsmath}
+\usepackage{fontspec}
+\usepackage{xeCJK}
+\setCJKmainfont{SimHei}
+\usepackage{tikz}
+\usetikzlibrary{
+  arrows.meta, positioning, shapes.geometric, calc,
+  backgrounds, fit, decorations.pathreplacing, patterns, shadows
+}
+
+% 低饱和度马卡龙配色
+\definecolor{mBlue}{HTML}{AEC6CF}
+\definecolor{mPink}{HTML}{FFD1DC}
+\definecolor{mGreen}{HTML}{B1D8B7}
+\definecolor{mPurple}{HTML}{B39EB5}
+\definecolor{mYellow}{HTML}{FDFD96}
+\definecolor{mGray}{HTML}{E5E4E2}
+\definecolor{mDark}{HTML}{4A4A4A}
+\definecolor{mOrange}{HTML}{FFB347}
+
+\tikzset{
+  >=stealth, thick, draw=mDark,
+  block/.style={
+    rectangle, rounded corners=4pt, draw=mDark, align=center,
+    font=\sffamily\small, minimum height=1.2cm, inner sep=6pt,
+    drop shadow={opacity=0.3, shadow xshift=1pt, shadow yshift=-1pt}},
+  micro/.style={
+    rectangle, rounded corners=2pt, draw=mDark!80, align=center,
+    font=\sffamily\tiny, minimum height=0.45cm, inner sep=3pt},
+  tiny/.style={
+    rectangle, rounded corners=1pt, draw=mDark!60, align=center,
+    font=\sffamily\tiny, minimum height=0.3cm, minimum width=0.8cm, inner sep=2pt},
+  op/.style={
+    circle, draw=mDark, minimum size=0.5cm, inner sep=0,
+    font=\scriptsize\bfseries, fill=mGray!70},
+  ts/.style={font=\tiny\sffamily, color=mDark!80},
+  perf/.style={font=\tiny\sffamily\bfseries, color=mOrange!80},
+  arr/.style={-{Stealth[length=5pt]}, very thick, draw=mDark},
+  darr/.style={-{Stealth[length=5pt]}, very thick, draw=mDark, dashed},
+  legendbox/.style={
+    rectangle, draw=mDark!60, rounded corners=4pt,
+    fill=mGray!20, inner sep=6pt, font=\tiny\sffamily},
+}
+
+\begin{document}
+\begin{tikzpicture}[
+  node distance=0.8cm and 1.5cm,
+]
+  % ========== 主数据流 ==========
+  \node[block, fill=mGray!50, minimum width=1.8cm] (img)
+    {$\mathbf{x}$\\{\tiny 原始图像}};
+
+  \node[block, fill=mBlue!50, right=1.8cm of img, minimum width=2.5cm] (enc)
+    {\textbf{Encoder}\\{\scriptsize 语义提取}};
+
+  \node[block, fill=mBlue!40, right=1.5cm of enc, minimum width=2.0cm] (pwr)
+    {功率控制\\{\tiny $\sqrt{P}$}};
+
+  \node[block, fill=mGreen!60, right=1.5cm of pwr, minimum width=2.0cm] (awgn)
+    {\textbf{AWGN}\\{\tiny 信道噪声}};
+
+  \node[block, fill=mPurple!50, right=1.5cm of awgn, minimum width=2.5cm] (gen)
+    {\textbf{Generator}\\{\scriptsize 图像重建}};
+
+  \node[block, fill=mGray!50, right=1.8cm of gen, minimum width=1.8cm] (out)
+    {$\hat{\mathbf{x}}$\\{\tiny 重建图像}};
+
+  % ========== 主流程连线（双层标注）==========
+  \draw[arr, mBlue!80] (img) -- (enc)
+    node[pos=0.5, above=4pt, ts] {$B{\times}3{\times}256{\times}256$}
+    node[pos=0.5, below=4pt, ts] {RGB原始}
+    node[pos=0.5, below=11pt, perf] {0.8 ms};
+
+  \draw[arr, mBlue!80] (enc) -- (pwr)
+    node[pos=0.5, above=4pt, ts] {$\mathbf{y} \in \mathbb{R}^{32768}$}
+    node[pos=0.5, below=4pt, ts] {语义特征}
+    node[pos=0.5, below=11pt, perf] {12.5 ms};
+
+  \draw[arr, mGreen!80] (pwr) -- (awgn)
+    node[pos=0.5, above=4pt, ts] {$\sqrt{P}\mathbf{y}$}
+    node[pos=0.5, below=4pt, ts] {归一化};
+
+  \draw[arr, mGreen!80] (awgn) -- (gen)
+    node[pos=0.5, above=4pt, ts] {$\hat{\mathbf{y}} = \sqrt{P}\mathbf{y} + \mathbf{n}$}
+    node[pos=0.5, below=4pt, ts] {$\mathbf{n} \sim \mathcal{N}(0, \sigma^2)$}
+    node[pos=0.5, below=11pt, perf] {SNR=10dB};
+
+  \draw[arr, mPurple!80] (gen) -- (out)
+    node[pos=0.5, above=4pt, ts] {$B{\times}3{\times}256{\times}256$}
+    node[pos=0.5, below=4pt, ts] {重建输出}
+    node[pos=0.5, below=11pt, perf] {152 ms (TVM)};
+
+  % ========== Discriminator（条件GAN）==========
+  \node[block, fill=mPink!50, below=2.5cm of awgn, dashed, minimum width=3.0cm] (disc)
+    {\textbf{Discriminator}\\{\scriptsize 判别器（仅训练）}};
+
+  \draw[darr, mPink!70] (img.south) -- ++(0,-0.6) -| (disc.west)
+    node[pos=0.2, left=2pt, ts] {真实 $\mathbf{x}$};
+
+  \draw[darr, mPink!70] (out.south) -- ++(0,-0.6) -| (disc.east)
+    node[pos=0.2, right=2pt, ts] {生成 $\hat{\mathbf{x}}$};
+
+  \draw[darr, mGreen!70] (awgn.south) -- (disc.north)
+    node[pos=0.5, right=3pt, ts] {条件 $\hat{\mathbf{y}}$};
+
+  \node[below=0.5cm of disc, ts, align=center]
+    {输出: $D(\mathbf{x}, \hat{\mathbf{y}}) \in [0, 1]$\\
+    {\tiny 1=真实，0=生成}};
+
+  % ========== Encoder 详细展开（层叠效果）==========
+  \node[below=1.5cm of enc, ts, align=center] {\textbf{Encoder 微观结构}};
+
+  % 第一层卷积块
+  \node[micro, fill=mBlue!40, below=1.8cm of enc, xshift=-2.5cm] (ec1) {Conv3x3};
+  \node[micro, fill=mBlue!40, right=0.18cm of ec1] (eb1) {BN};
+  \node[micro, fill=mBlue!40, right=0.18cm of eb1] (er1) {ReLU};
+
+  % 第二层卷积块（层叠）
+  \node[micro, fill=mBlue!35, below=0.08cm of ec1, xshift=0.15cm, yshift=0.03cm] (ec2) {Conv3x3};
+  \node[micro, fill=mBlue!35, right=0.18cm of ec2] (eb2) {BN};
+  \node[micro, fill=mBlue!35, right=0.18cm of eb2] (er2) {ReLU};
+
+  % ResBlock 展开
+  \node[below=0.6cm of ec2, xshift=0.5cm] (res_anchor) {};
+
+  % ResBlock 1
+  \node[tiny, fill=mBlue!30, below=0.6cm of ec2] (r11) {Conv};
+  \node[tiny, fill=mBlue!30, right=0.1cm of r11] (r12) {BN};
+  \node[tiny, fill=mBlue!30, right=0.1cm of r12] (r13) {ReLU};
+  \node[tiny, fill=mBlue!30, below=0.15cm of r11] (r14) {Conv};
+  \node[tiny, fill=mBlue!30, right=0.1cm of r14] (r15) {BN};
+  \node[op, fill=mBlue!25, right=0.15cm of r15] (r16) {$\oplus$};
+
+  % 跳跃连接
+  \draw[arr, mBlue!60, dashed] (r11.west) -- ++(-0.3,0) |- (r16.west);
+
+  \draw[arr, -, thick] (ec1) -- (eb1) -- (er1);
+  \draw[arr, -, thick] (ec2) -- (eb2) -- (er2);
+  \draw[arr, -, thin] (r11) -- (r12) -- (r13);
+  \draw[arr, -, thin] (r14) -- (r15) -- (r16);
+  \draw[arr, thin] (r13.south) -- (r14.north);
+
+  \node[ts, below=0.15cm of ec1] {$3{\to}64$};
+  \node[ts, below=0.15cm of ec2] {$64{\to}128$};
+  \node[ts, below=0.15cm of r16] {$\times$2层};
+
+  \draw[arr, dashed, mBlue!60] (enc.south) |- (eb1.north);
+
+  % ========== Generator 详细展开 ==========
+  \node[below=1.5cm of gen, ts, align=center] {\textbf{Generator 微观结构}};
+
+  % 反卷积层
+  \node[micro, fill=mPurple!40, below=1.8cm of gen, xshift=-2.5cm] (gc1) {ConvT3x3};
+  \node[micro, fill=mPurple!40, right=0.18cm of gc1] (gb1) {BN};
+  \node[micro, fill=mPurple!40, right=0.18cm of gb1] (gr1) {ReLU};
+
+  % 层叠
+  \node[micro, fill=mPurple!35, below=0.08cm of gc1, xshift=0.15cm, yshift=0.03cm] (gc2) {ConvT3x3};
+  \node[micro, fill=mPurple!35, right=0.18cm of gc2] (gb2) {BN};
+  \node[micro, fill=mPurple!35, right=0.18cm of gb2] (gr2) {ReLU};
+
+  % ResBlock × 5
+  \node[tiny, fill=mPurple!30, below=0.6cm of gc2] (g11) {Conv};
+  \node[tiny, fill=mPurple!30, right=0.1cm of g11] (g12) {BN};
+  \node[tiny, fill=mPurple!30, right=0.1cm of g12] (g13) {ReLU};
+  \node[tiny, fill=mPurple!30, below=0.15cm of g11] (g14) {Conv};
+  \node[tiny, fill=mPurple!30, right=0.1cm of g14] (g15) {BN};
+  \node[op, fill=mPurple!25, right=0.15cm of g15] (g16) {$\oplus$};
+
+  \draw[arr, mPurple!60, dashed] (g11.west) -- ++(-0.3,0) |- (g16.west);
+
+  \draw[arr, -, thick] (gc1) -- (gb1) -- (gr1);
+  \draw[arr, -, thick] (gc2) -- (gb2) -- (gr2);
+  \draw[arr, -, thin] (g11) -- (g12) -- (g13);
+  \draw[arr, -, thin] (g14) -- (g15) -- (g16);
+  \draw[arr, thin] (g13.south) -- (g14.north);
+
+  \node[ts, below=0.15cm of gc1] {$32{\to}256$};
+  \node[ts, below=0.15cm of gc2] {$256{\to}128$};
+  \node[ts, below=0.15cm of g16] {$\times$5层};
+
+  \draw[arr, dashed, mPurple!60] (gen.south) |- (gb1.north);
+
+  % ========== 背景分组 ==========
+  \begin{scope}[on background layer]
+    \node[fit=(img)(enc)(pwr)(ec1)(ec2)(r11)(r16),
+      fill=mBlue!8, draw=mBlue!60, dashed,
+      rounded corners=6pt, inner sep=12pt, very thick] {};
+    \node[above=0.4cm of enc, font=\sffamily\footnotesize\bfseries, color=mBlue!80]
+      {发送端（编码器）};
+
+    \node[fit=(gen)(out)(gc1)(gc2)(g11)(g16),
+      fill=mPurple!8, draw=mPurple!60, dashed,
+      rounded corners=6pt, inner sep=12pt, very thick] {};
+    \node[above=0.4cm of gen, font=\sffamily\footnotesize\bfseries, color=mPurple!80]
+      {接收端（解码器）};
+  \end{scope}
+
+  % ========== 完整损失函数图例 ==========
+  \node[legendbox, anchor=north west] at ([xshift=8pt, yshift=-8pt]current bounding box.north west)
+    [align=left, text width=5.5cm] {
+    \textbf{完整训练损失函数}\\[3pt]
+    \textbf{生成器损失:}\\
+    $L_t = \lambda L_G + \alpha L_{\text{MSE}} + \beta L_{\text{LPIPS}}$\\[2pt]
+    $L_G = -\mathbb{E}[\log D(G(\hat{\mathbf{y}}), \hat{\mathbf{y}})]$ \quad {\tiny (对抗)}\\
+    $L_{\text{MSE}} = \mathbb{E}[\|\hat{\mathbf{x}} - \mathbf{x}\|_2^2]$ \quad {\tiny (保真)}\\
+    $L_{\text{LPIPS}} = \mathbb{E}[d(f(\hat{\mathbf{x}}), f(\mathbf{x}))]$ \quad {\tiny (感知)}\\[3pt]
+    \textbf{判别器损失:}\\
+    $L_D = -\mathbb{E}[\log D(\mathbf{x}, \mathbf{y})] - \mathbb{E}[\log(1 - D(\hat{\mathbf{x}}, \hat{\mathbf{y}}))]$\\[3pt]
+    \textbf{超参数:} $\lambda{=}0.15$, $\alpha{=}0.0023$, $\beta{=}1.0$
+  };
+
+  % ========== 性能数据图例 ==========
+  \node[legendbox, anchor=south east] at ([xshift=-8pt, yshift=8pt]current bounding box.south east)
+    [align=left, text width=5.0cm] {
+    \textbf{图例 \& 性能数据}\\[2pt]
+    \colorbox{mBlue!50}{\rule{0.18cm}{0.14cm}} 编码端 \quad
+    \colorbox{mPurple!50}{\rule{0.18cm}{0.14cm}} 解码端 \quad
+    \colorbox{mGreen!60}{\rule{0.18cm}{0.14cm}} 信道\\[2pt]
+    实线：推理路径 \quad 虚线：训练路径\\[3pt]
+    \textbf{端到端性能（飞腾派）:}\\
+    • TVM静态优化: \textbf{255.9 ms/image} (86\% $\uparrow$)\\
+    • MNN动态支持: \textbf{410 ms/image} (1.85$\times$ $\uparrow$)\\[2pt]
+    \textbf{信道参数:} SNR = $10\log_{10}\frac{\|\mathbf{y}\|^2}{\sigma^2}$ = 10 dB
+  };
+\end{tikzpicture}
+\end{document}
