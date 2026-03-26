@@ -10,6 +10,16 @@ Rectangle {
     property string detail: ""
     property string tone: "neutral"
     property bool prominent: false
+    property int entranceDelay: 0
+
+    opacity: 0
+    Component.onCompleted: entranceAnim.start()
+
+    SequentialAnimation {
+        id: entranceAnim
+        PauseAnimation { duration: root.entranceDelay }
+        NumberAnimation { target: root; property: "opacity"; from: 0; to: 1; duration: 300; easing.type: Easing.OutCubic }
+    }
 
     readonly property color accentColor: shellWindow ? shellWindow.toneColor(tone) : "#86c7d4"
     readonly property bool structuredValue: /^[A-Za-z0-9_:\-./%°,+\s]+$/.test(String(root.value || ""))
@@ -24,9 +34,20 @@ Rectangle {
             : "#0f161d" }
         GradientStop { position: 1.0; color: Qt.rgba(root.bottomFill.r, root.bottomFill.g, root.bottomFill.b, 0.98) }
     }
-    border.color: shellWindow ? Qt.rgba(accentColor.r, accentColor.g, accentColor.b, prominent ? 0.76 : 0.54) : "#86c7d4"
+    border.color: shellWindow ? Qt.rgba(accentColor.r, accentColor.g, accentColor.b, prominent ? 0.76 : (hoverArea.containsMouse ? 0.68 : 0.54)) : "#86c7d4"
     border.width: 1
+    scale: hoverArea.containsMouse ? 1.012 : 1.0
     implicitHeight: body.implicitHeight + ((shellWindow ? shellWindow.cardPadding : 14) * 2)
+
+    Behavior on scale { NumberAnimation { duration: 140 } }
+    Behavior on border.color { ColorAnimation { duration: 140 } }
+
+    MouseArea {
+        id: hoverArea
+        anchors.fill: parent
+        hoverEnabled: true
+        acceptedButtons: Qt.NoButton
+    }
 
     Rectangle {
         anchors.fill: parent

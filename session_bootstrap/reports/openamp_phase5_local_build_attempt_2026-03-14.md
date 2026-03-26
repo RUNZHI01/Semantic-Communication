@@ -1,166 +1,206 @@
-# Phase 5 本地从核 Patch 构建尝试记录
+# Phase 5 `openamp_for_linux` 本地构建尝试记录
 
-> 日期：2026-03-14  
-> 目标：在本机 `/tmp/phytium-standalone-sdk` 上真实应用 `STATUS_REQ/RESP` 从核 patch，并尝试本地编译新的 `openamp_core0.elf`。  
-> 范围：本轮只在本机临时 SDK 工作副本上操作，不修改远端飞腾派 firmware。  
-> 关联前置：
-> - `session_bootstrap/patches/phytium_openamp_for_linux_status_req_resp_2026-03-14.patch`
-> - `session_bootstrap/runbooks/phytium_openamp_for_linux_status_req_resp_patch_runbook_2026-03-14.md`
-> - `session_bootstrap/scripts/prepare_phytium_openamp_patch.sh`
-> - `session_bootstrap/reports/openamp_phase5_source_entry_discovery_2026-03-14.md`
+> 日期：2026-03-14
+> 目标：把 `STATUS_REQ/RESP` patch 真正应用到本地官方 SDK 工作副本 `/tmp/phytium-standalone-sdk`，并在本机尽最大努力完成 `example/system/amp/openamp_for_linux` 的本地构建。
 
-## 1. 本轮结论
+## 1. 结论摘要
 
-本轮已经完成了以下关键动作：
+- patch 状态：已确认原始 SDK 尚未应用该 patch，本轮已成功 `git apply`
+- 构建状态：未成功生成 `pe2204_aarch64_phytiumpi_openamp_core0.elf`
+- `make image`：未执行，因为前置 ELF 未生成
+- 是否建议继续部署远端 firmware：**不建议**。当前没有可部署的新 ELF
 
-1. 已确认 `/tmp/phytium-standalone-sdk` 是干净 git 工作树。
-2. 已确认 patch 状态为：
-   - `git apply --check` 成功
-   - `git apply --reverse --check` 失败
-   - 说明 patch **尚未应用但可干净应用**。
-3. 已在本地 SDK 工作副本上成功执行：
+## 2. patch 应用状态
 
-```bash
-git -C /tmp/phytium-standalone-sdk apply \
-  /home/tianxing/tvm_metaschedule_execution_project/session_bootstrap/patches/phytium_openamp_for_linux_status_req_resp_2026-03-14.patch
-```
+使用的 patch：
 
-4. 已确认 patch 只改了一个官方源码文件：
+- `session_bootstrap/patches/phytium_openamp_for_linux_status_req_resp_2026-03-14.patch`
+
+检查与应用结果：
+
+1. `git -C /tmp/phytium-standalone-sdk apply --reverse --check <patch>`
+   - 失败，说明 patch 不是“已应用”状态
+2. `git -C /tmp/phytium-standalone-sdk apply --check <patch>`
+   - 成功，说明 patch 可干净应用
+3. `git -C /tmp/phytium-standalone-sdk apply <patch>`
+   - 成功
+
+本轮真正改入 SDK 的源码文件：
 
 - `example/system/amp/openamp_for_linux/src/slaver_00_example.c`
 
-5. 已继续尝试本地构建，但构建未成功；当前真实 blocker 已经从“找不到源码”切换成：
+本轮结束时，SDK 工作树相关状态为：
 
-**本机缺少 `aarch64-none-elf-gcc` 交叉工具链，导致无法把已打 patch 的 SDK 重新编成新的 `openamp_core0.elf`。**
+- `M example/system/amp/openamp_for_linux/src/slaver_00_example.c`
+- `M example/system/amp/openamp_for_linux/sdkconfig`
+- `M example/system/amp/openamp_for_linux/sdkconfig.h`
 
-## 2. patch 应用结果
+后两项来自本轮 `load_kconfig` / `olddefconfig` / `gen_kconfig` 的配置展开。
 
-本地 SDK 工作树状态：
+## 3. 构建命令与真实结果
 
-- patch 已应用
-- `git -C /tmp/phytium-standalone-sdk diff --stat` 显示：
-  - `openamp_for_linux/src/slaver_00_example.c` 被修改
-  - 约 `129 insertions(+), 78 deletions(-)`
+工作目录：
 
-说明当前的 `STATUS_REQ/RESP` 最小改造已经真实落入 SDK 工作副本，而不是停留在仓库 patch 文件层面。
+- `/tmp/phytium-standalone-sdk/example/system/amp/openamp_for_linux`
 
-## 3. 构建尝试过程
-
-### 3.1 `make load_kconfig` 结果
+### 3.1 按 runbook 的直接尝试
 
 执行：
 
 ```bash
-cd /tmp/phytium-standalone-sdk/example/system/amp/openamp_for_linux
 make load_kconfig LOAD_CONFIG_NAME=pe2204_aarch64_phytiumpi_openamp_core0
+make clean
+make all -j"$(nproc)"
 ```
 
 结果：
 
-- 配置文件已成功复制到本地 `sdkconfig`
-- 但后续 `menuconfig_autosave.py` 因 curses/TTY 环境报错而退出
+- `make load_kconfig ...` 在非交互终端里失败，报错来自 `menuconfig_autosave.py` 的 curses 初始化：
+  - `_curses.error: cbreak() returned ERR`
+  - `_curses.error: nocbreak() returned ERR`
+- 但该命令在失败前已经把
+  - `configs/pe2204_aarch64_phytiumpi_openamp_core0.config`
+  - 复制到了当前目录的 `sdkconfig`
+- 随后直接 `make all` 时，因配置未完全展开，出现：
+  - `arch///arch_compiler.mk: No such file or directory`
 
-这是一个工具交互问题，不是源码或配置名错误。
+对应日志：
 
-### 3.2 `genconfig.py` 结果
+- `/tmp/phytium_openamp_build_logs/load_kconfig.log`
+- `/tmp/phytium_openamp_build_logs/make_all.log`
 
-第一次直接运行 `genconfig.py` 时，因为 `SDK_DIR` 环境变量未传入，报：
+### 3.2 非交互配置展开后的重试
 
-```text
-'/standalone.kconfig' not found
-```
-
-补上：
-
-- `SDK_DIR=/tmp/phytium-standalone-sdk`
-- `STANDALONE_DIR=/tmp/phytium-standalone-sdk`
-
-之后，配置解析阶段可以继续进行。
-
-### 3.3 `make all` 结果
-
-在补齐 `SDK_DIR` / `STANDALONE_DIR` 后继续执行：
+为了在当前无 TTY 环境下继续排障，额外执行：
 
 ```bash
+SDK_DIR=/tmp/phytium-standalone-sdk \
+KCONFIG_CONFIG=sdkconfig \
+python3 /tmp/phytium-standalone-sdk/tools/build/Kconfiglib/olddefconfig.py Kconfig
+
+make gen_kconfig
 make clean
 make all -j"$(nproc)"
 ```
 
-构建真实失败点为：
+结果：
 
-```text
-/bin/aarch64-none-elf-gcc: not found
+- `olddefconfig.py` 成功将 preset 展开为完整 `sdkconfig`
+- 关键配置项已出现：
+  - `CONFIG_ARCH_NAME="armv8"`
+  - `CONFIG_ARCH_EXECUTION_STATE="aarch64"`
+  - `CONFIG_SOC_NAME="pe220x"`
+  - `CONFIG_BOARD_NAME="phytiumpi"`
+  - `CONFIG_TARGET_NAME="openamp_core0"`
+- 之后 `make all` 进入真实编译阶段，但失败于工具链缺失：
+  - `/bin/aarch64-none-elf-gcc: not found`
+
+对应日志：
+
+- `/tmp/phytium_openamp_build_logs/olddefconfig.log`
+- `/tmp/phytium_openamp_build_logs/gen_kconfig_after_olddefconfig.log`
+- `/tmp/phytium_openamp_build_logs/make_all_after_olddefconfig.log`
+
+### 3.3 为尽量推进构建做的本机兜底尝试
+
+由于本机存在 `aarch64-linux-gnu-*`，但不存在官方预期的 `aarch64-none-elf-*`，本轮额外尝试了两层临时兜底，均只放在 `/tmp`，未改 SDK 源码：
+
+1. 临时工具链 wrapper：
+   - `/tmp/aarch64-none-elf-wrap/bin/aarch64-none-elf-* -> /usr/bin/aarch64-linux-gnu-*`
+   - 通过 `AARCH64_CROSS_PATH=/tmp/aarch64-none-elf-wrap` 传入构建
+2. 临时 newlib include 增强：
+   - `/tmp/phytium_enhance_newlib_include.mk`
+   - 通过 `ENHANCE_DIR_INCLUDE=/tmp/phytium_enhance_newlib_include.mk` 传入构建
+
+对应结果分三步：
+
+1. 仅使用 wrapper：
+   - 编译推进，但失败于 `reent.h: No such file or directory`
+2. 仅补一层 `lib/newlib/libc/include`：
+   - 失败于 `newlib.h: No such file or directory`
+3. 复用 SDK 自带 `lib/newlib/include.mk` 补齐 include：
+   - 编译和归档基本完成
+   - 最终链接失败于 bare-metal C runtime/newlib 相关符号缺失：
+     - `undefined reference to '__errno'`
+     - `undefined reference to '__assert_func'`
+
+说明：
+
+- 这证明 patch 本身没有在编译前期引入新的明显语法错误
+- 真正阻塞本机构建的是 **官方 bare-metal 工具链 / newlib 运行时缺失**
+- 用 Linux 交叉链 `aarch64-linux-gnu-*` 做 wrapper 只能把问题推迟到链接期，不能替代官方 `aarch64-none-elf-*`
+
+对应日志：
+
+- `/tmp/phytium_openamp_build_logs/make_all_with_wrapper.log`
+- `/tmp/phytium_openamp_build_logs/make_all_with_wrapper_and_newlib_include.log`
+- `/tmp/phytium_openamp_build_logs/make_all_with_wrapper_and_full_newlib_include.log`
+
+## 4. 产物情况
+
+预期 ELF：
+
+- `/tmp/phytium-standalone-sdk/example/system/amp/openamp_for_linux/pe2204_aarch64_phytiumpi_openamp_core0.elf`
+
+实际结果：
+
+- ELF：**未生成**
+
+额外生成的 map 文件：
+
+- 路径：`/tmp/phytium-standalone-sdk/example/system/amp/openamp_for_linux/pe2204_aarch64_phytiumpi_openamp_core0.map`
+- 大小：`1476438` bytes
+- mtime：`2026-03-14 01:26:56.795903940 +0800`
+
+由于 ELF 未生成，本轮**没有执行**：
+
+```bash
+make image USR_BOOT_DIR=/tmp/phytium_openamp_out
 ```
 
-随后多个对象编译一起失败，例如：
+因此也**没有**产出部署名：
 
-- `aarch64_ram.ld.o`
-- `fdrivers_port.o`
-- `strto.o`
-- `main.o`
-- `fboard_init.o`
-- `fmmu_table.o`
-- `fassert.o`
-- `device.o`
-- `version.o`
-- `fcache.o`
+- `/tmp/phytium_openamp_out/openamp_core0.elf`
 
-因此，本轮没有生成新的：
+## 5. blocker 与最小下一步
 
-- `pe2204_aarch64_phytiumpi_openamp_core0.elf`
-- `openamp_core0.elf`
+### 当前 blocker
 
-## 4. 当前最小 blocker
+1. `make load_kconfig` 在当前非交互 shell 中依赖 curses/TTY
+2. 本机缺少官方预期的 bare-metal AArch64 工具链：
+   - `aarch64-none-elf-gcc`
+   - 以及同前缀配套 binutils
+3. 本机缺少与该 bare-metal 工具链匹配的 C runtime / newlib 链接环境
+   - 现象为最终链接缺失 `__errno`、`__assert_func`
 
-当前 blocker 已经非常明确，且比之前更靠后：
+### 最小下一步
 
-### 已经不缺的
-
-- 官方源码入口
-- PhytiumPi aarch64 对应配置
-- 最小 `STATUS_REQ/RESP` patch
-- patch 在官方 SDK 上的可应用性
-- patch 在官方 SDK 工作副本上的真实应用
-
-### 当前缺的
-
-- **`aarch64-none-elf-gcc` 交叉编译工具链**
-
-这意味着：
-
-- 现在不再卡在“源码找不到”
-- 也不再卡在“补丁设计不出来”
-- 而是卡在“本机还不能把补丁编译成新 firmware”
-
-## 5. 建议下一步
-
-建议按优先级走：
-
-1. 在本机安装或接入官方要求的裸机交叉工具链：
-   - 目标至少提供 `aarch64-none-elf-gcc`
-2. 重新执行：
+最小可行下一步不是部署远端，而是先在本机补齐官方 bare-metal 构建环境后重跑：
 
 ```bash
 cd /tmp/phytium-standalone-sdk/example/system/amp/openamp_for_linux
-export SDK_DIR=/tmp/phytium-standalone-sdk
-export STANDALONE_DIR=/tmp/phytium-standalone-sdk
+make load_kconfig LOAD_CONFIG_NAME=pe2204_aarch64_phytiumpi_openamp_core0
 make clean
 make all -j"$(nproc)"
+make image USR_BOOT_DIR=/tmp/phytium_openamp_out
 ```
 
-3. 若 ELF 成功产出，再继续：
-   - `make image USR_BOOT_DIR=/tmp/phytium_openamp_out`
-   - 替换飞腾派 `/lib/firmware/openamp_core0.elf`
-   - `stop/start remoteproc0`
-   - 用 `openamp_rpmsg_bridge.py` 验证真实 `STATUS_RESP`
+如果仍然只能在无 TTY 环境里跑，可沿用本轮验证过的非交互替代：
 
-## 6. 是否建议现在继续部署远端
+```bash
+SDK_DIR=/tmp/phytium-standalone-sdk \
+KCONFIG_CONFIG=sdkconfig \
+python3 /tmp/phytium-standalone-sdk/tools/build/Kconfiglib/olddefconfig.py Kconfig
+make gen_kconfig
+```
 
-当前**不建议**部署远端，因为：
+但这不能替代官方 bare-metal 工具链本身。
 
-- 还没有新的 `openamp_core0.elf` 产物
-- 部署不存在的 firmware 只会制造假进展
+## 6. 本轮边界
 
-因此，本轮的正确收口应该是：
-
-> 从核 patch 已成功进入官方 SDK 工作副本，当前仅缺裸机交叉编译器 `aarch64-none-elf-gcc`，待工具链补齐后再继续生成并部署新 firmware。
+- 本轮**没有**修改远端飞腾派 `/lib/firmware/openamp_core0.elf`
+- 本轮**没有**宣称构建成功
+- 本轮结果只能说明：
+  - patch 已成功应用到本地 SDK
+  - `openamp_for_linux` 已尽最大努力在本机推进到链接阶段
+  - 目前仍缺可部署的新 ELF

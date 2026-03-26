@@ -1,0 +1,16 @@
+{
+  "resume_id": "019d18e9-7015-73d0-b66e-44cefa6d825b",
+  "last_success": {
+    "run_id": "019d18e9-7015-73d0-b66e-44cefa6d825b",
+    "submit_status": "ok",
+    "submitted_at": "1774355483",
+    "anchor_fingerprint": "71eb8ef57e254b37e35bc7c98947a32d3be20917",
+    "tail_fingerprint": "9f2afb852f95c10d9610d9721db81b163d69a1d3",
+    "latest_visible": {
+      "role": "assistant",
+      "text": "我又继续把它往可展示状态推了一层，这次重点不是再堆视觉花活，而是把你刚指出的两个真实问题压下去： - 字体：现在不是一套字体硬到底了。标题/大字走更有力量感的中文黑体路线，正文和按钮走更干净的 UI 字体，数字继续走 mono。 - 顶部：最上面那条 header 我已经抬高并加大内边距，不会再被下面元素压住。 顺手我也把“发虚”相关的两处继续修了： - live launcher 现在是 `GPU 优先 / 失败再回退软件` - live 窗口尺寸不再锁死在小尺寸，而是更接近你的屏幕可用区 - 静态包现在统一导出成同一档高清图：`2208 x 1380` 当前 live 进程： - `47206` - `47208` 最新关键图： - 首页：[cockpit_native_landing_fontfix.png](/home/tianxing/tvm_metaschedule_execution_project/cockpit_native/runtime/captures/cockpit_native_landing_fontfix.png) 静态包也已经统一刷新： - [demo_pack](/home/tianxing/tvm_metaschedule_execution_project/cockpit_native/runtime/captures/demo_pack) 我也重新确认过回归： - `./cockpit_native/.venv/bin/python -m unittest discover -s cockpit_native/tests -p 'test_*.py'` - 结果：`34` 个测试全过 如果还继续，我下一轮就专门做你最关心的“更炫酷”那部分，不再碰渲染链： - 顶栏和按钮做成更像科幻设备按键 - 地图边框和角标再机械化一层 - 整体光场再提一层高级感",
+      "timestamp": "2026-03-24T13:00:30.777Z"
+    },
+    "unchanged_tail_skips": 0
+  }
+}

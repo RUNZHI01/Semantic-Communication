@@ -17,7 +17,20 @@ Item {
     property string scenarioLabel: ""
     property string scenarioTone: "neutral"
     property bool landingMode: false
-    property string bannerEyebrow: landingMode ? "全球指挥主舞台 / GLOBAL COMMAND STAGE" : "实时指挥舞台 / LIVE COMMAND STAGE"
+    property bool stageActive: true
+    property bool preloadAssets: false
+    property string chinaGeoJsonSource: Qt.resolvedUrl("../assets/china-official.geojson")
+    property string worldGeoJsonSource: Qt.resolvedUrl("../assets/world-countries-ne50m.geojson")
+    property var chinaGeoPaths: []
+    property var worldGeoPaths: []
+    property bool chinaGeoJsonPending: false
+    property bool worldGeoJsonPending: false
+    property bool chinaScene: false
+    readonly property bool chinaTheaterMode: chinaScene
+    readonly property bool chinaGeoJsonLoaded: chinaGeoPaths.length > 0
+    readonly property bool worldGeoJsonLoaded: worldGeoPaths.length > 0
+    property real scanSweepDeg: 0
+    property string bannerEyebrow: landingMode ? "全球指挥主舞台" : "实时指挥舞台"
     property string bannerTitle: currentLabel && currentLabel.length > 0
         ? currentLabel
         : (landingMode ? "世界主墙板" : "实时航迹")
@@ -42,10 +55,10 @@ Item {
         ? (shellWindow ? shellWindow.scaled(minimalBanner ? 8 : 10) : (minimalBanner ? 8 : 10))
         : 0
     readonly property int badgePadding: shellWindow ? shellWindow.scaled(landingMicroBadge ? 8 : 9) : (landingMicroBadge ? 8 : 9)
-    readonly property color oceanTop: landingMode ? "#204d67" : "#17304b"
-    readonly property color oceanBottom: landingMode ? "#0b1622" : "#050d15"
-    readonly property color landFill: landingMode ? "#5e8096" : "#53758f"
-    readonly property color landFillBright: landingMode ? "#88acc0" : "#7598ae"
+    readonly property color oceanTop: landingMode ? "#091826" : "#060e1a"
+    readonly property color oceanBottom: landingMode ? "#040a14" : "#020810"
+    readonly property color landFill: landingMode ? "#4a7090" : "#3e6585"
+    readonly property color landFillBright: landingMode ? "#6a98b8" : "#5888a5"
     readonly property color coastlineColor: shellWindow ? Qt.lighter(shellWindow.accentCyan, 1.04) : "#8fe6ff"
     readonly property color gridMinor: shellWindow ? shellWindow.gridLine : "#123147"
     readonly property color gridMajor: shellWindow ? shellWindow.gridLineStrong : "#245b80"
@@ -220,20 +233,20 @@ Item {
     function toneFill(tone) {
         if (shellWindow) {
             if (tone === "warning" || tone === "degraded")
-                return "#251d10"
+                return "#2a2014"
             if (tone === "online")
-                return "#0b2432"
+                return "#0f2a22"
             if (tone === "neutral")
-                return "#102033"
-            return "#0a1724"
+                return "#122838"
+            return "#0c1e30"
         }
         if (tone === "warning" || tone === "degraded")
-            return "#251d10"
+            return "#2a2014"
         if (tone === "online")
-            return "#0b2432"
+            return "#0f2a22"
         if (tone === "neutral")
-            return "#102033"
-        return "#0a1724"
+            return "#122838"
+        return "#0c1e30"
     }
 
     function projectX(longitude) {
@@ -242,6 +255,74 @@ Item {
 
     function projectY(latitude) {
         return mapInset + ((90 - Number(latitude)) / 180) * plotHeight
+    }
+
+    function requestBasePaint() {
+        baseCanvas.requestPaint()
+    }
+
+    function requestTrackPaint() {
+        trackCanvas.requestPaint()
+    }
+
+    function requestSweepPaint() {
+        sweepCanvas.requestPaint()
+    }
+
+    function requestStagePaint() {
+        root.requestBasePaint()
+        root.requestTrackPaint()
+        root.requestSweepPaint()
+    }
+
+    function ensureGeoJsonLoaded() {
+        if (!root.visible && !root.preloadAssets && !root.stageActive)
+            return
+        if (!chinaGeoJsonLoaded && !chinaGeoJsonPending)
+            loadChinaGeoJson()
+        if (!worldGeoJsonLoaded && !worldGeoJsonPending)
+            loadWorldGeoJson()
+    }
+
+    function drawPolygon(ctx, polygon, fillColor, strokeColor) {
+        if (!polygon || polygon.length < 2)
+            return
+
+        ctx.beginPath()
+        for (var pointIndex = 0; pointIndex < polygon.length; ++pointIndex) {
+            var point = polygon[pointIndex]
+            var px = root.projectX(point[0])
+            var py = root.projectY(point[1])
+            if (pointIndex === 0)
+                ctx.moveTo(px, py)
+            else
+                ctx.lineTo(px, py)
+        }
+        ctx.closePath()
+        ctx.fillStyle = fillColor
+        ctx.strokeStyle = strokeColor
+        ctx.lineWidth = 1.25
+        ctx.fill()
+        ctx.stroke()
+    }
+
+    function drawPolygonStrokeOnly(ctx, polygon, strokeColor, lineWidth) {
+        if (!polygon || polygon.length < 2)
+            return
+        ctx.beginPath()
+        for (var i = 0; i < polygon.length; ++i) {
+            var pt = polygon[i]
+            var px = root.projectX(pt[0])
+            var py = root.projectY(pt[1])
+            if (i === 0)
+                ctx.moveTo(px, py)
+            else
+                ctx.lineTo(px, py)
+        }
+        ctx.closePath()
+        ctx.strokeStyle = strokeColor
+        ctx.lineWidth = lineWidth
+        ctx.stroke()
     }
 
     function drawTrack(ctx) {
@@ -255,38 +336,44 @@ Item {
             var shadowWidth = landingMode ? 8.4 : 7.2
             var washWidth = landingMode ? 4.8 : 4.2
             var trackWidth = landingMode ? 3.1 : 2.6
-            ctx.beginPath()
-            for (var index = 0; index < trackData.length; ++index) {
-                var point = trackData[index]
-                var x = projectX(point["longitude"])
-                var y = projectY(point["latitude"])
-                if (index === 0)
-                    ctx.moveTo(x, y)
-                else
-                    ctx.lineTo(x, y)
+            var segCount = trackData.length - 1
+
+            for (var seg = 0; seg < segCount; ++seg) {
+                var segAlpha = 0.15 + 0.85 * (seg / segCount)
+                var p0 = trackData[seg]
+                var p1 = trackData[seg + 1]
+                var sx0 = projectX(p0["longitude"])
+                var sy0 = projectY(p0["latitude"])
+                var sx1 = projectX(p1["longitude"])
+                var sy1 = projectY(p1["latitude"])
+
+                ctx.globalAlpha = segAlpha * 0.78
+                ctx.beginPath(); ctx.moveTo(sx0, sy0); ctx.lineTo(sx1, sy1)
+                ctx.strokeStyle = "rgb(4,11,18)"; ctx.lineWidth = shadowWidth; ctx.stroke()
+
+                ctx.globalAlpha = segAlpha * 0.18
+                ctx.beginPath(); ctx.moveTo(sx0, sy0); ctx.lineTo(sx1, sy1)
+                ctx.strokeStyle = "rgb(255,255,255)"; ctx.lineWidth = washWidth; ctx.stroke()
+
+                ctx.globalAlpha = segAlpha * 0.94
+                ctx.beginPath(); ctx.moveTo(sx0, sy0); ctx.lineTo(sx1, sy1)
+                ctx.strokeStyle = "rgb(143,230,255)"; ctx.lineWidth = trackWidth; ctx.stroke()
             }
-            ctx.strokeStyle = "rgba(4,11,18,0.78)"
-            ctx.lineWidth = shadowWidth
-            ctx.stroke()
-
-            ctx.strokeStyle = "rgba(255,255,255,0.18)"
-            ctx.lineWidth = washWidth
-            ctx.stroke()
-
-            ctx.strokeStyle = "rgba(143,230,255,0.94)"
-            ctx.lineWidth = trackWidth
-            ctx.stroke()
+            ctx.globalAlpha = 1.0
 
             ctx.beginPath()
             for (var midIndex = 0; midIndex < trackData.length; ++midIndex) {
                 var midPoint = trackData[midIndex]
                 var mx = projectX(midPoint["longitude"])
                 var my = projectY(midPoint["latitude"])
-                ctx.moveTo(mx + 3.4, my)
+                var dotAlpha = 0.15 + 0.85 * (midIndex / Math.max(1, trackData.length - 1))
+                ctx.globalAlpha = dotAlpha * 0.88
+                ctx.beginPath()
                 ctx.arc(mx, my, midIndex === trackData.length - 1 ? (landingMode ? 5.2 : 4.6) : (landingMode ? 3.2 : 2.8), 0, Math.PI * 2)
+                ctx.fillStyle = "rgb(143,230,255)"
+                ctx.fill()
             }
-            ctx.fillStyle = "rgba(143,230,255,0.88)"
-            ctx.fill()
+            ctx.globalAlpha = 1.0
         }
 
         if (hasCurrentPoint) {
@@ -327,6 +414,268 @@ Item {
         ctx.restore()
     }
 
+    function flattenGeometryRings(geometry) {
+        if (!geometry)
+            return []
+        var type = geometry.type
+        var coords = geometry.coordinates
+        if (!coords)
+            return []
+        var rings = []
+        if (type === "Polygon") {
+            for (var i = 0; i < coords.length; ++i)
+                rings.push(coords[i])
+        } else if (type === "MultiPolygon") {
+            for (var j = 0; j < coords.length; ++j)
+                for (var k = 0; k < coords[j].length; ++k)
+                    rings.push(coords[j][k])
+        }
+        return rings
+    }
+
+    function featureTone(index) {
+        var tones = [
+            "#3858a8",
+            "#3050a0",
+            "#4060b0",
+            "#2848a0",
+            "#3454a8"
+        ]
+        return tones[index % tones.length]
+    }
+
+    function loadChinaGeoJson() {
+        if (!chinaGeoJsonSource || chinaGeoJsonSource.length === 0 || chinaGeoJsonPending || chinaGeoJsonLoaded)
+            return
+        chinaGeoJsonPending = true
+        var request = new XMLHttpRequest()
+        request.onreadystatechange = function() {
+            if (request.readyState !== XMLHttpRequest.DONE)
+                return
+            chinaGeoJsonPending = false
+            if (request.status !== 200 && request.status !== 0) {
+                baseCanvas.requestPaint()
+                return
+            }
+            try {
+                var payload = JSON.parse(request.responseText)
+                var features = payload && payload.features ? payload.features : []
+                var nextPaths = []
+                for (var featureIndex = 0; featureIndex < features.length; ++featureIndex) {
+                    var feature = features[featureIndex]
+                    var rings = flattenGeometryRings(feature.geometry)
+                    for (var ringIndex = 0; ringIndex < rings.length; ++ringIndex) {
+                        nextPaths.push({
+                            "ring": rings[ringIndex],
+                            "name": (feature.properties || {}).NAME || (feature.properties || {}).name || "",
+                            "index": nextPaths.length,
+                        })
+                    }
+                }
+                chinaGeoPaths = nextPaths
+                baseCanvas.requestPaint()
+            } catch (error) {
+                chinaGeoPaths = []
+                baseCanvas.requestPaint()
+            }
+        }
+        request.open("GET", chinaGeoJsonSource)
+        request.send()
+    }
+
+    function loadWorldGeoJson() {
+        if (!worldGeoJsonSource || worldGeoJsonSource.length === 0 || worldGeoJsonPending || worldGeoJsonLoaded)
+            return
+        worldGeoJsonPending = true
+        var request = new XMLHttpRequest()
+        request.onreadystatechange = function() {
+            if (request.readyState !== XMLHttpRequest.DONE)
+                return
+            worldGeoJsonPending = false
+            if (request.status !== 200 && request.status !== 0) {
+                baseCanvas.requestPaint()
+                return
+            }
+            try {
+                var payload = JSON.parse(request.responseText)
+                var features = payload && payload.features ? payload.features : []
+                var nextPaths = []
+                for (var featureIndex = 0; featureIndex < features.length; ++featureIndex) {
+                    var feature = features[featureIndex]
+                    var rings = flattenGeometryRings(feature.geometry)
+                    for (var ringIndex = 0; ringIndex < rings.length; ++ringIndex) {
+                        nextPaths.push({
+                            "ring": rings[ringIndex],
+                            "name": (feature.properties || {}).NAME || (feature.properties || {}).name || "",
+                            "index": nextPaths.length,
+                        })
+                    }
+                }
+                worldGeoPaths = nextPaths
+                baseCanvas.requestPaint()
+            } catch (error) {
+                worldGeoPaths = []
+                baseCanvas.requestPaint()
+            }
+        }
+        request.open("GET", worldGeoJsonSource)
+        request.send()
+    }
+
+    function paintStaticMap(ctx, canvasWidth, canvasHeight) {
+        var ocean = ctx.createLinearGradient(0, 0, 0, canvasHeight)
+        ocean.addColorStop(0.0, root.oceanTop)
+        ocean.addColorStop(0.34, root.landingMode ? "#1a4060" : "#0c1e32")
+        ocean.addColorStop(0.62, root.landingMode ? "#0f2840" : "#081626")
+        ocean.addColorStop(1.0, root.oceanBottom)
+        ctx.fillStyle = ocean
+        ctx.fillRect(0, 0, canvasWidth, canvasHeight)
+
+        var beamCenterX = canvasWidth * 0.72
+        var beamCenterY = canvasHeight * 0.32
+        var beamRadius = Math.max(1, canvasWidth * 0.55)
+        var beam = ctx.createRadialGradient(beamCenterX, beamCenterY, 0, beamCenterX, beamCenterY, beamRadius)
+        beam.addColorStop(0.0, root.landingMode ? "rgba(120,216,255,0.1)" : "rgba(120,216,255,0.18)")
+        beam.addColorStop(0.52, root.landingMode ? "rgba(120,216,255,0.04)" : "rgba(120,216,255,0.07)")
+        beam.addColorStop(1.0, "rgba(120,216,255,0.0)")
+        ctx.fillStyle = beam
+        ctx.fillRect(0, 0, canvasWidth, canvasHeight)
+
+        var hazeCenterX = canvasWidth * 0.22
+        var hazeCenterY = canvasHeight * 0.78
+        var hazeRadius = Math.max(1, canvasWidth * 0.42)
+        var haze = ctx.createRadialGradient(hazeCenterX, hazeCenterY, 0, hazeCenterX, hazeCenterY, hazeRadius)
+        haze.addColorStop(0.0, root.landingMode ? "rgba(231,201,142,0.09)" : "rgba(240,185,124,0.12)")
+        haze.addColorStop(0.5, root.landingMode ? "rgba(231,201,142,0.03)" : "rgba(240,185,124,0.04)")
+        haze.addColorStop(1.0, "rgba(240,185,124,0.0)")
+        ctx.fillStyle = haze
+        ctx.fillRect(0, 0, canvasWidth, canvasHeight)
+
+        ctx.save()
+        ctx.beginPath()
+        ctx.rect(root.mapInset, root.mapInset, root.plotWidth, root.plotHeight)
+        ctx.clip()
+
+        for (var latitude = -60; latitude <= 60; latitude += 30) {
+            var latitudeY = root.projectY(latitude)
+            ctx.beginPath()
+            ctx.moveTo(root.mapInset, latitudeY)
+            ctx.lineTo(width - root.mapInset, latitudeY)
+            ctx.strokeStyle = latitude === 0
+                ? (root.landingMode ? "rgba(176,221,255,0.38)" : "rgba(132,191,255,0.36)")
+                : (root.landingMode ? "rgba(88,122,151,0.22)" : "rgba(68,98,126,0.24)")
+            ctx.lineWidth = latitude === 0 ? 1.4 : 1.0
+            ctx.stroke()
+        }
+
+        for (var longitude = -180; longitude <= 180; longitude += 30) {
+            var longitudeX = root.projectX(longitude)
+            ctx.beginPath()
+            ctx.moveTo(longitudeX, root.mapInset)
+            ctx.lineTo(longitudeX, height - root.mapInset)
+            ctx.strokeStyle = longitude === 0
+                ? (root.landingMode ? "rgba(176,221,255,0.38)" : "rgba(132,191,255,0.36)")
+                : (root.landingMode ? "rgba(48,76,102,0.26)" : "rgba(31,49,69,0.32)")
+            ctx.lineWidth = longitude === 0 ? 1.4 : 1.0
+            ctx.stroke()
+        }
+
+        if (root.chinaTheaterMode && root.chinaGeoJsonLoaded) {
+            for (var cpIdx = 0; cpIdx < root.chinaGeoPaths.length; ++cpIdx) {
+                var cp = root.chinaGeoPaths[cpIdx]
+                drawPolygon(ctx, cp["ring"], root.landFill, Qt.rgba(root.coastlineColor.r, root.coastlineColor.g, root.coastlineColor.b, 0.6))
+            }
+        } else if (root.worldGeoJsonLoaded) {
+            for (var worldPathIndex = 0; worldPathIndex < root.worldGeoPaths.length; ++worldPathIndex) {
+                var worldPath = root.worldGeoPaths[worldPathIndex]
+                var worldRing = worldPath["ring"]
+                ctx.save()
+                ctx.translate(0, 2)
+                drawPolygon(ctx, worldRing, "rgba(3, 10, 16, 0.22)", "rgba(0,0,0,0)")
+                ctx.restore()
+                ctx.save()
+                ctx.globalAlpha = 0.2
+                drawPolygonStrokeOnly(ctx, worldRing, "rgba(100, 140, 255, 0.8)", 4)
+                ctx.globalAlpha = 1.0
+                ctx.restore()
+                drawPolygon(ctx, worldRing, root.featureTone(worldPathIndex), "rgba(100, 140, 255, 0.6)")
+            }
+        } else if (!root.externalBackdropActive) {
+            for (var polygonIndex = 0; polygonIndex < root.continentPolygons.length; ++polygonIndex) {
+                var polygon = root.continentPolygons[polygonIndex]
+                var shadowPolygon = root.continentPolygons[polygonIndex]
+                ctx.save()
+                ctx.translate(0, 3)
+                drawPolygon(ctx, shadowPolygon, "rgba(5,13,22,0.36)", "rgba(0,0,0,0)")
+                ctx.restore()
+
+                var fillColor = polygonIndex % 3 === 0
+                    ? root.landFillBright
+                    : (polygonIndex % 2 === 0 ? root.landFill : Qt.darker(root.landFill, 1.04))
+                drawPolygon(ctx, polygon, fillColor, Qt.rgba(root.coastlineColor.r, root.coastlineColor.g, root.coastlineColor.b, root.landingMode ? 0.62 : 0.5))
+            }
+        }
+
+        ctx.beginPath()
+        ctx.rect(root.mapInset, root.mapInset, root.plotWidth, root.plotHeight)
+        ctx.strokeStyle = root.landingMode ? "rgba(188,233,255,0.28)" : "rgba(172,236,255,0.28)"
+        ctx.lineWidth = 1
+        ctx.stroke()
+        ctx.restore()
+
+        var vigGrad = ctx.createRadialGradient(
+            canvasWidth * 0.5, canvasHeight * 0.5, Math.min(canvasWidth, canvasHeight) * 0.32,
+            canvasWidth * 0.5, canvasHeight * 0.5, Math.max(canvasWidth, canvasHeight) * 0.58
+        )
+        vigGrad.addColorStop(0.0, "rgba(0,0,0,0)")
+        vigGrad.addColorStop(1.0, "rgba(0,0,0,0.24)")
+        ctx.fillStyle = vigGrad
+        ctx.fillRect(0, 0, canvasWidth, canvasHeight)
+    }
+
+    function paintTrackOverlay(ctx, canvasWidth, canvasHeight) {
+        if (root.hasCurrentPoint) {
+            var spotlightRadius = Math.max(1, Math.min(canvasWidth, canvasHeight) * 0.38)
+            var spotlight = ctx.createRadialGradient(root.markerX, root.markerY, 0, root.markerX, root.markerY, spotlightRadius)
+            spotlight.addColorStop(0.0, "rgba(255,255,255,0.03)")
+            spotlight.addColorStop(0.3, "rgba(172,236,255,0.06)")
+            spotlight.addColorStop(1.0, "rgba(172,236,255,0.0)")
+            ctx.fillStyle = spotlight
+            ctx.fillRect(0, 0, canvasWidth, canvasHeight)
+        }
+
+        ctx.save()
+        ctx.beginPath()
+        ctx.rect(root.mapInset, root.mapInset, root.plotWidth, root.plotHeight)
+        ctx.clip()
+        root.drawTrack(ctx)
+        ctx.restore()
+    }
+
+    function paintSweepOverlay(ctx, canvasWidth, canvasHeight) {
+        if (!root.hasCurrentPoint)
+            return
+
+        var sweepAngle = (root.scanSweepDeg % 360) * Math.PI / 180
+        var sweepLength = Math.max(canvasWidth, canvasHeight) * 0.38
+        ctx.save()
+        ctx.globalCompositeOperation = "lighter"
+        ctx.beginPath()
+        ctx.moveTo(root.markerX, root.markerY)
+        ctx.arc(root.markerX, root.markerY, sweepLength, sweepAngle - 0.28, sweepAngle)
+        ctx.closePath()
+        var sweepGrad = ctx.createRadialGradient(
+            root.markerX, root.markerY, 0,
+            root.markerX, root.markerY, sweepLength
+        )
+        sweepGrad.addColorStop(0.0, "rgba(120,220,255,0.10)")
+        sweepGrad.addColorStop(0.4, "rgba(120,220,255,0.04)")
+        sweepGrad.addColorStop(1.0, "rgba(120,220,255,0.0)")
+        ctx.fillStyle = sweepGrad
+        ctx.fill()
+        ctx.restore()
+    }
+
     Image {
         id: externalBackdropImage
         anchors.fill: parent
@@ -338,7 +687,7 @@ Item {
         asynchronous: true
         mipmap: true
         opacity: root.landingMode ? 0.98 : 0.76
-        onStatusChanged: mapCanvas.requestPaint()
+        onStatusChanged: root.requestBasePaint()
     }
 
     Rectangle {
@@ -348,31 +697,11 @@ Item {
     }
 
     Canvas {
-        id: mapCanvas
+        id: baseCanvas
         anchors.fill: parent
         antialiasing: true
-
-        function drawPolygon(ctx, polygon, fillColor, strokeColor) {
-            if (!polygon || polygon.length < 2)
-                return
-
-            ctx.beginPath()
-            for (var pointIndex = 0; pointIndex < polygon.length; ++pointIndex) {
-                var point = polygon[pointIndex]
-                var px = root.projectX(point[0])
-                var py = root.projectY(point[1])
-                if (pointIndex === 0)
-                    ctx.moveTo(px, py)
-                else
-                    ctx.lineTo(px, py)
-            }
-            ctx.closePath()
-            ctx.fillStyle = fillColor
-            ctx.strokeStyle = strokeColor
-            ctx.lineWidth = 1.25
-            ctx.fill()
-            ctx.stroke()
-        }
+        renderStrategy: Canvas.Threaded
+        renderTarget: Canvas.FramebufferObject
 
         onPaint: {
             var ctx = getContext("2d")
@@ -380,239 +709,94 @@ Item {
             var canvasHeight = Math.max(1, root.height)
             ctx.reset()
             ctx.clearRect(0, 0, canvasWidth, canvasHeight)
-
-            var ocean = ctx.createLinearGradient(0, 0, 0, canvasHeight)
-            ocean.addColorStop(0.0, root.oceanTop)
-            ocean.addColorStop(0.34, root.landingMode ? "#28546d" : "#11253a")
-            ocean.addColorStop(0.62, root.landingMode ? "#173247" : "#0d1d2d")
-            ocean.addColorStop(1.0, root.oceanBottom)
-            ctx.fillStyle = ocean
-            ctx.fillRect(0, 0, canvasWidth, canvasHeight)
-
-            var beamCenterX = canvasWidth * 0.72
-            var beamCenterY = canvasHeight * 0.32
-            var beamRadius = Math.max(1, canvasWidth * 0.55)
-            var beam = ctx.createRadialGradient(beamCenterX, beamCenterY, 0, beamCenterX, beamCenterY, beamRadius)
-            beam.addColorStop(0.0, root.landingMode ? "rgba(120,216,255,0.1)" : "rgba(120,216,255,0.18)")
-            beam.addColorStop(0.52, root.landingMode ? "rgba(120,216,255,0.04)" : "rgba(120,216,255,0.07)")
-            beam.addColorStop(1.0, "rgba(120,216,255,0.0)")
-            ctx.fillStyle = beam
-            ctx.fillRect(0, 0, canvasWidth, canvasHeight)
-
-            var hazeCenterX = canvasWidth * 0.22
-            var hazeCenterY = canvasHeight * 0.78
-            var hazeRadius = Math.max(1, canvasWidth * 0.42)
-            var haze = ctx.createRadialGradient(hazeCenterX, hazeCenterY, 0, hazeCenterX, hazeCenterY, hazeRadius)
-            haze.addColorStop(0.0, root.landingMode ? "rgba(231,201,142,0.09)" : "rgba(240,185,124,0.12)")
-            haze.addColorStop(0.5, root.landingMode ? "rgba(231,201,142,0.03)" : "rgba(240,185,124,0.04)")
-            haze.addColorStop(1.0, "rgba(240,185,124,0.0)")
-            ctx.fillStyle = haze
-            ctx.fillRect(0, 0, canvasWidth, canvasHeight)
-
-            if (root.hasCurrentPoint) {
-                var spotlightRadius = Math.max(1, Math.min(canvasWidth, canvasHeight) * 0.38)
-                var spotlight = ctx.createRadialGradient(root.markerX, root.markerY, 0, root.markerX, root.markerY, spotlightRadius)
-                spotlight.addColorStop(0.0, "rgba(255,255,255,0.03)")
-                spotlight.addColorStop(0.3, "rgba(172,236,255,0.06)")
-                spotlight.addColorStop(1.0, "rgba(172,236,255,0.0)")
-                ctx.fillStyle = spotlight
-                ctx.fillRect(0, 0, canvasWidth, canvasHeight)
-            }
-
-            ctx.save()
-            ctx.beginPath()
-            ctx.rect(root.mapInset, root.mapInset, root.plotWidth, root.plotHeight)
-            ctx.clip()
-
-            for (var latitude = -60; latitude <= 60; latitude += 30) {
-                var latitudeY = root.projectY(latitude)
-                ctx.beginPath()
-                ctx.moveTo(root.mapInset, latitudeY)
-                ctx.lineTo(width - root.mapInset, latitudeY)
-                ctx.strokeStyle = latitude === 0
-                    ? (root.landingMode ? "rgba(176,221,255,0.38)" : "rgba(132,191,255,0.36)")
-                    : (root.landingMode ? "rgba(88,122,151,0.22)" : "rgba(68,98,126,0.24)")
-                ctx.lineWidth = latitude === 0 ? 1.4 : 1.0
-                ctx.stroke()
-            }
-
-            for (var longitude = -180; longitude <= 180; longitude += 30) {
-                var longitudeX = root.projectX(longitude)
-                ctx.beginPath()
-                ctx.moveTo(longitudeX, root.mapInset)
-                ctx.lineTo(longitudeX, height - root.mapInset)
-                ctx.strokeStyle = longitude === 0
-                    ? (root.landingMode ? "rgba(176,221,255,0.38)" : "rgba(132,191,255,0.36)")
-                    : (root.landingMode ? "rgba(48,76,102,0.26)" : "rgba(31,49,69,0.32)")
-                ctx.lineWidth = longitude === 0 ? 1.4 : 1.0
-                ctx.stroke()
-            }
-
-            if (!root.externalBackdropActive) {
-                for (var polygonIndex = 0; polygonIndex < root.continentPolygons.length; ++polygonIndex) {
-                    var polygon = root.continentPolygons[polygonIndex]
-                    var shadowPolygon = root.continentPolygons[polygonIndex]
-                    ctx.save()
-                    ctx.translate(0, 3)
-                    drawPolygon(ctx, shadowPolygon, "rgba(5,13,22,0.36)", "rgba(0,0,0,0)")
-                    ctx.restore()
-
-                    var fillColor = polygonIndex % 3 === 0
-                        ? root.landFillBright
-                        : (polygonIndex % 2 === 0 ? root.landFill : Qt.darker(root.landFill, 1.04))
-                    drawPolygon(ctx, polygon, fillColor, Qt.rgba(root.coastlineColor.r, root.coastlineColor.g, root.coastlineColor.b, root.landingMode ? 0.62 : 0.5))
-                }
-            }
-
-            ctx.beginPath()
-            ctx.rect(root.mapInset, root.mapInset, root.plotWidth, root.plotHeight)
-            ctx.strokeStyle = root.landingMode ? "rgba(188,233,255,0.28)" : "rgba(172,236,255,0.28)"
-            ctx.lineWidth = 1
-            ctx.stroke()
-
-            root.drawTrack(ctx)
-            ctx.restore()
+            root.paintStaticMap(ctx, canvasWidth, canvasHeight)
         }
 
         onWidthChanged: requestPaint()
         onHeightChanged: requestPaint()
-        Component.onCompleted: requestPaint()
     }
 
-    onTrackDataChanged: mapCanvas.requestPaint()
-    onCurrentPointChanged: mapCanvas.requestPaint()
-    onHeadingDegChanged: mapCanvas.requestPaint()
-    onBackdropModeChanged: mapCanvas.requestPaint()
-    onBackdropSourceChanged: mapCanvas.requestPaint()
-    onWidthChanged: mapCanvas.requestPaint()
-    onHeightChanged: mapCanvas.requestPaint()
+    Canvas {
+        id: trackCanvas
+        anchors.fill: parent
+        antialiasing: true
 
-    Rectangle {
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.top: parent.top
-        height: shellWindow ? shellWindow.scaled(2) : 2
-        gradient: Gradient {
-            orientation: Gradient.Horizontal
-            GradientStop { position: 0.0; color: "transparent" }
-            GradientStop { position: 0.22; color: root.mapGlow }
-            GradientStop { position: 0.5; color: Qt.lighter(root.mapGlow, 1.1) }
-            GradientStop { position: 0.78; color: root.mapGlow }
-            GradientStop { position: 1.0; color: "transparent" }
-        }
-        opacity: root.landingMode ? 0.46 : 0.62
-    }
-
-    Rectangle {
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.top: parent.top
-        height: parent.height * 0.2
-        gradient: Gradient {
-            GradientStop { position: 0.0; color: root.landingMode ? "#120d1312" : "#7a07111c" }
-            GradientStop { position: 0.4; color: root.landingMode ? "#080d1310" : "#3207111c" }
-            GradientStop { position: 1.0; color: "#0007111c" }
+        onPaint: {
+            var ctx = getContext("2d")
+            var canvasWidth = Math.max(1, root.width)
+            var canvasHeight = Math.max(1, root.height)
+            ctx.reset()
+            ctx.clearRect(0, 0, canvasWidth, canvasHeight)
+            root.paintTrackOverlay(ctx, canvasWidth, canvasHeight)
         }
     }
 
-    Rectangle {
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.bottom: parent.bottom
-        height: parent.height * 0.26
-        gradient: Gradient {
-            GradientStop { position: 0.0; color: "#0007111c" }
-            GradientStop { position: 0.4; color: root.landingMode ? "#080d1310" : "#2407111c" }
-            GradientStop { position: 1.0; color: root.landingMode ? "#140d1312" : "#98061018" }
+    Canvas {
+        id: sweepCanvas
+        anchors.fill: parent
+        antialiasing: true
+
+        onPaint: {
+            var ctx = getContext("2d")
+            var canvasWidth = Math.max(1, root.width)
+            var canvasHeight = Math.max(1, root.height)
+            ctx.reset()
+            ctx.clearRect(0, 0, canvasWidth, canvasHeight)
+            root.paintSweepOverlay(ctx, canvasWidth, canvasHeight)
         }
     }
 
-    Item {
-        x: root.mapInset - 1
-        y: root.mapInset - 1
-        width: shellWindow ? shellWindow.scaled(root.landingMode ? 20 : 18) : (root.landingMode ? 20 : 18)
-        height: width
-
-        Rectangle {
-            width: parent.width
-            height: 1
-            color: Qt.rgba(root.mapGlow.r, root.mapGlow.g, root.mapGlow.b, root.landingMode ? 0.54 : 0.62)
-        }
-
-        Rectangle {
-            width: 1
-            height: parent.height
-            color: Qt.rgba(root.mapGlow.r, root.mapGlow.g, root.mapGlow.b, root.landingMode ? 0.54 : 0.62)
+    Timer {
+        running: root.stageActive && root.hasCurrentPoint
+        repeat: true
+        interval: 200
+        onTriggered: {
+            root.scanSweepDeg += 12
+            root.requestSweepPaint()
         }
     }
 
-    Item {
-        width: shellWindow ? shellWindow.scaled(root.landingMode ? 20 : 18) : (root.landingMode ? 20 : 18)
-        height: width
-        x: root.mapInset + root.plotWidth - width + 1
-        y: root.mapInset - 1
-
-        Rectangle {
-            anchors.right: parent.right
-            width: parent.width
-            height: 1
-            color: Qt.rgba(root.mapGlow.r, root.mapGlow.g, root.mapGlow.b, root.landingMode ? 0.54 : 0.62)
-        }
-
-        Rectangle {
-            anchors.right: parent.right
-            width: 1
-            height: parent.height
-            color: Qt.rgba(root.mapGlow.r, root.mapGlow.g, root.mapGlow.b, root.landingMode ? 0.54 : 0.62)
+    onTrackDataChanged: if (root.stageActive) root.requestTrackPaint()
+    onCurrentPointChanged: {
+        if (root.stageActive) {
+            root.requestTrackPaint()
+            root.requestSweepPaint()
         }
     }
-
-    Item {
-        width: shellWindow ? shellWindow.scaled(root.landingMode ? 20 : 18) : (root.landingMode ? 20 : 18)
-        height: width
-        x: root.mapInset - 1
-        y: root.mapInset + root.plotHeight - height + 1
-
-        Rectangle {
-            anchors.bottom: parent.bottom
-            width: parent.width
-            height: 1
-            color: Qt.rgba(root.mapGlow.r, root.mapGlow.g, root.mapGlow.b, root.landingMode ? 0.54 : 0.62)
-        }
-
-        Rectangle {
-            anchors.bottom: parent.bottom
-            width: 1
-            height: parent.height
-            color: Qt.rgba(root.mapGlow.r, root.mapGlow.g, root.mapGlow.b, root.landingMode ? 0.54 : 0.62)
+    onHeadingDegChanged: if (root.stageActive) root.requestTrackPaint()
+    onBackdropModeChanged: root.requestBasePaint()
+    onBackdropSourceChanged: root.requestBasePaint()
+    onWidthChanged: root.requestStagePaint()
+    onHeightChanged: root.requestStagePaint()
+    onLandingModeChanged: root.requestStagePaint()
+    onStageActiveChanged: if (root.stageActive) root.requestStagePaint()
+    onChinaSceneChanged: root.requestBasePaint()
+    onVisibleChanged: {
+        if (visible) {
+            ensureGeoJsonLoaded()
+            root.requestStagePaint()
         }
     }
+    onChinaGeoJsonSourceChanged: {
+        chinaGeoPaths = []
+        chinaGeoJsonPending = false
+        ensureGeoJsonLoaded()
+        root.requestBasePaint()
+    }
+    onWorldGeoJsonSourceChanged: {
+        worldGeoPaths = []
+        worldGeoJsonPending = false
+        ensureGeoJsonLoaded()
+        root.requestBasePaint()
+    }
 
-    Item {
-        width: shellWindow ? shellWindow.scaled(root.landingMode ? 20 : 18) : (root.landingMode ? 20 : 18)
-        height: width
-        x: root.mapInset + root.plotWidth - width + 1
-        y: root.mapInset + root.plotHeight - height + 1
-
-        Rectangle {
-            anchors.right: parent.right
-            anchors.bottom: parent.bottom
-            width: parent.width
-            height: 1
-            color: Qt.rgba(root.mapGlow.r, root.mapGlow.g, root.mapGlow.b, root.landingMode ? 0.54 : 0.62)
-        }
-
-        Rectangle {
-            anchors.right: parent.right
-            anchors.bottom: parent.bottom
-            width: 1
-            height: parent.height
-            color: Qt.rgba(root.mapGlow.r, root.mapGlow.g, root.mapGlow.b, root.landingMode ? 0.54 : 0.62)
-        }
+    Component.onCompleted: {
+        ensureGeoJsonLoaded()
+        root.requestStagePaint()
     }
 
     Repeater {
-        model: root.continentLabels
+        model: !root.landingMode ? root.continentLabels : []
 
         delegate: Text {
             text: modelData["label"]
@@ -627,7 +811,7 @@ Item {
     }
 
     Repeater {
-        model: root.latitudeTicks
+        model: !root.landingMode ? root.latitudeTicks : []
 
         delegate: Text {
             text: String(modelData) + "°"
@@ -641,7 +825,7 @@ Item {
     }
 
     Repeater {
-        model: root.longitudeTicks
+        model: !root.landingMode ? root.longitudeTicks : []
 
         delegate: Text {
             text: (modelData > 0 ? "+" : "") + String(modelData) + "°"
@@ -672,6 +856,9 @@ Item {
         implicitWidth: stageLabelColumn.implicitWidth + ((shellWindow ? shellWindow.scaled(12) : 12) * 2)
         implicitHeight: stageLabelColumn.implicitHeight + (root.badgePadding * 2)
         clip: true
+        opacity: 0
+
+        NumberAnimation on opacity { from: 0; to: 1; duration: 400; easing.type: Easing.OutCubic }
 
         Rectangle {
             anchors.left: parent.left
@@ -691,8 +878,8 @@ Item {
 
             Text {
                 text: root.landingMicroBadge
-                    ? "GLOBAL WALLBOARD"
-                    : (root.landingMode ? "全球主墙板 / GLOBAL WALLBOARD" : "世界态势地图 / WORLD MAP")
+                    ? "全球主墙板"
+                    : (root.landingMode ? "全球主墙板" : "世界态势地图")
                 color: root.mapGlow
                 font.pixelSize: shellWindow ? (root.landingMicroBadge ? shellWindow.captionSize : shellWindow.captionSize + 1) : (root.landingMicroBadge ? 10 : 11)
                 font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
@@ -734,6 +921,11 @@ Item {
         border.color: toneColor(scenarioTone)
         border.width: 1
         implicitWidth: scenarioColumn.implicitWidth + ((shellWindow ? shellWindow.scaled(12) : 12) * 2)
+        opacity: 0
+
+        NumberAnimation on opacity { from: 0; to: 1; duration: 450; easing.type: Easing.OutCubic }
+
+        Behavior on border.color { ColorAnimation { duration: 200 } }
         implicitHeight: scenarioColumn.implicitHeight + (root.badgePadding * 2)
         clip: true
 
@@ -757,10 +949,10 @@ Item {
             Text {
                 width: parent.width
                 text: root.landingMicroBadge
-                    ? "RECOMMENDED PROFILE"
+                    ? "推荐策略"
                     : (root.compactStage
                         ? (root.landingMode ? "场景焦点" : "当前关注")
-                        : (root.landingMode ? "场景焦点 / Focus" : "当前关注 / Focus"))
+                        : (root.landingMode ? "场景焦点" : "当前关注"))
                 color: shellWindow ? shellWindow.textMuted : "#68859d"
                 font.pixelSize: shellWindow ? shellWindow.captionSize : 10
                 font.family: shellWindow ? (root.landingMicroBadge ? shellWindow.monoFamily : shellWindow.uiFamily) : (root.landingMicroBadge ? "JetBrains Mono" : "Noto Sans CJK SC")
@@ -810,6 +1002,9 @@ Item {
             ? Qt.rgba(root.mapGlow.r, root.mapGlow.g, root.mapGlow.b, 0.36)
             : Qt.rgba(root.mapGlow.r, root.mapGlow.g, root.mapGlow.b, 0.72)
         border.width: 1
+        opacity: 0
+
+        NumberAnimation on opacity { from: 0; to: 1; duration: 500; easing.type: Easing.OutCubic }
 
         Rectangle {
             anchors.fill: parent
@@ -1005,7 +1200,7 @@ Item {
                 spacing: 1
 
                 Text {
-                    text: "TRACK"
+                    text: "航迹"
                     color: root.mapGlow
                     font.pixelSize: shellWindow ? shellWindow.captionSize : 10
                     font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
@@ -1032,7 +1227,7 @@ Item {
                 spacing: 1
 
                 Text {
-                    text: "ANCHOR"
+                    text: "锚点"
                     color: root.mapGlow
                     font.pixelSize: shellWindow ? shellWindow.captionSize : 10
                     font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
@@ -1060,7 +1255,7 @@ Item {
                 spacing: 1
 
                 Text {
-                    text: "HEADING / FIX"
+                    text: "航向 · 定位"
                     color: root.mapGlow
                     font.pixelSize: shellWindow ? shellWindow.captionSize : 10
                     font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
@@ -1098,6 +1293,52 @@ Item {
                 loops: Animation.Infinite
                 NumberAnimation { from: 0.78; to: 1.18; duration: 1600 }
                 NumberAnimation { from: 1.18; to: 0.78; duration: 1600 }
+            }
+        }
+
+        Rectangle {
+            id: radarPing1
+            anchors.centerIn: parent
+            width: parent.width * 2.5
+            height: width
+            radius: width / 2
+            color: "transparent"
+            border.color: root.markerColor
+            border.width: 1.5
+            opacity: 0
+            scale: 0
+            SequentialAnimation on scale {
+                loops: Animation.Infinite
+                NumberAnimation { from: 0; to: 2.5; duration: 2200; easing.type: Easing.OutQuad }
+                PauseAnimation { duration: 200 }
+            }
+            SequentialAnimation on opacity {
+                loops: Animation.Infinite
+                NumberAnimation { from: 0.7; to: 0; duration: 2200; easing.type: Easing.OutQuad }
+                PauseAnimation { duration: 200 }
+            }
+        }
+
+        Rectangle {
+            id: radarPing2
+            anchors.centerIn: parent
+            width: parent.width * 2.5
+            height: width
+            radius: width / 2
+            color: "transparent"
+            border.color: root.markerColor
+            border.width: 1.2
+            opacity: 0
+            scale: 0
+            SequentialAnimation on scale {
+                loops: Animation.Infinite
+                PauseAnimation { duration: 1100 }
+                NumberAnimation { from: 0; to: 2.5; duration: 2200; easing.type: Easing.OutQuad }
+            }
+            SequentialAnimation on opacity {
+                loops: Animation.Infinite
+                PauseAnimation { duration: 1100 }
+                NumberAnimation { from: 0.5; to: 0; duration: 2200; easing.type: Easing.OutQuad }
             }
         }
 

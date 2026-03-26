@@ -123,6 +123,25 @@ PanelFrame {
                 y: -height * 0.2
             }
 
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.leftMargin: shellWindow ? shellWindow.scaled(14) : 14
+                anchors.rightMargin: shellWindow ? shellWindow.scaled(14) : 14
+                height: shellWindow ? shellWindow.scaled(2) : 2
+                radius: height / 2
+                gradient: Gradient {
+                    orientation: Gradient.Horizontal
+                    GradientStop { position: 0.0; color: "transparent" }
+                    GradientStop { position: 0.2; color: "rgba(58,174,255,0.06)" }
+                    GradientStop { position: 0.5; color: "rgba(58,174,255,0.48)" }
+                    GradientStop { position: 0.8; color: "rgba(58,174,255,0.08)" }
+                    GradientStop { position: 1.0; color: "transparent" }
+                }
+                opacity: 0.72
+            }
+
             GridLayout {
                 id: heroLayout
                 anchors.fill: parent
@@ -155,6 +174,12 @@ PanelFrame {
                             border.width: 1
                             implicitWidth: heroStamp.implicitWidth + ((shellWindow ? shellWindow.scaled(10) : 10) * 2)
                             implicitHeight: heroStamp.implicitHeight + ((shellWindow ? shellWindow.scaled(5) : 5) * 2)
+
+                            SequentialAnimation on border.color {
+                                loops: Animation.Infinite
+                                ColorAnimation { from: "#1d547c"; to: "#3a90c8"; duration: 1200; easing.type: Easing.InOutSine }
+                                ColorAnimation { from: "#3a90c8"; to: "#1d547c"; duration: 1200; easing.type: Easing.InOutSine }
+                            }
 
                             Text {
                                 id: heroStamp

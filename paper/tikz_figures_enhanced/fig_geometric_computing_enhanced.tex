@@ -1,0 +1,152 @@
+% 图 4.3.1 几何计算机制（重绘加强版）
+% 基于 CICC0903540 技术文档 4.3.1 - MNN 核心创新
+\documentclass[tikz,border=10pt]{standalone}
+
+% 强制全局样式与配色
+\usepackage{amssymb, amsmath}
+\usepackage{fontspec}
+\usepackage{xeCJK}
+\setCJKmainfont{SimHei}
+\usepackage{tikz}
+\usetikzlibrary{
+  arrows.meta, positioning, shapes.geometric, calc,
+  backgrounds, fit, decorations.pathreplacing, patterns
+}
+
+% 低饱和度马卡龙配色
+\definecolor{mBlue}{HTML}{AEC6CF}
+\definecolor{mPink}{HTML}{FFD1DC}
+\definecolor{mGreen}{HTML}{B1D8B7}
+\definecolor{mPurple}{HTML}{B39EB5}
+\definecolor{mYellow}{HTML}{FDFD96}
+\definecolor{mGray}{HTML}{E5E4E2}
+\definecolor{mDark}{HTML}{4A4A4A}
+
+% 全局 TikZ 样式
+\tikzset{
+  >=stealth,
+  thick,
+  draw=mDark,
+  bigbox/.style={
+    rectangle, rounded corners=4pt, draw=mDark, align=center,
+    font=\sffamily\small, minimum height=1.1cm, inner sep=6pt,
+    minimum width=3.0cm},
+  smallbox/.style={
+    rectangle, rounded corners=3pt, draw=mDark!80, align=center,
+    font=\sffamily\scriptsize, minimum height=0.85cm, inner sep=5pt,
+    minimum width=2.5cm},
+  micro/.style={
+    rectangle, rounded corners=2pt, draw=mDark!70, align=center,
+    font=\sffamily\tiny, minimum height=0.4cm, inner sep=3pt},
+  op/.style={
+    circle, draw=mDark, minimum size=0.5cm, inner sep=0,
+    font=\scriptsize, fill=mGray!60},
+  ts/.style={font=\tiny\sffamily, color=mDark!80},
+  arr/.style={-{Stealth[length=4pt]}, thick, draw=mDark},
+  legendbox/.style={
+    rectangle, draw=mDark!50, rounded corners=3pt,
+    fill=mGray!15, inner sep=5pt, font=\tiny\sffamily},
+}
+
+\begin{document}
+\begin{tikzpicture}[
+  node distance=0.8cm and 1.0cm,
+]
+  % ========== 上层：高层算子 ==========
+  \node[bigbox, fill=mBlue!40] (trans)
+    {转换算子\\{\scriptsize 45 个}};
+
+  \node[bigbox, fill=mBlue!40, right=2.0cm of trans] (comp)
+    {复合算子\\{\scriptsize 16 个}};
+
+  % 转换算子示例
+  \node[micro, fill=mBlue!30, below=0.3cm of trans, xshift=-0.8cm] (t1) {转置};
+  \node[micro, fill=mBlue!30, right=0.1cm of t1] (t2) {切片};
+  \node[micro, fill=mBlue!30, right=0.1cm of t2] (t3) {重排};
+  \draw[arr, dashed, thin, mDark!60] (trans.south) -- (t2.north);
+
+  % 复合算子示例
+  \node[micro, fill=mBlue!30, below=0.3cm of comp, xshift=-0.8cm] (c1) {卷积};
+  \node[micro, fill=mBlue!30, right=0.1cm of c1] (c2) {池化};
+  \node[micro, fill=mBlue!30, right=0.1cm of c2] (c3) {归一化};
+  \draw[arr, dashed, thin, mDark!60] (comp.south) -- (c2.north);
+
+  % ========== 中间：几何计算分解 ==========
+  \node[op, fill=mYellow!60, below=2.2cm of trans, xshift=1.0cm] (decomp) {$\downarrow$};
+  \node[ts, right=0.15cm of decomp] {几何计算分解};
+
+  % ========== 下层：底层算子 ==========
+  \node[smallbox, fill=mGreen!50, below=3.2cm of trans] (raster)
+    {光栅算子\\{\tiny Raster Operator}};
+
+  \node[smallbox, fill=mGreen!50, below=3.2cm of comp] (atomic)
+    {原子算子\\{\tiny 61 个}};
+
+  % 光栅算子细节
+  \node[micro, fill=mGreen!40, below=0.3cm of raster, xshift=-0.6cm] (r1) {坐标变换};
+  \node[micro, fill=mGreen!40, right=0.1cm of r1] (r2) {内存映射};
+  \node[ts, below=0.15cm of r1, text width=2.5cm, align=center] {region: strides + offsets};
+
+  % 原子算子细节
+  \node[micro, fill=mGreen!40, below=0.3cm of atomic, xshift=-0.8cm] (a1) {加};
+  \node[micro, fill=mGreen!40, right=0.1cm of a1] (a2) {减};
+  \node[micro, fill=mGreen!40, right=0.1cm of a2] (a3) {乘};
+  \node[micro, fill=mGreen!40, right=0.1cm of a3] (a4) {除};
+
+  % ========== 连线 ==========
+  \draw[arr] (trans.south) -- ++(0,-0.6) -| (raster.north);
+  \draw[arr] (comp.south) -- ++(0,-0.6) -| (atomic.north);
+
+  % ========== 层次化表达：背景分组 ==========
+  \begin{scope}[on background layer]
+    % 高层算子区域
+    \node[fit=(trans)(comp)(t1)(t2)(t3)(c1)(c2)(c3),
+      fill=mBlue!15, draw=mDark!40, dashed,
+      rounded corners=5pt, inner sep=10pt] {};
+
+    % 底层算子区域
+    \node[fit=(raster)(atomic)(r1)(r2)(a1)(a2)(a3)(a4),
+      fill=mGreen!18, draw=mDark!40, dashed,
+      rounded corners=5pt, inner sep=10pt] {};
+  \end{scope}
+
+  \node[above=0.3cm of trans, xshift=1.0cm, font=\sffamily\footnotesize\bfseries, color=mDark]
+    {高层算子（原始）};
+  \node[below=1.3cm of atomic, font=\sffamily\footnotesize\bfseries, color=mDark]
+    {底层算子（优化后）};
+
+  % ========== 优化工作量对比 ==========
+  \node[legendbox, anchor=north west] at ([xshift=-8cm, yshift=-0.5cm]current bounding box.north east)
+    [align=left, text width=3.8cm] {
+    \textbf{优化工作量对比}\\[2pt]
+    原始方案：$O(124 \times 16) = O(1984)$\\
+    （61原子 + 45转换 + 16复合 + 2控制流）\\
+    $\times$ 16后端\\[2pt]
+    几何计算：$O(61 + 1) \times 16 + O(45+16)$\\
+    $= O(992 + 61) = O(1053) \approx O(1055)$\\[2pt]
+    减少约 46\% 工作量
+  };
+
+  % ========== 信息密度拉满：region 概念 ==========
+  \node[legendbox, anchor=north east] at ([xshift=-0.5cm, yshift=-0.5cm]current bounding box.north east)
+    [align=left, text width=4.5cm] {
+    \textbf{Region 概念（光栅算子核心）}\\[2pt]
+    region = \{输入张量, 坐标范围, 映射函数\}\\[1pt]
+    映射函数：线性映射（strides + offsets）\\[2pt]
+    示例（切片操作）：\\
+    \texttt{output[i,j] = input[i + offset\_h, j + offset\_w]}\\[2pt]
+    优化策略：垂直合并 + 水平合并
+  };
+
+  % ========== 图例（右下角）==========
+  \node[legendbox, anchor=south east] at ([xshift=-5pt, yshift=5pt]current bounding box.south east)
+    [align=left, text width=4.2cm] {
+    \textbf{图例}\\[1pt]
+    \colorbox{mBlue!40}{\rule{0.16cm}{0.12cm}\hspace{0.05cm}} 高层算子 \quad
+    \colorbox{mGreen!50}{\rule{0.16cm}{0.12cm}\hspace{0.05cm}} 底层算子\\[1pt]
+    几何计算机制核心：\\
+    将转换/复合算子 $\to$ 光栅 + 原子\\
+    后端只需优化光栅 + 原子即可
+  };
+\end{tikzpicture}
+\end{document}

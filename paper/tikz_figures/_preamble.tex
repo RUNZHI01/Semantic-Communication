@@ -1,0 +1,39 @@
+% 顶会/顶刊风格：低饱和度马卡龙 + 高级感
+% 适用于 NeurIPS, CVPR, ICLR, IEEE TPAMI
+\usepackage{amssymb}
+\usepackage{fontspec}
+\usepackage{xeCJK}
+\setCJKmainfont{SimHei}
+\usepackage{tikz}
+\usepackage{pgfplots}
+\usetikzlibrary{
+  arrows.meta, positioning, shapes.geometric, calc,
+  backgrounds, fit, decorations.pathreplacing, patterns
+}
+
+% 低饱和度马卡龙配色
+\definecolor{mBlue}{HTML}{AEC6CF}
+\definecolor{mPink}{HTML}{FFD1DC}
+\definecolor{mGreen}{HTML}{B1D8B7}
+\definecolor{mPurple}{HTML}{B39EB5}
+\definecolor{mYellow}{HTML}{FDFD96}
+\definecolor{mGray}{HTML}{E5E4E2}
+\definecolor{mDark}{HTML}{4A4A4A}
+
+% 全局 TikZ 样式
+\tikzset{
+  >=stealth,
+  every node/.style={align=center, font=\sffamily},
+  block/.style={
+    rounded corners=3pt, draw=mDark, align=center,
+    minimum height=0.8cm, inner sep=5pt},
+  arr/.style={-{Stealth[length=4pt]}, semithick, draw=mDark},
+  % 信息密度增强：张量维度标注
+  ts/.style={font=\tiny\sffamily, color=mDark!80},
+  % 数学操作符节点（⊕加 ⊗乘 ‖拼接）
+  op/.style={circle, draw=mDark, minimum size=0.4cm, inner sep=0,
+    font=\scriptsize\sffamily, fill=mGray!60},
+  % 图例
+  legendbox/.style={rectangle, draw=mDark!50, rounded corners=2pt,
+    fill=mGray!15, inner sep=4pt, font=\tiny\sffamily},
+}

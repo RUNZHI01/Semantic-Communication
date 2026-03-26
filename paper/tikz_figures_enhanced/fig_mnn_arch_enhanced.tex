@@ -1,0 +1,160 @@
+% 图 4.5 MNN 架构图（重绘加强版）
+% 基于 CICC0903540 技术文档 4.3 - MNN 轻量级推理引擎
+\documentclass[tikz,border=10pt]{standalone}
+
+% 强制全局样式与配色
+\usepackage{amssymb, amsmath}
+\usepackage{fontspec}
+\usepackage{xeCJK}
+\setCJKmainfont{SimHei}
+\usepackage{tikz}
+\usetikzlibrary{
+  arrows.meta, positioning, shapes.geometric, calc,
+  backgrounds, fit, decorations.pathreplacing, patterns
+}
+
+% 低饱和度马卡龙配色
+\definecolor{mBlue}{HTML}{AEC6CF}
+\definecolor{mPink}{HTML}{FFD1DC}
+\definecolor{mGreen}{HTML}{B1D8B7}
+\definecolor{mPurple}{HTML}{B39EB5}
+\definecolor{mYellow}{HTML}{FDFD96}
+\definecolor{mGray}{HTML}{E5E4E2}
+\definecolor{mDark}{HTML}{4A4A4A}
+
+% 全局 TikZ 样式
+\tikzset{
+  >=stealth,
+  thick,
+  draw=mDark,
+  box/.style={
+    rectangle, rounded corners=3pt, draw=mDark, align=center,
+    font=\sffamily\small, minimum height=0.85cm, inner sep=5pt},
+  subbox/.style={
+    rectangle, rounded corners=2pt, draw=mDark!80, align=center,
+    font=\sffamily\scriptsize, minimum height=0.65cm, inner sep=4pt},
+  micro/.style={
+    rectangle, rounded corners=2pt, draw=mDark!70, align=center,
+    font=\sffamily\tiny, minimum height=0.4cm, inner sep=3pt},
+  ts/.style={font=\tiny\sffamily, color=mDark!80},
+  arr/.style={-{Stealth[length=4pt]}, thick, draw=mDark},
+  legendbox/.style={
+    rectangle, draw=mDark!50, rounded corners=3pt,
+    fill=mGray!15, inner sep=5pt, font=\tiny\sffamily},
+}
+
+\begin{document}
+\begin{tikzpicture}[
+  node distance=0.6cm and 0.8cm,
+]
+  % ========== 输入模型 ==========
+  \node[box, fill=mGray!50, minimum width=12cm] (input)
+    {输入模型（TensorFlow / TFLite / Caffe / ONNX）};
+
+  % ========== Converter 模块 ==========
+  \node[font=\sffamily\footnotesize\bfseries, color=mDark, below=0.9cm of input.west, anchor=west] (cvtLabel)
+    {Converter（模型转换器）};
+
+  \node[subbox, fill=mBlue!40, below=0.3cm of cvtLabel.south west, anchor=north west, minimum width=5.2cm] (frontend)
+    {Frontend（前端解析）};
+
+  \node[subbox, fill=mBlue!40, right=0.6cm of frontend, minimum width=5.2cm] (graphopt)
+    {Graph Optimizer（图优化器）};
+
+  % Frontend 微观细节
+  \node[micro, fill=mBlue!30, below=0.25cm of frontend] (f1) {格式解析};
+  \node[micro, fill=mBlue!30, below=0.2cm of f1] (f2) {权重加载};
+
+  % Graph Optimizer 微观细节
+  \node[micro, fill=mBlue!30, below=0.25cm of graphopt] (go1) {算子融合};
+  \node[micro, fill=mBlue!30, below=0.2cm of go1] (go2) {布局调整};
+
+  % ========== Interpreter 模块 ==========
+  \node[font=\sffamily\footnotesize\bfseries, color=mDark, below=1.2cm of cvtLabel.west, anchor=west] (intLabel)
+    {Interpreter（推理解释器）};
+
+  \node[subbox, fill=mPurple!40, below=0.3cm of intLabel.south west, anchor=north west, minimum width=5.2cm] (engine)
+    {Engine（调度引擎）};
+
+  \node[subbox, fill=mPurple!40, right=0.6cm of engine, minimum width=5.2cm] (backend)
+    {Backend（计算后端）};
+
+  % Engine 微观细节
+  \node[micro, fill=mPurple!30, below=0.25cm of engine] (en1) {计算图调度};
+  \node[micro, fill=mPurple!30, below=0.2cm of en1] (en2) {内存管理};
+
+  % Backend 微观细节
+  \node[micro, fill=mPurple!30, below=0.25cm of backend] (be1) {CPU/GPU/NPU};
+  \node[micro, fill=mPurple!30, below=0.2cm of be1] (be2) {算子实现};
+
+  % ========== 核心创新：几何计算 + 半自动搜索 ==========
+  \node[subbox, fill=mGreen!50, below=0.8cm of engine, minimum width=3.4cm] (geo)
+    {几何计算机制};
+
+  \node[subbox, fill=mYellow!50, right=0.5cm of geo, minimum width=3.4cm] (semi)
+    {半自动搜索};
+
+  \node[subbox, fill=mPink!40, right=0.5cm of semi, minimum width=2.8cm] (neon)
+    {NEON/汇编};
+
+  % 几何计算细节
+  \node[micro, fill=mGreen!40, below=0.25cm of geo] (g1) {光栅算子};
+  \node[micro, fill=mGreen!40, below=0.2cm of g1] (g2) {region 映射};
+  \node[ts, below=0.15cm of g2] {$O(1954) \to O(1055)$};
+
+  % 半自动搜索细节
+  \node[micro, fill=mYellow!40, below=0.25cm of semi] (s1) {后端选择};
+  \node[micro, fill=mYellow!40, below=0.2cm of s1] (s2) {参数优化};
+  \node[ts, below=0.15cm of s2] {tile size, SIMD};
+
+  % NEON/汇编细节
+  \node[micro, fill=mPink!30, below=0.25cm of neon] (n1) {ARM NEON};
+  \node[micro, fill=mPink!30, below=0.2cm of n1] (n2) {手写汇编};
+
+  % ========== 数据流连线 ==========
+  \draw[arr] (input.south) -- ++(0,-0.3) -| (frontend.north);
+  \draw[arr] (frontend) -- (graphopt);
+  \draw[arr] (graphopt.south) -- ++(0,-0.4) -| (engine.north);
+  \draw[arr] (engine) -- (backend);
+  \draw[arr] (engine.south) -- ++(0,-0.2) -| (geo.north);
+  \draw[arr] (geo) -- (semi);
+  \draw[arr] (semi) -- (neon);
+
+  % ========== 层次化表达：背景分组 ==========
+  \begin{scope}[on background layer]
+    % Converter 区域
+    \node[fit=(cvtLabel)(frontend)(graphopt)(f1)(f2)(go1)(go2),
+      fill=mBlue!15, draw=mDark!40, dashed,
+      rounded corners=5pt, inner sep=10pt] {};
+
+    % Interpreter 区域
+    \node[fit=(intLabel)(engine)(backend)(en1)(en2)(be1)(be2)(geo)(semi)(neon)(g1)(g2)(s1)(s2)(n1)(n2),
+      fill=mPurple!15, draw=mDark!40, dashed,
+      rounded corners=5pt, inner sep=10pt] {};
+  \end{scope}
+
+  % ========== 信息密度拉满：算子分类与优化 ==========
+  \node[legendbox, anchor=north west] at ([xshift=5pt, yshift=-5pt]current bounding box.north west)
+    [align=left, text width=5.0cm] {
+    \textbf{MNN 算子分类与优化}\\[2pt]
+    • 原子算子（61个）：加、减、乘、除\\
+    • 转换算子（45个）：转置、切片、重排\\
+    • 复合算子（16个）：卷积、池化、归一化\\
+    • 控制流（2个）：if、while\\[2pt]
+    \textbf{几何计算收益}：$O(1954) \to O(1055)$\\
+    约减少 46\% 后端优化工作量
+  };
+
+  % ========== 图例（右下角）==========
+  \node[legendbox, anchor=south east] at ([xshift=-5pt, yshift=5pt]current bounding box.south east)
+    [align=left, text width=4.8cm] {
+    \textbf{图例}\\[1pt]
+    \colorbox{mBlue!40}{\rule{0.16cm}{0.12cm}\hspace{0.05cm}} Converter \quad
+    \colorbox{mPurple!40}{\rule{0.16cm}{0.12cm}\hspace{0.05cm}} Interpreter\\
+    \colorbox{mGreen!50}{\rule{0.16cm}{0.12cm}\hspace{0.05cm}} 几何计算 \quad
+    \colorbox{mYellow!50}{\rule{0.16cm}{0.12cm}\hspace{0.05cm}} 半自动搜索\\[1pt]
+    Session API: \texttt{resizeTensor} + \texttt{resizeSession}\\
+    动态输入支持：$B{\times}3{\times}H{\times}W$（$H,W$ 可变）
+  };
+\end{tikzpicture}
+\end{document}

@@ -1,0 +1,47 @@
+% 图 4.6 MNN 模型转换与动态推理 — 基于 CICC0903540 技术文档 4.4.1
+\documentclass[tikz,border=8pt]{standalone}
+\input{_preamble}
+\begin{document}
+\begin{tikzpicture}[
+  x=1.05cm, y=1.0cm,
+  node distance=0.5cm and 0.7cm,
+  block/.style={
+    rectangle, draw=mDark, fill=mBlue!40,
+    minimum width=2.1cm, minimum height=0.8cm,
+    font=\small\sffamily, align=center, rounded corners=4pt,
+    semithick, inner sep=4pt},
+  tool/.style={
+    rectangle, draw=mDark!80, fill=mGray!50,
+    minimum height=0.5cm, font=\scriptsize\sffamily\color{mGray},
+    align=center, rounded corners=2pt},
+  arr/.style={-{Stealth[length=4pt]}, semithick, draw=mDark},
+]
+  \node[block] (pt) {\texttt{.pt}};
+  \node[tool, below=0.12cm of pt] {dynamic\_axes};
+  \node[block, right=1.0cm of pt] (onnx) {ONNX};
+  \node[tool, below=0.12cm of onnx] {MNN Converter};
+  \node[block, right=1.0cm of onnx] (mnn) {\texttt{.mnn}};
+  \node[tool, below=0.12cm of mnn] {Interpreter};
+  \node[block, right=1.0cm of mnn] (resize) {resizeTensor};
+  \node[tool, below=0.12cm of resize] {new\_shape};
+  \node[block, right=1.0cm of resize] (sess) {resizeSession};
+  \node[tool, below=0.12cm of sess] {内存预分配};
+  \node[block, right=1.0cm of sess] (run) {runSession};
+
+  \draw[arr] (pt) -- (onnx);
+  \draw[arr] (onnx) -- (mnn);
+  \draw[arr] (mnn) -- (resize);
+  \draw[arr] (resize) -- (sess);
+  \draw[arr] (sess) -- (run);
+
+  \node[above=0.2cm of pt, font=\scriptsize\sffamily, color=mGray] {模型转换};
+  \node[above=0.2cm of resize, font=\scriptsize\sffamily, color=mGray] {动态推理};
+
+  % 图例（预留边距，张量标注已融入流程）
+  \node[legendbox, anchor=north east] at ([xshift=-5pt, yshift=-5pt]current bounding box.south east)
+    [align=left, text width=2.6cm] {
+    \textbf{图例}\\[1pt]
+    PyTorch $\to$ ONNX $\to$ .mnn
+  };
+\end{tikzpicture}
+\end{document}

@@ -17,6 +17,8 @@ Item {
     property string scenarioLabel: ""
     property string scenarioTone: "neutral"
     property bool landingMode: false
+    property bool stageActive: true
+    property bool preloadAssets: false
     property string bannerEyebrow: landingMode ? "全球指挥主舞台 / GLOBAL COMMAND STAGE" : "实时指挥舞台 / LIVE COMMAND STAGE"
     property string bannerTitle: currentLabel && currentLabel.length > 0
         ? currentLabel
@@ -221,12 +223,13 @@ Item {
         geoMap.zoomLevel = Math.max(geoMap.minimumZoomLevel, Math.min(geoMap.maximumZoomLevel, zoom))
     }
 
-    onTrackDataChanged: Qt.callLater(refreshViewport)
-    onCurrentPointChanged: Qt.callLater(refreshViewport)
-    onHeadingDegChanged: Qt.callLater(refreshViewport)
-    onLandingModeChanged: Qt.callLater(refreshViewport)
-    onWidthChanged: viewportTimer.restart()
-    onHeightChanged: viewportTimer.restart()
+    onTrackDataChanged: if (root.stageActive) Qt.callLater(refreshViewport)
+    onCurrentPointChanged: if (root.stageActive) Qt.callLater(refreshViewport)
+    onHeadingDegChanged: if (root.stageActive) Qt.callLater(refreshViewport)
+    onLandingModeChanged: if (root.stageActive) Qt.callLater(refreshViewport)
+    onWidthChanged: if (root.stageActive) viewportTimer.restart()
+    onHeightChanged: if (root.stageActive) viewportTimer.restart()
+    onStageActiveChanged: if (root.stageActive) Qt.callLater(refreshViewport)
     Component.onCompleted: Qt.callLater(refreshViewport)
 
     Timer {

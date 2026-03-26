@@ -13,7 +13,7 @@ RELEASE_PATCH_PATH = (
 )
 PATCH_HELPER_PATH = PROJECT_ROOT / "session_bootstrap" / "scripts" / "prepare_phytium_openamp_patch.sh"
 
-BASELINE_SHA = "9478c8277b013ccbcae9dabaf72dd123efc7908405a359b951d7c85f780b8df8"
+BASELINE_SHA = "85d701db0021c26412c3e5e08a4ca043470aaa01fb2d6792cb3b3b29e93bf849"
 CURRENT_SHA = "6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1"
 
 

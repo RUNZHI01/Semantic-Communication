@@ -1,0 +1,141 @@
+% ============================================
+% 共享 Preamble - 适用于所有增强版 TikZ 图表
+% 用于 NeurIPS, CVPR, ICLR, IEEE TPAMI 等顶会/顶刊
+% ============================================
+
+% 数学符号支持
+\usepackage{amssymb, amsmath}
+
+% 字体配置（支持中文）
+\usepackage{fontspec}
+\usepackage{xeCJK}
+\setCJKmainfont{SimHei}  % 中文黑体（可根据系统调整）
+
+% TikZ 核心包
+\usepackage{tikz}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+
+% TikZ 必备库
+\usetikzlibrary{
+  arrows.meta,          % 箭头样式
+  positioning,          % 相对定位（禁止绝对坐标）
+  shapes.geometric,     % 几何形状
+  calc,                 % 坐标计算
+  backgrounds,          % 背景层（用于 fit）
+  fit,                  % 节点分组
+  decorations.pathreplacing,  % 装饰（大括号等）
+  patterns,             % 填充图案
+  shapes.symbols        % 符号形状
+}
+
+% ============================================
+% 配色方案：低饱和度马卡龙（禁止纯色）
+% ============================================
+\definecolor{mBlue}{HTML}{AEC6CF}      % 编码端/IR层/高层算子
+\definecolor{mPink}{HTML}{FFD1DC}      % Discriminator/Baseline
+\definecolor{mGreen}{HTML}{B1D8B7}     % 信道/调优层/底层算子
+\definecolor{mPurple}{HTML}{B39EB5}    % 解码端/代码生成/Interpreter
+\definecolor{mYellow}{HTML}{FDFD96}    % 半自动搜索/特殊标注
+\definecolor{mGray}{HTML}{E5E4E2}      % 硬件/IO/中性背景
+\definecolor{mDark}{HTML}{4A4A4A}      % 文字/线条（替代纯黑）
+
+% ============================================
+% 全局 TikZ 样式配置
+% ============================================
+\tikzset{
+  % 默认箭头与线条
+  >=stealth,
+  thick,
+  draw=mDark,
+
+  % 基础节点样式
+  block/.style={
+    rectangle,
+    rounded corners=3pt,
+    draw=mDark,
+    align=center,
+    font=\sffamily\small,
+    minimum height=0.85cm,
+    inner sep=5pt
+  },
+
+  % 微观模块样式（拆解黑盒用）
+  micro/.style={
+    rectangle,
+    rounded corners=2pt,
+    draw=mDark!70,
+    align=center,
+    font=\sffamily\tiny,
+    minimum height=0.4cm,
+    inner sep=3pt
+  },
+
+  % 数学操作符节点（⊕加 ⊗乘 ‖拼接）
+  op/.style={
+    circle,
+    draw=mDark,
+    minimum size=0.45cm,
+    inner sep=0,
+    font=\scriptsize,
+    fill=mGray!60
+  },
+
+  % 张量维度标注（信息密度提升）
+  ts/.style={
+    font=\tiny\sffamily,
+    color=mDark!80
+  },
+
+  % 箭头样式
+  arr/.style={
+    -{Stealth[length=4pt]},
+    thick,
+    draw=mDark
+  },
+
+  % 虚线箭头（用于训练路径或可选路径）
+  darr/.style={
+    -{Stealth[length=4pt]},
+    thick,
+    draw=mDark,
+    dashed
+  },
+
+  % 图例框样式
+  legendbox/.style={
+    rectangle,
+    draw=mDark!50,
+    rounded corners=3pt,
+    fill=mGray!15,
+    inner sep=5pt,
+    font=\tiny\sffamily
+  },
+}
+
+% ============================================
+% pgfplots 默认样式（用于柱状图/折线图）
+% ============================================
+\pgfplotsset{
+  every axis/.append style={
+    font=\sffamily\small,
+    tick label style={font=\sffamily\scriptsize, color=mDark},
+    label style={font=\sffamily\small, color=mDark},
+    legend style={
+      font=\sffamily\tiny,
+      draw=mDark!50,
+      fill=mGray!15,
+      rounded corners=2pt
+    },
+    grid style={draw=mGray, thin},
+  }
+}
+
+% ============================================
+% 注意事项
+% ============================================
+% 1. 禁止使用绝对坐标 `\node at (1,2)`，必须使用 `positioning` 库
+% 2. 禁止使用 TikZ 默认纯色（red, blue），必须使用 mBlue, mGreen 等
+% 3. 连线转折必须使用正交连线（`|-` 或 `-|`），禁止斜线乱飞
+% 4. 每张图必须补充张量维度、微观结构、数学公式等信息密度元素
+% 5. 使用 `fit` + `backgrounds` 实现层次化分组，体现模块归属关系

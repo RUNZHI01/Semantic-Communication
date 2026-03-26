@@ -1,0 +1,58 @@
+% 图 4.1 TVM 优化编译器框架转换步骤 — 基于 CICC0903540 技术文档 4.1
+\documentclass[tikz,border=8pt]{standalone}
+\input{_preamble}
+\begin{document}
+\begin{tikzpicture}[
+  node distance=0.55cm and 0.6cm,
+  stage/.style={
+    rectangle, rounded corners=3pt, draw=mDark, align=center,
+    font=\small\sffamily, semithick,
+    minimum width=1.75cm, minimum height=0.7cm, inner sep=4pt},
+  arr/.style={-{Stealth[length=4pt]}, draw=mDark, semithick},
+  desc/.style={font=\scriptsize\sffamily, color=mDark, align=center, text width=1.7cm},
+]
+  \node[stage, fill=mBlue!40] (s1) {模型导入\\{\footnotesize TF/PyTorch/ONNX}};
+  \node[stage, fill=mBlue!40, right=0.6cm of s1] (s2) {Relay/Relax\\{\footnotesize 高层次 IR}};
+  \node[stage, fill=mBlue!40, right=0.6cm of s2] (s3) {TE\\{\footnotesize 张量表达式}};
+  \node[stage, fill=mGreen!50, right=0.6cm of s3] (s4) {Auto-tuning\\{\footnotesize MetaSchedule}};
+  \node[stage, fill=mBlue!40, right=0.6cm of s4] (s5) {TIR\\{\footnotesize 底层 IR}};
+  \node[stage, fill=mPurple!40, right=0.6cm of s5] (s6) {机器码\\{\footnotesize .so}};
+
+  \draw[arr] (s1) -- (s2)
+    node[pos=0.5, above=2pt, ts] {计算图};
+  \draw[arr] (s2) -- (s3)
+    node[pos=0.5, above=2pt, ts] {FuseOps};
+  \draw[arr] (s3) -- (s4)
+    node[pos=0.5, above=2pt, ts] {schedule};
+  \draw[arr] (s4) -- (s5)
+    node[pos=0.5, above=2pt, ts] {JSON};
+  \draw[arr] (s5) -- (s6)
+    node[pos=0.5, above=2pt, ts] {LLVM};
+
+  % 下方说明与张量标注分两行，拉开垂直间距
+  \node[desc, below=0.35cm of s1] {从训练框架\\提取计算图};
+  \node[desc, below=0.35cm of s2] {图级优化\\算子融合};
+  \node[desc, below=0.35cm of s3] {循环切分\\矢量化};
+  \node[desc, below=0.35cm of s4] {搜索最优\\schedule};
+  \node[desc, below=0.35cm of s5] {底层优化\\内存重排};
+  \node[desc, below=0.35cm of s6] {AArch64\\cortex-a72};
+
+  \draw[decorate, decoration={brace, amplitude=3pt, raise=2pt}, draw=mDark, semithick]
+    (s1.north west) -- (s6.north east)
+    node[midway, above=6pt, font=\small\sffamily\bfseries, color=mDark]
+    {TVM 端到端编译流水线};
+
+  % 张量形状放在最下方一行，与 desc 有足够间距
+  \node[ts, below=0.7cm of s1] {输入 $1{\times}32{\times}32{\times}32$};
+  \node[ts, below=0.7cm of s6] {输出 $1{\times}3{\times}256{\times}256$};
+
+  % 图例（右下，与内容留距）
+  \node[legendbox, anchor=north east] at ([xshift=-4pt, yshift=-4pt]current bounding box.south east)
+    [align=left, text width=3cm] {
+    \textbf{图例}\\[1pt]
+    \colorbox{mBlue!40}{\rule{0.14cm}{0.1cm}\hspace{0.05cm}} IR \quad
+    \colorbox{mGreen!50}{\rule{0.14cm}{0.1cm}\hspace{0.05cm}} 调优 \quad
+    \colorbox{mPurple!40}{\rule{0.14cm}{0.1cm}\hspace{0.05cm}} 产物
+  };
+\end{tikzpicture}
+\end{document}

@@ -1,0 +1,141 @@
+% 图 4.3 TVM 优化逻辑流程图（重绘加强版）
+% 基于 CICC0903540 技术文档 4.2.1 与 4.2.3 - baseline 到 current 演进
+\documentclass[tikz,border=10pt]{standalone}
+
+% 强制全局样式与配色
+\usepackage{amssymb, amsmath}
+\usepackage{fontspec}
+\usepackage{xeCJK}
+\setCJKmainfont{SimHei}
+\usepackage{tikz}
+\usetikzlibrary{
+  arrows.meta, positioning, shapes.geometric, calc,
+  backgrounds, fit, decorations.pathreplacing, patterns
+}
+
+% 低饱和度马卡龙配色
+\definecolor{mBlue}{HTML}{AEC6CF}
+\definecolor{mPink}{HTML}{FFD1DC}
+\definecolor{mGreen}{HTML}{B1D8B7}
+\definecolor{mPurple}{HTML}{B39EB5}
+\definecolor{mYellow}{HTML}{FDFD96}
+\definecolor{mGray}{HTML}{E5E4E2}
+\definecolor{mDark}{HTML}{4A4A4A}
+
+% 全局 TikZ 样式
+\tikzset{
+  >=stealth,
+  thick,
+  draw=mDark,
+  stage/.style={
+    rectangle, rounded corners=3pt, draw=mDark, align=center,
+    font=\sffamily\scriptsize, minimum height=0.7cm, inner sep=5pt,
+    minimum width=2.2cm},
+  ts/.style={font=\tiny\sffamily, color=mDark!80},
+  arr/.style={-{Stealth[length=4pt]}, thick, draw=mDark},
+  legendbox/.style={
+    rectangle, draw=mDark!50, rounded corners=3pt,
+    fill=mGray!15, inner sep=5pt, font=\tiny\sffamily},
+}
+
+\begin{document}
+\begin{tikzpicture}[
+  node distance=0.7cm and 0.8cm,
+]
+  % ========== 五层演进路径 ==========
+  % Layer 1: 运行时兼容
+  \node[font=\sffamily\scriptsize\bfseries, color=mDark] (l1) {1. 运行时};
+  \node[stage, fill=mPink!40, right=0.3cm of l1] (b1) {compat runtime};
+  \node[arr, right=0.8cm of b1] (a1) {};
+  \node[stage, fill=mGreen!40, right=0.8cm of b1] (c1) {safe runtime};
+
+  \node[ts, below=0.2cm of b1, text width=2.2cm, align=center] {TVM 0.x\\旧版依赖};
+  \node[ts, below=0.2cm of c1, text width=2.2cm, align=center] {TVM 0.24\\隔离 torch};
+
+  % Layer 2: Target 收敛
+  \node[font=\sffamily\scriptsize\bfseries, color=mDark, below=1.0cm of l1] (l2) {2. Target};
+  \node[stage, fill=mPink!40, right=0.3cm of l2] (b2) {generic + neon};
+  \node[arr, right=0.8cm of b2] (a2) {};
+  \node[stage, fill=mGreen!40, right=0.8cm of b2] (c2) {cortex-a72};
+
+  \node[ts, below=0.2cm of b2, text width=2.2cm, align=center] {保守配置\\2502 ms};
+  \node[ts, below=0.2cm of c2, text width=2.2cm, align=center] {微架构适配\\2481 ms};
+
+  % Layer 3: 调优策略
+  \node[font=\sffamily\scriptsize\bfseries, color=mDark, below=1.0cm of l2] (l3) {3. 调优};
+  \node[stage, fill=mPink!40, right=0.3cm of l3] (b3) {rebuild-only};
+  \node[arr, right=0.8cm of b3] (a3) {};
+  \node[stage, fill=mGreen!40, right=0.8cm of b3] (c3) {增量调优};
+
+  \node[ts, below=0.2cm of b3, text width=2.2cm, align=center] {复用历史DB\\2479 ms};
+  \node[ts, below=0.2cm of c3, text width=2.2cm, align=center] {500 trials\\152 ms};
+
+  % Layer 4: 评测口径
+  \node[font=\sffamily\scriptsize\bfseries, color=mDark, below=1.0cm of l3] (l4) {4. 评测};
+  \node[stage, fill=mPink!40, right=0.3cm of l4] (b4) {payload only};
+  \node[arr, right=0.8cm of b4] (a4) {};
+  \node[stage, fill=mGreen!40, right=0.8cm of b4] (c4) {真实重建};
+
+  \node[ts, below=0.2cm of b4, text width=2.2cm, align=center] {VM init\\+ main()};
+  \node[ts, below=0.2cm of c4, text width=2.2cm, align=center] {latent $\to$ PNG\\300 张};
+
+  % Layer 5: 实验治理
+  \node[font=\sffamily\scriptsize\bfseries, color=mDark, below=1.0cm of l4] (l5) {5. 治理};
+  \node[stage, fill=mPink!40, right=0.3cm of l5] (b5) {人工确认};
+  \node[arr, right=0.8cm of b5] (a5) {};
+  \node[stage, fill=mGreen!40, right=0.8cm of b5] (c5) {SHA guard};
+
+  \node[ts, below=0.2cm of b5, text width=2.2cm, align=center] {默认未变化\\假设};
+  \node[ts, below=0.2cm of c5, text width=2.2cm, align=center] {1946b08e...\\验证};
+
+  % ========== 连线 ==========
+  \draw[arr] (b1) -- (c1);
+  \draw[arr] (b2) -- (c2);
+  \draw[arr] (b3) -- (c3);
+  \draw[arr] (b4) -- (c4);
+  \draw[arr] (b5) -- (c5);
+
+  % ========== 顶部：baseline → current 标注 ==========
+  \draw[decorate, decoration={brace, amplitude=4pt, raise=3pt}, thick, draw=mDark]
+    (b1.north west) -- (c5.south east)
+    node[midway, above=40pt, xshift=15pt, font=\sffamily\small\bfseries, color=mDark]
+    {baseline $\rightarrow$ current 演进路径};
+
+  % ========== 层次化表达：背景分组 ==========
+  \begin{scope}[on background layer]
+    % baseline 列
+    \node[fit=(b1)(b2)(b3)(b4)(b5),
+      fill=mPink!15, draw=mDark!40, dashed,
+      rounded corners=5pt, inner sep=10pt] {};
+
+    % current 列
+    \node[fit=(c1)(c2)(c3)(c4)(c5),
+      fill=mGreen!15, draw=mDark!40, dashed,
+      rounded corners=5pt, inner sep=10pt] {};
+  \end{scope}
+
+  \node[above=0.3cm of b1, font=\sffamily\footnotesize\bfseries, color=mDark] {Baseline};
+  \node[above=0.3cm of c1, font=\sffamily\footnotesize\bfseries, color=mDark] {Current};
+
+  % ========== 信息密度拉满：性能收益归因 ==========
+  \node[legendbox, anchor=north west] at ([xshift=5pt, yshift=-5pt]current bounding box.north west)
+    [align=left, text width=5.5cm] {
+    \textbf{Current 性能收益归因}\\[2pt]
+    • 运行时：解除 SIGILL 阻塞，可稳定加载\\
+    • Target：cortex-a72 + neon，性能提升 0.85\%\\
+    • 调优：增量搜索，速度提升 16.272$\times$\\
+    • 评测：端到端重建，覆盖真实系统开销\\
+    • 治理：SHA 守护，确保 artifact 可追溯
+  };
+
+  % ========== 图例（右下角）==========
+  \node[legendbox, anchor=south east] at ([xshift=-5pt, yshift=5pt]current bounding box.south east)
+    [align=left, text width=5.0cm] {
+    \textbf{图例}\\[1pt]
+    \colorbox{mPink!40}{\rule{0.16cm}{0.12cm}\hspace{0.05cm}} Baseline（早期版本）\\
+    \colorbox{mGreen!40}{\rule{0.16cm}{0.12cm}\hspace{0.05cm}} Current（最新版本）\\[1pt]
+    最终结论：端到端提升 86.02\%\\
+    （1830.3 ms/image $\to$ 255.931 ms/image）
+  };
+\end{tikzpicture}
+\end{document}
