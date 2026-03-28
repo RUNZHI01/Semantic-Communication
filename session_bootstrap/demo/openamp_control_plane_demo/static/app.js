@@ -119,6 +119,11 @@ function summarizeMissing(fields) {
   return fields.map((field) => fieldLabel(field)).join("、");
 }
 
+function isPasswordOnlyMissing(access) {
+  const missingFields = access?.missing_connection_fields || [];
+  return missingFields.length === 1 && missingFields[0] === "password";
+}
+
 function renderFieldChip(label, value, state) {
   const tone = state === "preloaded" ? "tone-online" : state === "missing" ? "tone-degraded" : "tone-neutral";
   return `
@@ -345,6 +350,17 @@ function closeDrawer(drawerId = "") {
     overlay.classList.remove("open");
     overlay.hidden = true;
   }
+}
+
+function jumpToPasswordEntry() {
+  jumpToTarget("credentialPanel", "act1");
+  setFeedback("当前只差板卡密码；请在 Session / Gate 中补录后继续 live 动作。", "warning");
+  window.setTimeout(() => {
+    const passwordInput = document.getElementById("passwordInput");
+    if (!passwordInput) return;
+    passwordInput.focus();
+    passwordInput.select();
+  }, 180);
 }
 
 function syncActiveActFromCue() {
@@ -1743,8 +1759,7 @@ function renderBoardAccess(systemStatus) {
   const baselineSummary = baselineSupport.note
     ? `${baselineSupport.label || "PyTorch live"}：${baselineSupport.note}`
     : `PyTorch：${baselineReadiness}。`;
-  const onlyPasswordMissing =
-    access.missing_connection_fields.length === 1 && access.missing_connection_fields[0] === "password";
+  const onlyPasswordMissing = isPasswordOnlyMissing(access);
 
   if (access.connection_ready) {
     document.getElementById("boardAccessSummary").textContent =
@@ -1785,6 +1800,49 @@ function renderBoardAccess(systemStatus) {
       ${escapeHtml(baselineSummary)}
     </div>
     ${sourceNotes.length ? `<div class="credential-note">${escapeHtml(sourceNotes.join(" ｜ "))}</div>` : ""}
+  `;
+}
+
+function renderMissionPasswordCallout(systemStatus) {
+  const access = systemStatus.board_access || {};
+  const callout = document.getElementById("missionPasswordCallout");
+  const hint = document.getElementById("missionPasswordHint");
+  if (!callout || !hint) return;
+
+  const onlyPasswordMissing = Boolean(access.preloaded_defaults?.active) && isPasswordOnlyMissing(access);
+  if (!onlyPasswordMissing) {
+    callout.hidden = true;
+    callout.innerHTML = "";
+    hint.hidden = true;
+    hint.innerHTML = "";
+    return;
+  }
+
+  const sessionTarget = access.host
+    ? `${access.user || "user"}@${access.host}:${access.port || 22}`
+    : "已预载的板卡会话";
+  const envLabel = access.env_file ? "与推理 env" : "与当前会话参数";
+
+  callout.hidden = false;
+  callout.innerHTML = `
+    <div class="mission-password-callout-head">
+      <div>
+        <div class="label">会话提醒</div>
+        <h3>当前只差板卡密码</h3>
+      </div>
+      <div class="status-pill tone-degraded">需补密码</div>
+    </div>
+    <p>${escapeHtml(`已预载 ${sessionTarget} ${envLabel}。补上密码后即可继续探板、PyTorch Live 和 Current Live。`)}</p>
+    <div class="inline-actions">
+      <button class="button button-primary" type="button" data-password-cta="mission">去 Session / Gate 填密码</button>
+      <span class="status-inline">密码只保存在当前 demo 进程内，不会写回仓库。</span>
+    </div>
+  `;
+
+  hint.hidden = false;
+  hint.innerHTML = `
+    <span>PyTorch Live / Current Live 当前只差密码。</span>
+    <button class="button button-secondary mission-action-hint-button" type="button" data-password-cta="mission-hint">去填密码</button>
   `;
 }
 
@@ -1943,6 +2001,7 @@ function renderMissionDashboard(snapshot, systemStatus) {
     archiveHasTimeline ? (state.archiveSession?.read_errors?.length ? "degraded" : "online") : (active.running ? activeProgress.tone || "degraded" : "neutral")
   );
   document.getElementById("eventTimelineModule").innerHTML = renderArchiveTimelineModule(snapshot, systemStatus);
+  renderMissionPasswordCallout(systemStatus);
 }
 
 function renderAct1(snapshot, systemStatus) {
@@ -2630,9 +2689,12 @@ function renderActLamps(systemStatus) {
 function applyLaunchPolicy(systemStatus) {
   const currentSupport = systemStatus.live?.variant_support?.current || {};
   const baselineSupport = systemStatus.live?.variant_support?.baseline || {};
+  const boardAccess = systemStatus.board_access || {};
   const baselineLiveLabel = baselineLiveDisplayLabel(baselineSupport);
   const boardBusy = String(systemStatus.live?.guard_state || "").toUpperCase() === "JOB_ACTIVE";
   const boardBusyReason = "板端当前 guard_state=JOB_ACTIVE；demo 保守阻断新的 live launch，不自动 SAFE_STOP。";
+  const passwordOnlyReason = "已预载主机、用户名、SSH 端口与推理 env；当前只差板卡密码。先去 Session / Gate 补录。";
+  const passwordOnlyMissing = Boolean(boardAccess.preloaded_defaults?.active) && isPasswordOnlyMissing(boardAccess);
   const currentBlocked = boardBusy || currentSupport.launch_allowed === false;
   const baselineBlocked = boardBusy || baselineSupport.launch_allowed === false;
 
@@ -2682,10 +2744,12 @@ function applyLaunchPolicy(systemStatus) {
     opsBaselineButton.disabled = baselineBlocked;
   }
 
-  currentButton.title = boardBusy ? boardBusyReason : (currentSupport.note || "");
+  currentButton.title = passwordOnlyMissing ? passwordOnlyReason : boardBusy ? boardBusyReason : (currentSupport.note || "");
   currentAgainButton.title = currentButton.title;
-  baselineButton.title = baselineSupport.note || "";
-  runAllButton.title = boardBusy ? boardBusyReason : (currentBlocked ? (currentSupport.note || "") : (baselineSupport.note || ""));
+  baselineButton.title = passwordOnlyMissing ? passwordOnlyReason : (baselineSupport.note || "");
+  runAllButton.title = passwordOnlyMissing
+    ? passwordOnlyReason
+    : boardBusy ? boardBusyReason : (currentBlocked ? (currentSupport.note || "") : (baselineSupport.note || ""));
   if (opsCurrentButton) {
     opsCurrentButton.title = currentButton.title;
   }
@@ -3088,6 +3152,11 @@ function bindEvents() {
     }
   });
   document.addEventListener("click", (event) => {
+    const passwordCta = event.target.closest("[data-password-cta]");
+    if (passwordCta) {
+      jumpToPasswordEntry();
+      return;
+    }
     const jumpButton = event.target.closest("[data-jump-target]");
     if (jumpButton) {
       jumpToTarget(jumpButton.dataset.jumpTarget, jumpButton.dataset.jumpAct || "");
