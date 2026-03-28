@@ -2516,6 +2516,7 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertIn('id="missionCurrentLaunch"', body)
         self.assertIn('id="missionRunCurrentButton"', body)
         self.assertIn("启动远端 Current 重建", body)
+        self.assertIn("展开 Current 重建详情", body)
         self.assertIn('id="missionCurrentProgressBadge"', body)
         self.assertIn('id="missionCurrentProgressCount"', body)
         self.assertIn('id="missionCurrentProgressBar"', body)
@@ -2598,6 +2599,18 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertIn("PyTorch reference archive", body)
         self.assertIn("PyTorch signed live", body)
         self.assertNotIn("去 Session / Gate 填密码", body)
+
+    def test_app_js_keeps_homepage_current_launch_on_home_surface(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+
+        status, _, body = request_text(state, "GET", "/app.js")
+
+        self.assertEqual(status, 200)
+        self.assertIn("async function runCurrentInferenceFromHomepage()", body)
+        self.assertIn("runCurrentInference({ switchActOptions: { openDrawer: false, user: false } });", body)
+        self.assertIn("if (options.openDrawer === false) {", body)
+        self.assertIn("switchAct(actId, switchActOptions);", body)
+        self.assertIn("runCurrentInferenceFromHomepage();", body)
 
     def test_app_css_serves_dashboard_stylesheet(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
