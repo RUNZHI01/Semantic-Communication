@@ -352,15 +352,11 @@ function closeDrawer(drawerId = "") {
   }
 }
 
-function jumpToPasswordEntry() {
-  jumpToTarget("credentialPanel", "act1");
-  setFeedback("当前只差板卡密码；请在 Session / Gate 中补录后继续 live 动作。", "warning");
-  window.setTimeout(() => {
-    const passwordInput = document.getElementById("passwordInput");
-    if (!passwordInput) return;
-    passwordInput.focus();
-    passwordInput.select();
-  }, 180);
+function focusMissionPasswordInput() {
+  const missionPasswordInput = document.getElementById("missionPasswordInput");
+  if (!missionPasswordInput) return;
+  missionPasswordInput.focus();
+  missionPasswordInput.select();
 }
 
 function syncActiveActFromCue() {
@@ -1803,47 +1799,38 @@ function renderBoardAccess(systemStatus) {
   `;
 }
 
-function renderMissionPasswordCallout(systemStatus) {
+function renderMissionPasswordInline(systemStatus) {
   const access = systemStatus.board_access || {};
-  const callout = document.getElementById("missionPasswordCallout");
-  const hint = document.getElementById("missionPasswordHint");
-  if (!callout || !hint) return;
+  const status = document.getElementById("missionPasswordStatus");
+  const input = document.getElementById("missionPasswordInput");
+  const button = document.getElementById("missionPasswordSaveButton");
+  if (!status || !input || !button) return;
 
-  const onlyPasswordMissing = Boolean(access.preloaded_defaults?.active) && isPasswordOnlyMissing(access);
-  if (!onlyPasswordMissing) {
-    callout.hidden = true;
-    callout.innerHTML = "";
-    hint.hidden = true;
-    hint.innerHTML = "";
-    return;
-  }
-
+  const defaults = access.preloaded_defaults || {};
+  const onlyPasswordMissing = Boolean(defaults.active) && isPasswordOnlyMissing(access);
+  const currentMissing = access.missing_inference_fields_by_variant?.current || access.missing_inference_fields || [];
   const sessionTarget = access.host
     ? `${access.user || "user"}@${access.host}:${access.port || 22}`
-    : "已预载的板卡会话";
-  const envLabel = access.env_file ? "与推理 env" : "与当前会话参数";
+    : "当前板卡会话";
 
-  callout.hidden = false;
-  callout.innerHTML = `
-    <div class="mission-password-callout-head">
-      <div>
-        <div class="label">会话提醒</div>
-        <h3>当前只差板卡密码</h3>
-      </div>
-      <div class="status-pill tone-degraded">需补密码</div>
-    </div>
-    <p>${escapeHtml(`已预载 ${sessionTarget} ${envLabel}。补上密码后即可继续探板、PyTorch Live 和 Current Live。`)}</p>
-    <div class="inline-actions">
-      <button class="button button-primary" type="button" data-password-cta="mission">去 Session / Gate 填密码</button>
-      <span class="status-inline">密码只保存在当前 demo 进程内，不会写回仓库。</span>
-    </div>
-  `;
+  if (access.connection_ready && !currentMissing.length) {
+    status.textContent = `当前会话已复用 ${sessionTarget}；如需更新板卡密码，可在此直接覆盖。`;
+  } else if (onlyPasswordMissing) {
+    status.textContent = `已预载 ${sessionTarget} 与推理 env；在此补录一次密码后，探板与 live 动作会直接复用。`;
+  } else if (access.connection_ready) {
+    status.textContent = `SSH 会话已就绪，但推理仍缺 ${summarizeMissing(currentMissing)}；完整参数仍可在 Session / Gate 调整。`;
+  } else if (access.configured) {
+    status.textContent = `当前会话仍缺 ${summarizeMissing(access.missing_connection_fields)}；首页可先补密码，完整 host / user / port / env 仍可在 Session / Gate 调整。`;
+  } else {
+    status.textContent = "常见预载场景可在首页直接补录板卡密码；完整 host / user / port / env 仍可在 Session / Gate 调整。";
+  }
 
-  hint.hidden = false;
-  hint.innerHTML = `
-    <span>PyTorch Live / Current Live 当前只差密码。</span>
-    <button class="button button-secondary mission-action-hint-button" type="button" data-password-cta="mission-hint">去填密码</button>
-  `;
+  input.placeholder = access.has_password
+    ? "当前密码已保存；输入新密码可覆盖"
+    : defaults.active
+      ? "当前唯一必填项；输入一次后复用"
+      : "仅保存在当前 demo 进程内";
+  button.textContent = access.has_password ? "更新并复用密码" : "保存并复用密码";
 }
 
 function renderMissionDashboard(snapshot, systemStatus) {
@@ -2001,7 +1988,7 @@ function renderMissionDashboard(snapshot, systemStatus) {
     archiveHasTimeline ? (state.archiveSession?.read_errors?.length ? "degraded" : "online") : (active.running ? activeProgress.tone || "degraded" : "neutral")
   );
   document.getElementById("eventTimelineModule").innerHTML = renderArchiveTimelineModule(snapshot, systemStatus);
-  renderMissionPasswordCallout(systemStatus);
+  renderMissionPasswordInline(systemStatus);
 }
 
 function renderAct1(snapshot, systemStatus) {
@@ -2693,7 +2680,7 @@ function applyLaunchPolicy(systemStatus) {
   const baselineLiveLabel = baselineLiveDisplayLabel(baselineSupport);
   const boardBusy = String(systemStatus.live?.guard_state || "").toUpperCase() === "JOB_ACTIVE";
   const boardBusyReason = "板端当前 guard_state=JOB_ACTIVE；demo 保守阻断新的 live launch，不自动 SAFE_STOP。";
-  const passwordOnlyReason = "已预载主机、用户名、SSH 端口与推理 env；当前只差板卡密码。先去 Session / Gate 补录。";
+  const passwordOnlyReason = "已预载主机、用户名、SSH 端口与推理 env；当前只差板卡密码。请先在首页 Mission 区补录，必要时再到 Session / Gate 调整完整参数。";
   const passwordOnlyMissing = Boolean(boardAccess.preloaded_defaults?.active) && isPasswordOnlyMissing(boardAccess);
   const currentBlocked = boardBusy || currentSupport.launch_allowed === false;
   const baselineBlocked = boardBusy || baselineSupport.launch_allowed === false;
@@ -2869,38 +2856,91 @@ async function refreshAll() {
   applyActiveAct();
 }
 
-async function saveBoardAccess() {
-  const payload = {
-    host: document.getElementById("hostInput").value.trim(),
-    user: document.getElementById("userInput").value.trim(),
-    password: document.getElementById("passwordInput").value,
-    port: document.getElementById("portInput").value.trim(),
-    env_file: document.getElementById("envFileInput").value.trim(),
+function clearBoardAccessPasswordInputs() {
+  [document.getElementById("passwordInput"), document.getElementById("missionPasswordInput")]
+    .filter(Boolean)
+    .forEach((input) => {
+      input.value = "";
+    });
+}
+
+function boardAccessSaveFeedback(boardAccess, source) {
+  const missingConnection = boardAccess.missing_connection_fields || [];
+  const currentMissing = boardAccess.missing_inference_fields_by_variant?.current || boardAccess.missing_inference_fields || [];
+  if (boardAccess.connection_ready && !currentMissing.length) {
+    return {
+      message:
+        source === "mission"
+          ? "首页已保存板卡密码；后续探板、PyTorch Live 与 Current Live 会直接复用当前会话。"
+          : "板卡会话已保存到当前 demo 进程内，后续探板/推理/故障动作会直接复用。",
+      tone: "success",
+    };
+  }
+  if (boardAccess.connection_ready) {
+    return {
+      message: `SSH 会话已保存，但推理仍缺 ${summarizeMissing(currentMissing)}；完整参数仍可在 Session / Gate 调整。`,
+      tone: "warning",
+    };
+  }
+  if (source === "mission") {
+    return {
+      message: `密码已保存，但当前会话仍缺 ${summarizeMissing(missingConnection)}；完整 host / user / port / env 请在 Session / Gate 调整。`,
+      tone: "warning",
+    };
+  }
+  return {
+    message: "板卡会话已更新，但仍有字段待补全。",
+    tone: "warning",
   };
+}
+
+async function submitBoardAccess(payload, options = {}) {
   try {
     const result = await fetchJSON("/api/session/board-access", {
       method: "POST",
       body: JSON.stringify(payload),
     });
     const boardAccess = result.board_access || {};
-    const onlyPasswordMissing =
-      (boardAccess.missing_connection_fields || []).length === 1 &&
-      boardAccess.missing_connection_fields[0] === "password";
-    setFeedback(
-      onlyPasswordMissing
-        ? "预载的主机、端口与推理 env 已保留；补上密码后即可复用真机动作。"
-        : "板卡会话已保存到当前 demo 进程内，后续探板/推理/故障动作会直接复用。",
-      onlyPasswordMissing ? "warning" : "success"
-    );
-    document.getElementById("passwordInput").value = "";
+    const feedback = boardAccessSaveFeedback(boardAccess, options.source || "drawer");
+    setFeedback(feedback.message, feedback.tone);
+    clearBoardAccessPasswordInputs();
     state.systemStatus = {
-      ...state.systemStatus,
+      ...(state.systemStatus || {}),
       board_access: boardAccess,
     };
     await refreshAll();
   } catch (error) {
     setFeedback(error.message, "error");
   }
+}
+
+async function saveBoardAccess() {
+  await submitBoardAccess(
+    {
+      host: document.getElementById("hostInput").value.trim(),
+      user: document.getElementById("userInput").value.trim(),
+      password: document.getElementById("passwordInput").value,
+      port: document.getElementById("portInput").value.trim(),
+      env_file: document.getElementById("envFileInput").value.trim(),
+    },
+    { source: "drawer" }
+  );
+}
+
+async function saveMissionPassword() {
+  const missionPasswordInput = document.getElementById("missionPasswordInput");
+  const password = missionPasswordInput?.value || "";
+  if (!password) {
+    setFeedback(
+      state.systemStatus?.board_access?.has_password
+        ? "当前已复用板卡密码；如需更新请输入新密码。"
+        : "请输入板卡密码后再保存。",
+      "warning"
+    );
+    focusMissionPasswordInput();
+    return;
+  }
+  await submitBoardAccess({ password }, { source: "mission" });
 }
 
 async function probeBoard() {
@@ -3104,6 +3144,14 @@ function bindEvents() {
   document.getElementById("saveAccessButton").addEventListener("click", () => {
     saveBoardAccess();
   });
+  document.getElementById("missionPasswordSaveButton").addEventListener("click", () => {
+    saveMissionPassword();
+  });
+  document.getElementById("missionPasswordInput").addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    saveMissionPassword();
+  });
   [document.getElementById("previewManifestGateButton"), document.getElementById("opsManifestButton")]
     .filter(Boolean)
     .forEach((button) => {
@@ -3152,11 +3200,6 @@ function bindEvents() {
     }
   });
   document.addEventListener("click", (event) => {
-    const passwordCta = event.target.closest("[data-password-cta]");
-    if (passwordCta) {
-      jumpToPasswordEntry();
-      return;
-    }
     const jumpButton = event.target.closest("[data-jump-target]");
     if (jumpButton) {
       jumpToTarget(jumpButton.dataset.jumpTarget, jumpButton.dataset.jumpAct || "");
