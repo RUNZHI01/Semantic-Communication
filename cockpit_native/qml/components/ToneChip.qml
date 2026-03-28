@@ -11,22 +11,17 @@ Rectangle {
     property bool prominent: false
 
     readonly property color accentColor: shellWindow ? shellWindow.toneColor(tone) : "#86c7d4"
-    readonly property color topFill: shellWindow ? Qt.lighter(shellWindow.surfaceGlass, 1.02) : "#233240"
-    readonly property color bottomFill: shellWindow ? Qt.darker(shellWindow.surfaceRaised, 1.02) : "#17222c"
+    readonly property bool interactive: chipHover.containsMouse
 
     radius: shellWindow ? shellWindow.edgeRadius : 12
-    gradient: Gradient {
-        GradientStop { position: 0.0; color: Qt.rgba(root.topFill.r, root.topFill.g, root.topFill.b, prominent ? 0.84 : 0.74) }
-        GradientStop { position: 0.42; color: shellWindow
-            ? Qt.rgba(shellWindow.surfaceQuiet.r, shellWindow.surfaceQuiet.g, shellWindow.surfaceQuiet.b, prominent ? 0.78 : 0.66)
-            : "#152029" }
-        GradientStop { position: 1.0; color: Qt.rgba(root.bottomFill.r, root.bottomFill.g, root.bottomFill.b, prominent ? 0.88 : 0.78) }
-    }
-    border.color: shellWindow ? Qt.rgba(accentColor.r, accentColor.g, accentColor.b, prominent ? 0.62 : (chipHover.containsMouse ? 0.52 : 0.34)) : "#86c7d4"
+    color: shellWindow
+        ? Qt.rgba(shellWindow.surfaceRaised.r, shellWindow.surfaceRaised.g, shellWindow.surfaceRaised.b, prominent ? 0.78 : 0.62)
+        : "#17222d"
+    border.color: Qt.rgba(accentColor.r, accentColor.g, accentColor.b, prominent ? 0.48 : (interactive ? 0.4 : 0.18))
     border.width: 1
-    scale: chipHover.containsMouse ? 1.02 : 1.0
-    implicitWidth: content.implicitWidth + ((shellWindow ? shellWindow.scaled(prominent ? 13 : 10) : 10) * 2)
-    implicitHeight: content.implicitHeight + ((shellWindow ? shellWindow.scaled(prominent ? 8 : 6) : 6) * 2)
+    implicitWidth: content.implicitWidth + ((shellWindow ? shellWindow.scaled(prominent ? 14 : 12) : 12) * 2)
+    implicitHeight: content.implicitHeight + ((shellWindow ? shellWindow.scaled(prominent ? 10 : 8) : 8) * 2)
+    scale: interactive ? 1.01 : 1.0
 
     Behavior on scale { NumberAnimation { duration: 120 } }
     Behavior on border.color { ColorAnimation { duration: 120 } }
@@ -39,45 +34,14 @@ Rectangle {
     }
 
     Rectangle {
-        anchors.fill: parent
-        radius: parent.radius
-        gradient: Gradient {
-            GradientStop { position: 0.0; color: "#12ffffff" }
-            GradientStop { position: 0.36; color: "#04ffffff" }
-            GradientStop { position: 1.0; color: "#00000000" }
-        }
-        opacity: prominent ? 0.22 : 0.12
-    }
-
-    Rectangle {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
-        anchors.leftMargin: shellWindow ? shellWindow.scaled(8) : 8
-        anchors.rightMargin: shellWindow ? shellWindow.scaled(8) : 8
-        height: shellWindow ? shellWindow.scaled(1) : 1
+        anchors.leftMargin: shellWindow ? shellWindow.scaled(10) : 10
+        anchors.rightMargin: shellWindow ? shellWindow.scaled(10) : 10
+        height: 1
         radius: height / 2
-        gradient: Gradient {
-            orientation: Gradient.Horizontal
-            GradientStop { position: 0.0; color: "transparent" }
-            GradientStop { position: 0.16; color: Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0.16) }
-            GradientStop { position: 0.5; color: Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0.76) }
-            GradientStop { position: 0.84; color: Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0.16) }
-            GradientStop { position: 1.0; color: "transparent" }
-        }
-        opacity: prominent ? 0.74 : 0.52
-    }
-
-    Rectangle {
-        anchors.left: parent.left
-        anchors.top: parent.top
-        anchors.bottom: parent.bottom
-        anchors.topMargin: shellWindow ? shellWindow.scaled(6) : 6
-        anchors.bottomMargin: shellWindow ? shellWindow.scaled(6) : 6
-        width: shellWindow ? shellWindow.scaled(prominent ? 2 : 1) : (prominent ? 2 : 1)
-        radius: width / 2
-        color: accentColor
-        opacity: prominent ? 0.76 : 0.58
+        color: Qt.rgba(accentColor.r, accentColor.g, accentColor.b, prominent ? 0.62 : 0.34)
     }
 
     Rectangle {
@@ -85,9 +49,8 @@ Rectangle {
         anchors.margins: 1
         radius: parent.radius - 1
         color: "transparent"
-        border.color: "#0effffff"
+        border.color: Qt.rgba(1, 1, 1, 0.04)
         border.width: 1
-        opacity: 0.34
     }
 
     ColumnLayout {
@@ -95,30 +58,28 @@ Rectangle {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.verticalCenter: parent.verticalCenter
-        anchors.leftMargin: shellWindow ? shellWindow.scaled(prominent ? 13 : 11) : 11
-        anchors.rightMargin: shellWindow ? shellWindow.scaled(prominent ? 13 : 11) : 11
-        spacing: shellWindow ? shellWindow.scaled(prominent ? 2 : 1) : 1
+        anchors.leftMargin: shellWindow ? shellWindow.scaled(prominent ? 14 : 12) : 12
+        anchors.rightMargin: shellWindow ? shellWindow.scaled(prominent ? 14 : 12) : 12
+        spacing: shellWindow ? shellWindow.scaled(prominent ? 2 : 1) : 2
 
         Text {
             visible: root.label.length > 0
             text: root.label
-            color: shellWindow ? shellWindow.textSecondary : "#6f7f8a"
+            color: shellWindow ? shellWindow.textMuted : "#8397aa"
             font.pixelSize: shellWindow ? shellWindow.captionSize : 10
-            font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
-            font.letterSpacing: shellWindow ? shellWindow.scaled(0.5) : 0.5
-            horizontalAlignment: Text.AlignLeft
+            font.family: shellWindow ? shellWindow.monoFamily : "Monospace"
+            font.letterSpacing: shellWindow ? shellWindow.scaled(0.6) : 0.6
         }
 
         Text {
             text: root.value
-            color: shellWindow ? shellWindow.textStrong : "#f5efe4"
+            color: shellWindow ? shellWindow.textStrong : "#f5f8fb"
             font.pixelSize: shellWindow
                 ? shellWindow.bodyEmphasisSize + (prominent ? shellWindow.scaled(1) : 0)
                 : 14
             font.weight: Font.DemiBold
-            font.family: shellWindow ? (prominent ? shellWindow.displayFamily : shellWindow.uiFamily) : "Noto Sans CJK SC"
-            font.letterSpacing: shellWindow ? shellWindow.scaled(prominent ? 0.18 : 0.08) : 0.1
-            horizontalAlignment: Text.AlignLeft
+            font.family: shellWindow ? shellWindow.uiFamily : "Sans Serif"
+            elide: Text.ElideRight
         }
     }
 }

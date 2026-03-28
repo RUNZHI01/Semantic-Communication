@@ -29,6 +29,10 @@ Item {
     readonly property bool chinaTheaterMode: chinaScene
     readonly property bool chinaGeoJsonLoaded: chinaGeoPaths.length > 0
     readonly property bool worldGeoJsonLoaded: worldGeoPaths.length > 0
+    readonly property real chinaMinLongitude: 72
+    readonly property real chinaMaxLongitude: 136
+    readonly property real chinaMinLatitude: 16
+    readonly property real chinaMaxLatitude: 56
     property real scanSweepDeg: 0
     property string bannerEyebrow: landingMode ? "全球指挥主舞台" : "实时指挥舞台"
     property string bannerTitle: currentLabel && currentLabel.length > 0
@@ -67,13 +71,13 @@ Item {
     readonly property color markerColor: shellWindow ? shellWindow.accentCyan : "#8fe6ff"
     readonly property color emphasisColor: shellWindow ? shellWindow.accentAmber : "#ffbf55"
     readonly property color overlayCardColor: shellWindow
-        ? Qt.rgba(shellWindow.surfaceGlass.r, shellWindow.surfaceGlass.g, shellWindow.surfaceGlass.b, landingMode ? 0.52 : 0.9)
+        ? Qt.rgba(shellWindow.surfaceGlass.r, shellWindow.surfaceGlass.g, shellWindow.surfaceGlass.b, landingMode ? 0.42 : 0.78)
         : (landingMode ? "#b3122330" : "#d2142634")
     readonly property color overlayCardColorSoft: shellWindow
-        ? Qt.rgba(shellWindow.surfaceQuiet.r, shellWindow.surfaceQuiet.g, shellWindow.surfaceQuiet.b, landingMode ? 0.42 : 0.92)
+        ? Qt.rgba(shellWindow.surfaceQuiet.r, shellWindow.surfaceQuiet.g, shellWindow.surfaceQuiet.b, landingMode ? 0.34 : 0.82)
         : (landingMode ? "#8a09121a" : "#b8091219")
     readonly property color overlayCardColorDeep: shellWindow
-        ? Qt.rgba(shellWindow.shellExterior.r, shellWindow.shellExterior.g, shellWindow.shellExterior.b, landingMode ? 0.32 : 0.72)
+        ? Qt.rgba(shellWindow.shellExterior.r, shellWindow.shellExterior.g, shellWindow.shellExterior.b, landingMode ? 0.26 : 0.6)
         : "#8d040b11"
     readonly property bool hasCurrentPoint: isFinite(Number(currentPoint["longitude"])) && isFinite(Number(currentPoint["latitude"]))
     readonly property bool compactStage: width < (landingMode ? 760 : 880)
@@ -206,6 +210,15 @@ Item {
     ]
     readonly property var latitudeTicks: [-60, -30, 0, 30, 60]
     readonly property var longitudeTicks: [-120, -60, 0, 60, 120]
+    readonly property var chinaLatitudeTicks: [20, 30, 40, 50]
+    readonly property var chinaLongitudeTicks: [80, 100, 120, 130]
+    readonly property var chinaLabels: [
+        { "label": "新疆", "lon": 85.0, "lat": 42.0 },
+        { "label": "成都", "lon": 104.0668, "lat": 30.5728 },
+        { "label": "北京", "lon": 116.4074, "lat": 39.9042 },
+        { "label": "上海", "lon": 121.4737, "lat": 31.2304 },
+        { "label": "深圳", "lon": 114.0579, "lat": 22.5431 }
+    ]
 
     function toneColor(tone) {
         if (shellWindow) {
@@ -250,10 +263,20 @@ Item {
     }
 
     function projectX(longitude) {
+        if (root.chinaTheaterMode) {
+            var lon = Number(longitude)
+            var lonSpan = Math.max(1, root.chinaMaxLongitude - root.chinaMinLongitude)
+            return mapInset + ((lon - root.chinaMinLongitude) / lonSpan) * plotWidth
+        }
         return mapInset + ((Number(longitude) + 180) / 360) * plotWidth
     }
 
     function projectY(latitude) {
+        if (root.chinaTheaterMode) {
+            var lat = Number(latitude)
+            var latSpan = Math.max(1, root.chinaMaxLatitude - root.chinaMinLatitude)
+            return mapInset + ((root.chinaMaxLatitude - lat) / latSpan) * plotHeight
+        }
         return mapInset + ((90 - Number(latitude)) / 180) * plotHeight
     }
 
@@ -556,27 +579,31 @@ Item {
         ctx.rect(root.mapInset, root.mapInset, root.plotWidth, root.plotHeight)
         ctx.clip()
 
-        for (var latitude = -60; latitude <= 60; latitude += 30) {
+        var latitudeTickSource = root.chinaTheaterMode ? root.chinaLatitudeTicks : root.latitudeTicks
+        for (var latitudeIndex = 0; latitudeIndex < latitudeTickSource.length; ++latitudeIndex) {
+            var latitude = latitudeTickSource[latitudeIndex]
             var latitudeY = root.projectY(latitude)
             ctx.beginPath()
             ctx.moveTo(root.mapInset, latitudeY)
             ctx.lineTo(width - root.mapInset, latitudeY)
-            ctx.strokeStyle = latitude === 0
+            ctx.strokeStyle = (!root.chinaTheaterMode && latitude === 0)
                 ? (root.landingMode ? "rgba(176,221,255,0.38)" : "rgba(132,191,255,0.36)")
                 : (root.landingMode ? "rgba(88,122,151,0.22)" : "rgba(68,98,126,0.24)")
-            ctx.lineWidth = latitude === 0 ? 1.4 : 1.0
+            ctx.lineWidth = (!root.chinaTheaterMode && latitude === 0) ? 1.4 : 1.0
             ctx.stroke()
         }
 
-        for (var longitude = -180; longitude <= 180; longitude += 30) {
+        var longitudeTickSource = root.chinaTheaterMode ? root.chinaLongitudeTicks : root.longitudeTicks
+        for (var longitudeIndex = 0; longitudeIndex < longitudeTickSource.length; ++longitudeIndex) {
+            var longitude = longitudeTickSource[longitudeIndex]
             var longitudeX = root.projectX(longitude)
             ctx.beginPath()
             ctx.moveTo(longitudeX, root.mapInset)
             ctx.lineTo(longitudeX, height - root.mapInset)
-            ctx.strokeStyle = longitude === 0
+            ctx.strokeStyle = (!root.chinaTheaterMode && longitude === 0)
                 ? (root.landingMode ? "rgba(176,221,255,0.38)" : "rgba(132,191,255,0.36)")
                 : (root.landingMode ? "rgba(48,76,102,0.26)" : "rgba(31,49,69,0.32)")
-            ctx.lineWidth = longitude === 0 ? 1.4 : 1.0
+            ctx.lineWidth = (!root.chinaTheaterMode && longitude === 0) ? 1.4 : 1.0
             ctx.stroke()
         }
 
@@ -618,7 +645,7 @@ Item {
 
         ctx.beginPath()
         ctx.rect(root.mapInset, root.mapInset, root.plotWidth, root.plotHeight)
-        ctx.strokeStyle = root.landingMode ? "rgba(188,233,255,0.28)" : "rgba(172,236,255,0.28)"
+        ctx.strokeStyle = root.landingMode ? "rgba(188,233,255,0.18)" : "rgba(172,236,255,0.22)"
         ctx.lineWidth = 1
         ctx.stroke()
         ctx.restore()
@@ -628,7 +655,7 @@ Item {
             canvasWidth * 0.5, canvasHeight * 0.5, Math.max(canvasWidth, canvasHeight) * 0.58
         )
         vigGrad.addColorStop(0.0, "rgba(0,0,0,0)")
-        vigGrad.addColorStop(1.0, "rgba(0,0,0,0.24)")
+        vigGrad.addColorStop(1.0, "rgba(0,0,0,0.18)")
         ctx.fillStyle = vigGrad
         ctx.fillRect(0, 0, canvasWidth, canvasHeight)
     }
@@ -686,14 +713,14 @@ Item {
         smooth: true
         asynchronous: true
         mipmap: true
-        opacity: root.landingMode ? 0.98 : 0.76
+        opacity: root.landingMode ? 0.94 : 0.7
         onStatusChanged: root.requestBasePaint()
     }
 
     Rectangle {
         anchors.fill: externalBackdropImage
         visible: externalBackdropImage.visible
-        color: root.landingMode ? "#121c2510" : "#4c091118"
+        color: root.landingMode ? "#0c151b08" : "#40101814"
     }
 
     Canvas {
@@ -796,7 +823,7 @@ Item {
     }
 
     Repeater {
-        model: !root.landingMode ? root.continentLabels : []
+        model: root.chinaTheaterMode ? root.chinaLabels : (!root.landingMode ? root.continentLabels : [])
 
         delegate: Text {
             text: modelData["label"]
@@ -811,7 +838,7 @@ Item {
     }
 
     Repeater {
-        model: !root.landingMode ? root.latitudeTicks : []
+        model: root.chinaTheaterMode ? root.chinaLatitudeTicks : (!root.landingMode ? root.latitudeTicks : [])
 
         delegate: Text {
             text: String(modelData) + "°"
@@ -825,10 +852,10 @@ Item {
     }
 
     Repeater {
-        model: !root.landingMode ? root.longitudeTicks : []
+        model: root.chinaTheaterMode ? root.chinaLongitudeTicks : (!root.landingMode ? root.longitudeTicks : [])
 
         delegate: Text {
-            text: (modelData > 0 ? "+" : "") + String(modelData) + "°"
+            text: (root.chinaTheaterMode ? "" : (modelData > 0 ? "+" : "")) + String(modelData) + "°"
             color: root.labelColor
             font.pixelSize: shellWindow ? shellWindow.captionSize : 10
             font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
@@ -877,9 +904,11 @@ Item {
             spacing: shellWindow ? shellWindow.scaled(root.landingMicroBadge ? 1 : 2) : (root.landingMicroBadge ? 1 : 2)
 
             Text {
-                text: root.landingMicroBadge
-                    ? "全球主墙板"
-                    : (root.landingMode ? "全球主墙板" : "世界态势地图")
+                text: root.chinaTheaterMode
+                    ? "中国任务区主墙"
+                    : (root.landingMicroBadge
+                        ? "全球主墙板"
+                        : (root.landingMode ? "全球主墙板" : "世界态势地图"))
                 color: root.mapGlow
                 font.pixelSize: shellWindow ? (root.landingMicroBadge ? shellWindow.captionSize : shellWindow.captionSize + 1) : (root.landingMicroBadge ? 10 : 11)
                 font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
@@ -888,9 +917,11 @@ Item {
             }
 
             Text {
-                text: root.externalBackdropActive
-                    ? (root.landingMicroBadge ? "WGS84 · LOCAL ASSET" : root.projectionLabel + " / LOCAL ASSET")
-                    : (root.landingMicroBadge ? "WGS84 · " + root.trackNodeLabel : root.projectionLabel)
+                text: root.chinaTheaterMode
+                    ? "WGS84 · CHINA THEATER"
+                    : (root.externalBackdropActive
+                        ? (root.landingMicroBadge ? "WGS84 · LOCAL ASSET" : root.projectionLabel + " / LOCAL ASSET")
+                        : (root.landingMicroBadge ? "WGS84 · " + root.trackNodeLabel : root.projectionLabel))
                 color: shellWindow ? shellWindow.textSecondary : "#88abc5"
                 font.pixelSize: shellWindow ? shellWindow.captionSize : 10
                 font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
