@@ -2510,6 +2510,7 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertIn('id="flightStage"', body)
         self.assertIn('id="aircraftVector"', body)
         self.assertIn('id="aircraftContractStrip"', body)
+        self.assertIn('<div class="mission-stage-main">', body)
         self.assertIn('id="missionCoreCard"', body)
         self.assertIn('id="comparePeekCard"', body)
         self.assertIn('id="missionPasswordInline"', body)
@@ -2603,6 +2604,14 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertIn(".flight-stage-sweep", body)
         self.assertIn(".operator-cue-shell", body)
         self.assertIn(".weak-console-metrics", body)
+        self.assertIn(
+            ".mission-stage-panel {\n"
+            "  grid-template-rows: auto minmax(0, 1fr) auto auto;\n"
+            "  overflow-y: auto;\n"
+            "  overflow-x: hidden;\n"
+            "}",
+            body,
+        )
 
     def test_docs_endpoint_renders_repo_relative_markdown_document(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
