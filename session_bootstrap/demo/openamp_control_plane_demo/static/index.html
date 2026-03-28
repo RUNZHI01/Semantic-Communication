@@ -90,8 +90,6 @@
 
           <article class="mission-core-card" id="missionCoreCard">正在构建任务推进中枢...</article>
           <article class="compare-peek-card" id="comparePeekCard">正在准备 compare 预览...</article>
-          <article class="mission-password-callout" id="missionPasswordCallout" hidden></article>
-
           <div class="mission-action-dock" id="missionActionDock">
             <button id="opsProbeButton" class="button button-secondary" type="button">探测板卡</button>
             <button id="opsManifestButton" class="button button-secondary" type="button">票据预检</button>
@@ -100,7 +98,26 @@
             <button id="opsRecoverButton" class="button button-danger" type="button">SAFE_STOP</button>
             <button id="opsReloadButton" class="button button-secondary" type="button">刷新快照</button>
           </div>
-          <div class="mission-action-hint" id="missionPasswordHint" hidden></div>
+          <section class="mission-password-inline" id="missionPasswordInline">
+            <div class="mission-password-inline-copy">
+              <div class="label">Board Access</div>
+              <h3>板卡密码快捷录入</h3>
+              <p id="missionPasswordStatus">常见预载场景可在首页直接补录板卡密码；完整 host / user / port / env 仍可在 Session / Gate 调整。</p>
+            </div>
+            <div class="mission-password-inline-controls">
+              <label class="mission-password-inline-field">
+                <span>板卡密码</span>
+                <input
+                  id="missionPasswordInput"
+                  name="mission_password"
+                  type="password"
+                  autocomplete="current-password"
+                  placeholder="仅保存在当前 demo 进程内"
+                >
+              </label>
+              <button id="missionPasswordSaveButton" class="button button-primary" type="button">保存并复用密码</button>
+            </div>
+          </section>
         </section>
 
         <aside class="cockpit-sidebar">
