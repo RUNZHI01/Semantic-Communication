@@ -96,10 +96,41 @@
             <button id="opsProbeButton" class="button button-secondary" type="button">探测板卡</button>
             <button id="opsManifestButton" class="button button-secondary" type="button">票据预检</button>
             <button id="opsRunBaselineButton" class="button button-secondary" type="button">PyTorch Live</button>
-            <button id="opsRunCurrentButton" class="button button-primary" type="button">Current Live</button>
+            <button id="opsRunCurrentButton" class="button button-primary" type="button">启动远端 Current 重建</button>
             <button id="opsRecoverButton" class="button button-danger" type="button">SAFE_STOP</button>
             <button id="opsReloadButton" class="button button-secondary" type="button">刷新快照</button>
           </div>
+          <section class="mission-current-launch" id="missionCurrentLaunch">
+            <div class="mission-current-launch-copy">
+              <div class="label">Current Reconstruction</div>
+              <h3>远端 Current 重建</h3>
+              <p id="missionCurrentLaunchNote">密码就绪后，可直接在首页启动远端 Current 重建，并同步查看 300 张图在线进度。</p>
+            </div>
+            <div class="mission-current-launch-actions">
+              <button id="missionRunCurrentButton" class="button button-primary" type="button">启动远端 Current 重建</button>
+              <button class="button button-secondary" type="button" data-open-drawer="currentDrawer">展开 Current 重建详情</button>
+            </div>
+            <div class="mission-current-progress">
+              <div class="live-progress-top">
+                <div>
+                  <div class="label">首页进度</div>
+                  <div class="status-pill tone-neutral" id="missionCurrentProgressBadge">等待触发</div>
+                </div>
+                <div class="live-progress-countbox">
+                  <strong id="missionCurrentProgressCount">0 / 300</strong>
+                  <span>已完成重建图像</span>
+                </div>
+              </div>
+              <div class="progress-axis-shell progress-axis-shell-compact">
+                <div class="progress-track"><span class="progress-fill" id="missionCurrentProgressBar"></span><span class="progress-marker" id="missionCurrentProgressMarker"></span></div>
+                <div class="progress-axis-labels" id="missionCurrentProgressAxis"></div>
+              </div>
+              <div class="mission-current-progress-summary">
+                <strong id="missionCurrentProgressStage">当前阶段：等待触发</strong>
+                <p class="compact-copy" id="missionCurrentProgressMeta">等待本场 300 张图 live run。</p>
+              </div>
+            </div>
+          </section>
           <section class="mission-password-inline" id="missionPasswordInline">
             <div class="mission-password-inline-copy">
               <div class="label">Board Access</div>
@@ -132,7 +163,7 @@
       <footer class="cockpit-dock">
         <div class="cockpit-dock-buttons">
           <button class="button button-secondary" type="button" data-open-drawer="sessionDrawer">Session / Gate</button>
-          <button class="button button-secondary" type="button" data-open-drawer="currentDrawer">Current Live</button>
+          <button class="button button-secondary" type="button" data-open-drawer="currentDrawer">Current 重建详情</button>
           <button class="button button-secondary" type="button" data-open-drawer="compareDrawer">Compare / Evidence</button>
           <button class="button button-secondary" type="button" data-open-drawer="safetyDrawer">Safety / Blackbox</button>
         </div>
@@ -231,7 +262,7 @@
   <aside class="details-drawer" id="currentDrawer" data-drawer>
     <div class="drawer-head">
       <div>
-        <div class="label">Current Live</div>
+        <div class="label">Current Reconstruction</div>
         <h2>Current 语义视觉回传在线推进</h2>
       </div>
       <button class="button button-secondary drawer-close" type="button" data-close-drawer="currentDrawer">关闭</button>
