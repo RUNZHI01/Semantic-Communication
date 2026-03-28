@@ -2873,6 +2873,9 @@ function switchAct(actId, options = {}) {
     state.userSelectedAct = true;
   }
   applyActiveAct();
+  if (options.openDrawer === false) {
+    return;
+  }
   const drawerId = drawerIdForAct(actId);
   if (drawerId) {
     openDrawer(drawerId);
@@ -3127,7 +3130,7 @@ function feedbackToneForResult(result) {
   return result.execution_mode === "live" || result.execution_mode === "reference" ? "success" : "warning";
 }
 
-async function runInferenceAction(endpoint, variant, resultKey, actId, feedbackText) {
+async function runInferenceAction(endpoint, variant, resultKey, actId, feedbackText, switchActOptions = {}) {
   try {
     setFeedback(feedbackText, "warning");
     state.selectedImageIndex = Number(document.getElementById("imageSelect").value || 0);
@@ -3138,7 +3141,7 @@ async function runInferenceAction(endpoint, variant, resultKey, actId, feedbackT
     state[resultKey] = initial;
     renderInference(state.currentResult);
     renderComparison(state.snapshot);
-    switchAct(actId);
+    switchAct(actId, switchActOptions);
     if (initial.request_state === "running" && initial.job_id) {
       const finalResult = await pollInferenceJob(initial.job_id, variant);
       setFeedback(finalResult.message, feedbackToneForResult(finalResult));
@@ -3153,14 +3156,19 @@ async function runInferenceAction(endpoint, variant, resultKey, actId, feedbackT
   }
 }
 
-async function runCurrentInference() {
+async function runCurrentInference(options = {}) {
   state.currentResult = await runInferenceAction(
     "/api/run-inference",
     "current",
     "currentResult",
     "act2",
-    "正在执行 Current 在线推进..."
+    "正在执行 Current 在线推进...",
+    options.switchActOptions || {}
   );
+}
+
+async function runCurrentInferenceFromHomepage() {
+  await runCurrentInference({ switchActOptions: { openDrawer: false, user: false } });
 }
 
 async function runBaseline() {
@@ -3252,11 +3260,18 @@ function bindEvents() {
         previewJobManifestGate();
       });
     });
-  [document.getElementById("runCurrentButton"), document.getElementById("opsRunCurrentButton"), document.getElementById("missionRunCurrentButton")]
+  [document.getElementById("runCurrentButton")]
     .filter(Boolean)
     .forEach((button) => {
       button.addEventListener("click", () => {
         runCurrentInference();
+      });
+    });
+  [document.getElementById("opsRunCurrentButton"), document.getElementById("missionRunCurrentButton")]
+    .filter(Boolean)
+    .forEach((button) => {
+      button.addEventListener("click", () => {
+        runCurrentInferenceFromHomepage();
       });
     });
   [document.getElementById("runBaselineButton"), document.getElementById("opsRunBaselineButton")]
