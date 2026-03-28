@@ -12,32 +12,26 @@ Rectangle {
     property bool prominent: false
     property int entranceDelay: 0
 
+    readonly property color accentColor: shellWindow ? shellWindow.toneColor(tone) : "#86c7d4"
+    readonly property bool hovered: hoverArea.containsMouse
+
     opacity: 0
     Component.onCompleted: entranceAnim.start()
 
     SequentialAnimation {
         id: entranceAnim
         PauseAnimation { duration: root.entranceDelay }
-        NumberAnimation { target: root; property: "opacity"; from: 0; to: 1; duration: 300; easing.type: Easing.OutCubic }
+        NumberAnimation { target: root; property: "opacity"; from: 0; to: 1; duration: 240; easing.type: Easing.OutCubic }
     }
-
-    readonly property color accentColor: shellWindow ? shellWindow.toneColor(tone) : "#86c7d4"
-    readonly property bool structuredValue: /^[A-Za-z0-9_:\-./%°,+\s]+$/.test(String(root.value || ""))
-    readonly property color topFill: shellWindow ? Qt.lighter(shellWindow.surfaceRaised, 1.04) : "#1a2430"
-    readonly property color bottomFill: shellWindow ? Qt.darker(shellWindow.surfaceQuiet, 1.08) : "#0c151d"
 
     radius: shellWindow ? shellWindow.cardRadius : 16
-    gradient: Gradient {
-        GradientStop { position: 0.0; color: Qt.rgba(root.topFill.r, root.topFill.g, root.topFill.b, prominent ? 0.97 : 0.94) }
-        GradientStop { position: 0.38; color: shellWindow
-            ? Qt.rgba(shellWindow.surfaceQuiet.r, shellWindow.surfaceQuiet.g, shellWindow.surfaceQuiet.b, prominent ? 0.95 : 0.9)
-            : "#0f161d" }
-        GradientStop { position: 1.0; color: Qt.rgba(root.bottomFill.r, root.bottomFill.g, root.bottomFill.b, 0.98) }
-    }
-    border.color: shellWindow ? Qt.rgba(accentColor.r, accentColor.g, accentColor.b, prominent ? 0.76 : (hoverArea.containsMouse ? 0.68 : 0.54)) : "#86c7d4"
+    color: shellWindow
+        ? Qt.rgba(shellWindow.surfaceRaised.r, shellWindow.surfaceRaised.g, shellWindow.surfaceRaised.b, prominent ? 0.8 : 0.64)
+        : "#16222d"
+    border.color: Qt.rgba(accentColor.r, accentColor.g, accentColor.b, prominent ? 0.5 : (hovered ? 0.38 : 0.16))
     border.width: 1
-    scale: hoverArea.containsMouse ? 1.012 : 1.0
     implicitHeight: body.implicitHeight + ((shellWindow ? shellWindow.cardPadding : 14) * 2)
+    scale: hovered ? 1.01 : 1.0
 
     Behavior on scale { NumberAnimation { duration: 140 } }
     Behavior on border.color { ColorAnimation { duration: 140 } }
@@ -50,56 +44,16 @@ Rectangle {
     }
 
     Rectangle {
-        anchors.fill: parent
-        radius: parent.radius
-        gradient: Gradient {
-            GradientStop { position: 0.0; color: "#12ffffff" }
-            GradientStop { position: 0.28; color: "#05ffffff" }
-            GradientStop { position: 1.0; color: "#00000000" }
-        }
-        opacity: prominent ? 0.38 : 0.28
-    }
-
-    Rectangle {
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.top: parent.top
-        anchors.leftMargin: shellWindow ? shellWindow.scaled(10) : 10
-        anchors.rightMargin: shellWindow ? shellWindow.scaled(10) : 10
-        height: shellWindow ? shellWindow.scaled(2) : 2
-        radius: height / 2
-        gradient: Gradient {
-            orientation: Gradient.Horizontal
-            GradientStop { position: 0.0; color: "transparent" }
-            GradientStop { position: 0.16; color: Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0.14) }
-            GradientStop { position: 0.5; color: Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0.74) }
-            GradientStop { position: 0.84; color: Qt.rgba(accentColor.r, accentColor.g, accentColor.b, 0.14) }
-            GradientStop { position: 1.0; color: "transparent" }
-        }
-        opacity: 0.88
-    }
-
-    Rectangle {
         anchors.left: parent.left
         anchors.top: parent.top
         anchors.bottom: parent.bottom
-        anchors.leftMargin: shellWindow ? shellWindow.scaled(6) : 6
-        anchors.topMargin: shellWindow ? shellWindow.scaled(8) : 8
-        anchors.bottomMargin: shellWindow ? shellWindow.scaled(8) : 8
-        width: shellWindow ? shellWindow.scaled(prominent ? 3 : 2) : (prominent ? 3 : 2)
+        anchors.leftMargin: shellWindow ? shellWindow.scaled(10) : 10
+        anchors.topMargin: shellWindow ? shellWindow.scaled(12) : 12
+        anchors.bottomMargin: shellWindow ? shellWindow.scaled(12) : 12
+        width: shellWindow ? shellWindow.scaled(prominent ? 4 : 3) : (prominent ? 4 : 3)
         radius: width / 2
         color: accentColor
-        opacity: 0.84
-    }
-
-    Rectangle {
-        width: parent.width * 0.34
-        height: parent.height * 0.64
-        radius: width / 2
-        color: accentColor
-        opacity: prominent ? 0.08 : 0.05
-        x: parent.width - (width * 0.74)
-        y: -height * 0.16
+        opacity: prominent ? 0.82 : 0.54
     }
 
     Rectangle {
@@ -107,9 +61,8 @@ Rectangle {
         anchors.margins: 1
         radius: parent.radius - 1
         color: "transparent"
-        border.color: "#0affffff"
+        border.color: Qt.rgba(1, 1, 1, 0.035)
         border.width: 1
-        opacity: 0.66
     }
 
     ColumnLayout {
@@ -118,34 +71,31 @@ Rectangle {
         anchors.right: parent.right
         anchors.top: parent.top
         anchors.bottom: parent.bottom
-        anchors.leftMargin: shellWindow ? shellWindow.cardPadding + shellWindow.scaled(4) : 18
+        anchors.leftMargin: shellWindow ? shellWindow.cardPadding + shellWindow.scaled(8) : 18
         anchors.rightMargin: shellWindow ? shellWindow.cardPadding : 14
         anchors.topMargin: shellWindow ? shellWindow.cardPadding : 14
         anchors.bottomMargin: shellWindow ? shellWindow.cardPadding : 14
-        spacing: shellWindow ? shellWindow.scaled(3) : 3
+        spacing: shellWindow ? shellWindow.scaled(4) : 4
 
         Text {
             text: root.label
-            color: shellWindow ? shellWindow.textMuted : "#6f7f8a"
+            color: shellWindow ? shellWindow.textMuted : "#8397aa"
             font.pixelSize: shellWindow ? shellWindow.captionSize : 10
-            font.family: shellWindow ? shellWindow.monoFamily : "JetBrains Mono"
-            font.letterSpacing: shellWindow ? shellWindow.scaled(0.6) : 0.6
+            font.family: shellWindow ? shellWindow.monoFamily : "Monospace"
+            font.letterSpacing: shellWindow ? shellWindow.scaled(0.5) : 0.5
         }
 
         Text {
             Layout.fillWidth: true
             text: root.value
-            color: shellWindow ? shellWindow.textStrong : "#f5efe4"
+            color: shellWindow ? shellWindow.textStrong : "#f5f8fb"
             font.pixelSize: shellWindow
-                ? shellWindow.bodyEmphasisSize + (root.prominent ? shellWindow.scaled(2) : shellWindow.scaled(1))
-                : (root.prominent ? 16 : 14)
+                ? shellWindow.bodyEmphasisSize + (root.prominent ? shellWindow.scaled(3) : shellWindow.scaled(1))
+                : (root.prominent ? 20 : 16)
             font.weight: Font.DemiBold
-            font.family: shellWindow
-                ? (root.structuredValue ? shellWindow.monoFamily : shellWindow.uiFamily)
-                : "Noto Sans CJK SC"
-            font.letterSpacing: shellWindow ? shellWindow.scaled(root.structuredValue ? 0.18 : 0.06) : 0.12
+            font.family: shellWindow ? shellWindow.uiFamily : "Sans Serif"
             wrapMode: Text.WordWrap
-            maximumLineCount: prominent ? 3 : 2
+            maximumLineCount: root.prominent ? 3 : 2
             elide: Text.ElideRight
         }
 
@@ -153,11 +103,11 @@ Rectangle {
             visible: root.detail.length > 0
             Layout.fillWidth: true
             text: root.detail
-            color: shellWindow ? shellWindow.textSecondary : "#9aa8b1"
-            font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 12
-            font.family: shellWindow ? shellWindow.uiFamily : "Noto Sans CJK SC"
+            color: shellWindow ? shellWindow.textSecondary : "#a6b4c1"
+            font.pixelSize: shellWindow ? shellWindow.captionSize + 1 : 11
+            font.family: shellWindow ? shellWindow.uiFamily : "Sans Serif"
             wrapMode: Text.WordWrap
-            maximumLineCount: 2
+            maximumLineCount: 3
             elide: Text.ElideRight
         }
     }

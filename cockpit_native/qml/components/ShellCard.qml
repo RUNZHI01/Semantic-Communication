@@ -26,9 +26,20 @@ Item {
     Rectangle {
         anchors.fill: parent
         radius: root.radius
-        color: Qt.rgba(root.fillColor.r, root.fillColor.g, root.fillColor.b, root.minimalChrome ? 0.6 : 0.85)
-        border.color: Qt.rgba(root.borderColor.r, root.borderColor.g, root.borderColor.b, 0.4)
+        color: Qt.rgba(root.fillColor.r, root.fillColor.g, root.fillColor.b, root.minimalChrome ? 0.62 : 0.88)
+        border.color: Qt.rgba(root.borderColor.r, root.borderColor.g, root.borderColor.b, root.minimalChrome ? 0.18 : 0.32)
         border.width: 1
+    }
+
+    Rectangle {
+        anchors.fill: parent
+        radius: root.radius
+        gradient: Gradient {
+            GradientStop { position: 0.0; color: "#10ffffff" }
+            GradientStop { position: 0.18; color: "#04ffffff" }
+            GradientStop { position: 1.0; color: "#05000000" }
+        }
+        opacity: root.minimalChrome ? 0.12 : 0.24
     }
 
     Rectangle {
@@ -47,7 +58,7 @@ Item {
             GradientStop { position: 0.7; color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.06) }
             GradientStop { position: 1.0; color: "transparent" }
         }
-        opacity: root.minimalChrome ? 0.4 : 0.6
+        opacity: root.minimalChrome ? 0.28 : 0.5
     }
 
     ColumnLayout {

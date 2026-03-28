@@ -113,6 +113,9 @@ class DemoRepoAdapter:
             candidate = "http://" + candidate
         return candidate.rstrip("/")
 
+    def operator_api_base(self) -> str:
+        return self._operator_api_base()
+
     def _load_live_aircraft_position_contract(self) -> JsonDict | None:
         request = urllib.request.Request(
             self._operator_api_base() + "/api/aircraft-position",
@@ -446,6 +449,7 @@ class DemoRepoAdapter:
                     "enabled": False,
                     "interactive": True,
                     "api_path": "/api/run-inference",
+                    "method": "POST",
                     "cta_label": "触发 Current",
                     "note": "尝试调用本机 OpenAMP demo server 的 Current live 重建入口。",
                     "limitation": (
@@ -471,6 +475,7 @@ class DemoRepoAdapter:
                     "enabled": False,
                     "interactive": True,
                     "api_path": "/api/probe-board",
+                    "method": "POST",
                     "cta_label": "执行探测",
                     "note": "调用 repo 现有只读板卡探测 API，刷新 remoteproc / RPMsg / firmware 状态。",
                     "limitation": "若 operator server 未启动或尚未录入会话凭据，会返回明确限制说明。",
@@ -483,6 +488,7 @@ class DemoRepoAdapter:
                     "enabled": False,
                     "interactive": True,
                     "api_path": "/api/recover",
+                    "method": "POST",
                     "cta_label": "执行收口",
                     "note": "通过 operator server 触发 SAFE_STOP 恢复链路；若 live 不通则返回回放/限制说明。",
                     "limitation": "这不是本地假动作，只有 OpenAMP demo server 在线时才会真正下发恢复。",
@@ -495,6 +501,7 @@ class DemoRepoAdapter:
                     "enabled": False,
                     "interactive": True,
                     "api_path": "/api/run-baseline",
+                    "method": "POST",
                     "cta_label": "刷新对照",
                     "note": "调用 baseline 对照入口；若 live baseline 不可用，server 会明确回退到归档/受限状态。",
                     "limitation": "baseline 侧仍受 repo 既有 live/demo 模式约束，不在 native shell 内伪造结果。",

@@ -1,0 +1,16 @@
+{
+  "resume_id": "019d28d6-7117-7ee1-afa9-8c13d3fff7e3",
+  "last_success": {
+    "run_id": "019d28d6-7117-7ee1-afa9-8c13d3fff7e3",
+    "submit_status": "ok",
+    "submitted_at": "1774529673",
+    "anchor_fingerprint": "c2a0c6d4c51eb09ed8cab9fb8a84d9f257324982",
+    "tail_fingerprint": "a8d19e9600690a21eb45376979e47f6507b69304",
+    "latest_visible": {
+      "role": "assistant",
+      "text": "继续做了，这一轮只做了一件事：把前两页右侧和左侧的检视器从“卡片堆叠”正式改成了 inspector rows 风格。 结果是： - 首页右侧现在不再像两张信息卡，而更像一个连续的 `link + source` 检视器。 - 合同页右侧的 `contract inspector` 也改成了同样的 row 层级，字段顺序更清楚，视觉上更专业。 - 中文字体方案也已经切到 `Source Han Sans SC` 优先，整体观感比前面更稳。 这轮核心改动在： - [InspectorRow.qml](/home/tianxing/tvm_metaschedule_execution_project/cockpit_native/qml/components/InspectorRow.qml) - [CockpitShell.qml](/home/tianxing/tvm_metaschedule_execution_project/cockpit_native/qml/components/CockpitShell.qml) - [qt_app.py](/home/tianxing/tvm_metaschedule_execution_project/cockpit_native/qt_app.py) 回归测试已经重新跑过： ```bash ./cockpit_native/.venv/bin/python -m unittest cockpit_native.tests.test_qml_offscreen cockpit_native.tests.test_qt_app cockpit_native.tests.test_main cockpit_native.tests.test_capture cockpit_native.tests.test_adapter ``` 通过。 最新导图包在： - `/tmp/cockpit_demo_pack_rows` 如果继续，我下一轮只做最后一步：把首页和合同页的 overlay 文案再压缩一档，尽量做到“只看标题和数字就能明白”，同时进一步削掉技术展示味。",
+      "timestamp": "2026-03-26T12:59:55.144Z"
+    },
+    "unchanged_tail_skips": 0
+  }
+}

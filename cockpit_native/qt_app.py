@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 import importlib.util
 import json
 import os
 from pathlib import Path
 import sys
 from typing import Any, Callable, Mapping, MutableMapping, Sequence
+import urllib.error
+import urllib.request
 
 from .adapter import DemoRepoAdapter
 from .availability import is_pyside6_available
@@ -60,36 +63,36 @@ VALID_MAP_TILE_MODES = {"auto", "online", "local_arcgis_cache"}
 FONT_FILE_SUFFIXES = {".ttf", ".otf", ".ttc"}
 DEFAULT_WORLD_MAP_BACKDROP_RELATIVE_PATH = Path("cockpit_native") / "qml" / "assets" / "world-map-backdrop.svg"
 DEFAULT_THEME_PALETTE = {
-    "sceneTop": "#0b1623",
-    "sceneMid": "#0e1d2e",
-    "sceneBottom": "#091420",
-    "haloCool": "#3080d0",
-    "haloWarm": "#506090",
-    "shellExterior": "#0f1b28",
-    "shellInterior": "#162638",
-    "surfaceRaised": "#1a2e42",
-    "surfaceQuiet": "#111e2c",
-    "surfaceGlass": "#223a50",
-    "borderSubtle": "#2e4d64",
-    "borderStrong": "#5ea8d4",
-    "accentIce": "#7cddff",
-    "accentGold": "#f0b060",
-    "accentMint": "#40e8a0",
-    "accentRose": "#ff6088",
-    "textStrong": "#f0f6fa",
-    "textPrimary": "#c4d8e8",
-    "textSecondary": "#8aa4b8",
-    "textMuted": "#607888",
-    "dataLine": "#1a3044",
-    "dataLineStrong": "#284860",
-    "panelHighlight": "#284a66",
-    "panelGlowSoft": "#60b8e8",
-    "canopyTop": "#142838",
-    "canopyBottom": "#0a1620",
+    "sceneTop": "#07131d",
+    "sceneMid": "#0c1d2d",
+    "sceneBottom": "#08131d",
+    "haloCool": "#1f5f95",
+    "haloWarm": "#4d5f84",
+    "shellExterior": "#0b1620",
+    "shellInterior": "#142331",
+    "surfaceRaised": "#132434",
+    "surfaceQuiet": "#0d1822",
+    "surfaceGlass": "#1a3144",
+    "borderSubtle": "#274257",
+    "borderStrong": "#5fa0ce",
+    "accentIce": "#87ddff",
+    "accentGold": "#d9a15a",
+    "accentMint": "#46d7a0",
+    "accentRose": "#ff728b",
+    "textStrong": "#f1f7fb",
+    "textPrimary": "#d1deea",
+    "textSecondary": "#91a8bb",
+    "textMuted": "#5f7384",
+    "dataLine": "#153043",
+    "dataLineStrong": "#244b63",
+    "panelHighlight": "#1d4d6f",
+    "panelGlowSoft": "#63c5f2",
+    "canopyTop": "#163247",
+    "canopyBottom": "#0b141c",
     "accentBlue": "#78b8e0",
-    "shellDockTop": "#1c3248",
-    "shellDockMid": "#142434",
-    "shellDockBottom": "#0f1b28",
+    "shellDockTop": "#173146",
+    "shellDockMid": "#132433",
+    "shellDockBottom": "#0d1822",
 }
 
 
@@ -98,6 +101,7 @@ class QtCockpitRuntime:
     app: Any
     engine: Any
     root_window: Any
+    bridge: Any | None = None
 
 
 def _optional_module_available(module_name: str) -> bool:
@@ -296,12 +300,12 @@ def build_runtime_font_plan(package_root: Path, app: Any) -> dict[str, object]:
     return {
         "registeredFontFamilies": registered_families,
         "displayFontFamily": resolve_font_family(
-            ["Ubuntu Sans", "Noto Sans CJK SC", "Ubuntu", "DejaVu Sans"],
+            ["Source Han Sans SC", "Noto Sans CJK SC", "Ubuntu Sans", "Ubuntu", "DejaVu Sans"],
             available_families=available_families,
             fallback_family=default_family,
         ),
         "uiFontFamily": resolve_font_family(
-            ["Ubuntu Sans", "Noto Sans CJK SC", "Ubuntu", "DejaVu Sans"],
+            ["Source Han Sans SC", "Noto Sans CJK SC", "Ubuntu Sans", "Ubuntu", "DejaVu Sans"],
             available_families=available_families,
             fallback_family=default_family,
         ),
@@ -368,12 +372,19 @@ def _create_cockpit_runtime(
 
     class CockpitBridge(QObject):
         stateChanged = Signal()
+        actionStateChanged = Signal()
 
         def __init__(self, repo_adapter: DemoRepoAdapter, publish_state_json: Callable[[str], None]) -> None:
             super().__init__()
             self._adapter = repo_adapter
             self._publish_state_json = publish_state_json
             self._state: dict[str, object] = {}
+            self._action_state: dict[str, object] = {
+                "busy": False,
+                "active_action_id": "",
+                "last_action": {},
+                "history": [],
+            }
             self._refresh_state()
 
         @Property("QVariant", notify=stateChanged)
@@ -384,21 +395,250 @@ def _create_cockpit_runtime(
         def stateJson(self) -> str:
             return json.dumps(self._state, ensure_ascii=False)
 
+        @Property("QVariant", notify=actionStateChanged)
+        def actionState(self) -> dict[str, object]:
+            return self._action_state
+
+        @Property(str, notify=actionStateChanged)
+        def actionStateJson(self) -> str:
+            return json.dumps(self._action_state, ensure_ascii=False)
+
         def _refresh_state(self) -> None:
             self._state = self._adapter.load_contract_bundle().ui_state
             self._publish_state_json(json.dumps(self._state, ensure_ascii=False))
+
+        def _set_action_state(self, payload: dict[str, object]) -> None:
+            self._action_state = payload
+            self.actionStateChanged.emit()
+
+        def _record_action(
+            self,
+            summary: dict[str, object],
+            *,
+            busy: bool = False,
+            active_action_id: str = "",
+        ) -> None:
+            previous_history = self._action_state.get("history")
+            history = [summary]
+            if isinstance(previous_history, list):
+                history.extend(item for item in previous_history if isinstance(item, dict))
+            self._set_action_state(
+                {
+                    "busy": bool(busy),
+                    "active_action_id": active_action_id if busy else "",
+                    "last_action": summary,
+                    "history": history[:8],
+                }
+            )
+
+        def _action_stamp(self) -> str:
+            return datetime.now().strftime("%H:%M:%S")
+
+        def _detail_lines_from_payload(self, payload: Mapping[str, object]) -> list[str]:
+            lines: list[str] = []
+
+            def add_line(value: object, *, prefix: str = "") -> None:
+                text = str(value or "").strip()
+                if text:
+                    lines.append(prefix + text)
+
+            add_line(payload.get("request_state"), prefix="state: ")
+            add_line(payload.get("execution_mode"), prefix="mode: ")
+            add_line(payload.get("source_label"), prefix="source: ")
+            add_line(payload.get("variant"), prefix="variant: ")
+            add_line(payload.get("job_id"), prefix="job: ")
+            add_line(payload.get("guard_state"), prefix="guard: ")
+            add_line(payload.get("last_fault_code"), prefix="fault: ")
+            add_line(payload.get("status_lamp"), prefix="lamp: ")
+
+            if not lines:
+                timings = payload.get("timings")
+                if isinstance(timings, Mapping):
+                    add_line(timings.get("total_ms"), prefix="total_ms: ")
+
+            return lines[:6]
+
+        def _log_lines_from_payload(self, payload: Mapping[str, object]) -> list[str]:
+            raw_logs = payload.get("log_entries")
+            if not isinstance(raw_logs, list):
+                return []
+            lines = [str(item or "").strip() for item in raw_logs if str(item or "").strip()]
+            return lines[-4:]
+
+        def _tone_from_payload(self, payload: Mapping[str, object]) -> str:
+            lamp = str(payload.get("status_lamp") or "").strip().lower()
+            status = str(payload.get("status") or payload.get("request_state") or "").strip().lower()
+            if lamp == "red":
+                return "danger"
+            if lamp == "yellow":
+                return "warning"
+            if any(marker in status for marker in ("error", "failed", "timeout")):
+                return "danger"
+            if any(marker in status for marker in ("reject", "denied", "warning", "limited")):
+                return "warning"
+            if any(marker in status for marker in ("running", "queued", "submitted")):
+                return "neutral"
+            return "online"
+
+        def _summarize_action(
+            self,
+            *,
+            action_id: str,
+            label: str,
+            payload: Mapping[str, object],
+            status_code: int,
+        ) -> dict[str, object]:
+            headline = str(payload.get("message") or payload.get("status") or label).strip() or label
+            detail = str(payload.get("limitation") or payload.get("note") or "").strip()
+            return {
+                "action_id": action_id,
+                "label": label,
+                "timestamp": self._action_stamp(),
+                "tone": self._tone_from_payload(payload),
+                "status_code": status_code,
+                "headline": headline,
+                "detail": detail,
+                "detail_lines": self._detail_lines_from_payload(payload),
+                "log_lines": self._log_lines_from_payload(payload),
+            }
+
+        def _invoke_operator_api(
+            self,
+            *,
+            action_id: str,
+            api_path: str,
+            method: str,
+        ) -> tuple[int, dict[str, object]]:
+            normalized_method = (method or "POST").strip().upper() or "POST"
+            resolved_api_path = str(api_path or "").strip()
+            if not resolved_api_path:
+                raise RuntimeError("动作缺少 API 路径，无法下发。")
+            base = self._adapter.operator_api_base()
+            url = resolved_api_path if "://" in resolved_api_path else base + resolved_api_path
+            body: dict[str, object] = {}
+            if action_id == "current_online_rebuild":
+                body = {"image_index": 0, "mode": "current"}
+            elif action_id == "baseline_live_check":
+                body = {"image_index": 0}
+
+            data = None
+            headers = {"Accept": "application/json"}
+            if normalized_method != "GET":
+                data = json.dumps(body, ensure_ascii=False).encode("utf-8")
+                headers["Content-Type"] = "application/json"
+
+            request = urllib.request.Request(url, data=data, headers=headers, method=normalized_method)
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            try:
+                with opener.open(request, timeout=18.0) as response:
+                    status_code = int(response.getcode())
+                    raw_body = response.read()
+            except urllib.error.HTTPError as exc:
+                raw_body = exc.read()
+                status_code = int(exc.code)
+            except urllib.error.URLError as exc:
+                raise RuntimeError(f"无法连接 operator server：{exc.reason}") from exc
+
+            try:
+                payload = json.loads(raw_body.decode("utf-8")) if raw_body else {}
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise RuntimeError(f"operator server 返回了无法解析的响应：HTTP {status_code}") from exc
+            if not isinstance(payload, dict):
+                raise RuntimeError(f"operator server 返回了非对象响应：HTTP {status_code}")
+            return status_code, dict(payload)
 
         @Slot()
         def reload(self) -> None:
             self._refresh_state()
             self.stateChanged.emit()
 
+        @Slot(str, str, str, str)
+        def invokeAction(self, action_id: str, api_path: str, method: str, label: str) -> None:
+            resolved_action_id = str(action_id or "").strip()
+            resolved_label = str(label or resolved_action_id or "动作").strip()
+            if not resolved_action_id:
+                self._record_action(
+                    {
+                        "action_id": "",
+                        "label": resolved_label,
+                        "timestamp": self._action_stamp(),
+                        "tone": "danger",
+                        "headline": "缺少动作标识，无法执行。",
+                        "detail": "",
+                        "detail_lines": [],
+                        "log_lines": [],
+                        "status_code": 0,
+                    }
+                )
+                return
+
+            self._record_action(
+                {
+                    "action_id": resolved_action_id,
+                    "label": resolved_label,
+                    "timestamp": self._action_stamp(),
+                    "tone": "neutral",
+                    "headline": "正在执行 " + resolved_label,
+                    "detail": "请求已下发，等待 operator server 返回。",
+                    "detail_lines": [],
+                    "log_lines": [],
+                    "status_code": 0,
+                },
+                busy=True,
+                active_action_id=resolved_action_id,
+            )
+
+            try:
+                if resolved_action_id == "reload_contracts":
+                    self._refresh_state()
+                    self.stateChanged.emit()
+                    summary = {
+                        "action_id": resolved_action_id,
+                        "label": resolved_label,
+                        "timestamp": self._action_stamp(),
+                        "tone": "online",
+                        "headline": "仓库合同已重新载入。",
+                        "detail": "当前 UI 状态已按最新 repo-backed snapshot 刷新。",
+                        "detail_lines": [],
+                        "log_lines": [],
+                        "status_code": 200,
+                    }
+                else:
+                    status_code, payload = self._invoke_operator_api(
+                        action_id=resolved_action_id,
+                        api_path=api_path,
+                        method=method,
+                    )
+                    self._refresh_state()
+                    self.stateChanged.emit()
+                    summary = self._summarize_action(
+                        action_id=resolved_action_id,
+                        label=resolved_label,
+                        payload=payload,
+                        status_code=status_code,
+                    )
+                self._record_action(summary)
+            except Exception as exc:
+                self._record_action(
+                    {
+                        "action_id": resolved_action_id,
+                        "label": resolved_label,
+                        "timestamp": self._action_stamp(),
+                        "tone": "danger",
+                        "headline": resolved_label + " 执行失败。",
+                        "detail": str(exc),
+                        "detail_lines": [],
+                        "log_lines": [],
+                        "status_code": 0,
+                    }
+                )
+
     app_argv = [str(item) for item in (list(argv) if argv is not None else sys.argv[:1])]
     if not app_argv:
         app_argv = ["cockpit_native"]
 
     app = QGuiApplication(app_argv)
-    app.setApplicationName("Feiteng Native Cockpit Prototype")
+    app.setApplicationName("Feiteng Native Cockpit")
     app.setOrganizationName("CICC0903540")
     engine = QQmlApplicationEngine()
     engine.rootContext().setContextProperty("cockpitUiStateJson", "{}")
@@ -412,7 +652,7 @@ def _create_cockpit_runtime(
 
     bridge = CockpitBridge(adapter, publish_state_json)
     primary_screen = app.primaryScreen()
-    screen_metrics = {"width": 1440, "height": 900, "devicePixelRatio": 1.0}
+    screen_metrics = {"width": 2560, "height": 1440, "devicePixelRatio": 1.0}
     if primary_screen is not None:
         available = primary_screen.availableGeometry()
         screen_metrics = {
@@ -430,7 +670,10 @@ def _create_cockpit_runtime(
     engine.load(str(qml_path))
     if not engine.rootObjects():
         raise RuntimeError(f"Unable to load QML scene: {qml_path}")
-    return QtCockpitRuntime(app=app, engine=engine, root_window=engine.rootObjects()[0])
+    # Keep a strong reference to the bridge on the app/runtime so Qt does not
+    # drop the Python QObject after this function returns.
+    app._cockpit_bridge = bridge  # type: ignore[attr-defined]
+    return QtCockpitRuntime(app=app, engine=engine, root_window=engine.rootObjects()[0], bridge=bridge)
 
 
 def launch_native_cockpit(
