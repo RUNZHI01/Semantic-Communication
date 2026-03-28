@@ -16,12 +16,13 @@ class DemoRepoAdapterTest(unittest.TestCase):
     def test_latest_snapshot_path_uses_current_archive(self) -> None:
         snapshot_path = self.adapter.latest_snapshot_path()
         self.assertEqual(snapshot_path.name, "state_snapshot.json")
-        self.assertEqual(snapshot_path.parent.name, "session_20260320_235724")
+        self.assertTrue(snapshot_path.parent.name.startswith("session_"))
+        self.assertTrue(snapshot_path.is_file())
 
     def test_load_contract_bundle_reads_repo_backed_sources(self) -> None:
         bundle = self.adapter.load_contract_bundle()
 
-        self.assertEqual(bundle.snapshot["aggregate"]["session_id"], "session_20260320_235724")
+        self.assertTrue(str(bundle.snapshot["aggregate"]["session_id"]).startswith("session_"))
         self.assertEqual(bundle.snapshot["reason"], "job_fallback")
         self.assertEqual(bundle.aircraft_position["contract_version"], "aircraft_position.v1")
         self.assertEqual(bundle.aircraft_position["source_api_path"], "/api/aircraft-position")

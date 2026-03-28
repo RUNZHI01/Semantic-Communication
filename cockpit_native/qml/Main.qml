@@ -21,11 +21,15 @@ ApplicationWindow {
     readonly property var bottomPanelData: DataUtils.objectOrEmpty(zones["bottom_action_strip"])
     readonly property var bottomActions: DataUtils.arrayOrEmpty(bottomPanelData["actions"])
     readonly property var meta: DataUtils.objectOrEmpty(uiState["meta"])
+    readonly property var demoStory: DataUtils.objectOrEmpty(meta["demo_story"])
+    readonly property var performanceHeadline: DataUtils.objectOrEmpty(demoStory["performance_headline"])
+    readonly property var demoFlow: DataUtils.arrayOrEmpty(demoStory["flow"])
     readonly property var statusRows: DataUtils.arrayOrEmpty(leftPanelData["rows"])
     readonly property var centerControlSummary: DataUtils.objectOrEmpty(centerPanelData["control_summary"])
     readonly property var centerFeedContract: DataUtils.objectOrEmpty(centerPanelData["feed_contract"])
     readonly property var trackData: DataUtils.arrayOrEmpty(centerPanelData["track"])
     readonly property var currentPosition: DataUtils.objectOrEmpty(centerPanelData["position"])
+    readonly property var positionSource: DataUtils.objectOrEmpty(centerPanelData["position_source"])
     readonly property var kinematics: DataUtils.objectOrEmpty(centerPanelData["kinematics"])
     readonly property var fix: DataUtils.objectOrEmpty(centerPanelData["fix"])
     readonly property var liveAnchor: DataUtils.objectOrEmpty(rightPanelData["live_anchor"])
@@ -37,40 +41,45 @@ ApplicationWindow {
     )
     readonly property int enabledBottomActions: enabledActionTotal(bottomActions)
     readonly property bool softwareRenderEnabled: !!options["softwareRender"]
+    readonly property var actionRuntime: (typeof cockpitBridge !== "undefined") && cockpitBridge
+        ? DataUtils.objectOrEmpty(cockpitBridge.actionState)
+        : ({})
+    readonly property var lastActionResult: DataUtils.objectOrEmpty(actionRuntime["last_action"])
+    readonly property bool actionBusy: !!actionRuntime["busy"]
 
-    readonly property int designWidth: 1440
-    readonly property int designHeight: 900
+    readonly property int designWidth: 2560
+    readonly property int designHeight: 1440
 
     readonly property string displayFamily: String(options["displayFontFamily"] || options["uiFontFamily"] || "Ubuntu Sans")
     readonly property string uiFamily: String(options["uiFontFamily"] || "Ubuntu Sans")
     readonly property string monoFamily: String(options["monoFontFamily"] || "Ubuntu Sans Mono")
 
-    readonly property color sceneTop: themeColor("sceneTop", "#0b1623")
-    readonly property color sceneMid: themeColor("sceneMid", "#122234")
-    readonly property color sceneBottom: themeColor("sceneBottom", "#0f1824")
-    readonly property color haloCool: themeColor("haloCool", "#275674")
-    readonly property color haloWarm: themeColor("haloWarm", "#36586c")
-    readonly property color shellExterior: themeColor("shellExterior", "#101b27")
-    readonly property color shellInterior: themeColor("shellInterior", "#162433")
-    readonly property color surfaceRaised: themeColor("surfaceRaised", "#1a2a3a")
-    readonly property color surfaceQuiet: themeColor("surfaceQuiet", "#111c28")
-    readonly property color surfaceGlass: themeColor("surfaceGlass", "#223448")
-    readonly property color borderSubtle: themeColor("borderSubtle", "#355369")
-    readonly property color borderStrong: themeColor("borderStrong", "#7da8c6")
-    readonly property color accentIce: themeColor("accentIce", "#96e7ff")
-    readonly property color accentGold: themeColor("accentGold", "#e7c98e")
-    readonly property color accentMint: themeColor("accentMint", "#8ce3c0")
-    readonly property color accentRose: themeColor("accentRose", "#ff95a0")
-    readonly property color textStrong: themeColor("textStrong", "#f4fbff")
-    readonly property color textPrimary: themeColor("textPrimary", "#d7e5f0")
-    readonly property color textSecondary: themeColor("textSecondary", "#9fb4c5")
-    readonly property color textMuted: themeColor("textMuted", "#72879a")
-    readonly property color dataLine: themeColor("dataLine", "#1b3448")
-    readonly property color dataLineStrong: themeColor("dataLineStrong", "#29516b")
-    readonly property color panelHighlight: themeColor("panelHighlight", "#294a62")
-    readonly property color panelGlowSoft: themeColor("panelGlowSoft", "#85ddff")
-    readonly property color canopyTop: themeColor("canopyTop", "#1a3043")
-    readonly property color canopyBottom: themeColor("canopyBottom", "#101925")
+    readonly property color sceneTop: themeColor("sceneTop", "#07131d")
+    readonly property color sceneMid: themeColor("sceneMid", "#0c1d2d")
+    readonly property color sceneBottom: themeColor("sceneBottom", "#08131d")
+    readonly property color haloCool: themeColor("haloCool", "#1f5f95")
+    readonly property color haloWarm: themeColor("haloWarm", "#4d5f84")
+    readonly property color shellExterior: themeColor("shellExterior", "#0b1620")
+    readonly property color shellInterior: themeColor("shellInterior", "#142331")
+    readonly property color surfaceRaised: themeColor("surfaceRaised", "#132434")
+    readonly property color surfaceQuiet: themeColor("surfaceQuiet", "#0d1822")
+    readonly property color surfaceGlass: themeColor("surfaceGlass", "#1a3144")
+    readonly property color borderSubtle: themeColor("borderSubtle", "#274257")
+    readonly property color borderStrong: themeColor("borderStrong", "#5fa0ce")
+    readonly property color accentIce: themeColor("accentIce", "#87ddff")
+    readonly property color accentGold: themeColor("accentGold", "#d9a15a")
+    readonly property color accentMint: themeColor("accentMint", "#46d7a0")
+    readonly property color accentRose: themeColor("accentRose", "#ff728b")
+    readonly property color textStrong: themeColor("textStrong", "#f1f7fb")
+    readonly property color textPrimary: themeColor("textPrimary", "#d1deea")
+    readonly property color textSecondary: themeColor("textSecondary", "#91a8bb")
+    readonly property color textMuted: themeColor("textMuted", "#5f7384")
+    readonly property color dataLine: themeColor("dataLine", "#153043")
+    readonly property color dataLineStrong: themeColor("dataLineStrong", "#244b63")
+    readonly property color panelHighlight: themeColor("panelHighlight", "#1d4d6f")
+    readonly property color panelGlowSoft: themeColor("panelGlowSoft", "#63c5f2")
+    readonly property color canopyTop: themeColor("canopyTop", "#163247")
+    readonly property color canopyBottom: themeColor("canopyBottom", "#0b141c")
 
     readonly property color panelColor: surfaceRaised
     readonly property color panelColorRaised: surfaceGlass
@@ -90,8 +99,8 @@ ApplicationWindow {
     readonly property color panelGlowStrong: panelGlowSoft
     readonly property color panelTraceStrong: borderStrong
 
-    readonly property real widthScale: Math.max(0.88, Math.min(2.0, Number(metrics["width"] || designWidth) / designWidth))
-    readonly property real heightScale: Math.max(0.88, Math.min(2.0, Number(metrics["height"] || designHeight) / designHeight))
+    readonly property real widthScale: Math.max(0.82, Math.min(1.6, Number(metrics["width"] || designWidth) / designWidth))
+    readonly property real heightScale: Math.max(0.82, Math.min(1.6, Number(metrics["height"] || designHeight) / designHeight))
     readonly property real uiScale: Math.min(widthScale, heightScale)
 
     readonly property int safeLeft: Number(insets["left"] || 0)
@@ -102,26 +111,26 @@ ApplicationWindow {
     readonly property int viewportHeight: height > 0 ? height : Number(metrics["height"] || designHeight)
     readonly property real viewportWidth: width > 0 ? width : Number(metrics["width"] || designWidth)
     readonly property real contentWidth: Math.max(1, viewportWidth - safeLeft - safeRight)
-    readonly property bool wideLayout: viewportWidth >= 1360
-    readonly property bool mediumLayout: !wideLayout && viewportWidth >= 1040
+    readonly property bool wideLayout: viewportWidth >= 1680
+    readonly property bool mediumLayout: !wideLayout && viewportWidth >= 1280
     readonly property bool compactLayout: !wideLayout && !mediumLayout
-    readonly property bool shortViewport: viewportHeight < 780
+    readonly property bool shortViewport: viewportHeight < 940
 
-    readonly property int outerPadding: scaled(compactLayout ? 6 : 10)
-    readonly property int shellPadding: scaled(compactLayout ? 8 : 12)
-    readonly property int zoneGap: scaled(compactLayout ? 7 : 10)
-    readonly property int compactGap: scaled(7)
-    readonly property int panelPadding: scaled(compactLayout ? 12 : 16)
-    readonly property int cardPadding: scaled(compactLayout ? 10 : 12)
-    readonly property int panelRadius: scaled(22)
-    readonly property int cardRadius: scaled(16)
-    readonly property int edgeRadius: scaled(13)
-    readonly property int headerTitleSize: scaled(compactLayout ? 32 : 42)
-    readonly property int sectionTitleSize: scaled(compactLayout ? 24 : 32)
-    readonly property int bodyEmphasisSize: scaled(compactLayout ? 17 : 20)
-    readonly property int bodySize: scaled(16)
-    readonly property int captionSize: scaled(14)
-    readonly property int eyebrowSize: scaled(13)
+    readonly property int outerPadding: scaled(compactLayout ? 12 : 18)
+    readonly property int shellPadding: scaled(compactLayout ? 16 : 22)
+    readonly property int zoneGap: scaled(compactLayout ? 12 : 18)
+    readonly property int compactGap: scaled(compactLayout ? 8 : 10)
+    readonly property int panelPadding: scaled(compactLayout ? 18 : 24)
+    readonly property int cardPadding: scaled(compactLayout ? 14 : 18)
+    readonly property int panelRadius: scaled(28)
+    readonly property int cardRadius: scaled(20)
+    readonly property int edgeRadius: scaled(15)
+    readonly property int headerTitleSize: scaled(compactLayout ? 40 : 56)
+    readonly property int sectionTitleSize: scaled(compactLayout ? 30 : 42)
+    readonly property int bodyEmphasisSize: scaled(compactLayout ? 20 : 24)
+    readonly property int bodySize: scaled(compactLayout ? 16 : 18)
+    readonly property int captionSize: scaled(compactLayout ? 13 : 15)
+    readonly property int eyebrowSize: scaled(compactLayout ? 12 : 14)
 
     readonly property string topTitle: primaryLabel(meta["title"] || "飞腾原生座舱")
     readonly property string topSubtitle: String(
@@ -156,6 +165,10 @@ ApplicationWindow {
     readonly property string footerNote: String(
         bottomPanelData["footer_note"] || "默认执行仓库内软件渲染安全启动路径。"
     )
+    readonly property string headlineCurrentValue: formattedMetric(performanceHeadline["current_ms"], 3, "ms")
+    readonly property string headlineBaselineValue: formattedMetric(performanceHeadline["baseline_ms"], 1, "ms")
+    readonly property string headlineImprovementValue: formattedMetric(performanceHeadline["improvement_pct"], 2, "%")
+    readonly property string headlineSpeedupValue: formattedMetric(performanceHeadline["speedup_x"], 1, "x")
     readonly property string currentPageSummary: String(
         DataUtils.objectOrEmpty(navigationModel[currentPage])["summary"] || topSubtitle
     )
@@ -165,33 +178,21 @@ ApplicationWindow {
     readonly property var navigationModel: [
         {
             "index": 0,
-            "label": "总览",
-            "english": "Landing",
-            "summary": "世界地图主舞台、系统回注、弱网剧本与执行坞站。"
+            "label": "态势",
+            "english": "Situation",
+            "summary": "任务地图主舞台、系统在线态与可信 headline。"
         },
         {
             "index": 1,
-            "label": "系统板态",
-            "english": "System",
-            "summary": "会话、心跳、最近事件、快照原因与事实边界。"
+            "label": "合同",
+            "english": "Contract",
+            "summary": "飞行位置、数据来源、弱网策略与证据边界。"
         },
         {
             "index": 2,
-            "label": "飞行合同",
-            "english": "Flight",
-            "summary": "全球地图、飞机合同、实时遥测与采样元数据。"
-        },
-        {
-            "index": 3,
-            "label": "弱网策略",
-            "english": "Weak-Link",
-            "summary": "推荐档、吞吐 uplift、在线锚点与对照证据。"
-        },
-        {
-            "index": 4,
-            "label": "执行坞站",
-            "english": "Action Dock",
-            "summary": "合同动作、启动入口、渲染模式与只读门控。"
+            "label": "执行",
+            "english": "Execute",
+            "summary": "主动作、动作回执、板卡探测与恢复入口。"
         }
     ]
 
@@ -205,33 +206,17 @@ ApplicationWindow {
     readonly property var landingJumpModel: [
         {
             "index": 1,
-            "label": "系统板态",
-            "english": "System",
-            "summary": "会话、心跳与快照原因",
-            "value": compactMessage(heartbeatValue + " / " + snapshotReasonValue, compactLayout ? 20 : 30),
-            "tone": heartbeatTone
-        },
-        {
-            "index": 2,
-            "label": "飞行合同",
-            "english": "Flight",
-            "summary": "地图、遥测与数据合同",
-            "value": compactMessage(activeSourceLabel, compactLayout ? 16 : 22),
+            "label": "合同",
+            "english": "Contract",
+            "summary": "数据来源、飞行位置与弱网约束",
+            "value": compactMessage(activeSourceLabel + " / " + recommendedScenarioId, compactLayout ? 18 : 30),
             "tone": "online"
         },
         {
-            "index": 3,
-            "label": "弱网策略",
-            "english": "Weak-Link",
-            "summary": "推荐档与在线锚点",
-            "value": compactMessage(recommendedScenarioId, compactLayout ? 12 : 18),
-            "tone": "warning"
-        },
-        {
-            "index": 4,
-            "label": "执行坞站",
-            "english": "Action Dock",
-            "summary": "合同动作与启动命令",
+            "index": 2,
+            "label": "执行",
+            "english": "Execute",
+            "summary": "主动作、探板与回执",
             "value": String(enabledBottomActions) + " / " + String(bottomActions.length) + " 动作",
             "tone": enabledBottomActions > 0 ? "online" : "warning"
         }
@@ -327,8 +312,8 @@ ApplicationWindow {
         { "label": "渲染", "value": softwareRenderEnabled ? "软件安全" : "图形优先", "tone": softwareRenderEnabled ? "warning" : "online" }
     ]
 
-    minimumWidth: 760
-    minimumHeight: 600
+    minimumWidth: 1024
+    minimumHeight: 720
     flags: Qt.Window
     visible: true
     color: sceneBottom
@@ -371,20 +356,20 @@ ApplicationWindow {
     function toneColor(tone) {
         if (tone === "online")
             return accentMint
+        if (tone === "offline" || tone === "danger")
+            return accentRose
         if (tone === "warning" || tone === "degraded")
             return accentGold
-        if (tone === "danger")
-            return accentRose
         return accentIce
     }
 
     function toneFill(tone) {
         if (tone === "online")
             return "#0f2a22"
+        if (tone === "offline" || tone === "danger")
+            return "#2c161c"
         if (tone === "warning" || tone === "degraded")
             return "#2a2014"
-        if (tone === "danger")
-            return "#2c161c"
         return "#122838"
     }
 
@@ -430,12 +415,27 @@ ApplicationWindow {
         return resolved.slice(0, limit)
     }
 
+    function invokeOperatorAction(action) {
+        var resolved = DataUtils.objectOrEmpty(action)
+        var actionId = String(resolved["action_id"] || "")
+        if (actionId.length === 0)
+            return
+        if ((typeof cockpitBridge === "undefined") || !cockpitBridge || !cockpitBridge.invokeAction)
+            return
+        cockpitBridge.invokeAction(
+            actionId,
+            String(resolved["api_path"] || ""),
+            String(resolved["method"] || "POST"),
+            String(resolved["label"] || actionId)
+        )
+    }
+
     Component.onCompleted: {
         var availableWidth = Math.max(minimumWidth, Number(metrics["width"] || designWidth))
         var availableHeight = Math.max(minimumHeight, Number(metrics["height"] || designHeight))
         var titleBarOffset = 40
-        width = Math.max(minimumWidth, Math.round(availableWidth * 0.92))
-        height = Math.max(minimumHeight, Math.round((availableHeight - titleBarOffset) * 0.92))
+        width = Math.max(minimumWidth, Math.round(availableWidth * 0.95))
+        height = Math.max(minimumHeight, Math.round((availableHeight - titleBarOffset) * 0.94))
         x = Math.max(0, Math.round((availableWidth - width) / 2))
         y = Math.max(0, Math.round((availableHeight - height - titleBarOffset) / 2))
     }
@@ -474,7 +474,7 @@ ApplicationWindow {
         }
     }
 
-    LandingShell {
+    CockpitShell {
         anchors.fill: parent
         shellWindow: root
     }

@@ -46,7 +46,7 @@ fi
 mkdir -p "$OUTPUT_DIR"
 
 bash "$SCRIPT_DIR/run_cockpit_native_capture.sh" --page 0 --width "$CAPTURE_WIDTH" --height "$CAPTURE_HEIGHT" --output "$OUTPUT_DIR/landing.png"
-bash "$SCRIPT_DIR/run_cockpit_native_capture.sh" --page 2 --width "$CAPTURE_WIDTH" --height "$CAPTURE_HEIGHT" --output "$OUTPUT_DIR/flight.png"
-bash "$SCRIPT_DIR/run_cockpit_native_capture.sh" --page 4 --width "$CAPTURE_WIDTH" --height "$CAPTURE_HEIGHT" --output "$OUTPUT_DIR/actiondock.png"
+bash "$SCRIPT_DIR/run_cockpit_native_capture.sh" --page 1 --width "$CAPTURE_WIDTH" --height "$CAPTURE_HEIGHT" --output "$OUTPUT_DIR/flight.png"
+bash "$SCRIPT_DIR/run_cockpit_native_capture.sh" --page 2 --width "$CAPTURE_WIDTH" --height "$CAPTURE_HEIGHT" --output "$OUTPUT_DIR/actiondock.png"
 
 printf '%s\n' "$OUTPUT_DIR"
