@@ -1833,6 +1833,81 @@ function renderMissionPasswordInline(systemStatus) {
   button.textContent = access.has_password ? "更新并复用密码" : "保存并复用密码";
 }
 
+function currentMissionProgressState(systemStatus) {
+  const active = systemStatus.active_inference || {};
+  const currentResult = latestResultForVariant("current");
+  const progress = active.running && active.variant === "current"
+    ? active.progress || null
+    : currentResult?.live_progress || null;
+  return {
+    currentResult,
+    progress,
+    normalized: normalizeProgress(progress),
+  };
+}
+
+function buildMissionCurrentProgressMeta(progress, result, systemStatus) {
+  const access = systemStatus.board_access || {};
+  const defaults = access.preloaded_defaults || {};
+  if (progress.state === "idle") {
+    if (Boolean(defaults.active) && isPasswordOnlyMissing(access)) {
+      return "当前仅差板卡密码；保存后即可从首页直接启动远端 Current 重建。";
+    }
+    if (!access.connection_ready) {
+      return "会话未完全就绪时，仍可在首页先补密码；完整 host / user / port / env 继续在 Session / Gate 调整。";
+    }
+    return `当前会话已就绪；可直接发起本场 ${progress.expected_count} 张图远端 Current 重建。`;
+  }
+  return buildCompactProgressMeta(progress, result);
+}
+
+function buildMissionCurrentLaunchNote(progress, result, systemStatus) {
+  const access = systemStatus.board_access || {};
+  const defaults = access.preloaded_defaults || {};
+  const sessionTarget = access.host
+    ? `${access.user || "user"}@${access.host}:${access.port || 22}`
+    : "当前板卡会话";
+  if (progress.state === "idle") {
+    if (Boolean(defaults.active) && isPasswordOnlyMissing(access)) {
+      return `已预载 ${sessionTarget} 与推理 env；先保存密码，再点击“启动远端 Current 重建”。`;
+    }
+    if (access.connection_ready) {
+      return `当前会话已复用 ${sessionTarget}；可直接从首页启动远端 Current 重建。`;
+    }
+    return "密码就绪后，可直接在首页启动远端 Current 重建，并同步查看 300 张图在线进度。";
+  }
+  if (progress.state === "running") {
+    return `远端 Current 重建正在推进，首页直接显示 ${progress.count_label} 与当前阶段；Drawer 内保留完整阶段和日志。`;
+  }
+  if (result?.execution_mode === "live") {
+    return "上一次远端 Current 重建已完成；首页保留计数与阶段摘要，可继续再次发起。";
+  }
+  if (result?.status === "fallback" || result?.execution_mode === "prerecorded") {
+    return "最近一次 live 已回退到归档展示；首页仍保留同一入口与最近进度摘要，便于重新发起。";
+  }
+  return "首页保留远端 Current 重建入口与最近进度摘要，Current Drawer 展示完整证据细节。";
+}
+
+function renderMissionCurrentLaunch(systemStatus) {
+  const note = document.getElementById("missionCurrentLaunchNote");
+  if (!note) return;
+  const { currentResult, progress, normalized } = currentMissionProgressState(systemStatus);
+  renderProgressFrame(
+    progress,
+    {
+      badgeId: "missionCurrentProgressBadge",
+      countId: "missionCurrentProgressCount",
+      barId: "missionCurrentProgressBar",
+      markerId: "missionCurrentProgressMarker",
+      axisId: "missionCurrentProgressAxis",
+      stageId: "missionCurrentProgressStage",
+      metaId: "missionCurrentProgressMeta",
+    },
+    buildMissionCurrentProgressMeta(normalized, currentResult, systemStatus)
+  );
+  note.textContent = buildMissionCurrentLaunchNote(normalized, currentResult, systemStatus);
+}
+
 function renderMissionDashboard(snapshot, systemStatus) {
   const mission = snapshot.mission || {};
   const live = systemStatus.live || {};
@@ -1842,12 +1917,10 @@ function renderMissionDashboard(snapshot, systemStatus) {
   const futureBinding = selectedLinkProfile.future_binding || {};
   const active = systemStatus.active_inference || {};
   const activeProgress = normalizeProgress(active.progress || null);
-  const currentResult = latestResultForVariant("current");
+  const currentLiveState = currentMissionProgressState(systemStatus);
+  const currentResult = currentLiveState.currentResult;
   const baselineResult = latestResultForVariant("baseline");
-  const currentLiveProgress = active.running && active.variant === "current"
-    ? activeProgress
-    : normalizeProgress(currentResult?.live_progress || null);
-  const baselineLiveProgress = normalizeProgress(baselineResult?.live_progress || null);
+  const currentLiveProgress = currentLiveState.normalized;
   const safetyPanel = effectiveSafetyPanel(systemStatus);
   const queueStages = active.running ? activeProgress.stages : (currentResult?.live_progress?.stages || []);
   const currentSampleLabel =
@@ -1988,6 +2061,7 @@ function renderMissionDashboard(snapshot, systemStatus) {
     archiveHasTimeline ? (state.archiveSession?.read_errors?.length ? "degraded" : "online") : (active.running ? activeProgress.tone || "degraded" : "neutral")
   );
   document.getElementById("eventTimelineModule").innerHTML = renderArchiveTimelineModule(snapshot, systemStatus);
+  renderMissionCurrentLaunch(systemStatus);
   renderMissionPasswordInline(systemStatus);
 }
 
@@ -2343,9 +2417,15 @@ function renderInference(result) {
     document.getElementById("qualityMetrics").innerHTML = "";
     document.getElementById("inferenceMessage").textContent = "等待触发重建。";
     renderLiveProgress(null);
+    if (state.systemStatus) {
+      renderMissionCurrentLaunch(state.systemStatus);
+    }
     return;
   }
   renderLiveProgress(result.live_progress || null);
+  if (state.systemStatus) {
+    renderMissionCurrentLaunch(state.systemStatus);
+  }
   document.getElementById("act2SourceLabel").textContent = `${result.source_label} | ${result.sample.label}`;
   document.getElementById("originalImage").src = result.original_image_b64;
   document.getElementById("reconstructedImage").src = result.reconstructed_image_b64;
@@ -2690,6 +2770,7 @@ function applyLaunchPolicy(systemStatus) {
   const baselineButton = document.getElementById("runBaselineButton");
   const runAllButton = document.getElementById("runAllButton");
   const opsCurrentButton = document.getElementById("opsRunCurrentButton");
+  const missionCurrentButton = document.getElementById("missionRunCurrentButton");
   const opsBaselineButton = document.getElementById("opsRunBaselineButton");
   const manifestButtons = [
     document.getElementById("previewManifestGateButton"),
@@ -2697,12 +2778,15 @@ function applyLaunchPolicy(systemStatus) {
   ].filter(Boolean);
 
   const currentLabel = currentSupport.mode === "signed_manifest_v1"
-    ? "启动 Current signed 数据面 300 张图在线推进"
-    : "启动 Current 数据面 300 张图在线推进";
+    ? "启动远端 Current signed 重建（300 张图）"
+    : "启动远端 Current 重建（300 张图）";
+  const missionCurrentLabel = currentSupport.mode === "signed_manifest_v1"
+    ? "启动远端 Current signed 重建"
+    : "启动远端 Current 重建";
   currentButton.textContent = currentLabel;
   currentAgainButton.textContent = currentSupport.mode === "signed_manifest_v1"
-    ? "运行 Current signed 数据面 300 张图"
-    : "运行 Current 数据面 300 张图";
+    ? "再次运行远端 Current signed 重建（300 张图）"
+    : "再次运行远端 Current 重建（300 张图）";
   baselineButton.textContent = baselineSupport.launch_allowed === false
     ? "PyTorch reference（归档）"
     : `运行 ${baselineLiveLabel} 数据面 300 张图`;
@@ -2710,7 +2794,10 @@ function applyLaunchPolicy(systemStatus) {
     ? "PyTorch reference + Current 当前未开放 live"
     : `一键顺序运行 ${baselineLiveLabel} + Current 数据面 300 张图`;
   if (opsCurrentButton) {
-    opsCurrentButton.textContent = currentSupport.mode === "signed_manifest_v1" ? "Current Signed" : "Current Live";
+    opsCurrentButton.textContent = missionCurrentLabel;
+  }
+  if (missionCurrentButton) {
+    missionCurrentButton.textContent = missionCurrentLabel;
   }
   if (opsBaselineButton) {
     opsBaselineButton.textContent = baselineSupport.launch_allowed === false
@@ -2727,6 +2814,9 @@ function applyLaunchPolicy(systemStatus) {
   if (opsCurrentButton) {
     opsCurrentButton.disabled = currentBlocked;
   }
+  if (missionCurrentButton) {
+    missionCurrentButton.disabled = currentBlocked;
+  }
   if (opsBaselineButton) {
     opsBaselineButton.disabled = baselineBlocked;
   }
@@ -2739,6 +2829,9 @@ function applyLaunchPolicy(systemStatus) {
     : boardBusy ? boardBusyReason : (currentBlocked ? (currentSupport.note || "") : (baselineSupport.note || ""));
   if (opsCurrentButton) {
     opsCurrentButton.title = currentButton.title;
+  }
+  if (missionCurrentButton) {
+    missionCurrentButton.title = currentButton.title;
   }
   if (opsBaselineButton) {
     opsBaselineButton.title = baselineButton.title;
@@ -3159,7 +3252,7 @@ function bindEvents() {
         previewJobManifestGate();
       });
     });
-  [document.getElementById("runCurrentButton"), document.getElementById("opsRunCurrentButton")]
+  [document.getElementById("runCurrentButton"), document.getElementById("opsRunCurrentButton"), document.getElementById("missionRunCurrentButton")]
     .filter(Boolean)
     .forEach((button) => {
       button.addEventListener("click", () => {
