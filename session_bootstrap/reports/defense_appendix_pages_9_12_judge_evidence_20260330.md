@@ -76,6 +76,9 @@
     - 当前 runtime hotspot candidates：
       - `fused_conv2d_transpose1_add9`
       - `fused_conv2d_transpose2_add12`
+    - raw top ops 还包括：
+      - `fused_conv2d_transpose_add6`
+      - `fused_conv2d3_add15`
   - 因此当前口径应为：
     - **stage-weight hotspot evidence 已有**
     - **remote runtime per-op profiling 也已可用**
