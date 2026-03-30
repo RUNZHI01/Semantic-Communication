@@ -69,6 +69,7 @@ DEFAULT_LOCAL_BUILD_OUTPUT_DIR = (
 )
 DEFAULT_LOCAL_BUILD_ARTIFACT_NAME = f"{OPERATOR_NAME}_post_db_swap.so"
 DEFAULT_LOCAL_BUILD_REPORT_NAME = f"{OPERATOR_NAME}_post_db_swap_report.json"
+LATEST_LOCAL_BUILD_SYNC_SNAPSHOT_NAME = "latest_local_build_sync_snapshot.md"
 DEFAULT_REMOTE_ARCHIVE_DIR = (
     "/home/user/Downloads/jscc-test/jscc_staging_handwritten_fused_conv2d_transpose1_add9"
 )
@@ -460,6 +461,29 @@ def build_validation_report_template(
     )
 
 
+def build_initial_local_build_sync_snapshot(
+    preferred_local_post_db_build: dict[str, str],
+) -> str:
+    return "\n".join(
+        [
+            "# Latest local build+sync snapshot",
+            "",
+            "- snapshot_status: `awaiting_first_local_build_sync`",
+            "- synced_at: `<not_synced_yet>`",
+            f"- report_path: `{preferred_local_post_db_build['report_path']}`",
+            f"- artifact_path: `{preferred_local_post_db_build['artifact_path']}`",
+            "- artifact_sha256: `<not_synced_yet>`",
+            "- artifact_exists: `<not_synced_yet>`",
+            "- build_status: `<not_synced_yet>`",
+            "- swap_succeeded: `<not_synced_yet>`",
+            "- export_status: `<not_synced_yet>`",
+            "",
+            "This file is refreshed by `sync_transpose1_post_db_local_build_result.py` and only records local diagnostic build facts.",
+            "",
+        ]
+    )
+
+
 def build_readme(
     *,
     candidate_payload: dict[str, Any],
@@ -504,14 +528,17 @@ def build_readme(
             f"- `manual_profile.env`: `{generated_files['manual_profile.env']}`",
             f"- `validation_report_template.md`: `{generated_files['validation_report_template.md']}`",
             f"- `bookkeeping.json`: `{generated_files['bookkeeping.json']}`",
+            (
+                "- `latest_local_build_sync_snapshot.md`: "
+                f"`{generated_files[LATEST_LOCAL_BUILD_SYNC_SNAPSHOT_NAME]}`"
+            ),
             "",
             "## Default workflow",
             "",
             "1. Materialize `manual_hook_overlay.env` so the handwritten lane points at the checked-in candidate-v0 module unless you explicitly need a scaffold-local placeholder seed module.",
-            "2. Run the preferred one-shot local build + sync wrapper and inspect its final JSON summary together with "
-            f"`{preferred_local_post_db_build['artifact_path']}` plus "
-            f"`{preferred_local_post_db_build['report_path']}`.",
-            "3. The wrapper records the artifact path, report path, and build SHA back into the scaffold bookkeeping pack.",
+            "2. Run the preferred one-shot local build + sync wrapper, then open "
+            f"`{generated_files[LATEST_LOCAL_BUILD_SYNC_SNAPSHOT_NAME]}` for the newest local artifact/report/SHA/status snapshot.",
+            "3. The wrapper also prints a concise JSON summary and records the same local facts back into the scaffold bookkeeping pack.",
             "4. The one-shot wrapper is still local-only and diagnostic-only; it does not imply payload or runtime validation.",
             "5. Use the split build/sync commands below only when you need to debug those steps independently.",
             "6. Only after the local build facts look sane, use the optional staging validation and runtime reprobe commands below.",
@@ -549,6 +576,10 @@ def build_readme(
             commands["sync_local_build_result"],
             "```",
             "",
+            (
+                "- Latest local build+sync snapshot: "
+                f"`{generated_files[LATEST_LOCAL_BUILD_SYNC_SNAPSHOT_NAME]}`"
+            ),
             f"- Preferred local build output dir: `{preferred_local_post_db_build['output_dir']}`",
             f"- Preferred local build artifact: `{preferred_local_post_db_build['artifact_path']}`",
             f"- Preferred local build report: `{preferred_local_post_db_build['report_path']}`",
@@ -613,6 +644,9 @@ def main(argv: list[str] | None = None) -> int:
     validation_template_md = args.output_dir / "validation_report_template.md"
     bookkeeping_json = args.output_dir / "bookkeeping.json"
     readme_md = args.output_dir / "README.md"
+    latest_local_build_sync_snapshot_md = (
+        args.output_dir / LATEST_LOCAL_BUILD_SYNC_SNAPSHOT_NAME
+    )
     ensure_clean_outputs(
         [
             rebuild_env,
@@ -621,6 +655,7 @@ def main(argv: list[str] | None = None) -> int:
             validation_template_md,
             bookkeeping_json,
             readme_md,
+            latest_local_build_sync_snapshot_md,
         ],
         args.allow_overwrite,
     )
@@ -642,6 +677,7 @@ def main(argv: list[str] | None = None) -> int:
         validation_template_md.name: str(validation_template_md),
         bookkeeping_json.name: str(bookkeeping_json),
         readme_md.name: str(readme_md),
+        latest_local_build_sync_snapshot_md.name: str(latest_local_build_sync_snapshot_md),
     }
     bookkeeping = {
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
@@ -703,6 +739,10 @@ def main(argv: list[str] | None = None) -> int:
             commands=commands,
             preferred_local_post_db_build=bookkeeping["preferred_local_post_db_build"],
         ),
+    )
+    write_text(
+        latest_local_build_sync_snapshot_md,
+        build_initial_local_build_sync_snapshot(bookkeeping["preferred_local_post_db_build"]),
     )
     write_text(bookkeeping_json, json.dumps(bookkeeping, indent=2, ensure_ascii=False) + "\n")
     write_text(

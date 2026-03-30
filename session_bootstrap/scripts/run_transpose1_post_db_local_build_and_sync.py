@@ -158,6 +158,9 @@ def summarize(
     validation_report_template = repo_native_optional(
         sync_payload.get("validation_report_template")
     )
+    latest_local_build_sync_snapshot = repo_native_optional(
+        sync_payload.get("latest_local_build_sync_snapshot")
+    )
 
     return {
         "status": "ok",
@@ -171,6 +174,7 @@ def summarize(
         "artifact_sha256": sync_payload.get("artifact_sha256"),
         "bookkeeping_json": bookkeeping_json,
         "validation_report_template": validation_report_template,
+        "latest_local_build_sync_snapshot": latest_local_build_sync_snapshot,
         "scaffold_readme": sync_result.repo_native(args.scaffold_dir / "README.md"),
         "report_id": build_payload.get("report_id"),
     }

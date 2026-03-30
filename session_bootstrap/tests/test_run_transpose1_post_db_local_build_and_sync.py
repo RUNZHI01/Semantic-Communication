@@ -77,6 +77,9 @@ class RunTranspose1PostDbLocalBuildAndSyncTest(unittest.TestCase):
                                 "artifact_sha256": "abc123",
                                 "bookkeeping_json": str(scaffold_dir / "bookkeeping.json"),
                                 "validation_report_template": str(scaffold_dir / "validation_report_template.md"),
+                                "latest_local_build_sync_snapshot": str(
+                                    scaffold_dir / "latest_local_build_sync_snapshot.md"
+                                ),
                             }
                         ),
                         stderr="",
@@ -140,6 +143,12 @@ class RunTranspose1PostDbLocalBuildAndSyncTest(unittest.TestCase):
             self.assertEqual(summary["artifact_sha256"], "abc123")
             self.assertEqual(summary["report_json"], module.sync_result.repo_native(output_dir / "report.json"))
             self.assertEqual(summary["bookkeeping_json"], module.sync_result.repo_native(scaffold_dir / "bookkeeping.json"))
+            self.assertEqual(
+                summary["latest_local_build_sync_snapshot"],
+                module.sync_result.repo_native(
+                    scaffold_dir / "latest_local_build_sync_snapshot.md"
+                ),
+            )
 
 
 if __name__ == "__main__":
