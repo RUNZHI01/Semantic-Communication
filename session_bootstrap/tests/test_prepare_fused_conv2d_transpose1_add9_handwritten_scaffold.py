@@ -119,6 +119,12 @@ class PrepareFusedConv2dTranspose1Add9HandwrittenScaffoldTest(unittest.TestCase)
                 f"--scaffold-dir {output_dir} "
                 "--output-dir ./session_bootstrap/tmp/transpose1_post_db_swap_local_build"
             )
+            preferred_one_shot_command = (
+                "python3 ./session_bootstrap/scripts/"
+                "run_transpose1_post_db_local_build_and_sync.py "
+                f"--scaffold-dir {output_dir} "
+                "--output-dir ./session_bootstrap/tmp/transpose1_post_db_swap_local_build"
+            )
             self.assertEqual(result["status"], "ok")
             self.assertEqual(result["output_dir"], str(output_dir))
             self.assertEqual(result["preferred_local_build_output_dir"], preferred_output_dir)
@@ -169,8 +175,7 @@ class PrepareFusedConv2dTranspose1Add9HandwrittenScaffoldTest(unittest.TestCase)
                 bookkeeping["default_workflow"],
                 [
                     "prepare_manual_hook_overlay",
-                    "local_schedule_preserving_build",
-                    "sync_local_build_result",
+                    "local_build_and_sync",
                     "validate",
                     "profile",
                 ],
@@ -232,6 +237,10 @@ class PrepareFusedConv2dTranspose1Add9HandwrittenScaffoldTest(unittest.TestCase)
                 "run_transpose1_post_db_local_build.py",
                 bookkeeping["commands"]["local_schedule_preserving_build"],
             )
+            self.assertEqual(
+                bookkeeping["commands"]["local_build_and_sync"],
+                preferred_one_shot_command,
+            )
             self.assertIn(
                 "--output-dir ./session_bootstrap/tmp/transpose1_post_db_swap_local_build",
                 bookkeeping["commands"]["local_schedule_preserving_build"],
@@ -279,16 +288,17 @@ class PrepareFusedConv2dTranspose1Add9HandwrittenScaffoldTest(unittest.TestCase)
 
             self.assertIn("## Default workflow", readme)
             self.assertIn(
-                "Run the local result-sync helper so the scaffold bookkeeping pack records",
+                "Run the preferred one-shot local build + sync wrapper",
                 readme,
             )
-            self.assertIn("The sync step is still local-only and diagnostic-only", readme)
+            self.assertIn("The one-shot wrapper is still local-only and diagnostic-only", readme)
             self.assertIn("manual_hook_overlay.env` is hook wiring only", readme)
             self.assertIn(preferred_artifact_path, readme)
             self.assertIn(preferred_report_path, readme)
             self.assertIn("Preferred local build artifact", readme)
             self.assertIn("Preferred local build report", readme)
             self.assertIn("Wrapper output naming note", readme)
+            self.assertIn("run_transpose1_post_db_local_build_and_sync.py", readme)
             self.assertIn("sync_transpose1_post_db_local_build_result.py", readme)
             self.assertIn("run_phytium_current_safe_one_shot.sh", readme)
             self.assertIn("run_task_5_1_operator_profile.py", readme)
