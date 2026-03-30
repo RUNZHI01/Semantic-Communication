@@ -40,6 +40,11 @@ DEFAULT_CHECKED_IN_CANDIDATE_PATH = (
     / OPERATOR_NAME
     / f"{OPERATOR_NAME}_manual_candidate.py"
 )
+DEFAULT_LOCAL_BUILD_OUTPUT_DIR = (
+    "./session_bootstrap/tmp/transpose1_post_db_swap_local_build"
+)
+DEFAULT_LOCAL_BUILD_ARTIFACT_NAME = f"{OPERATOR_NAME}_post_db_swap.so"
+DEFAULT_LOCAL_BUILD_REPORT_NAME = f"{OPERATOR_NAME}_post_db_swap_report.json"
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -147,6 +152,75 @@ def load_bookkeeping(bookkeeping_json: Path) -> dict[str, Any]:
     return payload
 
 
+def build_default_preferred_local_post_db_build() -> dict[str, str]:
+    output_dir = repo_native(Path(DEFAULT_LOCAL_BUILD_OUTPUT_DIR))
+    return {
+        "command": (
+            "python3 ./session_bootstrap/scripts/run_transpose1_post_db_local_build.py "
+            f"--output-dir {shell_quote(output_dir)}"
+        ),
+        "output_dir": output_dir,
+        "artifact_name": DEFAULT_LOCAL_BUILD_ARTIFACT_NAME,
+        "report_name": DEFAULT_LOCAL_BUILD_REPORT_NAME,
+        "artifact_path": repo_native(
+            Path(DEFAULT_LOCAL_BUILD_OUTPUT_DIR) / DEFAULT_LOCAL_BUILD_ARTIFACT_NAME
+        ),
+        "report_path": repo_native(
+            Path(DEFAULT_LOCAL_BUILD_OUTPUT_DIR) / DEFAULT_LOCAL_BUILD_REPORT_NAME
+        ),
+        "output_naming_note": (
+            "run_transpose1_post_db_local_build.py keeps these basenames; overriding "
+            "--output-dir only changes the parent directory."
+        ),
+    }
+
+
+def merge_nonempty_reference(target: dict[str, str], key: str, value: Any) -> None:
+    if isinstance(value, str) and value.strip():
+        target[key] = value.strip()
+
+
+def resolve_preferred_local_post_db_build(bookkeeping: dict[str, Any]) -> dict[str, str]:
+    preferred_local_post_db_build = build_default_preferred_local_post_db_build()
+    preferred = bookkeeping.get("preferred_local_post_db_build")
+    if isinstance(preferred, dict):
+        for key in (
+            "command",
+            "output_dir",
+            "artifact_name",
+            "report_name",
+            "artifact_path",
+            "report_path",
+            "output_naming_note",
+        ):
+            merge_nonempty_reference(preferred_local_post_db_build, key, preferred.get(key))
+
+    commands = bookkeeping.get("commands")
+    if isinstance(commands, dict):
+        merge_nonempty_reference(
+            preferred_local_post_db_build,
+            "command",
+            commands.get("local_schedule_preserving_build"),
+        )
+
+    merge_nonempty_reference(
+        preferred_local_post_db_build,
+        "output_dir",
+        bookkeeping.get("preferred_local_build_output_dir"),
+    )
+    merge_nonempty_reference(
+        preferred_local_post_db_build,
+        "artifact_path",
+        bookkeeping.get("preferred_local_build_artifact_path"),
+    )
+    merge_nonempty_reference(
+        preferred_local_post_db_build,
+        "report_path",
+        bookkeeping.get("preferred_local_build_report_path"),
+    )
+    return preferred_local_post_db_build
+
+
 def render_manual_impl(
     *,
     template_path: Path,
@@ -196,11 +270,23 @@ def build_overlay_env(
     rebuild_env: Path,
     manual_impl_path: Path,
     bookkeeping_json: Path,
+    bookkeeping: dict[str, Any],
 ) -> str:
+    preferred_local_build = resolve_preferred_local_post_db_build(bookkeeping)
+
     lines = [
         "# Auto-generated overlay for the fused_conv2d_transpose1_add9 handwritten hook.",
         "# shellcheck source=/dev/null",
         f"source {shell_quote(str(rebuild_env.resolve()))}",
+        "",
+        "# This overlay is hook wiring only for the transpose1 handwritten seam.",
+        "# It is local-only and diagnostic-only until you run the preferred post-db build.",
+        "# Generating this file does not build, export, validate, or prove any performance result.",
+        "# Preferred local build command:",
+        f"# {preferred_local_build['command']}",
+        f"# Preferred local build output dir: {preferred_local_build['output_dir']}",
+        f"# Preferred local build artifact: {preferred_local_build['artifact_path']}",
+        f"# Preferred local build report: {preferred_local_build['report_path']}",
         "",
         "# rpc_tune.py already consumes these variables at the pre-compile seam.",
         "# Keep this overlay staging-only by sourcing it only for the handwritten lane.",
@@ -221,6 +307,7 @@ def main(argv: list[str] | None = None) -> int:
     rebuild_env = require_file(args.scaffold_dir / "manual_rebuild.env", "scaffold rebuild env")
     bookkeeping_json = require_file(args.scaffold_dir / "bookkeeping.json", "scaffold bookkeeping")
     bookkeeping = load_bookkeeping(bookkeeping_json)
+    preferred_local_build = resolve_preferred_local_post_db_build(bookkeeping)
 
     checked_in_candidate_path = require_file(
         DEFAULT_CHECKED_IN_CANDIDATE_PATH,
@@ -260,6 +347,7 @@ def main(argv: list[str] | None = None) -> int:
             rebuild_env=rebuild_env,
             manual_impl_path=args.manual_impl_path,
             bookkeeping_json=bookkeeping_json,
+            bookkeeping=bookkeeping,
         ),
     )
 
@@ -271,6 +359,12 @@ def main(argv: list[str] | None = None) -> int:
                 "manual_impl_path": str(args.manual_impl_path),
                 "manual_impl_generated": materialize_manual_impl,
                 "output_env": str(args.output_env),
+                "overlay_role": "hook_wiring_only",
+                "overlay_is_hook_wiring_only": True,
+                "preferred_local_build_command": preferred_local_build["command"],
+                "preferred_local_build_output_dir": preferred_local_build["output_dir"],
+                "preferred_local_build_artifact_path": preferred_local_build["artifact_path"],
+                "preferred_local_build_report_path": preferred_local_build["report_path"],
             },
             ensure_ascii=False,
         )
