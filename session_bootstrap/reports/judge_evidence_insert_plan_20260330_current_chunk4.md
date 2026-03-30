@@ -7,11 +7,11 @@
 
 优先引用顺序：
 
-1. `session_bootstrap/reports/judge_evidence_pack_20260330_current_chunk4.md`
-2. `session_bootstrap/reports/judge_quality_formal_report_20260330.md`
+1. `session_bootstrap/reports/judge_evidence_pack_20260330_current_chunk4_lpips_profiled.md`
+2. `session_bootstrap/reports/judge_quality_formal_report_20260330_lpips_partial.md`
 3. `session_bootstrap/reports/judge_snr_robustness_20260330_current_chunk4.md`
 4. `session_bootstrap/reports/resource_profile_trusted_current_chunk4_20260330_151728.md`
-5. `session_bootstrap/reports/profiling_trusted_current_20260312_154323.md`
+5. `session_bootstrap/reports/profiling_judge_refresh_20260330_170808.md`
 
 ## 2. 技术文档正文建议插入位置
 
@@ -29,18 +29,18 @@
 ### 2.2 图像质量页
 
 建议表格直接引用：
-- `session_bootstrap/reports/judge_quality_formal_report_20260330.md`
+- `session_bootstrap/reports/judge_quality_formal_report_20260330_lpips_partial.md`
 
 可直接写成：
-- `PyTorch vs TVM baseline`：`PSNR 34.4795 dB`，`SSIM 0.970358`
-- `PyTorch vs TVM current`：`PSNR 35.6942 dB`，`SSIM 0.972836`
-- `TVM baseline vs TVM current`：`PSNR 34.5299 dB`，`SSIM 0.970432`
+- `PyTorch vs TVM baseline`：`PSNR 34.4244 dB`，`SSIM 0.970454`，`LPIPS 0.025883`
+- `PyTorch vs TVM current`：`PSNR 35.6633 dB`，`SSIM 0.972751`，`LPIPS 0.025124`
+- `TVM baseline vs TVM current`：`PSNR 34.5299 dB`，`SSIM 0.970432`，`LPIPS 暂缺`
 
 正文解释建议：
-- current 相比 baseline，在同一 PyTorch reference 下平均 `+1.2147 dB PSNR`
+- current 相比 baseline，在同一 PyTorch reference 下平均 `+1.2389 dB PSNR`
+- current 的 LPIPS 也略优于 baseline（`0.025124 < 0.025883`）
 - 说明 current 提速并未以明显牺牲重建质量为代价
-- 脚注注明：部分比较涉及空间裁剪归一化（crop policy）
-- LPIPS 当前仍属 environment-gated complementary evidence，不要把它写成“缺失导致结论无效”
+- 脚注注明：`PyTorch vs TVM baseline` 这组 LPIPS 为 remote crop249 对齐后得到；`TVM baseline vs current` 这一组 LPIPS 仍待补
 
 ### 2.3 资源画像页
 
@@ -87,7 +87,7 @@
 ### 2.5 算子热点 / profiling 页
 
 建议直接引用：
-- `session_bootstrap/reports/profiling_trusted_current_20260312_154323.md`
+- `session_bootstrap/reports/profiling_judge_refresh_20260330_170808.md`
 
 当前建议写法：
 - 不要声称“已经拿到完整 remote per-op profiler 结果”
@@ -98,7 +98,8 @@
     - `fused_variance1_add3_tir_sqrt1`
     - `reshape1`
     - `fused_mean1_subtract1_divide1_multiply1_add4`
-  - runtime per-op profiling 仍受 `vm.profile` 能力限制，当前保留为后续增强项
+  - 已在 trusted chunk4 上做过 fresh probe，但 `vm.profile('main', input)` 仍返回 `AttributeError: Module has no function 'profile'`
+  - 因此 runtime per-op profiling 当前仍属于暂不支持，而不是“还没试”
 
 ## 3. PPT 页结构建议
 
@@ -108,8 +109,8 @@
 标题建议：`加速同时保持重建质量`
 
 放：
-- `judge_quality_formal_report_20260330.md` 里的 aggregate matrix
-- 一句结论：`current 相比 baseline 平均 +1.2147 dB PSNR`
+- `judge_quality_formal_report_20260330_lpips_partial.md` 里的 aggregate matrix
+- 一句结论：`current 相比 baseline 平均 +1.2389 dB PSNR，LPIPS 也略优`
 
 ### 页 B：资源可控
 标题建议：`资源画像与部署 footprint`
@@ -135,7 +136,7 @@
 ## 4. 答辩口头版一句话模板
 
 ### 质量
-“我们不只看延迟，也补了和 PyTorch reference 对齐的重建质量指标；在同一参考下，current 的平均 PSNR 比 baseline 还高约 1.21 dB，说明这轮优化不是单纯拿质量换速度。”
+“我们不只看延迟，也补了和 PyTorch reference 对齐的重建质量指标；在同一参考下，current 的平均 PSNR 比 baseline 还高约 1.24 dB，SNR10 这一组 LPIPS 也略优于 baseline，说明这轮优化不是单纯拿质量换速度。”
 
 ### 资源
 “我们还补了板端 CPU、内存和产物大小画像；当前 trusted chunk4 产物只有 1.575 MiB，运行时平均 I/O wait 很低，说明系统已经具备比较稳定的部署形态。”
@@ -145,6 +146,6 @@
 
 ## 5. 当前仍需诚实说明的边界
 
-- `LPIPS` 仍未在这轮正式包里补齐；当前结论以 `PSNR / SSIM` 为正式最小集
-- 远端 runtime per-op profiling 仍未拿到完整可复用结果，当前是 `stage_level_hotspot_only`
-- 以上边界不会推翻已有 judge-facing 结论，但答辩时应主动说明为“后续增强项”
+- `LPIPS` 已补到 `PyTorch vs TVM baseline/current` 两组的 SNR10 远端实测，但 `TVM baseline vs current` 这一组仍未补齐
+- 远端 runtime per-op profiling 仍未拿到完整可复用结果，fresh probe 结论仍是 `stage_level_hotspot_only`
+- 以上边界不会推翻已有 judge-facing 结论，但答辩时应主动说明为“当前已补核心证据，剩余是增强项”

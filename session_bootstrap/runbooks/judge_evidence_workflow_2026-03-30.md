@@ -24,6 +24,8 @@
 - `session_bootstrap/reports/judge_evidence_pack_20260330_current_chunk4.json`
 - `session_bootstrap/reports/judge_evidence_pack_20260330_current_chunk4_lpips_partial.md`
 - `session_bootstrap/reports/judge_evidence_pack_20260330_current_chunk4_lpips_partial.json`
+- `session_bootstrap/reports/judge_evidence_pack_20260330_current_chunk4_lpips_profiled.md`
+- `session_bootstrap/reports/judge_evidence_pack_20260330_current_chunk4_lpips_profiled.json`
 
 对应脚本入口：
 
@@ -199,7 +201,7 @@ bash ./session_bootstrap/scripts/run_remote_resource_profile.sh \
 
 推荐评委材料引用顺序：
 
-1. `judge_evidence_pack_20260330_current_chunk4_lpips_partial.md`
+1. `judge_evidence_pack_20260330_current_chunk4_lpips_profiled.md`
 2. `judge_quality_formal_report_20260330_lpips_partial.md`
 3. `judge_snr_robustness_20260330_current_chunk4.md`
 4. `inference_compare_currentsafe_chunk4_refresh_20260313_1758.md`
