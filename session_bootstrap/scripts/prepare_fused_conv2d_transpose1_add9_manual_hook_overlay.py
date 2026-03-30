@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Prepare a first manual hook overlay for fused_conv2d_transpose1_add9.
+"""Prepare the first manual-seed hook overlay for fused_conv2d_transpose1_add9.
 
 This helper stays narrow on purpose:
 - reuse the existing handwritten scaffold directory as the source of truth
-- materialize one editable placeholder manual implementation file
+- materialize one editable manual implementation seed file
 - generate one rebuild overlay env that points at that file
 - avoid touching trusted current or any stock rebuild wrapper
 """
@@ -37,7 +37,7 @@ DEFAULT_TEMPLATE_PATH = (
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Materialize a placeholder manual implementation file plus rebuild overlay "
+            "Materialize an editable manual implementation seed file plus rebuild overlay "
             f"for the handwritten {OPERATOR_NAME} scaffold."
         )
     )
@@ -51,17 +51,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--template-path",
         type=Path,
         default=DEFAULT_TEMPLATE_PATH,
-        help="Checked-in placeholder template used to create the editable manual implementation file.",
+        help="Checked-in template used to create the editable manual implementation seed file.",
     )
     parser.add_argument(
         "--manual-impl-path",
         type=Path,
-        help="Output path for the editable placeholder manual implementation file.",
+        help="Output path for the editable manual implementation seed file.",
     )
     parser.add_argument(
         "--output-env",
         type=Path,
-        help="Output path for the rebuild overlay env that points at the placeholder file.",
+        help="Output path for the rebuild overlay env that points at the manual seed file.",
     )
     parser.add_argument(
         "--allow-overwrite",
