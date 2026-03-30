@@ -260,10 +260,190 @@ def _task_stage_matches(task_stages, operator_name):
     return matches
 
 
-def maybe_apply_handwritten_hook(mod, target, database, output_dir, task_stages=None):
+def _global_var_name(value):
+    name_hint = getattr(value, "name_hint", None)
+    if name_hint:
+        return str(name_hint)
+    return str(value)
+
+
+def _lookup_global_func(mod, name):
+    if mod is None or not name:
+        return None
+
+    get_global_var = getattr(mod, "get_global_var", None)
+    if callable(get_global_var):
+        try:
+            global_var = get_global_var(name)
+        except Exception:
+            global_var = None
+        else:
+            try:
+                return mod[global_var]
+            except Exception:
+                pass
+
+    try:
+        return mod[name]
+    except Exception:
+        pass
+
+    functions = getattr(mod, "functions", None)
+    if functions is not None:
+        try:
+            items = list(functions.items())
+        except Exception:
+            items = []
+        for key, value in items:
+            if _global_var_name(key) == name:
+                return value
+
+    get_global_vars = getattr(mod, "get_global_vars", None)
+    if callable(get_global_vars):
+        try:
+            global_vars = list(get_global_vars())
+        except Exception:
+            global_vars = []
+        for key in global_vars:
+            if _global_var_name(key) == name:
+                try:
+                    return mod[key]
+                except Exception:
+                    return None
+
+    return getattr(mod, name, None)
+
+
+def _resolve_override_target_names(override, operator_name):
+    raw_targets = override.get("target_global_vars")
+    if raw_targets is None:
+        raw_value = override.get("target_global_var")
+        raw_targets = [] if raw_value is None else [raw_value]
+
+    targets = []
+    for raw_name in raw_targets:
+        name = str(raw_name or "").strip()
+        if name and name not in targets:
+            targets.append(name)
+
+    operator_name = str(operator_name or "").strip()
+    if operator_name and operator_name not in targets:
+        targets.append(operator_name)
+    return targets
+
+
+def _align_override_global_symbol(func, target_name):
+    with_attr = getattr(func, "with_attr", None)
+    if not callable(with_attr):
+        return func
+
+    try:
+        return with_attr("global_symbol", target_name)
+    except Exception:
+        return func
+
+
+def _replace_global_func(mod, target_name, new_func):
+    get_global_var = getattr(mod, "get_global_var", None)
+    if callable(get_global_var):
+        try:
+            target_key = get_global_var(target_name)
+        except Exception:
+            target_key = target_name
+    else:
+        target_key = target_name
+
+    new_func = _align_override_global_symbol(new_func, target_name)
+
+    update_func = getattr(mod, "update_func", None)
+    if callable(update_func):
+        updated = update_func(target_key, new_func)
+        return mod if updated is None else updated
+
+    replace_global_func = getattr(mod, "replace_global_func", None)
+    if callable(replace_global_func):
+        updated = replace_global_func(target_key, new_func)
+        return mod if updated is None else updated
+
+    set_item = getattr(mod, "__setitem__", None)
+    if callable(set_item):
+        set_item(target_key, new_func)
+        return mod
+
+    raise TypeError(
+        "IRModule override target does not support update_func, "
+        "replace_global_func, or __setitem__"
+    )
+
+
+def _apply_handwritten_override(mod, operator_name, override):
+    if not isinstance(override, dict):
+        raise TypeError("Handwritten override payload must be a dict")
+
+    kind = str(override.get("kind", "")).strip()
+    if kind != "replace_prim_func_from_source":
+        raise ValueError(f"Unsupported handwritten override kind: {kind!r}")
+
+    source_path = _resolve_optional_path(override.get("source_path"))
+    if source_path is None:
+        raise ValueError("Handwritten override source_path must be set")
+    if not os.path.isfile(source_path):
+        raise FileNotFoundError(
+            f"Handwritten override source_path does not exist: {source_path}"
+        )
+
+    source_module_attr = str(override.get("source_module_attr", "")).strip() or None
+    source_func_name = str(override.get("source_func_name", "")).strip() or "main"
+    source_module = _load_python_module(source_path)
+    source_owner = source_module
+    if source_module_attr is not None:
+        source_owner = getattr(source_module, source_module_attr, None)
+        if source_owner is None:
+            raise AttributeError(
+                "Handwritten override module attribute not found: "
+                f"{source_module_attr}"
+            )
+
+    source_func = _lookup_global_func(source_owner, source_func_name)
+    if source_func is None:
+        raise AttributeError(
+            "Handwritten override source func not found: "
+            f"{source_func_name} in {source_path}"
+        )
+
+    target_names = _resolve_override_target_names(override, operator_name)
+    if not target_names:
+        raise ValueError("Handwritten override target_global_var is empty")
+
+    resolved_target = None
+    for candidate in target_names:
+        if _lookup_global_func(mod, candidate) is not None:
+            resolved_target = candidate
+            break
+    if resolved_target is None:
+        raise ValueError(
+            "Unable to find handwritten override target in compile module: %s"
+            % ",".join(target_names)
+        )
+
+    updated_mod = _replace_global_func(mod, resolved_target, source_func)
+    return updated_mod, {
+        "kind": kind,
+        "source_path": source_path,
+        "source_module_attr": source_module_attr,
+        "source_func_name": source_func_name,
+        "target_global_var": resolved_target,
+        "requested_target_global_vars": target_names,
+        "candidate_version": override.get("candidate_version"),
+        "staging_only": bool(override.get("staging_only")),
+        "validation_scope": override.get("validation_scope"),
+    }
+
+
+def resolve_handwritten_hook(mod, target, database, output_dir, task_stages=None):
     module_path = _resolve_optional_path(os.environ.get("TVM_HANDWRITTEN_IMPL_PATH"))
     if module_path is None:
-        return None
+        return mod, None
 
     operator_name = str(os.environ.get("TVM_HANDWRITTEN_OP", "")).strip()
     if not operator_name:
@@ -306,6 +486,7 @@ def maybe_apply_handwritten_hook(mod, target, database, output_dir, task_stages=
     }
 
     module = _load_python_module(module_path)
+    effective_mod = mod
     call_context = {
         "phase": "pre_compile",
         "operator": operator_name,
@@ -358,10 +539,21 @@ def maybe_apply_handwritten_hook(mod, target, database, output_dir, task_stages=
         )
         report["status"] = "entrypoint_completed"
         report["entrypoint_result"] = _json_safe(result)
-        if isinstance(result, dict) and "manual_override_applied" in result:
-            report["manual_override_applied"] = bool(
-                result["manual_override_applied"]
-            )
+        if isinstance(result, dict):
+            override = result.get("override")
+            if override is not None:
+                effective_mod, applied_override = _apply_handwritten_override(
+                    effective_mod,
+                    operator_name,
+                    override,
+                )
+                report["status"] = "manual_override_applied"
+                report["manual_override_applied"] = True
+                report["applied_override"] = _json_safe(applied_override)
+            elif "manual_override_applied" in result:
+                report["manual_override_applied"] = bool(
+                    result["manual_override_applied"]
+                )
     except NotImplementedError as err:
         if not placeholder_only:
             raise
@@ -378,6 +570,17 @@ def maybe_apply_handwritten_hook(mod, target, database, output_dir, task_stages=
     )
     if bookkeeping_json is not None:
         logger.info("Handwritten bookkeeping json: %s", bookkeeping_json)
+    return effective_mod, report
+
+
+def maybe_apply_handwritten_hook(mod, target, database, output_dir, task_stages=None):
+    _, report = resolve_handwritten_hook(
+        mod=mod,
+        target=target,
+        database=database,
+        output_dir=output_dir,
+        task_stages=task_stages,
+    )
     return report
 
 
@@ -478,7 +681,7 @@ def compile_and_export(mod, target, database, output_dir, task_stages=None):
     )
 
     os.makedirs(output_dir, exist_ok=True)
-    handwritten_hook = maybe_apply_handwritten_hook(
+    compile_mod, handwritten_hook = resolve_handwritten_hook(
         mod=mod,
         target=target,
         database=database,
@@ -488,7 +691,7 @@ def compile_and_export(mod, target, database, output_dir, task_stages=None):
     logger.info("Applying tuning database and compiling...")
     ex = compile_relax(
         database=database,
-        mod=mod,
+        mod=compile_mod,
         target=target,
         params={},
         enable_warning=False,

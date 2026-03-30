@@ -6,7 +6,7 @@ the repo without touching trusted current or launching any remote work.
 
 ## Files
 
-- `fused_conv2d_transpose1_add9_manual_candidate.py`: repo-native handwritten-hook entrypoint for this operator; it reports the checked-in candidate path without changing compile output yet.
+- `fused_conv2d_transpose1_add9_manual_candidate.py`: repo-native handwritten-hook entrypoint for this operator; it exposes the checked-in candidate v0 through the local/staging pre-compile override contract.
 - `fused_conv2d_transpose1_add9_editable_seed_tir.py`: editable operator TIR extracted from the local MetaSchedule task log.
 - `seed_manifest.json`: trimmed seed context copied from the captured seed JSON.
 - `README.md`: short editing runbook.
@@ -35,9 +35,9 @@ It refuses to overwrite this directory unless `--allow-overwrite` is passed.
 The existing `rpc_tune.py` handwritten hook can point at `./session_bootstrap/handwritten/fused_conv2d_transpose1_add9/fused_conv2d_transpose1_add9_manual_candidate.py`
 today. That module is deliberately honest:
 
-- it points engineers at the checked-in editable TIR in this directory
-- it lets the manual-hook path prove it loaded the checked-in candidate
-- it still reports `manual_override_applied = false`, so compile output stays unchanged until a later override step is implemented
+- it keeps the checked-in editable seed and checked-in candidate v0 side by side in this directory
+- it returns a local/staging-only override descriptor for candidate v0
+- `rpc_tune.py` now consumes that descriptor before `compile_relax()`, so the handwritten hook can replace the selected PrimFunc without touching trusted current
 
 ## Edit toward candidate v0
 
@@ -68,15 +68,14 @@ bash ./session_bootstrap/scripts/capture_fused_conv2d_transpose1_add9_manual_see
 ```
 
 That proves the hook is loading the checked-in candidate path. It does not
-yet prove a performance change, because the checked-in candidate module still
-reports `manual_override_applied = false`.
+yet prove a performance change. It proves the local handwritten path reaches
+the checked-in candidate v0 and applies it at the pre-compile integration point.
 
 ## Staging lane after a real override exists
 
-Once `build_manual_impl()` starts applying a real override, reuse the same
-`manual_hook_overlay.env` with the existing staging-safe one-shot and profile
-commands from the transpose1 handwritten runbooks. Do not overwrite trusted
-current while this checked-in candidate is still seed-derived.
+Reuse the same `manual_hook_overlay.env` with the existing staging-safe
+one-shot and profile commands from the transpose1 handwritten runbooks. Do not
+overwrite trusted current while this checked-in candidate is still seed-derived.
 
 ## Source reminder
 
