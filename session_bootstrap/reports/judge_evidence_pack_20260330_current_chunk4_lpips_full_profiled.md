@@ -1,7 +1,7 @@
 # Judge Technical Evidence Pack
 
 - run_id: judge_evidence_pack_20260330_current_chunk4_lpips_full_profiled
-- generated_at: 2026-03-30T18:41:29+08:00
+- generated_at: 2026-03-30T18:46:15+08:00
 - report_json: session_bootstrap/reports/judge_evidence_pack_20260330_current_chunk4_lpips_full_profiled.json
 
 ## Executive Summary

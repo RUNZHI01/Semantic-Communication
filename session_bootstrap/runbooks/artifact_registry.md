@@ -28,7 +28,7 @@
 - 这条线只服务于 judge-facing evidence / complementary materials，不处理 demo / admission 交付；
 - 本地已经把 `quality / hotspot / resource / SNR` 结果统一整理成正式材料；
 - 目前最新质量入口已升级到 `lpips_full`：`PyTorch vs TVM baseline/current` 与 `TVM baseline vs current` 三组都已有 SNR10 的远端 LPIPS 实测；
-- 当前真正还缺的，主要是 profiler-capable runtime per-op profiling。
+- 当前 judge-evidence 主线已基本闭环；若继续往下做，主要是把 profiling 从 `1 sample` 扩成多 sample 稳定性结论，而不是再补核心缺口。
 
 ---
 

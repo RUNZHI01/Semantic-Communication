@@ -109,6 +109,9 @@ current trusted chunk4 的部署 footprint 是可解释、可控的：
 - 当前候选热点：
   - `fused_conv2d_transpose1_add9`
   - `fused_conv2d_transpose2_add12`
+- top op 还包括：
+  - `fused_conv2d_transpose_add6`
+  - `fused_conv2d3_add15`
 - 仍需诚实说明：当前是 `1 sample` 级别的可用 profiling，不是大样本统计结论
 
 证据：
