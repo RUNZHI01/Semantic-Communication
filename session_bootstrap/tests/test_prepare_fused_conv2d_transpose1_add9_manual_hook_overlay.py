@@ -77,6 +77,12 @@ class PrepareFusedConv2dTranspose1Add9ManualHookOverlayTest(unittest.TestCase):
                     },
                     "current_profile_json": "/tmp/current_profile.json",
                     "remote_archive_dir": "/tmp/handwritten_archive",
+                    "preferred_local_post_db_build": {
+                        "command": "python3 ./session_bootstrap/scripts/run_transpose1_post_db_local_build.py --output-dir ./session_bootstrap/tmp/transpose1_post_db_swap_local_build",
+                        "output_dir": "./session_bootstrap/tmp/transpose1_post_db_swap_local_build",
+                        "artifact_path": "./session_bootstrap/tmp/transpose1_post_db_swap_local_build/fused_conv2d_transpose1_add9_post_db_swap.so",
+                        "report_path": "./session_bootstrap/tmp/transpose1_post_db_swap_local_build/fused_conv2d_transpose1_add9_post_db_swap_report.json"
+                    },
                     "operator_context": {
                         "current_argument_shapes": (
                             "float32[1, 48, 64, 64], "
@@ -98,8 +104,14 @@ class PrepareFusedConv2dTranspose1Add9ManualHookOverlayTest(unittest.TestCase):
             scaffold_dir = temp_dir / "scaffold"
             rebuild_env, bookkeeping_json = self._write_scaffold_inputs(scaffold_dir)
 
-            rc = module.main(["--scaffold-dir", str(scaffold_dir)])
+            import contextlib
+            import io
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                rc = module.main(["--scaffold-dir", str(scaffold_dir)])
             self.assertEqual(rc, 0)
+            result = json.loads(stdout.getvalue())
 
             overlay_env_path = scaffold_dir / "manual_hook_overlay.env"
             overlay_env = overlay_env_path.read_text(encoding="utf-8")
@@ -110,12 +122,38 @@ class PrepareFusedConv2dTranspose1Add9ManualHookOverlayTest(unittest.TestCase):
                 overlay_env,
             )
             self.assertIn("rpc_tune.py already consumes these variables", overlay_env)
+            self.assertIn("This overlay is hook wiring only", overlay_env)
+            self.assertIn(
+                "run_transpose1_post_db_local_build.py --output-dir ./session_bootstrap/tmp/transpose1_post_db_swap_local_build",
+                overlay_env,
+            )
+            self.assertIn(
+                "Preferred local build artifact: ./session_bootstrap/tmp/transpose1_post_db_swap_local_build/fused_conv2d_transpose1_add9_post_db_swap.so",
+                overlay_env,
+            )
+            self.assertIn(
+                "Preferred local build report: ./session_bootstrap/tmp/transpose1_post_db_swap_local_build/fused_conv2d_transpose1_add9_post_db_swap_report.json",
+                overlay_env,
+            )
             self.assertIn(
                 f"TVM_HANDWRITTEN_BOOKKEEPING_JSON={bookkeeping_json}",
                 overlay_env,
             )
             self.assertFalse(
                 (scaffold_dir / "fused_conv2d_transpose1_add9_manual_impl.py").exists()
+            )
+            self.assertEqual(result["overlay_role"], "hook_wiring_only")
+            self.assertEqual(
+                result["preferred_local_build_output_dir"],
+                "./session_bootstrap/tmp/transpose1_post_db_swap_local_build",
+            )
+            self.assertEqual(
+                result["preferred_local_build_artifact_path"],
+                "./session_bootstrap/tmp/transpose1_post_db_swap_local_build/fused_conv2d_transpose1_add9_post_db_swap.so",
+            )
+            self.assertEqual(
+                result["preferred_local_build_report_path"],
+                "./session_bootstrap/tmp/transpose1_post_db_swap_local_build/fused_conv2d_transpose1_add9_post_db_swap_report.json",
             )
 
     def test_materializes_scaffold_local_manual_seed_when_path_is_explicit(self) -> None:
