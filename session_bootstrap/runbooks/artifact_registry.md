@@ -20,6 +20,7 @@
 - `session_bootstrap/reports/judge_snr_robustness_20260330_current_chunk4_latency.svg`
 - `session_bootstrap/reports/judge_snr_robustness_20260330_current_chunk4_quality.svg`
 - `session_bootstrap/reports/judge_evidence_pack_20260330_current_chunk4_lpips_full.md`
+- `session_bootstrap/reports/defense_quick_reference_card_20260330_current_chunk4.md`
 
 补充说明：
 
