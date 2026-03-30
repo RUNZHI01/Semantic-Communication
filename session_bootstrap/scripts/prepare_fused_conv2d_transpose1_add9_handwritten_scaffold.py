@@ -54,6 +54,13 @@ DEFAULT_OUTPUT_DIR = (
     / "tmp"
     / "handwritten_fused_conv2d_transpose1_add9_scaffold"
 )
+CHECKED_IN_MANUAL_CANDIDATE_PATH = (
+    PROJECT_ROOT
+    / "session_bootstrap"
+    / "handwritten"
+    / OPERATOR_NAME
+    / f"{OPERATOR_NAME}_manual_candidate.py"
+)
 DEFAULT_REBUILD_OUTPUT_DIR = (
     "./session_bootstrap/tmp/handwritten_fused_conv2d_transpose1_add9_candidate"
 )
@@ -232,7 +239,7 @@ def build_rebuild_env(
         "# Pin the remote archive to a handwritten staging lane.",
         f"REMOTE_TVM_JSCC_BASE_DIR={shell_quote(args.remote_archive_dir)}",
         "",
-        "# Handwritten bookkeeping only; these variables are not consumed by the stock wrappers.",
+        "# Handwritten bookkeeping for the transpose1 staging lane.",
         f"HANDWRITTEN_TARGET_OP={OPERATOR_NAME}",
         f"HANDWRITTEN_PRIORITY=wave1_p{candidate.get('priority')}",
         f"HANDWRITTEN_REFERENCE_ARTIFACT_SHA256={best_staging.get('artifact_sha256', '')}",
@@ -245,7 +252,9 @@ def build_rebuild_env(
         "# Next smallest handoff: materialize a hook overlay instead of editing this file in place.",
         "# python3 ./session_bootstrap/scripts/prepare_fused_conv2d_transpose1_add9_manual_hook_overlay.py \\",
         f"#   --scaffold-dir {shell_quote(repo_native(args.output_dir))}",
-        "# That helper will create manual_hook_overlay.env plus a manual implementation seed file.",
+        "# By default that helper points the overlay at the checked-in candidate-v0 module.",
+        "# Pass --manual-impl-path <scaffold-local-path> only when you explicitly want a",
+        "# generated placeholder seed module for local capture work.",
         "",
     ]
     return "\n".join(lines)
@@ -444,13 +453,14 @@ def build_readme(
             f"  --scaffold-dir {shell_quote(str(args.output_dir))}",
             "```",
             "",
-            "- This materializes `manual_hook_overlay.env` plus an editable manual implementation seed file.",
+            "- This materializes `manual_hook_overlay.env` and, by default, points it at the repo-native checked-in candidate-v0 module.",
+            "- If you explicitly want a scaffold-local placeholder seed module instead, re-run with `--manual-impl-path ./session_bootstrap/tmp/.../fused_conv2d_transpose1_add9_manual_impl.py`.",
             "- After that, run `bash ./session_bootstrap/scripts/capture_fused_conv2d_transpose1_add9_manual_seed.sh --scaffold-dir ...` to record the selected task row and TIR snapshot through the local build path only.",
-            "- The stock wrappers already source rebuild env files; the remaining engineer patch is to teach the local rebuild path to consume `TVM_HANDWRITTEN_IMPL_PATH` before compile.",
+            "- `rpc_tune.py` already consumes `TVM_HANDWRITTEN_IMPL_PATH` at the pre-compile seam; the overlay is the activation contract for this staging-only lane.",
             "",
             "## Before running anything remote",
             "",
-            "1. Generate `manual_hook_overlay.env` and the manual implementation seed file, then edit that generated module instead of patching `manual_rebuild.env` directly.",
+            "1. Generate `manual_hook_overlay.env`; use the default checked-in candidate-v0 module unless you intentionally need a scaffold-local placeholder seed module.",
             (
                 "2. Build or rebuild the candidate locally so "
                 f"`{repo_native(Path(args.rebuild_output_dir))}/optimized_model.so` exists."

@@ -120,6 +120,7 @@ class PrepareFusedConv2dTranspose1Add9HandwrittenScaffoldTest(unittest.TestCase)
                 "prepare_fused_conv2d_transpose1_add9_manual_hook_overlay.py",
                 rebuild_env,
             )
+            self.assertIn("checked-in candidate-v0 module", rebuild_env)
 
             self.assertIn(f"source {str(validate_base_env)}", validate_env)
             self.assertIn(f"INFERENCE_CURRENT_ARCHIVE={remote_archive}", validate_env)
@@ -164,10 +165,12 @@ class PrepareFusedConv2dTranspose1Add9HandwrittenScaffoldTest(unittest.TestCase)
                 readme,
             )
             self.assertIn("manual_hook_overlay.env", readme)
+            self.assertIn("checked-in candidate-v0 module", readme)
             self.assertIn(
                 "capture_fused_conv2d_transpose1_add9_manual_seed.sh",
                 readme,
             )
+            self.assertIn("rpc_tune.py` already consumes `TVM_HANDWRITTEN_IMPL_PATH`", readme)
 
 
 if __name__ == "__main__":
