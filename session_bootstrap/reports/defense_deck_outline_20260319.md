@@ -88,6 +88,13 @@
 
 - `session_bootstrap/reports/defense_appendix_pages_9_12_judge_evidence_20260330.md`
 
+## 附录切换规则（主讲时直接照用）
+
+- 被问“是不是拿质量换速度” → 切附录 Page 9
+- 被问“资源占用、部署代价、artifact 大小” → 切附录 Page 10
+- 被问“不同 SNR/弱网变化下稳不稳” → 切附录 Page 11
+- 被问“有没有拿到真正 per-op profiling” → 切附录 Page 12
+
 ## 页面级统一要求
 
 - 每一页都优先使用“飞腾多核弱网安全语义视觉回传系统”或其同义表述，不用“TVM/MNN optimization project”做主标题。
