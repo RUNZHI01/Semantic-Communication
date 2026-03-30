@@ -93,12 +93,24 @@ def metric_ci(payload: dict[str, Any], metric_key: str) -> dict[str, Any]:
     return summary
 
 
+def canonicalize_comparison_label(label: str) -> str:
+    if label.startswith("pytorch_vs_tvm_current"):
+        return "pytorch_vs_tvm_current"
+    if label.startswith("pytorch_vs_tvm_baseline"):
+        return "pytorch_vs_tvm_baseline"
+    if label.startswith("tvm_baseline_vs_tvm_current"):
+        return "tvm_baseline_vs_tvm_current"
+    return label
+
+
 def build_row(path: Path, payload: dict[str, Any]) -> dict[str, Any]:
     psnr_ci = metric_ci(payload, "psnr_db")
     ssim_ci = metric_ci(payload, "ssim")
     lpips_ci = metric_ci(payload, "lpips")
+    raw_label = payload.get("comparison_label", path.stem)
     return {
-        "comparison_label": payload.get("comparison_label", path.stem),
+        "comparison_label": canonicalize_comparison_label(raw_label),
+        "comparison_label_raw": raw_label,
         "run_id": payload.get("run_id", path.stem),
         "source_json": str(path),
         "source_markdown": payload.get("markdown_report"),
@@ -232,7 +244,12 @@ def main() -> None:
     args = parse_args()
     input_paths = resolve_inputs(args.quality_json)
 
-    rows = [build_row(path, load_json(path)) for path in input_paths]
+    rows_by_label: dict[str, dict[str, Any]] = {}
+    for path in input_paths:
+        row = build_row(path, load_json(path))
+        rows_by_label[row["comparison_label"]] = row
+    rows = list(rows_by_label.values())
+    rows.sort(key=lambda row: row["comparison_label"])
     report_prefix = (
         Path(args.report_prefix)
         if args.report_prefix
