@@ -21,6 +21,7 @@
 - `session_bootstrap/reports/judge_evidence_pack_20260330_current_chunk4_lpips_full.md`
 - `session_bootstrap/reports/judge_evidence_pack_20260330_current_chunk4_lpips_full.json`
 - `session_bootstrap/reports/defense_quick_reference_card_20260330_current_chunk4.md`
+- `session_bootstrap/reports/judge_evidence_legacy_index_20260330.md`
 
 对应脚本入口：
 
@@ -220,4 +221,5 @@ bash ./session_bootstrap/scripts/run_remote_resource_profile.sh \
 
 - judge-facing 本地整理工作流已经具备。
 - 历史质量 / hotspot / resource / snr 结果已经被统一串成正式材料。
-- 真正还缺的不是“文档结构”，而是 `quality-vs-SNR` 与 profiler-enabled runtime 这两条需要上板手工补采的数据。
+- latest 默认引用已切到 `lpips_full`；若需要区分历史中间版本，直接看 `session_bootstrap/reports/judge_evidence_legacy_index_20260330.md`。
+- 当前真正还缺的，只剩 profiler-enabled runtime 这条需要继续上板攻关的技术项。
