@@ -76,6 +76,27 @@ the checked-in candidate v0 and applies it at the pre-compile integration point.
 Treat any payload/runtime number from this path as diagnostic-only until a
 schedule-context-preserving evaluation contract exists.
 
+## Preferred local schedule-preserving build path
+
+Once hook wiring is confirmed, prefer this local-only path before any future
+remote/staging validation:
+
+```bash
+python3 ./session_bootstrap/scripts/run_transpose1_post_db_local_build.py
+```
+
+This wrapper drives the checked-in best-staging task-summary / DB defaults,
+performs the post-DB scheduled `fused_conv2d_transpose1_add9` swap, and exports a
+local artifact plus adjacent JSON report under:
+
+```text
+./session_bootstrap/tmp/transpose1_post_db_swap_local_build
+```
+
+This is still build-level diagnostic evidence only, but it preserves the best
+staging schedule context much more honestly than the older raw pre-compile hook
+lane.
+
 ## Staging lane after a real override exists
 
 Reuse the same `manual_hook_overlay.env` with the existing staging-safe

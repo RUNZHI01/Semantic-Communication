@@ -77,6 +77,29 @@ Generated pack contents:
 - `bookkeeping.json`
 - `README.md`
 
+## Preferred local schedule-preserving build path
+
+Before any remote/staging step, prefer the new local-only post-DB scheduled swap path:
+
+```bash
+python3 ./session_bootstrap/scripts/run_transpose1_post_db_local_build.py
+```
+
+Default outputs land under:
+
+```text
+./session_bootstrap/tmp/transpose1_post_db_swap_local_build
+```
+
+This path now gives first-class local build evidence for:
+
+- best-staging DB recovery
+- post-database scheduled `fused_conv2d_transpose1_add9` swap
+- swapped full-module local build/export
+- artifact SHA / size / adjacent JSON report
+
+Use the older raw pre-compile hook lane only when you need hook-wiring diagnostics.
+
 ## What To Patch
 
 Patch only the generated scaffold files:
