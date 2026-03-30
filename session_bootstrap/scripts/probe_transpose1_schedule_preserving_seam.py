@@ -178,6 +178,48 @@ def lookup_global_func(mod: Any, name: str):
     return getattr(mod, name, None)
 
 
+def align_global_symbol(func: Any, target_name: str):
+    with_attr = getattr(func, "with_attr", None)
+    if not callable(with_attr):
+        return func
+    try:
+        return with_attr("global_symbol", target_name)
+    except Exception:
+        return func
+
+
+def replace_global_func(mod: Any, target_name: str, new_func: Any):
+    get_global_var = getattr(mod, "get_global_var", None)
+    if callable(get_global_var):
+        try:
+            target_key = get_global_var(target_name)
+        except Exception:
+            target_key = target_name
+    else:
+        target_key = target_name
+
+    new_func = align_global_symbol(new_func, target_name)
+
+    update_func = getattr(mod, "update_func", None)
+    if callable(update_func):
+        updated = update_func(target_key, new_func)
+        return mod if updated is None else updated
+
+    replace_global_func_method = getattr(mod, "replace_global_func", None)
+    if callable(replace_global_func_method):
+        updated = replace_global_func_method(target_key, new_func)
+        return mod if updated is None else updated
+
+    set_item = getattr(mod, "__setitem__", None)
+    if callable(set_item):
+        set_item(target_key, new_func)
+        return mod
+
+    raise TypeError(
+        "IRModule override target does not support update_func, replace_global_func, or __setitem__"
+    )
+
+
 def load_candidate_override(candidate_impl: Path, task_stages: dict[str, Any]) -> dict[str, Any]:
     module = load_python_module(candidate_impl)
     build_manual_impl = getattr(module, "build_manual_impl", None)
@@ -349,6 +391,44 @@ def probe_schedule_seam(
     if applied_operator_present:
         applied_operator_func = applied_mod[applied_mod.get_global_var(operator)]
 
+    swapped_full_module = {
+        "attempted": applied_operator_present and candidate["source_func"] is not None,
+        "swap_succeeded": False,
+        "swap_target_global": operator if applied_operator_present else None,
+        "post_swap_global_present": False,
+        "post_swap_func_type": None,
+        "structural_equal_post_swap_vs_candidate": None,
+        "build_attempted": False,
+        "build_status": "skipped",
+        "build_error": None,
+    }
+    if swapped_full_module["attempted"]:
+        swapped_mod = replace_global_func(applied_mod, operator, candidate["source_func"])
+        swapped_func = lookup_global_func(swapped_mod, operator)
+        swapped_full_module["swap_succeeded"] = swapped_func is not None
+        swapped_full_module["post_swap_global_present"] = operator in [
+            gv.name_hint for gv in swapped_mod.get_global_vars()
+        ]
+        swapped_full_module["post_swap_func_type"] = (
+            None if swapped_func is None else type(swapped_func).__name__
+        )
+        swapped_full_module["structural_equal_post_swap_vs_candidate"] = (
+            None
+            if swapped_func is None
+            else bool(tvm.ir.structural_equal(swapped_func, candidate["source_func"]))
+        )
+        swapped_full_module["build_attempted"] = True
+        try:
+            from tvm import relax  # pylint: disable=import-outside-toplevel
+
+            with target, tvm.transform.PassContext(opt_level=3):
+                relax.build(swapped_mod, target=target)
+        except Exception as err:  # pragma: no cover - integration-only path
+            swapped_full_module["build_status"] = "failed"
+            swapped_full_module["build_error"] = f"{type(err).__name__}: {err}"
+        else:
+            swapped_full_module["build_status"] = "built"
+
     report = {
         "task_summary_json": str(task_summary_path.resolve()),
         "database_dir": str(database_dir.resolve()),
@@ -443,6 +523,7 @@ def probe_schedule_seam(
                 applied_operator_present and candidate["source_func"] is not None
             ),
         },
+        "post_db_scheduled_swap": swapped_full_module,
         "recommended_seam": {
             "seam_id": "post_database_scheduled_primfunc_swap",
             "why": (

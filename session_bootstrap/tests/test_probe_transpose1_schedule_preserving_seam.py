@@ -44,6 +44,18 @@ class FakeGlobalVar:
         self.name_hint = name_hint
 
 
+class FakeFunc:
+    def __init__(self, tag: str) -> None:
+        self.tag = tag
+        self.attrs: dict[str, object] = {}
+
+    def with_attr(self, key: str, value: object):
+        cloned = FakeFunc(self.tag)
+        cloned.attrs = dict(self.attrs)
+        cloned.attrs[key] = value
+        return cloned
+
+
 class FakeIRModule:
     def __init__(self, mapping: dict[str, object]) -> None:
         self.mapping = dict(mapping)
@@ -59,11 +71,30 @@ class FakeIRModule:
             raise KeyError(name)
         return self.mapping[name]
 
+    def __setitem__(self, key: object, value: object) -> None:
+        name = getattr(key, "name_hint", key)
+        if not isinstance(name, str):
+            raise KeyError(name)
+        self.mapping[name] = value
+
 
 class ProbeTranspose1SchedulePreservingSeamTest(unittest.TestCase):
     def test_lookup_global_func_finds_named_entry(self) -> None:
         mod = FakeIRModule({"main": {"tag": "scheduled"}})
         self.assertEqual(module.lookup_global_func(mod, "main"), {"tag": "scheduled"})
+
+    def test_replace_global_func_updates_named_entry(self) -> None:
+        mod = FakeIRModule({"fused_conv2d_transpose1_add9": FakeFunc("scheduled")})
+        updated = module.replace_global_func(
+            mod,
+            "fused_conv2d_transpose1_add9",
+            FakeFunc("candidate"),
+        )
+        self.assertIs(updated, mod)
+        replaced = mod.mapping["fused_conv2d_transpose1_add9"]
+        self.assertIsInstance(replaced, FakeFunc)
+        self.assertEqual(replaced.tag, "candidate")
+        self.assertEqual(replaced.attrs.get("global_symbol"), "fused_conv2d_transpose1_add9")
 
     def test_load_candidate_override_recovers_checked_in_candidate_source(self) -> None:
         script_module = types.ModuleType("tvm.script")
