@@ -36,6 +36,7 @@ DEFAULT_LOCAL_BUILD_OUTPUT_DIR = (
 )
 DEFAULT_LOCAL_BUILD_ARTIFACT_NAME = f"{OPERATOR_NAME}_post_db_swap.so"
 DEFAULT_LOCAL_BUILD_REPORT_NAME = f"{OPERATOR_NAME}_post_db_swap_report.json"
+LATEST_LOCAL_BUILD_SYNC_SNAPSHOT_NAME = "latest_local_build_sync_snapshot.md"
 SYNC_COMMENT = "# Synced from the local post-db build report."
 SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 
@@ -187,6 +188,14 @@ def build_local_build_command(output_dir: str) -> str:
     )
 
 
+def build_local_build_and_sync_command(scaffold_dir: Path, output_dir: str) -> str:
+    return (
+        "python3 ./session_bootstrap/scripts/run_transpose1_post_db_local_build_and_sync.py "
+        f"--scaffold-dir {shell_quote(repo_native(scaffold_dir))} "
+        f"--output-dir {shell_quote(output_dir)}"
+    )
+
+
 def build_sync_command(scaffold_dir: Path, output_dir: str) -> str:
     return (
         "python3 ./session_bootstrap/scripts/sync_transpose1_post_db_local_build_result.py "
@@ -327,6 +336,38 @@ def render_local_build_notes(sync_payload: dict[str, Any]) -> str:
     return "; ".join(parts)
 
 
+def render_snapshot_value(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if value is None:
+        return "<not_synced_yet>"
+    if isinstance(value, str):
+        stripped = value.strip()
+        return stripped or "<not_synced_yet>"
+    return str(value)
+
+
+def build_latest_local_build_sync_snapshot(sync_payload: dict[str, Any]) -> str:
+    return "\n".join(
+        [
+            "# Latest local build+sync snapshot",
+            "",
+            "- snapshot_status: `synced_local_build_result`",
+            f"- synced_at: `{render_snapshot_value(sync_payload.get('synced_at'))}`",
+            f"- report_path: `{render_snapshot_value(sync_payload.get('report_path'))}`",
+            f"- artifact_path: `{render_snapshot_value(sync_payload.get('artifact_path'))}`",
+            f"- artifact_sha256: `{render_snapshot_value(sync_payload.get('artifact_sha256'))}`",
+            f"- artifact_exists: `{render_snapshot_value(sync_payload.get('artifact_exists'))}`",
+            f"- build_status: `{render_snapshot_value(sync_payload.get('build_status'))}`",
+            f"- swap_succeeded: `{render_snapshot_value(sync_payload.get('swap_succeeded'))}`",
+            f"- export_status: `{render_snapshot_value(sync_payload.get('export_status'))}`",
+            "",
+            "This file is refreshed by `sync_transpose1_post_db_local_build_result.py` and only records local diagnostic build facts.",
+            "",
+        ]
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     args.scaffold_dir = require_dir(as_abs(args.scaffold_dir), "scaffold dir")
@@ -342,6 +383,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     profile_env = require_file(args.scaffold_dir / "manual_profile.env", "profile env")
     bookkeeping = load_bookkeeping(bookkeeping_json)
+    latest_local_build_sync_snapshot_md = (
+        args.scaffold_dir / LATEST_LOCAL_BUILD_SYNC_SNAPSHOT_NAME
+    )
 
     report_json = resolve_report_json(args, bookkeeping)
     report = json.loads(report_json.read_text(encoding="utf-8"))
@@ -423,16 +467,31 @@ def main(argv: list[str] | None = None) -> int:
     if artifact_sha256 is not None:
         bookkeeping["manual_artifact_sha256"] = artifact_sha256
     bookkeeping["latest_local_post_db_build"] = sync_payload
+    generated_files = bookkeeping.get("generated_files")
+    if not isinstance(generated_files, dict):
+        generated_files = {}
+        bookkeeping["generated_files"] = generated_files
+    generated_files[LATEST_LOCAL_BUILD_SYNC_SNAPSHOT_NAME] = str(
+        latest_local_build_sync_snapshot_md
+    )
 
     commands = bookkeeping.get("commands")
     if not isinstance(commands, dict):
         commands = {}
         bookkeeping["commands"] = commands
+    commands["local_build_and_sync"] = build_local_build_and_sync_command(
+        args.scaffold_dir,
+        output_dir_repo,
+    )
     commands["local_schedule_preserving_build"] = build_local_build_command(output_dir_repo)
     commands["sync_local_build_result"] = build_sync_command(args.scaffold_dir, output_dir_repo)
 
     bookkeeping_json.write_text(
         json.dumps(bookkeeping, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    latest_local_build_sync_snapshot_md.write_text(
+        build_latest_local_build_sync_snapshot(sync_payload),
         encoding="utf-8",
     )
 
@@ -483,6 +542,7 @@ def main(argv: list[str] | None = None) -> int:
                 "artifact_sha256": artifact_sha256,
                 "bookkeeping_json": str(bookkeeping_json),
                 "validation_report_template": str(validation_template_md),
+                "latest_local_build_sync_snapshot": str(latest_local_build_sync_snapshot_md),
                 "diagnostic_only": True,
             },
             ensure_ascii=False,
