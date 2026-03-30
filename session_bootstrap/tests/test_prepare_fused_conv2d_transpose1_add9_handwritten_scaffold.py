@@ -170,6 +170,14 @@ class PrepareFusedConv2dTranspose1Add9HandwrittenScaffoldTest(unittest.TestCase)
                 "capture_fused_conv2d_transpose1_add9_manual_seed.sh",
                 readme,
             )
+            self.assertIn(
+                "run_transpose1_post_db_local_build.py",
+                readme,
+            )
+            self.assertIn(
+                "transpose1_post_db_swap_local_build",
+                readme,
+            )
             self.assertIn("rpc_tune.py` already consumes `TVM_HANDWRITTEN_IMPL_PATH`", readme)
 
 

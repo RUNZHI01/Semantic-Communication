@@ -461,12 +461,20 @@ def build_readme(
             "## Before running anything remote",
             "",
             "1. Generate `manual_hook_overlay.env`; use the default checked-in candidate-v0 module unless you intentionally need a scaffold-local placeholder seed module.",
+            "2. Prefer the schedule-preserving local build path first:",
+            "",
+            "```bash",
+            "python3 ./session_bootstrap/scripts/run_transpose1_post_db_local_build.py",
+            "```",
+            "",
+            "   That path exports a local swapped artifact plus adjacent JSON report under",
+            "   `./session_bootstrap/tmp/transpose1_post_db_swap_local_build`.",
             (
-                "2. Build or rebuild the candidate locally so "
+                "3. Build or rebuild the candidate locally so "
                 f"`{repo_native(Path(args.rebuild_output_dir))}/optimized_model.so` exists."
             ),
-            f"3. {sha_note}",
-            "4. Copy or edit `validation_report_template.md` so the keep/drop decision is captured together with the payload and reprobe outputs.",
+            f"4. {sha_note}",
+            "5. Copy or edit `validation_report_template.md` so the keep/drop decision is captured together with the payload and reprobe outputs.",
             "",
             "## SHA capture",
             "",
