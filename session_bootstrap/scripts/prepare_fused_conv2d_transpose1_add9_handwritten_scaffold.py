@@ -245,7 +245,7 @@ def build_rebuild_env(
         "# Next smallest handoff: materialize a hook overlay instead of editing this file in place.",
         "# python3 ./session_bootstrap/scripts/prepare_fused_conv2d_transpose1_add9_manual_hook_overlay.py \\",
         f"#   --scaffold-dir {shell_quote(repo_native(args.output_dir))}",
-        "# That helper will create manual_hook_overlay.env plus a placeholder manual impl file.",
+        "# That helper will create manual_hook_overlay.env plus a manual implementation seed file.",
         "",
     ]
     return "\n".join(lines)
@@ -444,12 +444,13 @@ def build_readme(
             f"  --scaffold-dir {shell_quote(str(args.output_dir))}",
             "```",
             "",
-            "- This materializes `manual_hook_overlay.env` plus an editable placeholder manual implementation file.",
+            "- This materializes `manual_hook_overlay.env` plus an editable manual implementation seed file.",
+            "- After that, run `bash ./session_bootstrap/scripts/capture_fused_conv2d_transpose1_add9_manual_seed.sh --scaffold-dir ...` to record the selected task row and TIR snapshot through the local build path only.",
             "- The stock wrappers already source rebuild env files; the remaining engineer patch is to teach the local rebuild path to consume `TVM_HANDWRITTEN_IMPL_PATH` before compile.",
             "",
             "## Before running anything remote",
             "",
-            "1. Generate `manual_hook_overlay.env` and the placeholder manual implementation file, then edit that placeholder instead of patching `manual_rebuild.env` directly.",
+            "1. Generate `manual_hook_overlay.env` and the manual implementation seed file, then edit that generated module instead of patching `manual_rebuild.env` directly.",
             (
                 "2. Build or rebuild the candidate locally so "
                 f"`{repo_native(Path(args.rebuild_output_dir))}/optimized_model.so` exists."
