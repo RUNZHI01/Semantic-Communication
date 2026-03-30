@@ -29,8 +29,38 @@ def write_text(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
+class FakeGlobalVar:
+    def __init__(self, name_hint: str) -> None:
+        self.name_hint = name_hint
+
+
+class FakePrimFunc:
+    def __init__(self, script_text: str) -> None:
+        self._script_text = script_text
+
+    def script(self, show_meta: bool = False) -> str:
+        del show_meta
+        return self._script_text
+
+
+class FakeIRModule:
+    def __init__(self, mapping: dict[str, FakePrimFunc]) -> None:
+        self._mapping = mapping
+
+    def get_global_var(self, name: str) -> FakeGlobalVar:
+        if name not in self._mapping:
+            raise KeyError(name)
+        return FakeGlobalVar(name)
+
+    def __getitem__(self, key: object) -> FakePrimFunc:
+        name = getattr(key, "name_hint", key)
+        if not isinstance(name, str) or name not in self._mapping:
+            raise KeyError(name)
+        return self._mapping[name]
+
+
 class PrepareFusedConv2dTranspose1Add9ManualHookOverlayTest(unittest.TestCase):
-    def test_generates_placeholder_manual_impl_and_overlay_env(self) -> None:
+    def test_generates_manual_seed_impl_and_overlay_env(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir_raw:
             temp_dir = Path(temp_dir_raw)
             scaffold_dir = temp_dir / "scaffold"
@@ -99,8 +129,59 @@ class PrepareFusedConv2dTranspose1Add9ManualHookOverlayTest(unittest.TestCase):
             )
             self.assertEqual(payload["bookkeeping_json"], str(bookkeeping_json))
             self.assertTrue(payload["placeholder_only"])
+            self.assertEqual(
+                payload["seed_json"],
+                str(scaffold_dir / "fused_conv2d_transpose1_add9_manual_seed.json"),
+            )
+            self.assertEqual(
+                payload["seed_tir"],
+                str(scaffold_dir / "fused_conv2d_transpose1_add9_manual_seed_tir.py"),
+            )
+
+            context = {
+                "phase": "pre_compile",
+                "operator": "fused_conv2d_transpose1_add9",
+                "module_path": str(manual_impl_path),
+                "output_dir": str(temp_dir / "build_output"),
+                "target": "llvm",
+                "database": "fake-db",
+                "bookkeeping_json": str(bookkeeping_json),
+                "task_stages": {
+                    "legalized_fused_tir": {
+                        "tasks": [
+                            {
+                                "task_name": "fused_conv2d_transpose1_add9",
+                                "prim_funcs": ["fused_conv2d_transpose1_add9"],
+                                "weight": 1,
+                            }
+                        ]
+                    }
+                },
+                "mod": FakeIRModule(
+                    {
+                        "fused_conv2d_transpose1_add9": FakePrimFunc(
+                            "def fused_conv2d_transpose1_add9():\n    pass\n"
+                        )
+                    }
+                ),
+            }
             with self.assertRaises(NotImplementedError):
-                impl_module.build_manual_impl()
+                impl_module.build_manual_impl(context)
+
+            seed_json = json.loads(
+                (scaffold_dir / "fused_conv2d_transpose1_add9_manual_seed.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            seed_tir = (
+                scaffold_dir / "fused_conv2d_transpose1_add9_manual_seed_tir.py"
+            ).read_text(encoding="utf-8")
+            self.assertEqual(seed_json["operator"], "fused_conv2d_transpose1_add9")
+            self.assertEqual(seed_json["phase"], "pre_compile")
+            self.assertEqual(seed_json["task_row"]["stage_name"], "legalized_fused_tir")
+            self.assertEqual(seed_json["prim_func_capture"][0]["name"], "fused_conv2d_transpose1_add9")
+            self.assertIn("PrimFunc: fused_conv2d_transpose1_add9", seed_tir)
+            self.assertIn("def fused_conv2d_transpose1_add9()", seed_tir)
 
 
 if __name__ == "__main__":
