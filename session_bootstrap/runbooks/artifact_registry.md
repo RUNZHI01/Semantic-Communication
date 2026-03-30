@@ -15,11 +15,11 @@
 - `session_bootstrap/scripts/build_quality_matrix_report.py`
 - `session_bootstrap/scripts/build_snr_robustness_report.py`
 - `session_bootstrap/scripts/build_judge_evidence_pack.py`
-- `session_bootstrap/reports/judge_quality_formal_report_20260330_lpips_partial.md`
+- `session_bootstrap/reports/judge_quality_formal_report_20260330_lpips_full.md`
 - `session_bootstrap/reports/judge_snr_robustness_20260330_current_chunk4.md`
 - `session_bootstrap/reports/judge_snr_robustness_20260330_current_chunk4_latency.svg`
 - `session_bootstrap/reports/judge_snr_robustness_20260330_current_chunk4_quality.svg`
-- `session_bootstrap/reports/judge_evidence_pack_20260330_current_chunk4_lpips_profiled.md`
+- `session_bootstrap/reports/judge_evidence_pack_20260330_current_chunk4_lpips_full.md`
 
 补充说明：
 
