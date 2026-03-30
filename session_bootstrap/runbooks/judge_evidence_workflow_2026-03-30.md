@@ -12,8 +12,6 @@
 
 已生成的 judge-facing 材料：
 
-- `session_bootstrap/reports/judge_quality_formal_report_20260330.md`
-- `session_bootstrap/reports/judge_quality_formal_report_20260330.json`
 - `session_bootstrap/reports/judge_quality_formal_report_20260330_lpips_full.md`
 - `session_bootstrap/reports/judge_quality_formal_report_20260330_lpips_full.json`
 - `session_bootstrap/reports/judge_snr_robustness_20260330_current_chunk4.md`
@@ -34,17 +32,24 @@
 
 ### 2.1 Formal Quality Report
 
-默认会自动抓取仓库里最新的三份质量 JSON：
+默认会自动抓取仓库里最新的三份质量 JSON；当前 latest 推荐入口是：
 
-- `quality_metrics_*pytorch_vs_tvm_baseline.json`
-- `quality_metrics_*pytorch_vs_tvm_current.json`
-- `quality_metrics_*tvm_baseline_vs_tvm_current.json`
+- `judge_quality_formal_report_20260330_lpips_full.*`
+
+其底层已整合：
+
+- `PyTorch vs TVM baseline`（含 LPIPS）
+- `PyTorch vs TVM current`（含 LPIPS）
+- `TVM baseline vs TVM current`（含 LPIPS，crop249 对齐口径）
 
 命令：
 
 ```bash
 python3 ./session_bootstrap/scripts/build_quality_matrix_report.py \
-  --report-prefix ./session_bootstrap/reports/judge_quality_formal_report_$(date +%Y%m%d)
+  --quality-json ./session_bootstrap/reports/lpips_remote_snr10_retry_20260330_163229_baseline_lpips_remote_crop249.json \
+  --quality-json ./session_bootstrap/reports/lpips_remote_snr10_retry_20260330_163229_lpips_remote.json \
+  --quality-json ./session_bootstrap/reports/lpips_remote_snr10_retry_20260330_163229_tvm_baseline_vs_current_lpips_crop249.json \
+  --report-prefix ./session_bootstrap/reports/judge_quality_formal_report_$(date +%Y%m%d)_lpips_full
 ```
 
 输出：
@@ -54,7 +59,7 @@ python3 ./session_bootstrap/scripts/build_quality_matrix_report.py \
 
 ### 2.2 Multi-SNR Robustness Report
 
-默认会读取指定的 `snr_sweep_*.md` 汇总；当前最新推荐入口是 `snr_sweep_current_chunk4_20260330_152054.md`，它已经包含 trusted chunk4 的 `SNR=1/4/7/10/13` 实测 current latency，并可叠加同批质量 JSON 生成 judge-facing md/json/svg。
+默认会读取指定的 `snr_sweep_*.md` 汇总；当前最新推荐入口是 `snr_sweep_current_chunk4_20260330_152054.md`，它已经包含 trusted chunk4 的 `SNR=1/4/7/10/13` 实测 current latency，并已叠加同批质量 JSON 生成 latest judge-facing md/json/svg。
 
 命令：
 
@@ -72,10 +77,13 @@ python3 ./session_bootstrap/scripts/build_snr_robustness_report.py \
 
 说明：
 
-- 当前仓库里只有历史 `latency vs SNR`，还没有按 SNR 归档的 `quality vs SNR` JSON。
-- 该脚本会把这个缺口明确写进报告，并附上手工补采命令。
+- latest current chunk4 judge 版本已经具备 `latency + quality` 双曲线。
+- 旧版 `judge_snr_robustness_20260330.*` 仍保留为历史 latency-heavy 材料，不再作为默认入口。
 
 ### 2.3 Unified Judge Evidence Pack
+
+当前 latest 推荐入口：
+- `judge_evidence_pack_20260330_current_chunk4_lpips_full.*`
 
 命令：
 
@@ -109,12 +117,12 @@ python3 ./session_bootstrap/scripts/build_judge_evidence_pack.py \
 
 下面这些步骤需要上板或远端环境，本工作流**不自动执行**，只保留命令给主操作人手动跑。
 
-### 3.1 补齐 quality-vs-SNR
+### 3.1 刷新 / 重采 quality-vs-SNR
 
-当前正式入口已经写进：
+当前 latest 正式入口已经写进：
 
-- `session_bootstrap/reports/judge_snr_robustness_20260330.md`
-- `session_bootstrap/reports/judge_evidence_pack_20260330.md`
+- `session_bootstrap/reports/judge_snr_robustness_20260330_current_chunk4.md`
+- `session_bootstrap/reports/judge_evidence_pack_20260330_current_chunk4_lpips_full.md`
 
 命令：
 
