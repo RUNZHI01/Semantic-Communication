@@ -117,11 +117,16 @@ class RefreshFusedConv2dTranspose1Add9CheckedInSeedTest(unittest.TestCase):
             self.assertEqual(
                 manifest["source_files"]["captured_seed_json"], str(seed_json)
             )
+            self.assertEqual(
+                manifest["checked_in_hook_target"],
+                str(output_dir / "fused_conv2d_transpose1_add9_manual_candidate.py"),
+            )
 
-            self.assertIn("Refresh from the latest local capture", readme)
+            self.assertIn("Hook-facing candidate path", readme)
             self.assertIn(
                 "refresh_fused_conv2d_transpose1_add9_checked_in_seed.py", readme
             )
+            self.assertIn("manual_candidate.py", readme)
 
 
 if __name__ == "__main__":

@@ -46,6 +46,7 @@ DEFAULT_TASK_LOG = (
 DEFAULT_OUTPUT_DIR = (
     PROJECT_ROOT / "session_bootstrap" / "handwritten" / "fused_conv2d_transpose1_add9"
 )
+MANUAL_CANDIDATE_FILENAME = f"{OPERATOR_NAME}_manual_candidate.py"
 EDITABLE_TIR_FILENAME = f"{OPERATOR_NAME}_editable_seed_tir.py"
 MANIFEST_FILENAME = "seed_manifest.json"
 README_FILENAME = "README.md"
@@ -190,6 +191,9 @@ def build_manifest(
         "task_row": seed_payload.get("task_row"),
         "prim_func_capture": seed_payload.get("prim_func_capture"),
         "seed_capture_kind": seed_payload.get("seed_capture_kind"),
+        "checked_in_hook_target": repo_native(
+            output_dir / MANUAL_CANDIDATE_FILENAME
+        ),
         "checked_in_edit_target": repo_native(output_dir / EDITABLE_TIR_FILENAME),
         "source_files": {
             "captured_seed_json": repo_native(seed_json_path),
@@ -199,7 +203,7 @@ def build_manifest(
         "notes": [
             "The pre-compile seed snapshot captured the Relax callsite under `main`.",
             "The editable TIR in this directory is extracted from the local MetaSchedule task log for the selected operator workload.",
-            "This package is repo-native and checked in, but not wired into rebuild hooks automatically.",
+            "The checked-in manual candidate module is hook-facing bookkeeping only until a later compile-time override step consumes it.",
         ],
     }
 
@@ -240,6 +244,7 @@ def render_readme(
     task_log_path: Path,
     output_dir: Path,
 ) -> str:
+    manual_candidate_path = repo_native(output_dir / MANUAL_CANDIDATE_FILENAME)
     editable_tir_path = repo_native(output_dir / EDITABLE_TIR_FILENAME)
     return "\n".join(
         [
@@ -251,6 +256,7 @@ def render_readme(
             "",
             "## Files",
             "",
+            f"- `{MANUAL_CANDIDATE_FILENAME}`: repo-native handwritten-hook entrypoint for this operator; it reports the checked-in candidate path without changing compile output yet.",
             f"- `{EDITABLE_TIR_FILENAME}`: editable operator TIR extracted from the local MetaSchedule task log.",
             f"- `{MANIFEST_FILENAME}`: trimmed seed context copied from the captured seed JSON.",
             f"- `{README_FILENAME}`: short editing runbook.",
@@ -274,14 +280,53 @@ def render_readme(
             "",
             "It refuses to overwrite this directory unless `--allow-overwrite` is passed.",
             "",
+            "## Hook-facing candidate path",
+            "",
+            f"The existing `rpc_tune.py` handwritten hook can point at `{manual_candidate_path}`",
+            "today. That module is deliberately honest:",
+            "",
+            "- it points engineers at the checked-in editable TIR in this directory",
+            "- it lets the manual-hook path prove it loaded the checked-in candidate",
+            "- it still reports `manual_override_applied = false`, so compile output stays unchanged until a later override step is implemented",
+            "",
             "## Edit toward candidate v0",
             "",
             f"1. Start from `{editable_tir_path}`.",
-            "2. Keep the buffer contract stable:",
+            f"2. Keep `{manual_candidate_path}` as the hook-facing module path.",
+            "3. Keep the buffer contract stable:",
             "   input `(1, 48, 64, 64)`, weight `(48, 24, 3, 3)`, bias `(1, 24, 1, 1)`, output `(1, 24, 128, 128)`.",
-            "3. Treat `data_dilate`, `data_pad`, `kernel_transform`, `compute`, and `T_add` as the honest baseline stages from the captured workload.",
-            "4. First manual edits should stay narrow: reduce intermediate traffic, fuse cheap transforms when possible, and only then try tiling/vectorization around `compute`.",
-            "5. Do not point remote validation at this directory until a local-only rebuild path explicitly consumes it.",
+            "4. Treat `data_dilate`, `data_pad`, `kernel_transform`, `compute`, and `T_add` as the honest baseline stages from the captured workload.",
+            "5. First manual edits should stay narrow: reduce intermediate traffic, fuse cheap transforms when possible, and only then try tiling/vectorization around `compute`.",
+            "",
+            "## Local-only validation through the existing manual hook",
+            "",
+            "Regenerate the overlay so it points at the checked-in candidate module:",
+            "",
+            "```bash",
+            "python3 ./session_bootstrap/scripts/prepare_fused_conv2d_transpose1_add9_manual_hook_overlay.py \\",
+            "  --scaffold-dir ./session_bootstrap/tmp/handwritten_fused_conv2d_transpose1_add9_scaffold \\",
+            f"  --manual-impl-path {manual_candidate_path} \\",
+            "  --allow-overwrite",
+            "```",
+            "",
+            "Then exercise the existing hook with no remote work:",
+            "",
+            "```bash",
+            "bash ./session_bootstrap/scripts/capture_fused_conv2d_transpose1_add9_manual_seed.sh \\",
+            "  --scaffold-dir ./session_bootstrap/tmp/handwritten_fused_conv2d_transpose1_add9_scaffold \\",
+            "  --allow-existing-output",
+            "```",
+            "",
+            "That proves the hook is loading the checked-in candidate path. It does not",
+            "yet prove a performance change, because the checked-in candidate module still",
+            "reports `manual_override_applied = false`.",
+            "",
+            "## Staging lane after a real override exists",
+            "",
+            "Once `build_manual_impl()` starts applying a real override, reuse the same",
+            "`manual_hook_overlay.env` with the existing staging-safe one-shot and profile",
+            "commands from the transpose1 handwritten runbooks. Do not overwrite trusted",
+            "current while this checked-in candidate is still seed-derived.",
             "",
             "## Source reminder",
             "",
