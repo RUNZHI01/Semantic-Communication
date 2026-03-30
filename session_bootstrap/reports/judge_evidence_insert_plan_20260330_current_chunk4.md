@@ -97,6 +97,9 @@
   - 当前 runtime hotspot candidates 为：
     - `fused_conv2d_transpose1_add9`
     - `fused_conv2d_transpose2_add12`
+  - 若需要再展开，可补一句 raw top ops 还包括：
+    - `fused_conv2d_transpose_add6`
+    - `fused_conv2d3_add15`
   - 需要诚实说明：当前还只是 `1 sample` 级别的 runtime profile，后续可继续补多 sample 稳定性
 
 ## 3. PPT 页结构建议
