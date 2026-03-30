@@ -7,6 +7,29 @@
 
 ---
 
+## Judge Evidence Pack（2026-03-30）
+
+核心入口：
+
+- `session_bootstrap/runbooks/judge_evidence_workflow_2026-03-30.md`
+- `session_bootstrap/scripts/build_quality_matrix_report.py`
+- `session_bootstrap/scripts/build_snr_robustness_report.py`
+- `session_bootstrap/scripts/build_judge_evidence_pack.py`
+- `session_bootstrap/reports/judge_quality_formal_report_20260330_lpips_partial.md`
+- `session_bootstrap/reports/judge_snr_robustness_20260330_current_chunk4.md`
+- `session_bootstrap/reports/judge_snr_robustness_20260330_current_chunk4_latency.svg`
+- `session_bootstrap/reports/judge_snr_robustness_20260330_current_chunk4_quality.svg`
+- `session_bootstrap/reports/judge_evidence_pack_20260330_current_chunk4_lpips_partial.md`
+
+补充说明：
+
+- 这条线只服务于 judge-facing evidence / complementary materials，不处理 demo / admission 交付；
+- 本地已经把 `quality / hotspot / resource / SNR` 结果统一整理成正式材料；
+- 目前最新质量入口已升级到 `lpips_partial`：`PyTorch vs TVM baseline/current` 两组都已有 SNR10 的远端 LPIPS 实测；
+- 当前真正还缺的，主要是 `tvm_baseline_vs_tvm_current` 这一组 LPIPS，以及 profiler-capable runtime per-op profiling。
+
+---
+
 ## 0. big.LITTLE 异构大小核真机入口（2026-03-18）
 
 核心入口：

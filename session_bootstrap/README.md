@@ -26,6 +26,10 @@
 | 目的 | 路径 |
 |---|---|
 | 当前成果 / 脚本 / 路径总索引 | `runbooks/artifact_registry.md` |
+| 评委补证工作流 | `runbooks/judge_evidence_workflow_2026-03-30.md` |
+| 评委技术证据总包（latest） | `reports/judge_evidence_pack_20260330_current_chunk4_lpips_partial.md` |
+| 正式质量报告（PSNR / SSIM / LPIPS，latest） | `reports/judge_quality_formal_report_20260330_lpips_partial.md` |
+| 多 SNR 鲁棒性摘要（latest） | `reports/judge_snr_robustness_20260330_current_chunk4.md` |
 | trusted current payload 正式结论 | `reports/inference_compare_currentsafe_chunk4_refresh_20260313_1758.md` |
 | trusted current 真实端到端重建正式结论 | `reports/inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md` |
 | 下一轮性能优化执行清单 | `runbooks/next_round_optimization_checklist.md` |
@@ -39,6 +43,26 @@
 | big.LITTLE 首跑前交接（历史） | `reports/big_little_overnight_handoff_20260318.md` |
 | big.LITTLE 异构流水线 runbook | `runbooks/big_little_pipeline_runbook_2026-03-18.md` |
 | 后续性能优化路线 | `runbooks/optimization_roadmap.md` |
+
+## Judge Evidence Workflow（2026-03-30）
+
+如果当前目标是补评委追问证据，而不是继续做 demo / admission 交付，默认走下面这条线：
+
+1. `python3 ./scripts/build_quality_matrix_report.py`
+2. `python3 ./scripts/build_snr_robustness_report.py`
+3. `python3 ./scripts/build_judge_evidence_pack.py`
+
+推荐直接先看：
+
+- `runbooks/judge_evidence_workflow_2026-03-30.md`
+- `reports/judge_quality_formal_report_20260330_lpips_partial.md`
+- `reports/judge_snr_robustness_20260330_current_chunk4.md`
+- `reports/judge_evidence_pack_20260330_current_chunk4_lpips_partial.md`
+
+说明：
+
+- 这套 workflow 只整理本地已有结果，不自动发起任何 SSH / 远端脚本。
+- 对仍然必须上板的步骤，例如 `quality-vs-SNR` 和 profiler-enabled runtime 验证，runbook 里只保留手工命令。
 
 ### 飞腾杯冲奖救援文档（2026-03-19）
 

@@ -61,6 +61,10 @@
 | 查看进度与里程碑 | `session_bootstrap/PROGRESS_LOG.md` |
 | 执行命令与脚本说明 | `session_bootstrap/README.md` |
 | 当前成果 / 脚本 / 路径索引 | `session_bootstrap/runbooks/artifact_registry.md` |
+| 评委补证工作流（quality / hotspot / resource / SNR / final pack） | `session_bootstrap/runbooks/judge_evidence_workflow_2026-03-30.md` |
+| 评委技术证据总包（2026-03-30，latest） | `session_bootstrap/reports/judge_evidence_pack_20260330_current_chunk4_lpips_partial.md` |
+| PSNR / SSIM / LPIPS 正式质量报告（2026-03-30，latest） | `session_bootstrap/reports/judge_quality_formal_report_20260330_lpips_partial.md` |
+| 多 SNR 鲁棒性摘要（2026-03-30，latest） | `session_bootstrap/reports/judge_snr_robustness_20260330_current_chunk4.md` |
 | OpenAMP 控制面答辩证据包 | `session_bootstrap/reports/openamp_control_plane_evidence_package_20260315/README.md` |
 | OpenAMP demo / 答辩材料索引 | `session_bootstrap/reports/openamp_control_plane_evidence_package_20260315/demo_materials_index.md` |
 | OpenAMP demo 最新 live 双路径状态（2026-03-17） | `session_bootstrap/reports/openamp_demo_live_dualpath_status_20260317.md` |
@@ -94,6 +98,15 @@
 | big.LITTLE 首选 apples-to-apples compare | `session_bootstrap/reports/big_little_compare_20260318_123300.md`（健康板态下 serial current `231.522 ms/image` → pipeline current `134.617 ms/image`，吞吐 `+56.077%`） |
 | big.LITTLE 板态漂移结论 | `session_bootstrap/reports/big_little_board_state_drift_20260318.md`（same-day direct rerun `347.375 → 295.255 → 239.233 ms/image`，CPU online `0-2 → 0-3`，说明板态是 primary factor） |
 | 详细产物 / 脚本 / 路径说明 | `session_bootstrap/runbooks/artifact_registry.md` |
+
+### 评委补证材料（2026-03-30）
+
+- `session_bootstrap/runbooks/judge_evidence_workflow_2026-03-30.md`
+- `session_bootstrap/reports/judge_quality_formal_report_20260330_lpips_partial.md`
+- `session_bootstrap/reports/judge_snr_robustness_20260330_current_chunk4.md`
+- `session_bootstrap/reports/judge_snr_robustness_20260330_current_chunk4_latency.svg`
+- `session_bootstrap/reports/judge_snr_robustness_20260330_current_chunk4_quality.svg`
+- `session_bootstrap/reports/judge_evidence_pack_20260330_current_chunk4_lpips_partial.md`
 
 ### 飞腾杯冲奖救援文档（2026-03-19）
 
