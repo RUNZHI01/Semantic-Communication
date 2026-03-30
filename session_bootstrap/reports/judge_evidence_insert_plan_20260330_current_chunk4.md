@@ -7,8 +7,8 @@
 
 优先引用顺序：
 
-1. `session_bootstrap/reports/judge_evidence_pack_20260330_current_chunk4_lpips_profiled.md`
-2. `session_bootstrap/reports/judge_quality_formal_report_20260330_lpips_partial.md`
+1. `session_bootstrap/reports/judge_evidence_pack_20260330_current_chunk4_lpips_full.md`
+2. `session_bootstrap/reports/judge_quality_formal_report_20260330_lpips_full.md`
 3. `session_bootstrap/reports/judge_snr_robustness_20260330_current_chunk4.md`
 4. `session_bootstrap/reports/resource_profile_trusted_current_chunk4_20260330_151728.md`
 5. `session_bootstrap/reports/profiling_judge_refresh_20260330_170808.md`
@@ -29,18 +29,18 @@
 ### 2.2 图像质量页
 
 建议表格直接引用：
-- `session_bootstrap/reports/judge_quality_formal_report_20260330_lpips_partial.md`
+- `session_bootstrap/reports/judge_quality_formal_report_20260330_lpips_full.md`
 
 可直接写成：
 - `PyTorch vs TVM baseline`：`PSNR 34.4244 dB`，`SSIM 0.970454`，`LPIPS 0.025883`
 - `PyTorch vs TVM current`：`PSNR 35.6633 dB`，`SSIM 0.972751`，`LPIPS 0.025124`
-- `TVM baseline vs TVM current`：`PSNR 34.5299 dB`，`SSIM 0.970432`，`LPIPS 暂缺`
+- `TVM baseline vs TVM current`：`PSNR 34.4464 dB`，`SSIM 0.970427`，`LPIPS 0.025850`
 
 正文解释建议：
 - current 相比 baseline，在同一 PyTorch reference 下平均 `+1.2389 dB PSNR`
 - current 的 LPIPS 也略优于 baseline（`0.025124 < 0.025883`）
 - 说明 current 提速并未以明显牺牲重建质量为代价
-- 脚注注明：`PyTorch vs TVM baseline` 这组 LPIPS 为 remote crop249 对齐后得到；`TVM baseline vs current` 这一组 LPIPS 仍待补
+- 脚注注明：涉及 baseline 的 LPIPS 采用 remote crop249 对齐口径（与历史 baseline 249×249 输出保持一致）
 
 ### 2.3 资源画像页
 
@@ -109,7 +109,7 @@
 标题建议：`加速同时保持重建质量`
 
 放：
-- `judge_quality_formal_report_20260330_lpips_partial.md` 里的 aggregate matrix
+- `judge_quality_formal_report_20260330_lpips_full.md` 里的 aggregate matrix
 - 一句结论：`current 相比 baseline 平均 +1.2389 dB PSNR，LPIPS 也略优`
 
 ### 页 B：资源可控
@@ -146,6 +146,6 @@
 
 ## 5. 当前仍需诚实说明的边界
 
-- `LPIPS` 已补到 `PyTorch vs TVM baseline/current` 两组的 SNR10 远端实测，但 `TVM baseline vs current` 这一组仍未补齐
+- `LPIPS` 现已补齐三组正式比较，但其中涉及 baseline 的两组采用 remote crop249 对齐口径，应在答辩里用脚注说明
 - 远端 runtime per-op profiling 仍未拿到完整可复用结果，fresh probe 结论仍是 `stage_level_hotspot_only`
 - 以上边界不会推翻已有 judge-facing 结论，但答辩时应主动说明为“当前已补核心证据，剩余是增强项”
