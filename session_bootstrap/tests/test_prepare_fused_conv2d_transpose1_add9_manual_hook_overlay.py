@@ -60,56 +60,89 @@ class FakeIRModule:
 
 
 class PrepareFusedConv2dTranspose1Add9ManualHookOverlayTest(unittest.TestCase):
-    def test_generates_manual_seed_impl_and_overlay_env(self) -> None:
+    def _write_scaffold_inputs(self, scaffold_dir: Path) -> tuple[Path, Path]:
+        rebuild_env = scaffold_dir / "manual_rebuild.env"
+        bookkeeping_json = scaffold_dir / "bookkeeping.json"
+        write_text(rebuild_env, "TUNE_TOTAL_TRIALS=0\n")
+        write_text(
+            bookkeeping_json,
+            json.dumps(
+                {
+                    "operator": "fused_conv2d_transpose1_add9",
+                    "current_best_staging": {
+                        "artifact_sha256": (
+                            "5bd14b9f97d1d06f04a484cd8b1b3f57"
+                            "a955d65711ed65a22f9925dcec44698d"
+                        )
+                    },
+                    "current_profile_json": "/tmp/current_profile.json",
+                    "remote_archive_dir": "/tmp/handwritten_archive",
+                    "operator_context": {
+                        "current_argument_shapes": (
+                            "float32[1, 48, 64, 64], "
+                            "float32[48, 24, 3, 3], "
+                            "float32[1, 24, 1, 1], "
+                            "float32[1, 24, 128, 128]"
+                        )
+                    },
+                },
+                indent=2,
+            )
+            + "\n",
+        )
+        return rebuild_env, bookkeeping_json
+
+    def test_defaults_overlay_to_checked_in_candidate_module(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir_raw:
             temp_dir = Path(temp_dir_raw)
             scaffold_dir = temp_dir / "scaffold"
-            rebuild_env = scaffold_dir / "manual_rebuild.env"
-            bookkeeping_json = scaffold_dir / "bookkeeping.json"
-
-            write_text(rebuild_env, "TUNE_TOTAL_TRIALS=0\n")
-            write_text(
-                bookkeeping_json,
-                json.dumps(
-                    {
-                        "operator": "fused_conv2d_transpose1_add9",
-                        "current_best_staging": {
-                            "artifact_sha256": (
-                                "5bd14b9f97d1d06f04a484cd8b1b3f57"
-                                "a955d65711ed65a22f9925dcec44698d"
-                            )
-                        },
-                        "current_profile_json": "/tmp/current_profile.json",
-                        "remote_archive_dir": "/tmp/handwritten_archive",
-                        "operator_context": {
-                            "current_argument_shapes": (
-                                "float32[1, 48, 64, 64], "
-                                "float32[48, 24, 3, 3], "
-                                "float32[1, 24, 1, 1], "
-                                "float32[1, 24, 128, 128]"
-                            )
-                        },
-                    },
-                    indent=2,
-                )
-                + "\n",
-            )
+            rebuild_env, bookkeeping_json = self._write_scaffold_inputs(scaffold_dir)
 
             rc = module.main(["--scaffold-dir", str(scaffold_dir)])
             self.assertEqual(rc, 0)
 
-            manual_impl_path = scaffold_dir / "fused_conv2d_transpose1_add9_manual_impl.py"
             overlay_env_path = scaffold_dir / "manual_hook_overlay.env"
-
             overlay_env = overlay_env_path.read_text(encoding="utf-8")
             self.assertIn(f"source {str(rebuild_env)}", overlay_env)
-            self.assertIn("TVM_HANDWRITTEN_OP=fused_conv2d_transpose1_add9", overlay_env)
+            self.assertIn(
+                "TVM_HANDWRITTEN_IMPL_PATH=./session_bootstrap/handwritten/"
+                "fused_conv2d_transpose1_add9/fused_conv2d_transpose1_add9_manual_candidate.py",
+                overlay_env,
+            )
+            self.assertIn("rpc_tune.py already consumes these variables", overlay_env)
+            self.assertIn(
+                f"TVM_HANDWRITTEN_BOOKKEEPING_JSON={bookkeeping_json}",
+                overlay_env,
+            )
+            self.assertFalse(
+                (scaffold_dir / "fused_conv2d_transpose1_add9_manual_impl.py").exists()
+            )
+
+    def test_materializes_scaffold_local_manual_seed_when_path_is_explicit(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir_raw:
+            temp_dir = Path(temp_dir_raw)
+            scaffold_dir = temp_dir / "scaffold"
+            rebuild_env, bookkeeping_json = self._write_scaffold_inputs(scaffold_dir)
+            manual_impl_path = scaffold_dir / "fused_conv2d_transpose1_add9_manual_impl.py"
+
+            rc = module.main(
+                [
+                    "--scaffold-dir",
+                    str(scaffold_dir),
+                    "--manual-impl-path",
+                    str(manual_impl_path),
+                ]
+            )
+            self.assertEqual(rc, 0)
+
+            overlay_env_path = scaffold_dir / "manual_hook_overlay.env"
+            overlay_env = overlay_env_path.read_text(encoding="utf-8")
+            self.assertIn(f"source {str(rebuild_env)}", overlay_env)
             self.assertIn(
                 f"TVM_HANDWRITTEN_IMPL_PATH={manual_impl_path}",
                 overlay_env,
             )
             self.assertIn("TVM_HANDWRITTEN_IMPL_ENTRYPOINT=build_manual_impl", overlay_env)
-            self.assertIn("TVM_HANDWRITTEN_IMPL_METADATA_FN=describe_placeholder", overlay_env)
             self.assertIn(
                 f"TVM_HANDWRITTEN_BOOKKEEPING_JSON={bookkeeping_json}",
                 overlay_env,
