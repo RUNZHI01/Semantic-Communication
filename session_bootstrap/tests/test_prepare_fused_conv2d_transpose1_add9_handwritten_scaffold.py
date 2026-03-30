@@ -154,10 +154,26 @@ class PrepareFusedConv2dTranspose1Add9HandwrittenScaffoldTest(unittest.TestCase)
                 bookkeeping["local_schedule_preserving_build_output_dir"],
                 "./session_bootstrap/tmp/transpose1_post_db_swap_local_build",
             )
+            self.assertEqual(
+                bookkeeping["preferred_local_post_db_build"]["output_dir"],
+                "./session_bootstrap/tmp/transpose1_post_db_swap_local_build",
+            )
+            self.assertEqual(
+                bookkeeping["preferred_local_post_db_build"]["artifact_path"],
+                "./session_bootstrap/tmp/transpose1_post_db_swap_local_build/fused_conv2d_transpose1_add9_post_db_swap.so",
+            )
+            self.assertEqual(
+                bookkeeping["preferred_local_post_db_build"]["report_path"],
+                "./session_bootstrap/tmp/transpose1_post_db_swap_local_build/fused_conv2d_transpose1_add9_post_db_swap_report.json",
+            )
             self.assertIn("schedule-preserving", bookkeeping["why_local_first"])
             self.assertIn("validation_report_template.md", bookkeeping["generated_files"])
             self.assertIn(
                 "run_transpose1_post_db_local_build.py",
+                bookkeeping["commands"]["local_schedule_preserving_build"],
+            )
+            self.assertIn(
+                "--output-dir ./session_bootstrap/tmp/transpose1_post_db_swap_local_build",
                 bookkeeping["commands"]["local_schedule_preserving_build"],
             )
             self.assertIn(
@@ -172,6 +188,8 @@ class PrepareFusedConv2dTranspose1Add9HandwrittenScaffoldTest(unittest.TestCase)
 
             self.assertIn("- candidate_sha256: `aaaaaaaa", validation_template)
             self.assertIn("- local_build_output_dir: `./session_bootstrap/tmp/transpose1_post_db_swap_local_build`", validation_template)
+            self.assertIn("- local_build_report_json: `./session_bootstrap/tmp/transpose1_post_db_swap_local_build/fused_conv2d_transpose1_add9_post_db_swap_report.json`", validation_template)
+            self.assertIn("- local_build_artifact: `./session_bootstrap/tmp/transpose1_post_db_swap_local_build/fused_conv2d_transpose1_add9_post_db_swap.so`", validation_template)
             self.assertIn("- local_build_swap_result: `<fill>`", validation_template)
             self.assertIn(
                 "run_transpose1_post_db_local_build.py",
@@ -184,6 +202,9 @@ class PrepareFusedConv2dTranspose1Add9HandwrittenScaffoldTest(unittest.TestCase)
 
             self.assertIn("## Default workflow", readme)
             self.assertIn("Only after the local build and SHA capture look sane", readme)
+            self.assertIn("manual_hook_overlay.env` is hook wiring only", readme)
+            self.assertIn("Preferred local build artifact", readme)
+            self.assertIn("Preferred local build report", readme)
             self.assertIn("run_phytium_current_safe_one_shot.sh", readme)
             self.assertIn("run_task_5_1_operator_profile.py", readme)
             self.assertIn("validation_report_template.md", readme)

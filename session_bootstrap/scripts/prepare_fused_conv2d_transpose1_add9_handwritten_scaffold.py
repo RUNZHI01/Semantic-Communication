@@ -176,6 +176,23 @@ def shell_quote(value: str) -> str:
     return shlex.quote(value)
 
 
+def build_preferred_local_post_db_build() -> dict[str, str]:
+    output_dir = repo_native(Path(DEFAULT_LOCAL_BUILD_OUTPUT_DIR))
+    return {
+        "command": (
+            "python3 ./session_bootstrap/scripts/run_transpose1_post_db_local_build.py "
+            f"--output-dir {shell_quote(output_dir)}"
+        ),
+        "output_dir": output_dir,
+        "artifact_path": repo_native(
+            Path(DEFAULT_LOCAL_BUILD_OUTPUT_DIR) / f"{OPERATOR_NAME}_post_db_swap.so"
+        ),
+        "report_path": repo_native(
+            Path(DEFAULT_LOCAL_BUILD_OUTPUT_DIR) / f"{OPERATOR_NAME}_post_db_swap_report.json"
+        ),
+    }
+
+
 def load_candidate(candidate_json: Path) -> tuple[dict[str, Any], dict[str, Any]]:
     payload = json.loads(candidate_json.read_text(encoding="utf-8"))
     wave1 = payload.get("wave1_candidates") or []
@@ -314,10 +331,8 @@ def build_commands(
     profile_env: Path,
     remote_archive_dir: str,
     rebuild_output_dir: str,
+    preferred_local_post_db_build: dict[str, str],
 ) -> dict[str, str]:
-    local_build_command = (
-        "python3 ./session_bootstrap/scripts/run_transpose1_post_db_local_build.py"
-    )
     validate_command = "\n".join(
         [
             "bash ./session_bootstrap/scripts/run_phytium_current_safe_one_shot.sh \\",
@@ -342,7 +357,7 @@ def build_commands(
     sha_target = f"{repo_native(Path(rebuild_output_dir))}/optimized_model.so"
     sha_command = f"sha256sum {shell_quote(sha_target)}"
     return {
-        "local_schedule_preserving_build": local_build_command,
+        "local_schedule_preserving_build": preferred_local_post_db_build["command"],
         "compute_sha256": sha_command,
         "validate": validate_command,
         "profile": profile_command,
@@ -355,6 +370,7 @@ def build_validation_report_template(
     candidate: dict[str, Any],
     args: argparse.Namespace,
     commands: dict[str, str],
+    preferred_local_post_db_build: dict[str, str],
 ) -> str:
     best_staging = candidate_payload.get("current_best_staging") or {}
     digest = args.manual_artifact_sha256 or "<fill_after_build>"
@@ -374,10 +390,10 @@ def build_validation_report_template(
             "## Local-first build",
             "",
             f"- local_build_command: `{commands['local_schedule_preserving_build']}`",
-            f"- local_build_output_dir: `{DEFAULT_LOCAL_BUILD_OUTPUT_DIR}`",
-            "- local_build_report_json: `<fill>`",
+            f"- local_build_output_dir: `{preferred_local_post_db_build['output_dir']}`",
+            f"- local_build_report_json: `{preferred_local_post_db_build['report_path']}`",
             "- local_build_swap_result: `<fill>`",
-            "- local_build_artifact: `<fill>`",
+            f"- local_build_artifact: `{preferred_local_post_db_build['artifact_path']}`",
             "- local_build_notes: `<fill>`",
             "",
             "## Payload validation",
@@ -429,6 +445,7 @@ def build_readme(
     args: argparse.Namespace,
     generated_files: dict[str, str],
     commands: dict[str, str],
+    preferred_local_post_db_build: dict[str, str],
 ) -> str:
     best_staging = candidate_payload.get("current_best_staging") or {}
     sha_note = (
@@ -469,8 +486,7 @@ def build_readme(
             "## Default workflow",
             "",
             "1. Materialize `manual_hook_overlay.env` so the handwritten lane points at the checked-in candidate-v0 module unless you explicitly need a scaffold-local placeholder seed module.",
-            "2. Run the local schedule-preserving build path and inspect the swapped artifact plus adjacent JSON report under "
-            f"`{DEFAULT_LOCAL_BUILD_OUTPUT_DIR}`.",
+            "2. Run the preferred local schedule-preserving build command and inspect its explicit post-db artifact/report outputs.",
             "3. Record the local artifact SHA from the handwritten rebuild output directory.",
             "4. Only after the local build and SHA capture look sane, use the optional staging validation and runtime reprobe commands below.",
             "",
@@ -482,6 +498,8 @@ def build_readme(
             "```",
             "",
             "- This materializes `manual_hook_overlay.env` and, by default, points it at the repo-native checked-in candidate-v0 module.",
+            "- `manual_hook_overlay.env` is hook wiring only; it does not build, export, or validate any artifact by itself.",
+            "- The immediate next step after generating the overlay is the preferred local post-db build command below.",
             "- If you explicitly want a scaffold-local placeholder seed module instead, re-run with `--manual-impl-path ./session_bootstrap/tmp/.../fused_conv2d_transpose1_add9_manual_impl.py`.",
             "- After that, run `bash ./session_bootstrap/scripts/capture_fused_conv2d_transpose1_add9_manual_seed.sh --scaffold-dir ...` to record the selected task row and TIR snapshot through the local build path only.",
             "- `rpc_tune.py` already consumes `TVM_HANDWRITTEN_IMPL_PATH` at the pre-compile seam; the overlay is the activation contract for this staging-only lane.",
@@ -492,11 +510,12 @@ def build_readme(
             "2. Prefer the schedule-preserving local build path first:",
             "",
             "```bash",
-            "python3 ./session_bootstrap/scripts/run_transpose1_post_db_local_build.py",
+            commands["local_schedule_preserving_build"],
             "```",
             "",
-            "   That path exports a local swapped artifact plus adjacent JSON report under",
-            "   `./session_bootstrap/tmp/transpose1_post_db_swap_local_build`.",
+            f"- Preferred local build output dir: `{preferred_local_post_db_build['output_dir']}`",
+            f"- Preferred local build artifact: `{preferred_local_post_db_build['artifact_path']}`",
+            f"- Preferred local build report: `{preferred_local_post_db_build['report_path']}`",
             (
                 "3. Build or rebuild the candidate locally so "
                 f"`{repo_native(Path(args.rebuild_output_dir))}/optimized_model.so` exists."
@@ -569,6 +588,7 @@ def main(argv: list[str] | None = None) -> int:
         profile_env=profile_env,
         remote_archive_dir=args.remote_archive_dir,
         rebuild_output_dir=args.rebuild_output_dir,
+        preferred_local_post_db_build=build_preferred_local_post_db_build(),
     )
     generated_files = {
         rebuild_env.name: str(rebuild_env),
@@ -609,6 +629,7 @@ def main(argv: list[str] | None = None) -> int:
             "profile",
         ],
         "local_schedule_preserving_build_output_dir": DEFAULT_LOCAL_BUILD_OUTPUT_DIR,
+        "preferred_local_post_db_build": build_preferred_local_post_db_build(),
         "generated_files": generated_files,
         "commands": commands,
     }
@@ -626,6 +647,7 @@ def main(argv: list[str] | None = None) -> int:
             candidate=candidate,
             args=args,
             commands=commands,
+            preferred_local_post_db_build=bookkeeping["preferred_local_post_db_build"],
         ),
     )
     write_text(bookkeeping_json, json.dumps(bookkeeping, indent=2, ensure_ascii=False) + "\n")
@@ -637,6 +659,7 @@ def main(argv: list[str] | None = None) -> int:
             args=args,
             generated_files=generated_files,
             commands=commands,
+            preferred_local_post_db_build=bookkeeping["preferred_local_post_db_build"],
         ),
     )
 
