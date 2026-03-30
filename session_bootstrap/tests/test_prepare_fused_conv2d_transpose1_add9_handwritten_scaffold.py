@@ -113,6 +113,12 @@ class PrepareFusedConv2dTranspose1Add9HandwrittenScaffoldTest(unittest.TestCase)
                 "./session_bootstrap/tmp/transpose1_post_db_swap_local_build/"
                 "fused_conv2d_transpose1_add9_post_db_swap_report.json"
             )
+            preferred_sync_command = (
+                "python3 ./session_bootstrap/scripts/"
+                "sync_transpose1_post_db_local_build_result.py "
+                f"--scaffold-dir {output_dir} "
+                "--output-dir ./session_bootstrap/tmp/transpose1_post_db_swap_local_build"
+            )
             self.assertEqual(result["status"], "ok")
             self.assertEqual(result["output_dir"], str(output_dir))
             self.assertEqual(result["preferred_local_build_output_dir"], preferred_output_dir)
@@ -164,7 +170,7 @@ class PrepareFusedConv2dTranspose1Add9HandwrittenScaffoldTest(unittest.TestCase)
                 [
                     "prepare_manual_hook_overlay",
                     "local_schedule_preserving_build",
-                    "compute_sha256",
+                    "sync_local_build_result",
                     "validate",
                     "profile",
                 ],
@@ -230,6 +236,10 @@ class PrepareFusedConv2dTranspose1Add9HandwrittenScaffoldTest(unittest.TestCase)
                 "--output-dir ./session_bootstrap/tmp/transpose1_post_db_swap_local_build",
                 bookkeeping["commands"]["local_schedule_preserving_build"],
             )
+            self.assertEqual(
+                bookkeeping["commands"]["sync_local_build_result"],
+                preferred_sync_command,
+            )
             self.assertIn(
                 "run_phytium_current_safe_one_shot.sh",
                 bookkeeping["commands"]["validate"],
@@ -241,6 +251,10 @@ class PrepareFusedConv2dTranspose1Add9HandwrittenScaffoldTest(unittest.TestCase)
             )
 
             self.assertIn("- candidate_sha256: `aaaaaaaa", validation_template)
+            self.assertIn(
+                f"- local_build_sync_command: `{preferred_sync_command}`",
+                validation_template,
+            )
             self.assertIn(
                 f"- preferred_local_build_output_dir: `{preferred_output_dir}`",
                 validation_template,
@@ -264,13 +278,18 @@ class PrepareFusedConv2dTranspose1Add9HandwrittenScaffoldTest(unittest.TestCase)
             self.assertIn("- decision: `<keep_staging_only|drop>`", validation_template)
 
             self.assertIn("## Default workflow", readme)
-            self.assertIn("Only after the local build and SHA capture look sane", readme)
+            self.assertIn(
+                "Run the local result-sync helper so the scaffold bookkeeping pack records",
+                readme,
+            )
+            self.assertIn("The sync step is still local-only and diagnostic-only", readme)
             self.assertIn("manual_hook_overlay.env` is hook wiring only", readme)
             self.assertIn(preferred_artifact_path, readme)
             self.assertIn(preferred_report_path, readme)
             self.assertIn("Preferred local build artifact", readme)
             self.assertIn("Preferred local build report", readme)
             self.assertIn("Wrapper output naming note", readme)
+            self.assertIn("sync_transpose1_post_db_local_build_result.py", readme)
             self.assertIn("run_phytium_current_safe_one_shot.sh", readme)
             self.assertIn("run_task_5_1_operator_profile.py", readme)
             self.assertIn("validation_report_template.md", readme)
@@ -286,6 +305,10 @@ class PrepareFusedConv2dTranspose1Add9HandwrittenScaffoldTest(unittest.TestCase)
             )
             self.assertIn(
                 "run_transpose1_post_db_local_build.py",
+                readme,
+            )
+            self.assertIn(
+                "The sync helper only records local build facts; it does not claim runtime or performance validity.",
                 readme,
             )
             self.assertIn(
