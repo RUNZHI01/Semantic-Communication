@@ -116,6 +116,10 @@ class PrepareFusedConv2dTranspose1Add9HandwrittenScaffoldTest(unittest.TestCase)
             self.assertIn("TUNE_TOTAL_TRIALS=0", rebuild_env)
             self.assertIn(f"REMOTE_TVM_JSCC_BASE_DIR={remote_archive}", rebuild_env)
             self.assertIn("HANDWRITTEN_TARGET_OP=fused_conv2d_transpose1_add9", rebuild_env)
+            self.assertIn(
+                "prepare_fused_conv2d_transpose1_add9_manual_hook_overlay.py",
+                rebuild_env,
+            )
 
             self.assertIn(f"source {str(validate_base_env)}", validate_env)
             self.assertIn(f"INFERENCE_CURRENT_ARCHIVE={remote_archive}", validate_env)
@@ -155,6 +159,11 @@ class PrepareFusedConv2dTranspose1Add9HandwrittenScaffoldTest(unittest.TestCase)
             self.assertIn("run_phytium_current_safe_one_shot.sh", readme)
             self.assertIn("run_task_5_1_operator_profile.py", readme)
             self.assertIn("validation_report_template.md", readme)
+            self.assertIn(
+                "prepare_fused_conv2d_transpose1_add9_manual_hook_overlay.py",
+                readme,
+            )
+            self.assertIn("manual_hook_overlay.env", readme)
 
 
 if __name__ == "__main__":

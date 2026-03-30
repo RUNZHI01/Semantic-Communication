@@ -1,0 +1,48 @@
+"""First placeholder manual implementation hook for fused_conv2d_transpose1_add9.
+
+This module is staging-only bookkeeping. The current stock rebuild wrappers do
+not import it yet. The first local build-side patch should load this file from
+TVM_HANDWRITTEN_IMPL_PATH and call build_manual_impl() when
+TVM_HANDWRITTEN_OP matches this operator.
+"""
+
+from __future__ import annotations
+
+
+OPERATOR_NAME = __OPERATOR_NAME__
+REFERENCE_STAGING_SHA256 = __REFERENCE_STAGING_SHA256__
+REFERENCE_PROFILE_JSON = __REFERENCE_PROFILE_JSON__
+ARGUMENT_SHAPES = __ARGUMENT_SHAPES__
+BOOKKEEPING_JSON = __BOOKKEEPING_JSON__
+REMOTE_ARCHIVE_DIR = __REMOTE_ARCHIVE_DIR__
+PLACEHOLDER_ONLY = True
+
+
+def describe_placeholder() -> dict[str, object]:
+    return {
+        "operator": OPERATOR_NAME,
+        "reference_staging_sha256": REFERENCE_STAGING_SHA256,
+        "reference_profile_json": REFERENCE_PROFILE_JSON,
+        "argument_shapes": ARGUMENT_SHAPES,
+        "bookkeeping_json": BOOKKEEPING_JSON,
+        "remote_archive_dir": REMOTE_ARCHIVE_DIR,
+        "placeholder_only": PLACEHOLDER_ONLY,
+        "next_step": (
+            "Replace build_manual_impl() with the first engineer-owned manual "
+            "implementation before switching the rebuild path to "
+            "manual_hook_overlay.env."
+        ),
+    }
+
+
+def build_manual_impl() -> None:
+    raise NotImplementedError(
+        "Placeholder only. Fill in the first manual implementation for "
+        "fused_conv2d_transpose1_add9 and keep it staging-only."
+    )
+
+
+if __name__ == "__main__":
+    import json
+
+    print(json.dumps(describe_placeholder(), indent=2, ensure_ascii=False))
