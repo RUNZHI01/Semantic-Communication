@@ -7,7 +7,7 @@
 
 优先引用顺序：
 
-1. `session_bootstrap/reports/judge_evidence_pack_20260330_current_chunk4_lpips_full.md`
+1. `session_bootstrap/reports/judge_evidence_pack_20260330_current_chunk4_lpips_full_profiled.md`
 2. `session_bootstrap/reports/judge_quality_formal_report_20260330_lpips_full.md`
 3. `session_bootstrap/reports/judge_snr_robustness_20260330_current_chunk4.md`
 4. `session_bootstrap/reports/resource_profile_trusted_current_chunk4_20260330_151728.md`
@@ -87,19 +87,17 @@
 ### 2.5 算子热点 / profiling 页
 
 建议直接引用：
-- `session_bootstrap/reports/profiling_judge_refresh_20260330_170808.md`
+- `session_bootstrap/reports/profiling_judge_retry_parse_20260330_184026.md`
 
 当前建议写法：
-- 不要声称“已经拿到完整 remote per-op profiler 结果”
+- 不再需要说“remote per-op profiler 仍不支持”
 - 应写成：
   - 已完成可信 stage-weight hotspot evidence
-  - 当前热点集合前列包括：
-    - `reshape2`
-    - `fused_variance1_add3_tir_sqrt1`
-    - `reshape1`
-    - `fused_mean1_subtract1_divide1_multiply1_add4`
-  - 已在 trusted chunk4 上做过 fresh probe，但 `vm.profile('main', input)` 仍返回 `AttributeError: Module has no function 'profile'`
-  - 因此 runtime per-op profiling 当前仍属于暂不支持，而不是“还没试”
+  - 也已拿到 remote runtime per-op profiling 的 sample 级结果
+  - 当前 runtime hotspot candidates 为：
+    - `fused_conv2d_transpose1_add9`
+    - `fused_conv2d_transpose2_add12`
+  - 需要诚实说明：当前还只是 `1 sample` 级别的 runtime profile，后续可继续补多 sample 稳定性
 
 ## 3. PPT 页结构建议
 
@@ -147,5 +145,5 @@
 ## 5. 当前仍需诚实说明的边界
 
 - `LPIPS` 现已补齐三组正式比较，但其中涉及 baseline 的两组采用 remote crop249 对齐口径，应在答辩里用脚注说明
-- 远端 runtime per-op profiling 仍未拿到完整可复用结果，fresh probe 结论仍是 `stage_level_hotspot_only`
-- 以上边界不会推翻已有 judge-facing 结论，但答辩时应主动说明为“当前已补核心证据，剩余是增强项”
+- 远端 runtime per-op profiling 已在 latest probe 中打通，但当前仍是 `1 sample` 级别，不宜过度外推成完整统计结论
+- 以上边界不会推翻已有 judge-facing 结论，但答辩时应主动说明为“核心证据已补齐，剩余是增强项”

@@ -63,26 +63,29 @@
 
 ## Page 12
 
-- 页标题：`热点与边界：知道瓶颈在哪，也知道当前还没 overclaim 什么`
-- 页核心信息：我们已经完成热点定位，但没有虚构 runtime per-op profiler 结果。
+- 页标题：`热点与边界：知道瓶颈在哪，也知道当前不该 overclaim 什么`
+- 页核心信息：我们已经完成热点定位，也拿到了 remote runtime per-op profiling 的 sample 级结果，但不会把它夸大成大样本统计结论。
 - 页内文案：
   - 可信 stage-weight hotspot 入口已固定：
     - `reshape2`
     - `fused_variance1_add3_tir_sqrt1`
     - `reshape1`
     - `fused_mean1_subtract1_divide1_multiply1_add4`
-  - fresh profiling probe 已再次验证：
-    - trusted chunk4 + `--profile-ops --profile-samples 1`
-    - 仍返回 `AttributeError: Module has no function 'profile'`
+  - latest remote runtime profiling 已打通：
+    - `runtime_operator_profile`
+    - 当前 runtime hotspot candidates：
+      - `fused_conv2d_transpose1_add9`
+      - `fused_conv2d_transpose2_add12`
   - 因此当前口径应为：
-    - **hotspot evidence 已有**
-    - **remote runtime per-op profiling 仍暂不支持**
+    - **stage-weight hotspot evidence 已有**
+    - **remote runtime per-op profiling 也已可用**
+    - **但目前仍以 1 sample probe 为主，不能夸大成完整统计画像**
 - 讲者备注：
-  - 这页的价值不是“显得更强”，而是防止被评委质疑 overclaim。
-  - 主动承认边界，可信度反而更高。
+  - 这页的价值仍然是防止 overclaim。
+  - 现在要主动讲的边界，已经从“没有 per-op profile”变成“有 sample 级 per-op profile，但还没做大样本统计”。
 - 引用证据：
-  - `session_bootstrap/reports/profiling_judge_refresh_20260330_170808.md`
-  - `session_bootstrap/reports/judge_evidence_pack_20260330_current_chunk4_lpips_full.md`
+  - `session_bootstrap/reports/profiling_judge_retry_parse_20260330_184026.md`
+  - `session_bootstrap/reports/judge_evidence_pack_20260330_current_chunk4_lpips_full_profiled.md`
 
 ## 使用建议
 

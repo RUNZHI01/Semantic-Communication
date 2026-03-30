@@ -640,7 +640,7 @@ def main():
     load_t0 = time.perf_counter()
     lib = tvm.runtime.load_module(str(artifact_path))
     load_t1 = time.perf_counter()
-    vm = relax.VirtualMachine(lib, dev)
+    vm = relax.VirtualMachine(lib, dev, profile=bool(args.profile_ops))
     load_t2 = time.perf_counter()
     fn = vm["main"]
     LOGGER.info("TVM 模型加载成功")
