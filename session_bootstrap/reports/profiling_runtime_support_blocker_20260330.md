@@ -31,8 +31,13 @@
    - `relax.VirtualMachine` **类级别**存在 `profile`
    - `tvm.runtime.profiling` 模块可正常导入
    - 入口：`session_bootstrap/reports/profiling_runtime_api_probe_20260330_182717.md`
+6. `2026-03-30` 新增 instance-level probe 已进一步确认：
+   - `loaded_module_has_profile = false`
+   - `vm_module_has_profile = false`
+   - `get_function('profile') -> AttributeError: Module has no function 'profile'`
+   - 入口：`session_bootstrap/reports/profiling_runtime_instance_probe_20260330.md`
 
-这意味着问题不在 benchmark 封装，也不在 Python API 是否暴露 `profile` 本身，而更像是**当前 trusted current 实例绑定的底层 runtime module / artifact 组合，在真正调用时没有导出或支持对应 profiling symbol**。
+这意味着问题不在 benchmark 封装，也不在 Python API 是否暴露 `profile` 本身，而更像是**当前 trusted current 实例绑定的底层 runtime module / artifact 组合，没有导出或支持 profiling 所需符号**。
 
 ## 当前仍可对外使用的替代口径
 
