@@ -19,6 +19,22 @@ EDITABLE_TIR_FILENAME = f"{OPERATOR_NAME}_editable_seed_tir.py"
 CHECKED_IN_CANDIDATE_FILENAME = f"{OPERATOR_NAME}_candidate_v0_tir.py"
 CHECKED_IN_CANDIDATE_METADATA_FILENAME = f"{OPERATOR_NAME}_candidate_v0.json"
 MANIFEST_FILENAME = "seed_manifest.json"
+DEFAULT_EVALUATION_CONTRACT = {
+    "path_kind": "diagnostic_raw_pre_compile_replacement",
+    "schedule_context_guarantee": "not_guaranteed",
+    "performance_evaluable": False,
+    "comparison_semantics": "non_comparable_diagnostic_only",
+    "future_path_kind": "schedule_context_preserving_evaluation",
+    "future_path_status": "not_implemented",
+    "reason": (
+        "The current raw pre-compile handwritten replacement seam may miss the "
+        "best staging schedule context, so any runtime number is diagnostic only."
+    ),
+    "notes": [
+        "Use this path to confirm hook targeting, artifact identity, and structural integration only.",
+        "Do not treat runtime measurements from this seam as candidate-performance evidence.",
+    ],
+}
 
 
 def _module_dir() -> Path:
@@ -69,6 +85,15 @@ def _load_checked_in_candidate_metadata() -> dict[str, Any]:
     return payload
 
 
+def _evaluation_contract(candidate_metadata: dict[str, Any]) -> dict[str, Any]:
+    payload = candidate_metadata.get("evaluation_contract")
+    if isinstance(payload, dict):
+        merged = dict(DEFAULT_EVALUATION_CONTRACT)
+        merged.update(payload)
+        return merged
+    return dict(DEFAULT_EVALUATION_CONTRACT)
+
+
 def _select_task_row(task_stages: Any) -> dict[str, Any] | None:
     if not isinstance(task_stages, dict):
         return None
@@ -108,6 +133,7 @@ def describe_placeholder(context: dict[str, Any] | None = None) -> dict[str, obj
     del context
     manifest = _load_manifest()
     candidate_metadata = _load_checked_in_candidate_metadata()
+    evaluation_contract = _evaluation_contract(candidate_metadata)
     return {
         "operator": OPERATOR_NAME,
         "candidate_version": candidate_metadata.get("candidate_version"),
@@ -124,10 +150,11 @@ def describe_placeholder(context: dict[str, Any] | None = None) -> dict[str, obj
         "manual_override_applied": False,
         "manual_override_available": True,
         "validation_scope": "local_staging_only_pre_compile_override",
+        "evaluation_contract": evaluation_contract,
         "next_step": (
-            "Keep using this module as the handwritten-hook entrypoint to apply "
-            "the checked-in candidate v0 through the local/staging pre-compile "
-            "override path."
+            "Keep using this module as the handwritten-hook entrypoint only for "
+            "contract-side diagnostics until a schedule-context-preserving "
+            "evaluation path exists."
         ),
     }
 
@@ -135,6 +162,7 @@ def describe_placeholder(context: dict[str, Any] | None = None) -> dict[str, obj
 def build_manual_impl(context: dict[str, Any] | None = None) -> dict[str, object]:
     manifest = _load_manifest()
     candidate_metadata = _load_checked_in_candidate_metadata()
+    evaluation_contract = _evaluation_contract(candidate_metadata)
     candidate_tir_path = _checked_in_candidate_tir_path()
     if not candidate_tir_path.is_file():
         raise FileNotFoundError(
@@ -154,6 +182,7 @@ def build_manual_impl(context: dict[str, Any] | None = None) -> dict[str, object
         "candidate_metadata": str(_checked_in_candidate_metadata_path()),
         "seed_manifest": str(_manifest_path()),
         "validation_scope": "local_staging_only_pre_compile_override",
+        "evaluation_contract": evaluation_contract,
         "override": {
             "kind": "replace_prim_func_from_source",
             "source_path": str(candidate_tir_path),
@@ -163,9 +192,11 @@ def build_manual_impl(context: dict[str, Any] | None = None) -> dict[str, object
             "candidate_version": candidate_metadata.get("candidate_version"),
             "staging_only": True,
             "validation_scope": "local_staging_only_pre_compile_override",
+            "evaluation_contract": evaluation_contract,
         },
         "notes": [
             "The checked-in candidate v0 is exposed only through the local/staging handwritten hook.",
+            "The current raw pre-compile replacement seam is diagnostic-only and non-comparable.",
             "rpc_tune.py must consume the returned override descriptor before compile_relax.",
         ],
     }
