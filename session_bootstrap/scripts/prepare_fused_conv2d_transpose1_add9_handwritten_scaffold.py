@@ -242,10 +242,10 @@ def build_rebuild_env(
         ),
         f"HANDWRITTEN_ARGUMENT_SHAPES={shell_quote(str(candidate.get('current_argument_shapes', '')))}",
         "",
-        "# TODO: add the env switch or path that enables the handwritten kernel before rebuild.",
-        "# Example placeholders:",
-        f"# TVM_HANDWRITTEN_OP={OPERATOR_NAME}",
-        "# TVM_HANDWRITTEN_IMPL_PATH=./session_bootstrap/tmp/fused_conv2d_transpose1_add9_manual_impl.py",
+        "# Next smallest handoff: materialize a hook overlay instead of editing this file in place.",
+        "# python3 ./session_bootstrap/scripts/prepare_fused_conv2d_transpose1_add9_manual_hook_overlay.py \\",
+        f"#   --scaffold-dir {shell_quote(repo_native(args.output_dir))}",
+        "# That helper will create manual_hook_overlay.env plus a placeholder manual impl file.",
         "",
     ]
     return "\n".join(lines)
@@ -437,9 +437,19 @@ def build_readme(
             f"- `validation_report_template.md`: `{generated_files['validation_report_template.md']}`",
             f"- `bookkeeping.json`: `{generated_files['bookkeeping.json']}`",
             "",
+            "## Next handoff",
+            "",
+            "```bash",
+            "python3 ./session_bootstrap/scripts/prepare_fused_conv2d_transpose1_add9_manual_hook_overlay.py \\",
+            f"  --scaffold-dir {shell_quote(str(args.output_dir))}",
+            "```",
+            "",
+            "- This materializes `manual_hook_overlay.env` plus an editable placeholder manual implementation file.",
+            "- The stock wrappers already source rebuild env files; the remaining engineer patch is to teach the local rebuild path to consume `TVM_HANDWRITTEN_IMPL_PATH` before compile.",
+            "",
             "## Before running anything remote",
             "",
-            f"1. Patch `manual_rebuild.env` so the handwritten implementation for `{OPERATOR_NAME}` is actually enabled.",
+            "1. Generate `manual_hook_overlay.env` and the placeholder manual implementation file, then edit that placeholder instead of patching `manual_rebuild.env` directly.",
             (
                 "2. Build or rebuild the candidate locally so "
                 f"`{repo_native(Path(args.rebuild_output_dir))}/optimized_model.so` exists."
