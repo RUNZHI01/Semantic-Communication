@@ -338,6 +338,11 @@ def build_commands(
     rebuild_output_dir: str,
     preferred_local_post_db_build: dict[str, str],
 ) -> dict[str, str]:
+    local_build_and_sync_command = (
+        "python3 ./session_bootstrap/scripts/run_transpose1_post_db_local_build_and_sync.py "
+        f"--scaffold-dir {shell_quote(repo_native(scaffold_dir))} "
+        f"--output-dir {shell_quote(preferred_local_post_db_build['output_dir'])}"
+    )
     sync_command = (
         "python3 ./session_bootstrap/scripts/sync_transpose1_post_db_local_build_result.py "
         f"--scaffold-dir {shell_quote(repo_native(scaffold_dir))} "
@@ -367,6 +372,7 @@ def build_commands(
     sha_target = f"{repo_native(Path(rebuild_output_dir))}/optimized_model.so"
     sha_command = f"sha256sum {shell_quote(sha_target)}"
     return {
+        "local_build_and_sync": local_build_and_sync_command,
         "local_schedule_preserving_build": preferred_local_post_db_build["command"],
         "sync_local_build_result": sync_command,
         "compute_sha256": sha_command,
@@ -502,12 +508,13 @@ def build_readme(
             "## Default workflow",
             "",
             "1. Materialize `manual_hook_overlay.env` so the handwritten lane points at the checked-in candidate-v0 module unless you explicitly need a scaffold-local placeholder seed module.",
-            "2. Run the preferred local schedule-preserving build command and inspect "
+            "2. Run the preferred one-shot local build + sync wrapper and inspect its final JSON summary together with "
             f"`{preferred_local_post_db_build['artifact_path']}` plus "
             f"`{preferred_local_post_db_build['report_path']}`.",
-            "3. Run the local result-sync helper so the scaffold bookkeeping pack records the artifact path, report path, and build SHA.",
-            "4. The sync step is still local-only and diagnostic-only; it does not imply payload or runtime validation.",
-            "5. Only after the local build facts look sane, use the optional staging validation and runtime reprobe commands below.",
+            "3. The wrapper records the artifact path, report path, and build SHA back into the scaffold bookkeeping pack.",
+            "4. The one-shot wrapper is still local-only and diagnostic-only; it does not imply payload or runtime validation.",
+            "5. Use the split build/sync commands below only when you need to debug those steps independently.",
+            "6. Only after the local build facts look sane, use the optional staging validation and runtime reprobe commands below.",
             "",
             "## Next handoff",
             "",
@@ -526,13 +533,17 @@ def build_readme(
             "## Local-first build",
             "",
             "1. Generate `manual_hook_overlay.env`; use the default checked-in candidate-v0 module unless you intentionally need a scaffold-local placeholder seed module.",
-            "2. Prefer the schedule-preserving local build path first:",
+            "2. Prefer the one-shot local build + sync wrapper first:",
+            "",
+            "```bash",
+            commands["local_build_and_sync"],
+            "```",
+            "",
+            "3. If you need to split the diagnostics, the underlying build and sync commands remain available:",
             "",
             "```bash",
             commands["local_schedule_preserving_build"],
             "```",
-            "",
-            "3. Sync the finished local report back into the scaffold pack:",
             "",
             "```bash",
             commands["sync_local_build_result"],
@@ -657,8 +668,7 @@ def main(argv: list[str] | None = None) -> int:
         ),
         "default_workflow": [
             "prepare_manual_hook_overlay",
-            "local_schedule_preserving_build",
-            "sync_local_build_result",
+            "local_build_and_sync",
             "validate",
             "profile",
         ],
