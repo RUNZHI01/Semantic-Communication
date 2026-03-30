@@ -63,13 +63,20 @@
 
 目标：不跑完整模型，先确认远端 runtime 暴露了什么。
 
+已完成结果：
+- `session_bootstrap/reports/profiling_runtime_api_probe_20260330_182717.md`
+- 结论：
+  - `hasattr(relax.VirtualMachine, 'profile') == True`
+  - `tvm.runtime.profiling` 可正常导入
+  - 因此当前 blocker 并不是“API 层根本没有 profile”，而是实例调用时底层 runtime module / artifact 组合不支持对应 symbol
+
 建议方式：
 - 在飞腾板当前 TVM Python 环境中，最小化打印：
   - `hasattr(relax.VirtualMachine, 'profile')`
   - `dir(relax.VirtualMachine)`
   - profiling 相关模块接口
 
-如果这里已经没有 `profile`，后续就不要反复重跑 `run_task_5_1_operator_profile.py` 期待奇迹。
+如果这里已经没有 `profile`，后续就不要反复重跑 `run_task_5_1_operator_profile.py` 期待奇迹；如果这里有 `profile` 但实例调用仍报 `Module has no function 'profile'`，则应把排查重点转向 runtime build / exported symbol / artifact compatibility。
 
 ### Step 2：最小 sample 复验
 
