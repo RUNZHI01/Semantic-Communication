@@ -123,9 +123,12 @@ After that helper exists and is stable, the next code step should be one of:
   DB-recovered scheduled task seam instead of the current raw pre-compile seam
 
 Update: `104fe46` already proved the DB-recovered scheduled seam is mechanically
-reachable. The next concrete milestone is for the helper to compare that
-scheduled reference against the checked-in handwritten candidate module and say
-whether a future post-DB scheduled swap is structurally plausible.
+reachable. `18cb4ae` then proved the helper can compare that scheduled
+reference against the checked-in handwritten candidate module and report that a
+future post-DB scheduled swap is structurally plausible.
+
+The next concrete milestone is to perform that swap on the post-database full
+module in-memory and verify the swapped module still remains locally buildable.
 
 ## Recommendation in one sentence
 
