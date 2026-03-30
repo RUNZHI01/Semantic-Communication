@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 import tempfile
 import textwrap
+import types
 from types import SimpleNamespace
 import unittest
 from unittest import mock
@@ -58,6 +59,33 @@ def make_task_stages(operator_name: str) -> dict[str, object]:
             "tasks": [row],
         },
     }
+
+
+class FakeGlobalVar:
+    def __init__(self, name_hint: str) -> None:
+        self.name_hint = name_hint
+
+
+class FakeIRModule:
+    def __init__(self, mapping: dict[str, object]) -> None:
+        self.mapping = dict(mapping)
+
+    def get_global_var(self, name: str) -> FakeGlobalVar:
+        if name not in self.mapping:
+            raise KeyError(name)
+        return FakeGlobalVar(name)
+
+    def __getitem__(self, key: object) -> object:
+        name = getattr(key, "name_hint", key)
+        if not isinstance(name, str) or name not in self.mapping:
+            raise KeyError(name)
+        return self.mapping[name]
+
+    def __setitem__(self, key: object, value: object) -> None:
+        name = getattr(key, "name_hint", key)
+        if not isinstance(name, str):
+            raise KeyError(name)
+        self.mapping[name] = value
 
 
 class RpcTuneHandwrittenHookTest(unittest.TestCase):
@@ -150,6 +178,114 @@ class RpcTuneHandwrittenHookTest(unittest.TestCase):
         self.assertEqual(state["metadata_phase"], "pre_compile")
         self.assertEqual(state["metadata_operator"], "fused_conv2d_transpose1_add9")
         self.assertEqual(state["entrypoint_phase"], "pre_compile")
+
+    def test_compile_and_export_applies_manual_override_before_compile_relax(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir_raw:
+            temp_dir = Path(temp_dir_raw)
+            impl_path = temp_dir / "manual_impl.py"
+            override_source = temp_dir / "override_source.py"
+            write_text(
+                override_source,
+                textwrap.dedent(
+                    """\
+                    class OverrideModule:
+                        manual_v0 = {"tag": "manual_v0"}
+                    """
+                ),
+            )
+            write_text(
+                impl_path,
+                textwrap.dedent(
+                    f"""\
+                    def describe_placeholder(context):
+                        return {{
+                            "operator": "fused_conv2d_transpose1_add9",
+                            "placeholder_only": False,
+                            "tag": "manual_override",
+                        }}
+
+
+                    def build_manual_impl(context):
+                        return {{
+                            "operator": "fused_conv2d_transpose1_add9",
+                            "override": {{
+                                "kind": "replace_prim_func_from_source",
+                                "source_path": {str(override_source)!r},
+                                "source_module_attr": "OverrideModule",
+                                "source_func_name": "manual_v0",
+                                "target_global_vars": ["fused_conv2d_transpose1_add9"],
+                                "candidate_version": "v0",
+                                "staging_only": True,
+                            }},
+                        }}
+                    """
+                ),
+            )
+
+            compile_calls: dict[str, object] = {}
+
+            class FakeExecutable:
+                def export_library(self, path: str) -> None:
+                    Path(path).write_text("fake-so\n", encoding="utf-8")
+
+            def fake_compile_relax(**kwargs):
+                compile_calls.update(kwargs)
+                return FakeExecutable()
+
+            relax_integration_module = types.ModuleType(
+                "tvm.s_tir.meta_schedule.relax_integration"
+            )
+            relax_integration_module.compile_relax = fake_compile_relax
+            meta_schedule_module = types.ModuleType("tvm.s_tir.meta_schedule")
+            meta_schedule_module.relax_integration = relax_integration_module
+            s_tir_module = types.ModuleType("tvm.s_tir")
+            s_tir_module.meta_schedule = meta_schedule_module
+            tvm_module = types.ModuleType("tvm")
+            tvm_module.s_tir = s_tir_module
+
+            fake_mod = FakeIRModule({"fused_conv2d_transpose1_add9": {"tag": "seed"}})
+            env = {
+                "TVM_HANDWRITTEN_IMPL_PATH": str(impl_path),
+                "TVM_HANDWRITTEN_OP": "fused_conv2d_transpose1_add9",
+                "TVM_HANDWRITTEN_IMPL_ENTRYPOINT": "build_manual_impl",
+                "TVM_HANDWRITTEN_IMPL_METADATA_FN": "describe_placeholder",
+            }
+            with mock.patch.dict(os.environ, env, clear=True):
+                with mock.patch.dict(
+                    sys.modules,
+                    {
+                        "tvm": tvm_module,
+                        "tvm.s_tir": s_tir_module,
+                        "tvm.s_tir.meta_schedule": meta_schedule_module,
+                        "tvm.s_tir.meta_schedule.relax_integration": relax_integration_module,
+                    },
+                    clear=False,
+                ):
+                    lib_path, handwritten_hook = module.compile_and_export(
+                        mod=fake_mod,
+                        target="llvm",
+                        database="fake-db",
+                        output_dir=str(temp_dir),
+                        task_stages=make_task_stages("fused_conv2d_transpose1_add9"),
+                    )
+                    self.assertEqual(
+                        Path(lib_path).read_text(encoding="utf-8"), "fake-so\n"
+                    )
+                    self.assertIsNotNone(handwritten_hook)
+                    self.assertEqual(
+                        handwritten_hook["status"], "manual_override_applied"
+                    )
+                    self.assertTrue(handwritten_hook["manual_override_applied"])
+                    self.assertEqual(
+                        handwritten_hook["applied_override"]["target_global_var"],
+                        "fused_conv2d_transpose1_add9",
+                    )
+                    self.assertEqual(
+                        compile_calls["mod"].mapping["fused_conv2d_transpose1_add9"],
+                        {"tag": "manual_v0"},
+                    )
+                    self.assertEqual(compile_calls["database"], "fake-db")
+                    self.assertEqual(compile_calls["target"], "llvm")
 
     def test_metadata_operator_mismatch_raises(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir_raw:

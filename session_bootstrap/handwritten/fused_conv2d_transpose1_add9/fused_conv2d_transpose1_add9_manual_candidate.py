@@ -4,7 +4,7 @@ Edit the sibling editable TIR file when shaping the first real manual candidate.
 This module stays intentionally narrow:
 - it is a repo-native TVM_HANDWRITTEN_IMPL_PATH target
 - it reports the checked-in candidate through the existing rpc_tune.py hook
-- it does not claim a compile-time override yet
+- it only exposes the v0 override through the local/staging handwritten path
 """
 
 from __future__ import annotations
@@ -16,6 +16,8 @@ from typing import Any
 
 OPERATOR_NAME = "fused_conv2d_transpose1_add9"
 EDITABLE_TIR_FILENAME = f"{OPERATOR_NAME}_editable_seed_tir.py"
+CHECKED_IN_CANDIDATE_FILENAME = f"{OPERATOR_NAME}_candidate_v0_tir.py"
+CHECKED_IN_CANDIDATE_METADATA_FILENAME = f"{OPERATOR_NAME}_candidate_v0.json"
 MANIFEST_FILENAME = "seed_manifest.json"
 
 
@@ -25,6 +27,14 @@ def _module_dir() -> Path:
 
 def _editable_tir_path() -> Path:
     return _module_dir() / EDITABLE_TIR_FILENAME
+
+
+def _checked_in_candidate_tir_path() -> Path:
+    return _module_dir() / CHECKED_IN_CANDIDATE_FILENAME
+
+
+def _checked_in_candidate_metadata_path() -> Path:
+    return _module_dir() / CHECKED_IN_CANDIDATE_METADATA_FILENAME
 
 
 def _manifest_path() -> Path:
@@ -41,6 +51,20 @@ def _load_manifest() -> dict[str, Any]:
     if operator != OPERATOR_NAME:
         raise ValueError(
             f"expected manifest operator {OPERATOR_NAME!r}, got {operator!r}"
+        )
+    return payload
+
+
+def _load_checked_in_candidate_metadata() -> dict[str, Any]:
+    metadata_path = _checked_in_candidate_metadata_path()
+    if not metadata_path.is_file():
+        raise FileNotFoundError(f"candidate metadata not found: {metadata_path}")
+
+    payload = json.loads(metadata_path.read_text(encoding="utf-8"))
+    operator = payload.get("operator")
+    if operator != OPERATOR_NAME:
+        raise ValueError(
+            f"expected candidate operator {OPERATOR_NAME!r}, got {operator!r}"
         )
     return payload
 
@@ -68,48 +92,81 @@ def _select_task_row(task_stages: Any) -> dict[str, Any] | None:
     return preferred or fallback
 
 
+def _override_target_global_vars(task_row: dict[str, Any] | None) -> list[str]:
+    candidates: list[str] = []
+    for raw_name in (task_row or {}).get("prim_funcs") or []:
+        name = str(raw_name or "").strip()
+        if not name or name == "main" or name in candidates:
+            continue
+        candidates.append(name)
+    if OPERATOR_NAME not in candidates:
+        candidates.append(OPERATOR_NAME)
+    return candidates
+
+
 def describe_placeholder(context: dict[str, Any] | None = None) -> dict[str, object]:
     del context
     manifest = _load_manifest()
+    candidate_metadata = _load_checked_in_candidate_metadata()
     return {
         "operator": OPERATOR_NAME,
+        "candidate_version": candidate_metadata.get("candidate_version"),
+        "candidate_status": candidate_metadata.get("status"),
         "reference_staging_sha256": manifest.get("reference_staging_sha256"),
         "reference_profile_json": manifest.get("reference_profile_json"),
         "argument_shapes": manifest.get("argument_shapes"),
         "seed_capture_kind": manifest.get("seed_capture_kind"),
-        "candidate_tir": str(_editable_tir_path()),
+        "candidate_tir": str(_checked_in_candidate_tir_path()),
+        "editable_tir": str(_editable_tir_path()),
+        "candidate_metadata": str(_checked_in_candidate_metadata_path()),
         "seed_manifest": str(_manifest_path()),
         "placeholder_only": False,
         "manual_override_applied": False,
-        "validation_scope": "checked_in_candidate_only",
+        "manual_override_available": True,
+        "validation_scope": "local_staging_only_pre_compile_override",
         "next_step": (
-            "Edit the checked-in editable_seed_tir.py file, then keep using this "
-            "module as the handwritten-hook entrypoint until a later compile-time "
-            "override step is ready."
+            "Keep using this module as the handwritten-hook entrypoint to apply "
+            "the checked-in candidate v0 through the local/staging pre-compile "
+            "override path."
         ),
     }
 
 
 def build_manual_impl(context: dict[str, Any] | None = None) -> dict[str, object]:
     manifest = _load_manifest()
-    editable_tir_path = _editable_tir_path()
-    if not editable_tir_path.is_file():
-        raise FileNotFoundError(f"editable seed TIR not found: {editable_tir_path}")
+    candidate_metadata = _load_checked_in_candidate_metadata()
+    candidate_tir_path = _checked_in_candidate_tir_path()
+    if not candidate_tir_path.is_file():
+        raise FileNotFoundError(
+            f"checked-in candidate TIR not found: {candidate_tir_path}"
+        )
+    task_row = None if context is None else _select_task_row(context.get("task_stages"))
 
     return {
-        "manual_override_applied": False,
         "operator": OPERATOR_NAME,
         "phase": None if context is None else context.get("phase"),
-        "task_row": None
-        if context is None
-        else _select_task_row(context.get("task_stages")),
+        "task_row": task_row,
+        "candidate_version": candidate_metadata.get("candidate_version"),
+        "candidate_status": candidate_metadata.get("status"),
         "reference_staging_sha256": manifest.get("reference_staging_sha256"),
-        "candidate_tir": str(editable_tir_path),
+        "candidate_tir": str(candidate_tir_path),
+        "editable_tir": str(_editable_tir_path()),
+        "candidate_metadata": str(_checked_in_candidate_metadata_path()),
         "seed_manifest": str(_manifest_path()),
-        "validation_scope": "checked_in_candidate_only",
+        "validation_scope": "local_staging_only_pre_compile_override",
+        "override": {
+            "kind": "replace_prim_func_from_source",
+            "source_path": str(candidate_tir_path),
+            "source_module_attr": "Module",
+            "source_func_name": "main",
+            "target_global_vars": _override_target_global_vars(task_row),
+            "candidate_version": candidate_metadata.get("candidate_version"),
+            "staging_only": True,
+            "validation_scope": "local_staging_only_pre_compile_override",
+        },
         "notes": [
-            "The checked-in candidate path is active.",
-            "Compile output is unchanged until a later override step consumes the edited TIR.",
+            "The checked-in candidate v0 is exposed only through the local/staging handwritten hook.",
+            "rpc_tune.py must consume the returned override descriptor before compile_relax.",
         ],
     }
 
