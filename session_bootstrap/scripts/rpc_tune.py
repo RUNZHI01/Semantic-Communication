@@ -19,6 +19,9 @@ Usage:
 """
 
 import argparse
+import hashlib
+import importlib.util
+import inspect
 import json
 import logging
 import os
@@ -182,7 +185,203 @@ def parse_op_names(raw_value):
     return [item.strip() for item in str(raw_value).split(",") if item.strip()]
 
 
-def write_task_summary(output_dir, task_stages, args):
+def _resolve_optional_path(raw_value):
+    value = str(raw_value or "").strip()
+    if not value:
+        return None
+    return os.path.abspath(os.path.expanduser(value))
+
+
+def _json_safe(value):
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(item) for item in value]
+    if hasattr(value, "__fspath__"):
+        return os.fspath(value)
+    return repr(value)
+
+
+def _load_python_module(module_path):
+    module_name = "tvm_handwritten_impl_" + hashlib.sha256(
+        module_path.encode("utf-8")
+    ).hexdigest()[:12]
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Unable to load handwritten module from {module_path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _call_handwritten_callable(func, context, label):
+    try:
+        params = list(inspect.signature(func).parameters.values())
+    except (TypeError, ValueError):
+        return func(context)
+
+    if not params:
+        return func()
+    if len(params) != 1:
+        raise TypeError(
+            f"{label} must accept zero arguments or a single context argument"
+        )
+
+    param = params[0]
+    if param.kind in (
+        inspect.Parameter.POSITIONAL_ONLY,
+        inspect.Parameter.POSITIONAL_OR_KEYWORD,
+    ):
+        return func(context)
+    if param.kind == inspect.Parameter.KEYWORD_ONLY:
+        return func(**{param.name: context})
+    if param.kind == inspect.Parameter.VAR_POSITIONAL:
+        return func(context)
+    if param.kind == inspect.Parameter.VAR_KEYWORD:
+        return func(context=context)
+
+    raise TypeError(
+        f"{label} must accept zero arguments or a single context argument"
+    )
+
+
+def _task_stage_matches(task_stages, operator_name):
+    if task_stages is None:
+        return None
+
+    matches = {}
+    for stage_name, stage_payload in task_stages.items():
+        tasks = stage_payload.get("tasks", [])
+        matches[stage_name] = any(
+            row.get("task_name") == operator_name for row in tasks
+        )
+    return matches
+
+
+def maybe_apply_handwritten_hook(mod, target, database, output_dir, task_stages=None):
+    module_path = _resolve_optional_path(os.environ.get("TVM_HANDWRITTEN_IMPL_PATH"))
+    if module_path is None:
+        return None
+
+    operator_name = str(os.environ.get("TVM_HANDWRITTEN_OP", "")).strip()
+    if not operator_name:
+        raise ValueError(
+            "TVM_HANDWRITTEN_OP must be set when TVM_HANDWRITTEN_IMPL_PATH is enabled"
+        )
+    if not os.path.isfile(module_path):
+        raise FileNotFoundError(
+            f"TVM_HANDWRITTEN_IMPL_PATH does not exist: {module_path}"
+        )
+
+    entrypoint_name = (
+        str(os.environ.get("TVM_HANDWRITTEN_IMPL_ENTRYPOINT", "")).strip()
+        or "build_manual_impl"
+    )
+    metadata_name = (
+        str(os.environ.get("TVM_HANDWRITTEN_IMPL_METADATA_FN", "")).strip() or None
+    )
+    bookkeeping_json = _resolve_optional_path(
+        os.environ.get("TVM_HANDWRITTEN_BOOKKEEPING_JSON")
+    )
+    task_stage_matches = _task_stage_matches(task_stages, operator_name)
+    if task_stage_matches is not None and not any(task_stage_matches.values()):
+        raise ValueError(
+            "TVM_HANDWRITTEN_OP=%s is not present in the extracted task stages"
+            % operator_name
+        )
+
+    report = {
+        "enabled": True,
+        "integration_phase": "pre_compile",
+        "status": "pending",
+        "operator": operator_name,
+        "impl_path": module_path,
+        "entrypoint": entrypoint_name,
+        "metadata_fn": metadata_name,
+        "bookkeeping_json": bookkeeping_json,
+        "task_stage_matches": task_stage_matches,
+        "manual_override_applied": False,
+    }
+
+    module = _load_python_module(module_path)
+    call_context = {
+        "phase": "pre_compile",
+        "operator": operator_name,
+        "module_path": module_path,
+        "output_dir": output_dir,
+        "target": target,
+        "database": database,
+        "mod": mod,
+        "bookkeeping_json": bookkeeping_json,
+        "task_stages": task_stages,
+    }
+
+    metadata = None
+    if metadata_name is not None:
+        metadata_fn = getattr(module, metadata_name, None)
+        if metadata_fn is None or not callable(metadata_fn):
+            raise AttributeError(
+                f"Handwritten metadata function not found or not callable: {metadata_name}"
+            )
+        metadata = _call_handwritten_callable(
+            metadata_fn, call_context, f"{module_path}:{metadata_name}"
+        )
+        if metadata is not None and not isinstance(metadata, dict):
+            raise TypeError(
+                f"Handwritten metadata function must return a dict or None: {metadata_name}"
+            )
+
+    report["metadata"] = _json_safe(metadata)
+    placeholder_only = bool(metadata and metadata.get("placeholder_only"))
+    report["placeholder_only"] = placeholder_only
+
+    metadata_operator = str(metadata.get("operator", "")).strip() if metadata else ""
+    if metadata_operator:
+        report["metadata_operator"] = metadata_operator
+        if metadata_operator != operator_name:
+            raise ValueError(
+                "Handwritten metadata operator mismatch: env=%s metadata=%s"
+                % (operator_name, metadata_operator)
+            )
+
+    entrypoint_fn = getattr(module, entrypoint_name, None)
+    if entrypoint_fn is None or not callable(entrypoint_fn):
+        raise AttributeError(
+            f"Handwritten entrypoint not found or not callable: {entrypoint_name}"
+        )
+
+    try:
+        result = _call_handwritten_callable(
+            entrypoint_fn, call_context, f"{module_path}:{entrypoint_name}"
+        )
+        report["status"] = "entrypoint_completed"
+        report["entrypoint_result"] = _json_safe(result)
+        if isinstance(result, dict) and "manual_override_applied" in result:
+            report["manual_override_applied"] = bool(
+                result["manual_override_applied"]
+            )
+    except NotImplementedError as err:
+        if not placeholder_only:
+            raise
+        report["status"] = "placeholder_only"
+        report["entrypoint_notice"] = str(err)
+
+    logger.info(
+        "Handwritten hook status=%s operator=%s impl=%s entrypoint=%s placeholder_only=%s",
+        report["status"],
+        operator_name,
+        module_path,
+        entrypoint_name,
+        placeholder_only,
+    )
+    if bookkeeping_json is not None:
+        logger.info("Handwritten bookkeeping json: %s", bookkeeping_json)
+    return report
+
+
+def write_task_summary(output_dir, task_stages, args, handwritten_hook=None):
     summary = {
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "onnx_path": args.onnx_path,
@@ -194,6 +393,8 @@ def write_task_summary(output_dir, task_stages, args):
         "selected_op_names": parse_op_names(args.op_names),
         "stages": task_stages,
     }
+    if handwritten_hook is not None:
+        summary["handwritten_hook"] = handwritten_hook
     path = os.path.join(output_dir, "task_summary.json")
     with open(path, "w", encoding="utf-8") as f:
         json.dump(summary, f, indent=2, ensure_ascii=False)
@@ -270,12 +471,20 @@ def run_tune(mod, target, work_dir, runner, args):
     return db, elapsed
 
 
-def compile_and_export(mod, target, database, output_dir):
+def compile_and_export(mod, target, database, output_dir, task_stages=None):
     """Apply tuning database, compile, and export .so."""
     from tvm.s_tir.meta_schedule.relax_integration import (  # pylint: disable=import-outside-toplevel
         compile_relax,
     )
 
+    os.makedirs(output_dir, exist_ok=True)
+    handwritten_hook = maybe_apply_handwritten_hook(
+        mod=mod,
+        target=target,
+        database=database,
+        output_dir=output_dir,
+        task_stages=task_stages,
+    )
     logger.info("Applying tuning database and compiling...")
     ex = compile_relax(
         database=database,
@@ -284,14 +493,22 @@ def compile_and_export(mod, target, database, output_dir):
         params={},
         enable_warning=False,
     )
-    os.makedirs(output_dir, exist_ok=True)
     lib_path = os.path.join(output_dir, "optimized_model.so")
     ex.export_library(lib_path)
     logger.info("Compiled model exported: %s", lib_path)
-    return lib_path
+    return lib_path, handwritten_hook
 
 
-def write_tune_report(output_dir, args, elapsed_sec, lib_path, work_dir, task_summary_path, task_stages):
+def write_tune_report(
+    output_dir,
+    args,
+    elapsed_sec,
+    lib_path,
+    work_dir,
+    task_summary_path,
+    task_stages,
+    handwritten_hook=None,
+):
     """Write a JSON summary of the tuning run."""
     report = {
         "onnx_path": args.onnx_path,
@@ -313,6 +530,8 @@ def write_tune_report(output_dir, args, elapsed_sec, lib_path, work_dir, task_su
         "task_summary_json": task_summary_path,
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
     }
+    if handwritten_hook is not None:
+        report["handwritten_hook"] = handwritten_hook
     report_path = os.path.join(output_dir, "tune_report.json")
     with open(report_path, "w", encoding="utf-8") as f:
         json.dump(report, f, indent=2, ensure_ascii=False)
@@ -361,7 +580,20 @@ def main():
     db, elapsed = run_tune(mod, target, work_dir, runner, args)
     sanitize_tuning_records(work_dir)
 
-    lib_path = compile_and_export(mod, target, db, output_dir)
+    lib_path, handwritten_hook = compile_and_export(
+        mod,
+        target,
+        db,
+        output_dir,
+        task_stages=task_stages,
+    )
+    if handwritten_hook is not None:
+        task_summary_path = write_task_summary(
+            output_dir,
+            task_stages,
+            args,
+            handwritten_hook=handwritten_hook,
+        )
     report_path = write_tune_report(
         output_dir,
         args,
@@ -370,6 +602,7 @@ def main():
         work_dir,
         task_summary_path,
         task_stages,
+        handwritten_hook=handwritten_hook,
     )
 
     print(f"tune_output_dir={output_dir}")
@@ -377,6 +610,8 @@ def main():
     print(f"tune_report={report_path}")
     print(f"task_summary_json={task_summary_path}")
     print(f"tune_elapsed_sec={elapsed:.1f}")
+    if handwritten_hook is not None:
+        print(f"handwritten_hook_status={handwritten_hook['status']}")
 
 
 if __name__ == "__main__":
