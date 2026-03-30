@@ -24,13 +24,14 @@
 
 最低验收标准：
 
-1. 在飞腾板 trusted current `chunk4` 上，`vm.profile('main', input)` 不再抛 `AttributeError`
-2. 至少 1 个真实 sample 能返回 op-level summary
-3. 生成一份新的报告，能替换当前 `profiling_judge_refresh_20260330_170808.md` 的 judge-facing 入口
+1. 在飞腾板 trusted current `chunk4` 上，`vm.module.get_function('profile')` 不再报 `AttributeError`
+2. 且 `vm.profile('main', input)` 不再抛 `AttributeError`
+3. 至少 1 个真实 sample 能返回 op-level summary
+4. 生成一份新的报告，能替换当前 `profiling_judge_refresh_20260330_170808.md` 的 judge-facing 入口
 
 ## 3. 推荐路线
 
-### 路线 A（优先）：换 runtime，不换证据口径
+### 路线 A（优先）：换 runtime / 导出符号，不换证据口径
 
 思路：
 - 保持现有 trusted current artifact、输入目录、SNR、board 环境基本不变
@@ -65,9 +66,12 @@
 
 已完成结果：
 - `session_bootstrap/reports/profiling_runtime_api_probe_20260330_182717.md`
+- `session_bootstrap/reports/profiling_runtime_instance_probe_20260330.md`
 - 结论：
   - `hasattr(relax.VirtualMachine, 'profile') == True`
   - `tvm.runtime.profiling` 可正常导入
+  - 但 `loaded_module_has_profile = false`
+  - 且 `vm.module.get_function('profile') -> AttributeError: Module has no function 'profile'`
   - 因此当前 blocker 并不是“API 层根本没有 profile”，而是实例调用时底层 runtime module / artifact 组合不支持对应 symbol
 
 建议方式：
