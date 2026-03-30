@@ -140,6 +140,9 @@ class PrepareFusedConv2dTranspose1Add9HandwrittenScaffoldTest(unittest.TestCase)
                 encoding="utf-8"
             )
             readme = (output_dir / "README.md").read_text(encoding="utf-8")
+            latest_snapshot = (
+                output_dir / module.LATEST_LOCAL_BUILD_SYNC_SNAPSHOT_NAME
+            ).read_text(encoding="utf-8")
             bookkeeping = json.loads((output_dir / "bookkeeping.json").read_text(encoding="utf-8"))
 
             self.assertIn(f"source {str(rebuild_base_env)}", rebuild_env)
@@ -233,6 +236,10 @@ class PrepareFusedConv2dTranspose1Add9HandwrittenScaffoldTest(unittest.TestCase)
             )
             self.assertIn("schedule-preserving", bookkeeping["why_local_first"])
             self.assertIn("validation_report_template.md", bookkeeping["generated_files"])
+            self.assertEqual(
+                bookkeeping["generated_files"][module.LATEST_LOCAL_BUILD_SYNC_SNAPSHOT_NAME],
+                str(output_dir / module.LATEST_LOCAL_BUILD_SYNC_SNAPSHOT_NAME),
+            )
             self.assertIn(
                 "run_transpose1_post_db_local_build.py",
                 bookkeeping["commands"]["local_schedule_preserving_build"],
@@ -286,6 +293,18 @@ class PrepareFusedConv2dTranspose1Add9HandwrittenScaffoldTest(unittest.TestCase)
             self.assertIn("- reprobe_run_id: `<fill>`", validation_template)
             self.assertIn("- decision: `<keep_staging_only|drop>`", validation_template)
 
+            self.assertIn(
+                "- snapshot_status: `awaiting_first_local_build_sync`",
+                latest_snapshot,
+            )
+            self.assertIn(f"- report_path: `{preferred_report_path}`", latest_snapshot)
+            self.assertIn(f"- artifact_path: `{preferred_artifact_path}`", latest_snapshot)
+            self.assertIn("- artifact_sha256: `<not_synced_yet>`", latest_snapshot)
+            self.assertIn(
+                "sync_transpose1_post_db_local_build_result.py",
+                latest_snapshot,
+            )
+
             self.assertIn("## Default workflow", readme)
             self.assertIn(
                 "Run the preferred one-shot local build + sync wrapper",
@@ -295,8 +314,10 @@ class PrepareFusedConv2dTranspose1Add9HandwrittenScaffoldTest(unittest.TestCase)
             self.assertIn("manual_hook_overlay.env` is hook wiring only", readme)
             self.assertIn(preferred_artifact_path, readme)
             self.assertIn(preferred_report_path, readme)
+            self.assertIn("latest_local_build_sync_snapshot.md", readme)
             self.assertIn("Preferred local build artifact", readme)
             self.assertIn("Preferred local build report", readme)
+            self.assertIn("Latest local build+sync snapshot", readme)
             self.assertIn("Wrapper output naming note", readme)
             self.assertIn("run_transpose1_post_db_local_build_and_sync.py", readme)
             self.assertIn("sync_transpose1_post_db_local_build_result.py", readme)

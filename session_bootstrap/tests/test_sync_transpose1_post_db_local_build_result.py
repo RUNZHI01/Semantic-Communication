@@ -137,6 +137,10 @@ class SyncTranspose1PostDbLocalBuildResultTest(unittest.TestCase):
                 module.repo_native(artifact_path),
             )
             self.assertEqual(result["artifact_sha256"], artifact_sha)
+            self.assertEqual(
+                result["latest_local_build_sync_snapshot"],
+                str(scaffold_dir / module.LATEST_LOCAL_BUILD_SYNC_SNAPSHOT_NAME),
+            )
             self.assertTrue(result["diagnostic_only"])
 
             bookkeeping = json.loads(bookkeeping_json.read_text(encoding="utf-8"))
@@ -162,6 +166,10 @@ class SyncTranspose1PostDbLocalBuildResultTest(unittest.TestCase):
                     "artifact": artifact_path.name,
                     "report": report_path.name,
                 },
+            )
+            self.assertEqual(
+                bookkeeping["generated_files"][module.LATEST_LOCAL_BUILD_SYNC_SNAPSHOT_NAME],
+                str(scaffold_dir / module.LATEST_LOCAL_BUILD_SYNC_SNAPSHOT_NAME),
             )
             self.assertEqual(
                 bookkeeping["latest_local_post_db_build"]["build_status"],
@@ -226,6 +234,25 @@ class SyncTranspose1PostDbLocalBuildResultTest(unittest.TestCase):
             self.assertIn(
                 module.SYNC_COMMENT,
                 profile_env.read_text(encoding="utf-8"),
+            )
+
+            latest_snapshot = (
+                scaffold_dir / module.LATEST_LOCAL_BUILD_SYNC_SNAPSHOT_NAME
+            ).read_text(encoding="utf-8")
+            self.assertIn(
+                "- snapshot_status: `synced_local_build_result`",
+                latest_snapshot,
+            )
+            self.assertIn(f"- report_path: `{expected_report_path}`", latest_snapshot)
+            self.assertIn(f"- artifact_path: `{expected_artifact_path}`", latest_snapshot)
+            self.assertIn(f"- artifact_sha256: `{artifact_sha}`", latest_snapshot)
+            self.assertIn("- artifact_exists: `true`", latest_snapshot)
+            self.assertIn("- build_status: `built`", latest_snapshot)
+            self.assertIn("- swap_succeeded: `true`", latest_snapshot)
+            self.assertIn("- export_status: `exported`", latest_snapshot)
+            self.assertIn(
+                "sync_transpose1_post_db_local_build_result.py",
+                latest_snapshot,
             )
 
 
