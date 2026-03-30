@@ -27,8 +27,12 @@
 4. 当前失败点明确落在：
    - `vm.profile('main', input)`
    - 报错：`AttributeError: Module has no function 'profile'`
+5. `2026-03-30` 新增 API capability probe 已确认：
+   - `relax.VirtualMachine` **类级别**存在 `profile`
+   - `tvm.runtime.profiling` 模块可正常导入
+   - 入口：`session_bootstrap/reports/profiling_runtime_api_probe_20260330_182717.md`
 
-这意味着问题不在 benchmark 封装，而在当前 remote runtime / artifact / API 组合本身不支持该 profiling 调用。
+这意味着问题不在 benchmark 封装，也不在 Python API 是否暴露 `profile` 本身，而更像是**当前 trusted current 实例绑定的底层 runtime module / artifact 组合，在真正调用时没有导出或支持对应 profiling symbol**。
 
 ## 当前仍可对外使用的替代口径
 
