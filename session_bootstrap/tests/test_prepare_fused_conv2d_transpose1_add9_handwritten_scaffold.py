@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import json
 from pathlib import Path
 import tempfile
@@ -77,28 +79,45 @@ class PrepareFusedConv2dTranspose1Add9HandwrittenScaffoldTest(unittest.TestCase)
             write_text(profile_base_env, "INFERENCE_CURRENT_EXPECTED_SHA256=old\n")
             best_staging_db.mkdir(parents=True, exist_ok=True)
 
-            rc = module.main(
-                [
-                    "--candidate-json",
-                    str(candidate_json),
-                    "--rebuild-base-env",
-                    str(rebuild_base_env),
-                    "--validate-inference-base-env",
-                    str(validate_base_env),
-                    "--profile-base-env",
-                    str(profile_base_env),
-                    "--best-staging-db",
-                    str(best_staging_db),
-                    "--output-dir",
-                    str(output_dir),
-                    "--remote-archive-dir",
-                    remote_archive,
-                    "--manual-artifact-sha256",
-                    sha256_value,
-                ]
-            )
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                rc = module.main(
+                    [
+                        "--candidate-json",
+                        str(candidate_json),
+                        "--rebuild-base-env",
+                        str(rebuild_base_env),
+                        "--validate-inference-base-env",
+                        str(validate_base_env),
+                        "--profile-base-env",
+                        str(profile_base_env),
+                        "--best-staging-db",
+                        str(best_staging_db),
+                        "--output-dir",
+                        str(output_dir),
+                        "--remote-archive-dir",
+                        remote_archive,
+                        "--manual-artifact-sha256",
+                        sha256_value,
+                    ]
+                )
 
             self.assertEqual(rc, 0)
+            result = json.loads(stdout.getvalue())
+            preferred_output_dir = "./session_bootstrap/tmp/transpose1_post_db_swap_local_build"
+            preferred_artifact_path = (
+                "./session_bootstrap/tmp/transpose1_post_db_swap_local_build/"
+                "fused_conv2d_transpose1_add9_post_db_swap.so"
+            )
+            preferred_report_path = (
+                "./session_bootstrap/tmp/transpose1_post_db_swap_local_build/"
+                "fused_conv2d_transpose1_add9_post_db_swap_report.json"
+            )
+            self.assertEqual(result["status"], "ok")
+            self.assertEqual(result["output_dir"], str(output_dir))
+            self.assertEqual(result["preferred_local_build_output_dir"], preferred_output_dir)
+            self.assertEqual(result["preferred_local_build_artifact_path"], preferred_artifact_path)
+            self.assertEqual(result["preferred_local_build_report_path"], preferred_report_path)
 
             rebuild_env = (output_dir / "manual_rebuild.env").read_text(encoding="utf-8")
             validate_env = (output_dir / "manual_validate_inference.env").read_text(
@@ -152,19 +171,54 @@ class PrepareFusedConv2dTranspose1Add9HandwrittenScaffoldTest(unittest.TestCase)
             )
             self.assertEqual(
                 bookkeeping["local_schedule_preserving_build_output_dir"],
-                "./session_bootstrap/tmp/transpose1_post_db_swap_local_build",
+                preferred_output_dir,
             )
             self.assertEqual(
                 bookkeeping["preferred_local_post_db_build"]["output_dir"],
-                "./session_bootstrap/tmp/transpose1_post_db_swap_local_build",
+                preferred_output_dir,
             )
             self.assertEqual(
                 bookkeeping["preferred_local_post_db_build"]["artifact_path"],
-                "./session_bootstrap/tmp/transpose1_post_db_swap_local_build/fused_conv2d_transpose1_add9_post_db_swap.so",
+                preferred_artifact_path,
             )
             self.assertEqual(
                 bookkeeping["preferred_local_post_db_build"]["report_path"],
-                "./session_bootstrap/tmp/transpose1_post_db_swap_local_build/fused_conv2d_transpose1_add9_post_db_swap_report.json",
+                preferred_report_path,
+            )
+            self.assertEqual(
+                bookkeeping["preferred_local_post_db_build"]["artifact_name"],
+                "fused_conv2d_transpose1_add9_post_db_swap.so",
+            )
+            self.assertEqual(
+                bookkeeping["preferred_local_post_db_build"]["report_name"],
+                "fused_conv2d_transpose1_add9_post_db_swap_report.json",
+            )
+            self.assertIn(
+                "--output-dir only changes the parent directory",
+                bookkeeping["preferred_local_post_db_build"]["output_naming_note"],
+            )
+            self.assertEqual(
+                bookkeeping["preferred_local_build_output_dir"],
+                preferred_output_dir,
+            )
+            self.assertEqual(
+                bookkeeping["preferred_local_build_artifact_path"],
+                preferred_artifact_path,
+            )
+            self.assertEqual(
+                bookkeeping["preferred_local_build_report_path"],
+                preferred_report_path,
+            )
+            self.assertEqual(
+                bookkeeping["preferred_local_build_output_names"],
+                {
+                    "artifact": "fused_conv2d_transpose1_add9_post_db_swap.so",
+                    "report": "fused_conv2d_transpose1_add9_post_db_swap_report.json",
+                },
+            )
+            self.assertIn(
+                "--output-dir only changes the parent directory",
+                bookkeeping["preferred_local_build_output_naming_note"],
             )
             self.assertIn("schedule-preserving", bookkeeping["why_local_first"])
             self.assertIn("validation_report_template.md", bookkeeping["generated_files"])
@@ -187,9 +241,18 @@ class PrepareFusedConv2dTranspose1Add9HandwrittenScaffoldTest(unittest.TestCase)
             )
 
             self.assertIn("- candidate_sha256: `aaaaaaaa", validation_template)
-            self.assertIn("- local_build_output_dir: `./session_bootstrap/tmp/transpose1_post_db_swap_local_build`", validation_template)
-            self.assertIn("- local_build_report_json: `./session_bootstrap/tmp/transpose1_post_db_swap_local_build/fused_conv2d_transpose1_add9_post_db_swap_report.json`", validation_template)
-            self.assertIn("- local_build_artifact: `./session_bootstrap/tmp/transpose1_post_db_swap_local_build/fused_conv2d_transpose1_add9_post_db_swap.so`", validation_template)
+            self.assertIn(
+                f"- preferred_local_build_output_dir: `{preferred_output_dir}`",
+                validation_template,
+            )
+            self.assertIn(
+                f"- preferred_local_build_report_json: `{preferred_report_path}`",
+                validation_template,
+            )
+            self.assertIn(
+                f"- preferred_local_build_artifact: `{preferred_artifact_path}`",
+                validation_template,
+            )
             self.assertIn("- local_build_swap_result: `<fill>`", validation_template)
             self.assertIn(
                 "run_transpose1_post_db_local_build.py",
@@ -203,8 +266,11 @@ class PrepareFusedConv2dTranspose1Add9HandwrittenScaffoldTest(unittest.TestCase)
             self.assertIn("## Default workflow", readme)
             self.assertIn("Only after the local build and SHA capture look sane", readme)
             self.assertIn("manual_hook_overlay.env` is hook wiring only", readme)
+            self.assertIn(preferred_artifact_path, readme)
+            self.assertIn(preferred_report_path, readme)
             self.assertIn("Preferred local build artifact", readme)
             self.assertIn("Preferred local build report", readme)
+            self.assertIn("Wrapper output naming note", readme)
             self.assertIn("run_phytium_current_safe_one_shot.sh", readme)
             self.assertIn("run_task_5_1_operator_profile.py", readme)
             self.assertIn("validation_report_template.md", readme)
