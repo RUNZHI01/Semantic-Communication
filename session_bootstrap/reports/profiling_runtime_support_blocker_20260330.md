@@ -2,7 +2,7 @@
 
 ## 结论
 
-> 历史 blocker 已在 `2026-03-30` 晚间被定位并绕开：根因是 VM 实例化时未启用 `profile=True`，导致底层 module 未导出 profiling 符号。最新可用入口见 `session_bootstrap/reports/profiling_judge_retry_parse_20260330_184026.md`。
+> 历史 blocker 已在 `2026-03-30` 晚间被定位并绕开：根因是 VM 实例化时未启用 `profile=True`，导致底层 module 未导出 profiling 符号。最新可用入口见 `session_bootstrap/reports/profiling_judge_multi_20260330_184658.md`。
 
 截至 `2026-03-30` 白天时，trusted current `chunk4` 路线的 **remote runtime per-op profiling** 曾不可用。这个历史 blocker 不是基于推测，而是基于 fresh probe 的正式复验：
 

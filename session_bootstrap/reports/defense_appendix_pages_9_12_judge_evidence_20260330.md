@@ -74,15 +74,15 @@
   - latest remote runtime profiling 已打通：
     - `runtime_operator_profile`
     - 当前 runtime hotspot candidates：
-      - `fused_conv2d_transpose1_add9`
       - `fused_conv2d_transpose2_add12`
+      - `fused_conv2d_transpose1_add9`
     - raw top ops 还包括：
       - `fused_conv2d_transpose_add6`
       - `fused_conv2d3_add15`
   - 因此当前口径应为：
     - **stage-weight hotspot evidence 已有**
     - **remote runtime per-op profiling 也已可用**
-    - **但目前仍以 1 sample probe 为主，不能夸大成完整统计画像**
+    - **且当前已达到 3 samples 的小样本稳定结论，但还不是完整大样本统计画像**
 - 讲者备注：
   - 这页的价值仍然是防止 overclaim。
   - 现在要主动讲的边界，已经从“没有 per-op profile”变成“有 sample 级 per-op profile，但还没做大样本统计”。

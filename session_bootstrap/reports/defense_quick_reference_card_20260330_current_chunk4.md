@@ -107,15 +107,15 @@ current trusted chunk4 的部署 footprint 是可解释、可控的：
 
 - latest 入口：`runtime_operator_profile`
 - 当前候选热点：
-  - `fused_conv2d_transpose1_add9`
   - `fused_conv2d_transpose2_add12`
+  - `fused_conv2d_transpose1_add9`
 - top op 还包括：
   - `fused_conv2d_transpose_add6`
   - `fused_conv2d3_add15`
-- 仍需诚实说明：当前是 `1 sample` 级别的可用 profiling，不是大样本统计结论
+- 仍需诚实说明：当前已是 `3 samples` 的小样本稳定结论，但还不是大样本统计画像
 
 证据：
-- `session_bootstrap/reports/profiling_judge_retry_parse_20260330_184026.md`
+- `session_bootstrap/reports/profiling_judge_multi_20260330_184658.md`
 - `session_bootstrap/reports/profiling_runtime_support_blocker_20260330.md`
 
 ---
