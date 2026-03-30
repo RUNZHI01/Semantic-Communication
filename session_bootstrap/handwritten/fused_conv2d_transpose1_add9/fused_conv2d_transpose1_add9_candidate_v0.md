@@ -27,13 +27,18 @@ It is not yet claimed to be faster. The point of v0 is to make one honest,
 reviewable memory-traffic reduction before attempting more aggressive
 transpose1-specific scheduling work.
 
+As of `2026-03-31`, this candidate is only valid through the raw pre-compile
+handwritten override contract. That path is useful for integration/structure
+checks, but it is **not** a schedule-context-preserving performance evaluation
+path.
+
 ## TODO after v0
 
-- Prove the candidate structurally inside the future compile-time override path.
-- Consider folding `kernel_transform` next if the direct flipped-weight access is
-  still readable in TIR.
-- Revisit `data_dilate` and `data_pad` only after the simpler intermediate
-  reduction is understood.
+- Do not use v0 for further reprobe/promotion decisions.
+- Fix the handwritten replacement contract so structural candidates can be
+  evaluated without discarding best-staging MetaSchedule schedule context.
+- Only return to operator-side candidate v1 work after that contract-side path
+  exists.
 
 ## Lightweight validation used for this commit
 

@@ -273,12 +273,33 @@ class RpcTuneHandwrittenHookTest(unittest.TestCase):
                     )
                     self.assertIsNotNone(handwritten_hook)
                     self.assertEqual(
-                        handwritten_hook["status"], "manual_override_applied"
+                        handwritten_hook["status"],
+                        "manual_override_applied_diagnostic_only",
                     )
                     self.assertTrue(handwritten_hook["manual_override_applied"])
                     self.assertEqual(
                         handwritten_hook["applied_override"]["target_global_var"],
                         "fused_conv2d_transpose1_add9",
+                    )
+                    self.assertEqual(
+                        handwritten_hook["evaluation_contract"]["path_kind"],
+                        "diagnostic_raw_pre_compile_replacement",
+                    )
+                    self.assertEqual(
+                        handwritten_hook["comparison_semantics"],
+                        "non_comparable_diagnostic_only",
+                    )
+                    self.assertFalse(handwritten_hook["performance_evaluable"])
+                    self.assertEqual(
+                        handwritten_hook["evaluation_contract"]["schedule_context_guarantee"],
+                        "not_guaranteed",
+                    )
+                    self.assertEqual(
+                        handwritten_hook["evaluation_contract"]["future_path_kind"],
+                        "schedule_context_preserving_evaluation",
+                    )
+                    self.assertFalse(
+                        handwritten_hook["evaluation_contract"]["performance_comparable"]
                     )
                     self.assertEqual(
                         compile_calls["mod"].mapping["fused_conv2d_transpose1_add9"],

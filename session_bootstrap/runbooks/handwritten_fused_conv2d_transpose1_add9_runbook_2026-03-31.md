@@ -112,6 +112,11 @@ This keeps:
 - best staging candidate untouched
 - handwritten candidate isolated in its own staging lane
 
+Under the current handwritten contract, this one-shot lane is still a
+`diagnostic_raw_pre_compile_replacement` path. The best-staging schedule
+context is not guaranteed to survive, so payload numbers from this command are
+diagnostic only and not performance-comparable evidence.
+
 ## Runtime Reprobe
 
 Use the generated profile env:
@@ -129,15 +134,13 @@ python3 ./session_bootstrap/scripts/run_task_5_1_operator_profile.py \
 
 ## Keep / Drop Rules
 
-Keep the candidate only if all of these hold:
+Under the current raw pre-compile replacement contract, the honest keep / drop
+rules are narrower:
 
-- `artifact_sha256_match = true`
-- safe-runtime payload does not regress versus `5bd14b9f...`
-- `fused_conv2d_transpose1_add9` gets materially better in the reprobe
-- no new dominant hotspot snapback appears
+- `artifact_sha256_match = true` must still hold
+- hook targeting, artifact identity, and basic runtime/profile wiring must still hold
+- catastrophic regressions can still justify dropping the candidate as a contract-side diagnostic
+- do not use safe-runtime payload or reprobe deltas from this seam as promotion evidence versus `5bd14b9f...`
 
-If any check fails:
-
-- archive the report
-- keep the candidate staging-only
-- do not roll it into trusted current
+Promotion-grade performance claims are deferred until a
+`schedule_context_preserving_evaluation` path exists.

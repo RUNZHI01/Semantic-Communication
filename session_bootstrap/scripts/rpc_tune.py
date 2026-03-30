@@ -337,6 +337,123 @@ def _resolve_override_target_names(override, operator_name):
     return targets
 
 
+def _normalize_evaluation_contract(
+    payload,
+    operator_name,
+    integration_phase,
+    *,
+    default_to_raw_pre_compile=False,
+):
+    contract = {}
+    raw_contract = None
+    if isinstance(payload, dict):
+        raw_contract = payload.get("evaluation_contract")
+        if raw_contract is not None and not isinstance(raw_contract, dict):
+            raise TypeError("Handwritten evaluation_contract must be a dict when set")
+        if isinstance(raw_contract, dict):
+            contract.update(raw_contract)
+
+    if raw_contract is None and not default_to_raw_pre_compile:
+        return None
+
+    path_kind = str(contract.get("path_kind", "")).strip()
+    legacy_mode = str(contract.get("mode", "")).strip()
+    if not path_kind:
+        if legacy_mode:
+            path_kind = legacy_mode
+        elif default_to_raw_pre_compile and integration_phase == "pre_compile":
+            path_kind = "diagnostic_raw_pre_compile_replacement"
+        else:
+            path_kind = f"raw_{integration_phase}_primfunc_replace"
+
+    default_schedule_context_guarantee = "unspecified"
+    default_performance_evaluable = None
+    default_comparison_semantics = "unspecified"
+    default_future_path_kind = None
+    default_future_path_status = None
+    default_reason = None
+    if path_kind == "diagnostic_raw_pre_compile_replacement":
+        default_schedule_context_guarantee = "not_guaranteed"
+        default_performance_evaluable = False
+        default_comparison_semantics = "non_comparable_diagnostic_only"
+        default_future_path_kind = "schedule_context_preserving_evaluation"
+        default_future_path_status = "not_implemented"
+        default_reason = (
+            "Raw pre-compile PrimFunc replacement can lose the best staging "
+            "schedule context, so runtime numbers are diagnostic only."
+        )
+
+    schedule_context_guarantee = (
+        str(
+            contract.get(
+                "schedule_context_guarantee",
+                default_schedule_context_guarantee,
+            )
+            or default_schedule_context_guarantee
+        ).strip()
+        or default_schedule_context_guarantee
+    )
+    if "performance_evaluable" in contract:
+        performance_evaluable = contract.get("performance_evaluable")
+    else:
+        performance_evaluable = default_performance_evaluable
+    comparison_semantics = (
+        str(contract.get("comparison_semantics", default_comparison_semantics)).strip()
+        or default_comparison_semantics
+    )
+    future_path_kind = (
+        str(contract.get("future_path_kind", default_future_path_kind or "")).strip()
+        or default_future_path_kind
+    )
+    future_path_status = (
+        str(
+            contract.get(
+                "future_path_status",
+                default_future_path_status or "",
+            )
+        ).strip()
+        or default_future_path_status
+    )
+    reason = str(contract.get("reason", default_reason or "")).strip() or default_reason
+    intended_use = str(contract.get("intended_use", "")).strip()
+    if not intended_use:
+        intended_use = (
+            "diagnostic_only"
+            if comparison_semantics == "non_comparable_diagnostic_only"
+            else "unspecified"
+        )
+
+    contract_summary = {
+        "path_kind": path_kind,
+        "mode": legacy_mode or path_kind,
+        "operator": str(operator_name or "").strip() or None,
+        "integration_phase": str(integration_phase or "").strip() or None,
+        "schedule_context_guarantee": schedule_context_guarantee,
+        "schedule_context_preserved": schedule_context_guarantee == "preserved",
+        "performance_evaluable": performance_evaluable,
+        "performance_comparable": bool(performance_evaluable),
+        "comparison_semantics": comparison_semantics,
+        "intended_use": intended_use,
+        "future_path_kind": future_path_kind,
+        "future_path_status": future_path_status,
+        "reason": reason,
+        "notes": _json_safe(contract.get("notes") or []),
+    }
+    return contract_summary
+
+
+def _attach_evaluation_contract(report, evaluation_contract):
+    if evaluation_contract is None:
+        return
+    report["evaluation_contract"] = evaluation_contract
+    report["performance_evaluable"] = evaluation_contract.get(
+        "performance_evaluable"
+    )
+    report["comparison_semantics"] = evaluation_contract.get(
+        "comparison_semantics"
+    )
+
+
 def _align_override_global_symbol(func, target_name):
     with_attr = getattr(func, "with_attr", None)
     if not callable(with_attr):
@@ -442,6 +559,12 @@ def _apply_handwritten_override(mod, operator_name, override):
         "candidate_version": override.get("candidate_version"),
         "staging_only": bool(override.get("staging_only")),
         "validation_scope": override.get("validation_scope"),
+        "evaluation_contract": _normalize_evaluation_contract(
+            override,
+            operator_name=resolved_target or operator_name,
+            integration_phase="pre_compile",
+            default_to_raw_pre_compile=True,
+        ),
     }
 
 
@@ -520,6 +643,14 @@ def resolve_handwritten_hook(mod, target, database, output_dir, task_stages=None
             )
 
     report["metadata"] = _json_safe(metadata)
+    _attach_evaluation_contract(
+        report,
+        _normalize_evaluation_contract(
+            metadata,
+            operator_name=operator_name,
+            integration_phase=report["integration_phase"],
+        ),
+    )
     placeholder_only = bool(metadata and metadata.get("placeholder_only"))
     report["placeholder_only"] = placeholder_only
 
@@ -545,6 +676,14 @@ def resolve_handwritten_hook(mod, target, database, output_dir, task_stages=None
         report["status"] = "entrypoint_completed"
         report["entrypoint_result"] = _json_safe(result)
         if isinstance(result, dict):
+            _attach_evaluation_contract(
+                report,
+                _normalize_evaluation_contract(
+                    result,
+                    operator_name=operator_name,
+                    integration_phase=report["integration_phase"],
+                ),
+            )
             override = result.get("override")
             if override is not None:
                 effective_mod, applied_override = _apply_handwritten_override(
@@ -555,6 +694,15 @@ def resolve_handwritten_hook(mod, target, database, output_dir, task_stages=None
                 report["status"] = "manual_override_applied"
                 report["manual_override_applied"] = True
                 report["applied_override"] = _json_safe(applied_override)
+                _attach_evaluation_contract(
+                    report,
+                    _json_safe(
+                        applied_override.get("evaluation_contract")
+                        or report.get("evaluation_contract")
+                    ),
+                )
+                if report.get("performance_evaluable") is False:
+                    report["status"] = "manual_override_applied_diagnostic_only"
             elif "manual_override_applied" in result:
                 report["manual_override_applied"] = bool(
                     result["manual_override_applied"]
@@ -566,13 +714,29 @@ def resolve_handwritten_hook(mod, target, database, output_dir, task_stages=None
         report["entrypoint_notice"] = str(err)
 
     logger.info(
-        "Handwritten hook status=%s operator=%s impl=%s entrypoint=%s placeholder_only=%s",
+        "Handwritten hook status=%s operator=%s impl=%s entrypoint=%s "
+        "placeholder_only=%s comparison_semantics=%s performance_evaluable=%s",
         report["status"],
         operator_name,
         module_path,
         entrypoint_name,
         placeholder_only,
+        report.get("comparison_semantics"),
+        report.get("performance_evaluable"),
     )
+    evaluation_contract = report.get("evaluation_contract") or {}
+    if (
+        report.get("manual_override_applied")
+        and isinstance(evaluation_contract, dict)
+        and report.get("performance_evaluable") is False
+    ):
+        logger.warning(
+            "Handwritten override is diagnostic-only: path_kind=%s "
+            "schedule_context_guarantee=%s comparison_semantics=%s",
+            evaluation_contract.get("path_kind"),
+            evaluation_contract.get("schedule_context_guarantee"),
+            evaluation_contract.get("comparison_semantics"),
+        )
     if bookkeeping_json is not None:
         logger.info("Handwritten bookkeeping json: %s", bookkeeping_json)
     return effective_mod, report

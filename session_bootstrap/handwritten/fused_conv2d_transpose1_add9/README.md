@@ -38,6 +38,9 @@ today. That module is deliberately honest:
 - it keeps the checked-in editable seed and checked-in candidate v0 side by side in this directory
 - it returns a local/staging-only override descriptor for candidate v0
 - `rpc_tune.py` now consumes that descriptor before `compile_relax()`, so the handwritten hook can replace the selected PrimFunc without touching trusted current
+- the current contract is explicitly diagnostic-only: it is a raw pre-compile replacement path with `schedule_context_guarantee=not_guaranteed`
+- runtime or reprobe numbers from this seam are `non_comparable_diagnostic_only`, not candidate-performance evidence
+- a future `schedule_context_preserving_evaluation` path is still required before another handwritten candidate can be judged on performance
 
 ## Edit toward candidate v0
 
@@ -70,12 +73,17 @@ bash ./session_bootstrap/scripts/capture_fused_conv2d_transpose1_add9_manual_see
 That proves the hook is loading the checked-in candidate path. It does not
 yet prove a performance change. It proves the local handwritten path reaches
 the checked-in candidate v0 and applies it at the pre-compile integration point.
+Treat any payload/runtime number from this path as diagnostic-only until a
+schedule-context-preserving evaluation contract exists.
 
 ## Staging lane after a real override exists
 
 Reuse the same `manual_hook_overlay.env` with the existing staging-safe
 one-shot and profile commands from the transpose1 handwritten runbooks. Do not
 overwrite trusted current while this checked-in candidate is still seed-derived.
+Until a `schedule_context_preserving_evaluation` path exists, treat those
+one-shot / reprobe outputs as contract-side diagnostics rather than
+performance-comparable evidence.
 
 ## Source reminder
 

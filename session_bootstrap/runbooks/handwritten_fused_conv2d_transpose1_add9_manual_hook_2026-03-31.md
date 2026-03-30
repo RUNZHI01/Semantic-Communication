@@ -32,6 +32,9 @@ This path now provides the smallest real local handoff:
 That is the narrowest useful next step because the rebuild wrappers already
 `source "$REBUILD_ENV"` before they assemble the local compile command. The
 override remains staging-only because only the local handwritten env enables it.
+It is now also explicitly contract-side diagnostic only: the raw pre-compile
+replacement seam does not guarantee best-staging schedule context, so this path
+is not honest candidate-performance evidence.
 
 ## Why This Capture Point
 
@@ -113,6 +116,9 @@ Keep the rebuild path narrow:
 
 This keeps the handwritten lane staging-only because the only difference is the
 local rebuild overlay and the resulting staging archive upload.
+Under the tightened contract, any runtime number from this seam must be read as
+`non_comparable_diagnostic_only` until a
+`schedule_context_preserving_evaluation` path exists.
 
 ## Manual Seed File Contract
 
@@ -140,4 +146,5 @@ bash ./session_bootstrap/scripts/run_phytium_current_safe_one_shot.sh \
   --report-id phytium_handwritten_fused_conv2d_transpose1_add9_$(date +%Y%m%d_%H%M%S)
 ```
 
-Nothing else in the staging flow changes.
+Nothing else in the staging flow changes, but the resulting `handwritten_hook`
+report must now stay labeled diagnostic-only and non-comparable.
