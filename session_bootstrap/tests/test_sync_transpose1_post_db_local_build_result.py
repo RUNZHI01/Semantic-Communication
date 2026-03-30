@@ -169,8 +169,21 @@ class SyncTranspose1PostDbLocalBuildResultTest(unittest.TestCase):
             )
             self.assertTrue(bookkeeping["latest_local_post_db_build"]["swap_succeeded"])
             self.assertEqual(
+                bookkeeping["commands"]["local_build_and_sync"],
+                (
+                    "python3 ./session_bootstrap/scripts/"
+                    "run_transpose1_post_db_local_build_and_sync.py "
+                    f"--scaffold-dir {module.repo_native(scaffold_dir)} "
+                    f"--output-dir {expected_output_dir}"
+                ),
+            )
+            self.assertEqual(
                 bookkeeping["commands"]["local_schedule_preserving_build"],
                 f"python3 ./session_bootstrap/scripts/run_transpose1_post_db_local_build.py --output-dir {expected_output_dir}",
+            )
+            self.assertIn(
+                "run_transpose1_post_db_local_build_and_sync.py",
+                bookkeeping["commands"]["local_build_and_sync"],
             )
             self.assertEqual(
                 bookkeeping["commands"]["sync_local_build_result"],
