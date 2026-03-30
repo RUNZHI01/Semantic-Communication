@@ -62,7 +62,7 @@
 | 执行命令与脚本说明 | `session_bootstrap/README.md` |
 | 当前成果 / 脚本 / 路径索引 | `session_bootstrap/runbooks/artifact_registry.md` |
 | 评委补证工作流（quality / hotspot / resource / SNR / final pack） | `session_bootstrap/runbooks/judge_evidence_workflow_2026-03-30.md` |
-| 评委技术证据总包（2026-03-30，latest） | `session_bootstrap/reports/judge_evidence_pack_20260330_current_chunk4_lpips_partial.md` |
+| 评委技术证据总包（2026-03-30，latest） | `session_bootstrap/reports/judge_evidence_pack_20260330_current_chunk4_lpips_profiled.md` |
 | PSNR / SSIM / LPIPS 正式质量报告（2026-03-30，latest） | `session_bootstrap/reports/judge_quality_formal_report_20260330_lpips_partial.md` |
 | 多 SNR 鲁棒性摘要（2026-03-30，latest） | `session_bootstrap/reports/judge_snr_robustness_20260330_current_chunk4.md` |
 | OpenAMP 控制面答辩证据包 | `session_bootstrap/reports/openamp_control_plane_evidence_package_20260315/README.md` |
@@ -106,7 +106,7 @@
 - `session_bootstrap/reports/judge_snr_robustness_20260330_current_chunk4.md`
 - `session_bootstrap/reports/judge_snr_robustness_20260330_current_chunk4_latency.svg`
 - `session_bootstrap/reports/judge_snr_robustness_20260330_current_chunk4_quality.svg`
-- `session_bootstrap/reports/judge_evidence_pack_20260330_current_chunk4_lpips_partial.md`
+- `session_bootstrap/reports/judge_evidence_pack_20260330_current_chunk4_lpips_profiled.md`
 
 ### 飞腾杯冲奖救援文档（2026-03-19）
 
