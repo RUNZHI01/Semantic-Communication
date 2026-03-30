@@ -31,59 +31,94 @@
 - 当前最佳 staging 冻结记录：
   - `session_bootstrap/reports/current_best_staging_candidate_20260331.md`
 
+## 最小缺口
+
+现有 operator-specific scaffold 已经能做一件事：
+
+- 当手写候选 artifact SHA 已知时，生成一个 reprobe 用的 profile env
+
+但 engineer 还缺少第一版真正可落地的 validation bundle：
+
+- 一个从 current best staging candidate 派生的 `manual_rebuild.env`
+- 一个 payload validate 用的 `manual_validate_inference.env`
+- 一个 reprobe 用的 `manual_profile.env`
+- 一个记录 candidate SHA / payload / reprobe / decision 的短模板
+
+所以这一步补的是“第一次验证手写候选”所需的最小闭环，而不是新的调优子系统。
+
 ## 推荐 staging 归档
 
 手写候选不要进入 `jscc` 或 `jscc_staging`，而是使用单独归档：
 
 ```text
-/home/user/Downloads/jscc-test/jscc_staging_handwritten
+/home/user/Downloads/jscc-test/jscc_staging_handwritten_fused_conv2d_transpose1_add9
 ```
 
 ## 最小工作流
 
-### 1) 为手写候选生成 profile env
+### 1) 先生成 validation bundle
 
-先从现有 joint-top6 reprobe 的 trusted env snapshot 派生一个手写候选 env：
+先用 current best staging candidate 的冻结证据生成一份最小 bundle：
 
 ```bash
-python3 ./session_bootstrap/scripts/prepare_handwritten_fused_conv2d_transpose1_add9_env.py \
-  --expected-sha256 <candidate_sha256>
+python3 ./session_bootstrap/scripts/prepare_fused_conv2d_transpose1_add9_handwritten_scaffold.py
 ```
 
 默认输出：
 
 ```text
-session_bootstrap/tmp/handwritten_fused_conv2d_transpose1_add9_profile.env
+session_bootstrap/tmp/handwritten_fused_conv2d_transpose1_add9_scaffold
 ```
 
-它会自动：
+生成内容：
 
-- 把 `INFERENCE_CURRENT_ARCHIVE` 指到 `jscc_staging_handwritten`
-- 把 `REMOTE_CURRENT_ARTIFACT` 指到 handwritten staging 的 `optimized_model.so`
-- 把 `INFERENCE_CURRENT_EXPECTED_SHA256` 固定成你传入的候选 SHA
+- `manual_rebuild.env`
+- `manual_validate_inference.env`
+- `manual_profile.env`
+- `validation_report_template.md`
+- `bookkeeping.json`
+- `README.md`
 
-### 2) 用 staging validate 跑 payload 验证
+### 2) 只 patch 生成出来的文件
 
-当你已经有了手写候选 artifact 所用的 rebuild env / overlay env 时：
+只改 bundle 内文件，不改 trusted-current env：
+
+- 在 `manual_rebuild.env` 里补上启用 `fused_conv2d_transpose1_add9` 手写实现的 env 开关或实现路径
+- 本地 rebuild 出 `optimized_model.so` 后，用 `sha256sum` 回填 `manual_validate_inference.env` 与 `manual_profile.env` 里的 `INFERENCE_CURRENT_EXPECTED_SHA256`
+- 把 payload / reprobe / final decision 记到 `validation_report_template.md`
+
+### 3) 用 rebuild-only one-shot 跑 payload 验证
+
+这里不再优先走 `run_phytium_current_safe_staging_validate.sh`，因为手写候选的第一版验证更接近 rebuild-only staging validate，而不是再开一轮增量调优。
 
 ```bash
-bash ./session_bootstrap/scripts/run_phytium_current_safe_staging_validate.sh \
-  --rebuild-env <manual_overlay.env> \
-  --remote-archive-dir /home/user/Downloads/jscc-test/jscc_staging_handwritten \
+bash ./session_bootstrap/scripts/run_phytium_current_safe_one_shot.sh \
+  --rebuild-env ./session_bootstrap/tmp/handwritten_fused_conv2d_transpose1_add9_scaffold/manual_rebuild.env \
+  --inference-env ./session_bootstrap/tmp/handwritten_fused_conv2d_transpose1_add9_scaffold/manual_validate_inference.env \
+  --remote-archive-dir /home/user/Downloads/jscc-test/jscc_staging_handwritten_fused_conv2d_transpose1_add9 \
   --report-id phytium_handwritten_fused_conv2d_transpose1_add9_$(date +%Y%m%d_%H%M%S)
 ```
 
-### 3) 再做 runtime reprobe
+### 4) 再做 runtime reprobe
 
 ```bash
 python3 ./session_bootstrap/scripts/run_task_5_1_operator_profile.py \
   --run-id profiling_handwritten_fused_conv2d_transpose1_add9_$(date +%Y%m%d_%H%M%S) \
   --hotspot-mode reuse \
   --runtime-mode attempt \
-  --trusted-env ./session_bootstrap/tmp/handwritten_fused_conv2d_transpose1_add9_profile.env \
+  --trusted-env ./session_bootstrap/tmp/handwritten_fused_conv2d_transpose1_add9_scaffold/manual_profile.env \
   --trusted-variant current \
   --max-inputs 1 \
   --profile-samples 1
+```
+
+### 5) 仅在需要时，继续复用旧 helper
+
+如果你已经有了候选 SHA，只想单独刷新 reprobe env，仍然可以继续使用：
+
+```bash
+python3 ./session_bootstrap/scripts/prepare_handwritten_fused_conv2d_transpose1_add9_env.py \
+  --expected-sha256 <candidate_sha256>
 ```
 
 ## 必须同时满足的保留条件

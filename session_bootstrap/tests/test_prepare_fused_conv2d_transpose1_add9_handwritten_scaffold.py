@@ -164,6 +164,10 @@ class PrepareFusedConv2dTranspose1Add9HandwrittenScaffoldTest(unittest.TestCase)
                 readme,
             )
             self.assertIn("manual_hook_overlay.env", readme)
+            self.assertIn(
+                "capture_fused_conv2d_transpose1_add9_manual_seed.sh",
+                readme,
+            )
 
 
 if __name__ == "__main__":
