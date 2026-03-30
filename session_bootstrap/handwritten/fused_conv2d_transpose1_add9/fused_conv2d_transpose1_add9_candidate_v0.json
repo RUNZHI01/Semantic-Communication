@@ -1,0 +1,21 @@
+{
+  "operator": "fused_conv2d_transpose1_add9",
+  "candidate_version": "v0",
+  "status": "seed_derived_additive_candidate",
+  "manual_override_applied": false,
+  "staging_safe": true,
+  "derived_from": "./session_bootstrap/handwritten/fused_conv2d_transpose1_add9/fused_conv2d_transpose1_add9_editable_seed_tir.py",
+  "candidate_tir": "./session_bootstrap/handwritten/fused_conv2d_transpose1_add9/fused_conv2d_transpose1_add9_candidate_v0_tir.py",
+  "primary_change": "Bias is fused into the convolution reduction init so the standalone compute_intermediate buffer and trailing T_add loop are removed.",
+  "non_changes": [
+    "data_dilate remains materialized",
+    "data_pad remains materialized",
+    "kernel_transform remains materialized",
+    "no hook wiring or trusted-current selection changes are made here"
+  ],
+  "next_todos": [
+    "Validate structural use under the handwritten override path",
+    "Consider folding kernel_transform in a follow-up candidate",
+    "Only evaluate more aggressive scheduling after this simpler delta is reviewed"
+  ]
+}
