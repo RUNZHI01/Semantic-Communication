@@ -64,6 +64,9 @@ CHECKED_IN_MANUAL_CANDIDATE_PATH = (
 DEFAULT_REBUILD_OUTPUT_DIR = (
     "./session_bootstrap/tmp/handwritten_fused_conv2d_transpose1_add9_candidate"
 )
+DEFAULT_LOCAL_BUILD_OUTPUT_DIR = (
+    "./session_bootstrap/tmp/transpose1_post_db_swap_local_build"
+)
 DEFAULT_REMOTE_ARCHIVE_DIR = (
     "/home/user/Downloads/jscc-test/jscc_staging_handwritten_fused_conv2d_transpose1_add9"
 )
@@ -312,6 +315,9 @@ def build_commands(
     remote_archive_dir: str,
     rebuild_output_dir: str,
 ) -> dict[str, str]:
+    local_build_command = (
+        "python3 ./session_bootstrap/scripts/run_transpose1_post_db_local_build.py"
+    )
     validate_command = "\n".join(
         [
             "bash ./session_bootstrap/scripts/run_phytium_current_safe_one_shot.sh \\",
@@ -336,6 +342,7 @@ def build_commands(
     sha_target = f"{repo_native(Path(rebuild_output_dir))}/optimized_model.so"
     sha_command = f"sha256sum {shell_quote(sha_target)}"
     return {
+        "local_schedule_preserving_build": local_build_command,
         "compute_sha256": sha_command,
         "validate": validate_command,
         "profile": profile_command,
@@ -364,6 +371,15 @@ def build_validation_report_template(
             f"- local_rebuild_output: `{repo_native(Path(args.rebuild_output_dir))}`",
             f"- operator_shapes: `{candidate.get('current_argument_shapes', '')}`",
             "",
+            "## Local-first build",
+            "",
+            f"- local_build_command: `{commands['local_schedule_preserving_build']}`",
+            f"- local_build_output_dir: `{DEFAULT_LOCAL_BUILD_OUTPUT_DIR}`",
+            "- local_build_report_json: `<fill>`",
+            "- local_build_swap_result: `<fill>`",
+            "- local_build_artifact: `<fill>`",
+            "- local_build_notes: `<fill>`",
+            "",
             "## Payload validation",
             "",
             "- validate_report_id: `<fill>`",
@@ -385,6 +401,10 @@ def build_validation_report_template(
             "- rationale: `<fill>`",
             "",
             "## Commands used",
+            "",
+            "```bash",
+            commands["local_schedule_preserving_build"],
+            "```",
             "",
             "```bash",
             commands["compute_sha256"],
@@ -446,6 +466,14 @@ def build_readme(
             f"- `validation_report_template.md`: `{generated_files['validation_report_template.md']}`",
             f"- `bookkeeping.json`: `{generated_files['bookkeeping.json']}`",
             "",
+            "## Default workflow",
+            "",
+            "1. Materialize `manual_hook_overlay.env` so the handwritten lane points at the checked-in candidate-v0 module unless you explicitly need a scaffold-local placeholder seed module.",
+            "2. Run the local schedule-preserving build path and inspect the swapped artifact plus adjacent JSON report under "
+            f"`{DEFAULT_LOCAL_BUILD_OUTPUT_DIR}`.",
+            "3. Record the local artifact SHA from the handwritten rebuild output directory.",
+            "4. Only after the local build and SHA capture look sane, use the optional staging validation and runtime reprobe commands below.",
+            "",
             "## Next handoff",
             "",
             "```bash",
@@ -458,7 +486,7 @@ def build_readme(
             "- After that, run `bash ./session_bootstrap/scripts/capture_fused_conv2d_transpose1_add9_manual_seed.sh --scaffold-dir ...` to record the selected task row and TIR snapshot through the local build path only.",
             "- `rpc_tune.py` already consumes `TVM_HANDWRITTEN_IMPL_PATH` at the pre-compile seam; the overlay is the activation contract for this staging-only lane.",
             "",
-            "## Before running anything remote",
+            "## Local-first build",
             "",
             "1. Generate `manual_hook_overlay.env`; use the default checked-in candidate-v0 module unless you intentionally need a scaffold-local placeholder seed module.",
             "2. Prefer the schedule-preserving local build path first:",
@@ -482,13 +510,13 @@ def build_readme(
             commands["compute_sha256"],
             "```",
             "",
-            "## Staging validation",
+            "## Optional staging validation",
             "",
             "```bash",
             commands["validate"],
             "```",
             "",
-            "## Runtime reprobe",
+            "## Optional runtime reprobe",
             "",
             "```bash",
             commands["profile"],
@@ -569,6 +597,18 @@ def main(argv: list[str] | None = None) -> int:
             "while run_phytium_current_safe_staging_validate.sh ultimately expects a positive "
             "tuning budget."
         ),
+        "why_local_first": (
+            "run_transpose1_post_db_local_build.py keeps the transpose1 evaluation local "
+            "and schedule-preserving before any remote or staging step."
+        ),
+        "default_workflow": [
+            "prepare_manual_hook_overlay",
+            "local_schedule_preserving_build",
+            "compute_sha256",
+            "validate",
+            "profile",
+        ],
+        "local_schedule_preserving_build_output_dir": DEFAULT_LOCAL_BUILD_OUTPUT_DIR,
         "generated_files": generated_files,
         "commands": commands,
     }
