@@ -129,8 +129,8 @@ the generated `*_manual_seed_tir.py` snapshot.
 
 ## First Rebuild Command With Local Wiring
 
-Once the local build-side patch knows how to honor `TVM_HANDWRITTEN_IMPL_PATH`,
-switch only the rebuild env argument:
+With `rpc_tune.py` already honoring `TVM_HANDWRITTEN_IMPL_PATH`, switch only the
+rebuild env argument:
 
 ```bash
 bash ./session_bootstrap/scripts/run_phytium_current_safe_one_shot.sh \

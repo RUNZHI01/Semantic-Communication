@@ -3,9 +3,10 @@
 
 This helper stays narrow on purpose:
 - reuse the existing handwritten scaffold directory as the source of truth
-- materialize one editable manual implementation seed file
-- generate one rebuild overlay env that points at that file
-- avoid touching trusted current or any stock rebuild wrapper
+- default the overlay to the checked-in candidate-v0 module
+- optionally materialize one editable scaffold-local manual seed module when explicitly asked
+- generate one rebuild overlay env that activates the existing pre-compile hook in rpc_tune.py
+- avoid touching trusted current or any remote path
 """
 
 from __future__ import annotations
@@ -32,13 +33,21 @@ DEFAULT_TEMPLATE_PATH = (
     / "handwritten"
     / "fused_conv2d_transpose1_add9_manual_impl.py.tmpl"
 )
+DEFAULT_CHECKED_IN_CANDIDATE_PATH = (
+    PROJECT_ROOT
+    / "session_bootstrap"
+    / "handwritten"
+    / OPERATOR_NAME
+    / f"{OPERATOR_NAME}_manual_candidate.py"
+)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Materialize an editable manual implementation seed file plus rebuild overlay "
-            f"for the handwritten {OPERATOR_NAME} scaffold."
+            "Prepare the handwritten rebuild overlay for the "
+            f"{OPERATOR_NAME} scaffold. By default it points at the checked-in "
+            "candidate-v0 hook target."
         )
     )
     parser.add_argument(
@@ -51,22 +60,26 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--template-path",
         type=Path,
         default=DEFAULT_TEMPLATE_PATH,
-        help="Checked-in template used to create the editable manual implementation seed file.",
+        help="Checked-in template used only when materializing a scaffold-local placeholder module.",
     )
     parser.add_argument(
         "--manual-impl-path",
         type=Path,
-        help="Output path for the editable manual implementation seed file.",
+        help=(
+            "Manual implementation module path for the overlay. Defaults to the "
+            "checked-in candidate-v0 module; pass a scaffold-local path only when "
+            "you explicitly want to materialize an editable placeholder seed file."
+        ),
     )
     parser.add_argument(
         "--output-env",
         type=Path,
-        help="Output path for the rebuild overlay env that points at the manual seed file.",
+        help="Output path for the rebuild overlay env that points at the handwritten hook module.",
     )
     parser.add_argument(
         "--allow-overwrite",
         action="store_true",
-        help="Allow overwriting an existing manual implementation file or overlay env.",
+        help="Allow overwriting a generated scaffold-local placeholder module or overlay env.",
     )
     return parser.parse_args(argv)
 
@@ -111,6 +124,14 @@ def ensure_clean_outputs(paths: list[Path], allow_overwrite: bool) -> None:
         )
 
 
+def is_within(path: Path, parent: Path) -> bool:
+    try:
+        path.resolve().relative_to(parent.resolve())
+    except ValueError:
+        return False
+    return True
+
+
 def write_text(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
@@ -151,6 +172,25 @@ def render_manual_impl(
     return rendered
 
 
+def resolve_manual_impl_target(
+    *,
+    scaffold_dir: Path,
+    manual_impl_path: Path | None,
+) -> tuple[Path, bool]:
+    checked_in_candidate_path = DEFAULT_CHECKED_IN_CANDIDATE_PATH.resolve()
+    if manual_impl_path is None:
+        return checked_in_candidate_path, False
+
+    resolved = as_abs(manual_impl_path)
+    if resolved.exists() and not resolved.is_file():
+        raise SystemExit(f"ERROR: handwritten hook module path is not a file: {resolved}")
+    if resolved == checked_in_candidate_path:
+        return resolved, False
+    if resolved.exists() and not is_within(resolved, scaffold_dir):
+        return resolved, False
+    return resolved, True
+
+
 def build_overlay_env(
     *,
     rebuild_env: Path,
@@ -158,13 +198,12 @@ def build_overlay_env(
     bookkeeping_json: Path,
 ) -> str:
     lines = [
-        "# Auto-generated overlay for the first handwritten fused_conv2d_transpose1_add9 hook.",
+        "# Auto-generated overlay for the fused_conv2d_transpose1_add9 handwritten hook.",
         "# shellcheck source=/dev/null",
         f"source {shell_quote(str(rebuild_env.resolve()))}",
         "",
-        "# These variables are the local build-side handoff; stock wrappers only source this env.",
-        "# The first local patch should import TVM_HANDWRITTEN_IMPL_PATH and call",
-        "# TVM_HANDWRITTEN_IMPL_ENTRYPOINT before compile when TVM_HANDWRITTEN_OP matches.",
+        "# rpc_tune.py already consumes these variables at the pre-compile seam.",
+        "# Keep this overlay staging-only by sourcing it only for the handwritten lane.",
         f"TVM_HANDWRITTEN_OP={OPERATOR_NAME}",
         f"TVM_HANDWRITTEN_IMPL_PATH={shell_quote(repo_native(manual_impl_path))}",
         "TVM_HANDWRITTEN_IMPL_ENTRYPOINT=build_manual_impl",
@@ -178,30 +217,43 @@ def build_overlay_env(
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     args.scaffold_dir = require_dir(as_abs(args.scaffold_dir), "scaffold dir")
-    args.template_path = require_file(as_abs(args.template_path), "manual implementation template")
 
     rebuild_env = require_file(args.scaffold_dir / "manual_rebuild.env", "scaffold rebuild env")
     bookkeeping_json = require_file(args.scaffold_dir / "bookkeeping.json", "scaffold bookkeeping")
     bookkeeping = load_bookkeeping(bookkeeping_json)
 
-    args.manual_impl_path = as_abs(
-        args.manual_impl_path
-        if args.manual_impl_path is not None
-        else args.scaffold_dir / f"{OPERATOR_NAME}_manual_impl.py"
+    checked_in_candidate_path = require_file(
+        DEFAULT_CHECKED_IN_CANDIDATE_PATH,
+        "checked-in candidate module",
+    )
+    args.manual_impl_path, materialize_manual_impl = resolve_manual_impl_target(
+        scaffold_dir=args.scaffold_dir,
+        manual_impl_path=args.manual_impl_path,
     )
     args.output_env = as_abs(
         args.output_env if args.output_env is not None else args.scaffold_dir / "manual_hook_overlay.env"
     )
-    ensure_clean_outputs([args.manual_impl_path, args.output_env], args.allow_overwrite)
 
-    write_text(
-        args.manual_impl_path,
-        render_manual_impl(
-            template_path=args.template_path,
-            bookkeeping=bookkeeping,
-            bookkeeping_json=bookkeeping_json,
-        ),
-    )
+    protected_outputs = [args.output_env]
+    if materialize_manual_impl:
+        protected_outputs.append(args.manual_impl_path)
+    ensure_clean_outputs(protected_outputs, args.allow_overwrite)
+
+    if materialize_manual_impl:
+        args.template_path = require_file(
+            as_abs(args.template_path), "manual implementation template"
+        )
+        write_text(
+            args.manual_impl_path,
+            render_manual_impl(
+                template_path=args.template_path,
+                bookkeeping=bookkeeping,
+                bookkeeping_json=bookkeeping_json,
+            ),
+        )
+    else:
+        require_file(args.manual_impl_path, "handwritten hook module")
+
     write_text(
         args.output_env,
         build_overlay_env(
@@ -217,6 +269,7 @@ def main(argv: list[str] | None = None) -> int:
                 "status": "ok",
                 "scaffold_dir": str(args.scaffold_dir),
                 "manual_impl_path": str(args.manual_impl_path),
+                "manual_impl_generated": materialize_manual_impl,
                 "output_env": str(args.output_env),
             },
             ensure_ascii=False,
