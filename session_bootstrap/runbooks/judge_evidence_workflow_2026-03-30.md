@@ -14,12 +14,16 @@
 
 - `session_bootstrap/reports/judge_quality_formal_report_20260330.md`
 - `session_bootstrap/reports/judge_quality_formal_report_20260330.json`
+- `session_bootstrap/reports/judge_quality_formal_report_20260330_lpips_partial.md`
+- `session_bootstrap/reports/judge_quality_formal_report_20260330_lpips_partial.json`
 - `session_bootstrap/reports/judge_snr_robustness_20260330_current_chunk4.md`
 - `session_bootstrap/reports/judge_snr_robustness_20260330_current_chunk4.json`
 - `session_bootstrap/reports/judge_snr_robustness_20260330_current_chunk4_latency.svg`
 - `session_bootstrap/reports/judge_snr_robustness_20260330_current_chunk4_quality.svg`
 - `session_bootstrap/reports/judge_evidence_pack_20260330_current_chunk4.md`
 - `session_bootstrap/reports/judge_evidence_pack_20260330_current_chunk4.json`
+- `session_bootstrap/reports/judge_evidence_pack_20260330_current_chunk4_lpips_partial.md`
+- `session_bootstrap/reports/judge_evidence_pack_20260330_current_chunk4_lpips_partial.json`
 
 对应脚本入口：
 
@@ -195,13 +199,13 @@ bash ./session_bootstrap/scripts/run_remote_resource_profile.sh \
 
 推荐评委材料引用顺序：
 
-1. `judge_evidence_pack_20260330.md`
-2. `judge_quality_formal_report_20260330.md`
-3. `judge_snr_robustness_20260330.md`
+1. `judge_evidence_pack_20260330_current_chunk4_lpips_partial.md`
+2. `judge_quality_formal_report_20260330_lpips_partial.md`
+3. `judge_snr_robustness_20260330_current_chunk4.md`
 4. `inference_compare_currentsafe_chunk4_refresh_20260313_1758.md`
 5. `inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md`
-6. `profiling_trusted_current_20260312_154323.md`
-7. `resource_profile_trusted_current_20260312_001.md`
+6. `profiling_judge_refresh_20260330_170808.md`
+7. `resource_profile_trusted_current_chunk4_20260330_151728.md`
 
 ## 5. 结论
 
