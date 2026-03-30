@@ -127,6 +127,14 @@ class RefreshFusedConv2dTranspose1Add9CheckedInSeedTest(unittest.TestCase):
                 "refresh_fused_conv2d_transpose1_add9_checked_in_seed.py", readme
             )
             self.assertIn("manual_candidate.py", readme)
+            self.assertIn("Hook wiring diagnostic through the existing manual hook", readme)
+            self.assertIn("Preferred local schedule-preserving build path", readme)
+            self.assertIn("run_transpose1_post_db_local_build.py", readme)
+            self.assertIn("transpose1_post_db_swap_local_build", readme)
+            self.assertIn(
+                "schedule_context_preserving_evaluation",
+                readme,
+            )
 
 
 if __name__ == "__main__":

@@ -51,7 +51,7 @@ today. That module is deliberately honest:
 4. Treat `data_dilate`, `data_pad`, `kernel_transform`, `compute`, and `T_add` as the honest baseline stages from the captured workload.
 5. First manual edits should stay narrow: reduce intermediate traffic, fuse cheap transforms when possible, and only then try tiling/vectorization around `compute`.
 
-## Local-only validation through the existing manual hook
+## Hook wiring diagnostic through the existing manual hook
 
 Regenerate the overlay so it points at the checked-in candidate module:
 
