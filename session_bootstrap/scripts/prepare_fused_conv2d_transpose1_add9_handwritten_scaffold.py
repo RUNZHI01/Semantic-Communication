@@ -330,6 +330,7 @@ def build_profile_env(*, args: argparse.Namespace) -> str:
 
 def build_commands(
     *,
+    scaffold_dir: Path,
     rebuild_env: Path,
     validate_env: Path,
     profile_env: Path,
@@ -337,6 +338,11 @@ def build_commands(
     rebuild_output_dir: str,
     preferred_local_post_db_build: dict[str, str],
 ) -> dict[str, str]:
+    sync_command = (
+        "python3 ./session_bootstrap/scripts/sync_transpose1_post_db_local_build_result.py "
+        f"--scaffold-dir {shell_quote(repo_native(scaffold_dir))} "
+        f"--output-dir {shell_quote(preferred_local_post_db_build['output_dir'])}"
+    )
     validate_command = "\n".join(
         [
             "bash ./session_bootstrap/scripts/run_phytium_current_safe_one_shot.sh \\",
@@ -362,6 +368,7 @@ def build_commands(
     sha_command = f"sha256sum {shell_quote(sha_target)}"
     return {
         "local_schedule_preserving_build": preferred_local_post_db_build["command"],
+        "sync_local_build_result": sync_command,
         "compute_sha256": sha_command,
         "validate": validate_command,
         "profile": profile_command,
@@ -394,6 +401,7 @@ def build_validation_report_template(
             "## Local-first build",
             "",
             f"- local_build_command: `{commands['local_schedule_preserving_build']}`",
+            f"- local_build_sync_command: `{commands['sync_local_build_result']}`",
             f"- preferred_local_build_output_dir: `{preferred_local_post_db_build['output_dir']}`",
             f"- preferred_local_build_report_json: `{preferred_local_post_db_build['report_path']}`",
             "- local_build_swap_result: `<fill>`",
@@ -424,6 +432,10 @@ def build_validation_report_template(
             "",
             "```bash",
             commands["local_schedule_preserving_build"],
+            "```",
+            "",
+            "```bash",
+            commands["sync_local_build_result"],
             "```",
             "",
             "```bash",
@@ -493,8 +505,9 @@ def build_readme(
             "2. Run the preferred local schedule-preserving build command and inspect "
             f"`{preferred_local_post_db_build['artifact_path']}` plus "
             f"`{preferred_local_post_db_build['report_path']}`.",
-            "3. Record the local artifact SHA from the handwritten rebuild output directory.",
-            "4. Only after the local build and SHA capture look sane, use the optional staging validation and runtime reprobe commands below.",
+            "3. Run the local result-sync helper so the scaffold bookkeeping pack records the artifact path, report path, and build SHA.",
+            "4. The sync step is still local-only and diagnostic-only; it does not imply payload or runtime validation.",
+            "5. Only after the local build facts look sane, use the optional staging validation and runtime reprobe commands below.",
             "",
             "## Next handoff",
             "",
@@ -519,6 +532,12 @@ def build_readme(
             commands["local_schedule_preserving_build"],
             "```",
             "",
+            "3. Sync the finished local report back into the scaffold pack:",
+            "",
+            "```bash",
+            commands["sync_local_build_result"],
+            "```",
+            "",
             f"- Preferred local build output dir: `{preferred_local_post_db_build['output_dir']}`",
             f"- Preferred local build artifact: `{preferred_local_post_db_build['artifact_path']}`",
             f"- Preferred local build report: `{preferred_local_post_db_build['report_path']}`",
@@ -527,11 +546,14 @@ def build_readme(
                 f"`{preferred_local_post_db_build['output_naming_note']}`"
             ),
             (
-                "3. Build or rebuild the candidate locally so "
-                f"`{repo_native(Path(args.rebuild_output_dir))}/optimized_model.so` exists."
+                "4. Build or rebuild the candidate locally so "
+                f"`{repo_native(Path(args.rebuild_output_dir))}/optimized_model.so` exists if you still want a separate rebuild-lane artifact."
             ),
-            f"4. {sha_note}",
-            "5. Copy or edit `validation_report_template.md` so the keep/drop decision is captured together with the payload and reprobe outputs.",
+            (
+                "5. The sync helper only records local build facts; it does not claim runtime or performance validity."
+            ),
+            f"6. {sha_note} The `sha256sum` command below remains available as a manual cross-check.",
+            "7. Copy or edit `validation_report_template.md` so the keep/drop decision is captured together with the payload and reprobe outputs.",
             "",
             "## SHA capture",
             "",
@@ -594,6 +616,7 @@ def main(argv: list[str] | None = None) -> int:
 
     preferred_local_post_db_build = build_preferred_local_post_db_build()
     commands = build_commands(
+        scaffold_dir=args.output_dir,
         rebuild_env=rebuild_env,
         validate_env=validate_env,
         profile_env=profile_env,
@@ -635,7 +658,7 @@ def main(argv: list[str] | None = None) -> int:
         "default_workflow": [
             "prepare_manual_hook_overlay",
             "local_schedule_preserving_build",
-            "compute_sha256",
+            "sync_local_build_result",
             "validate",
             "profile",
         ],
