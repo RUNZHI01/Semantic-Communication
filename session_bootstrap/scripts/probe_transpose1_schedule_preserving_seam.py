@@ -14,13 +14,21 @@ It answers a narrower contract question:
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
 from relax_ms_utils import load_onnx_to_relax, summarize_task_stages
 
 DEFAULT_OPERATOR = "fused_conv2d_transpose1_add9"
+DEFAULT_CANDIDATE_IMPL = (
+    Path(__file__).resolve().parents[1]
+    / "handwritten"
+    / DEFAULT_OPERATOR
+    / f"{DEFAULT_OPERATOR}_manual_candidate.py"
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -53,6 +61,15 @@ def parse_args() -> argparse.Namespace:
         help=(
             "Also attempt a local tvm.build() of the scheduled per-task IRModule. "
             "This is a structural build probe only, not a benchmark."
+        ),
+    )
+    parser.add_argument(
+        "--candidate-impl",
+        type=Path,
+        default=DEFAULT_CANDIDATE_IMPL,
+        help=(
+            "Checked-in handwritten candidate entrypoint module. Defaults to the "
+            "repo-native transpose1 manual candidate."
         ),
     )
     parser.add_argument(
@@ -99,6 +116,112 @@ def load_task_summary(path: Path) -> dict[str, Any]:
     return payload
 
 
+def load_python_module(module_path: Path):
+    module_name = f"transpose1_probe_{module_path.stem}"
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"unable to load module from {module_path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(module_name, None)
+        raise
+    return module
+
+
+def lookup_global_func(mod: Any, name: str):
+    if mod is None or not name:
+        return None
+
+    get_global_var = getattr(mod, "get_global_var", None)
+    if callable(get_global_var):
+        try:
+            global_var = get_global_var(name)
+        except Exception:
+            global_var = None
+        else:
+            try:
+                return mod[global_var]
+            except Exception:
+                pass
+
+    try:
+        return mod[name]
+    except Exception:
+        pass
+
+    functions = getattr(mod, "functions", None)
+    if functions is not None:
+        try:
+            items = list(functions.items())
+        except Exception:
+            items = []
+        for key, value in items:
+            if getattr(key, "name_hint", None) == name or str(key) == name:
+                return value
+
+    get_global_vars = getattr(mod, "get_global_vars", None)
+    if callable(get_global_vars):
+        try:
+            global_vars = list(get_global_vars())
+        except Exception:
+            global_vars = []
+        for key in global_vars:
+            if getattr(key, "name_hint", None) == name or str(key) == name:
+                try:
+                    return mod[key]
+                except Exception:
+                    return None
+
+    return getattr(mod, name, None)
+
+
+def load_candidate_override(candidate_impl: Path, task_stages: dict[str, Any]) -> dict[str, Any]:
+    module = load_python_module(candidate_impl)
+    build_manual_impl = getattr(module, "build_manual_impl", None)
+    describe_placeholder = getattr(module, "describe_placeholder", None)
+    if build_manual_impl is None or not callable(build_manual_impl):
+        raise AttributeError(f"build_manual_impl missing in {candidate_impl}")
+    if describe_placeholder is None or not callable(describe_placeholder):
+        raise AttributeError(f"describe_placeholder missing in {candidate_impl}")
+
+    metadata = describe_placeholder()
+    result = build_manual_impl({"phase": "scheduled_task_compare", "task_stages": task_stages})
+    override = result.get("override") if isinstance(result, dict) else None
+    if not isinstance(override, dict):
+        raise TypeError("build_manual_impl must return a dict with an override payload")
+
+    source_path = Path(str(override.get("source_path") or "")).resolve()
+    source_module = load_python_module(source_path)
+    source_owner = source_module
+    source_module_attr = str(override.get("source_module_attr") or "").strip() or None
+    if source_module_attr is not None:
+        source_owner = getattr(source_module, source_module_attr, None)
+        if source_owner is None:
+            raise AttributeError(
+                f"source_module_attr missing in candidate source: {source_module_attr}"
+            )
+    source_func_name = str(override.get("source_func_name") or "main").strip() or "main"
+    source_func = lookup_global_func(source_owner, source_func_name)
+    if source_func is None:
+        raise AttributeError(
+            f"source_func_name missing in candidate source: {source_func_name}"
+        )
+
+    return {
+        "module": module,
+        "metadata": metadata,
+        "result": result,
+        "override": override,
+        "source_path": source_path,
+        "source_owner": source_owner,
+        "source_func_name": source_func_name,
+        "source_func": source_func,
+    }
+
+
 def find_stage_task_row(task_summary: dict[str, Any], operator: str) -> dict[str, Any] | None:
     stages = task_summary.get("stages")
     if not isinstance(stages, dict):
@@ -139,6 +262,7 @@ def probe_schedule_seam(
     database_dir: Path,
     operator: str,
     *,
+    candidate_impl: Path,
     build_standalone_scheduled_task: bool,
 ) -> dict[str, Any]:
     import tvm  # pylint: disable=import-outside-toplevel
@@ -174,6 +298,9 @@ def probe_schedule_seam(
             "ERROR: operator is absent from extracted tuned tasks: "
             f"{operator}"
         )
+
+    candidate_impl = require_file(candidate_impl.resolve(), "candidate impl")
+    candidate = load_candidate_override(candidate_impl, task_stages)
 
     db = JSONDatabase(
         str(database_dir / "database_workload.json"),
@@ -275,6 +402,47 @@ def probe_schedule_seam(
             else type(applied_operator_func).__name__,
             "global_var_names_sample": applied_global_var_names[:40],
         },
+        "handwritten_candidate": {
+            "candidate_impl": str(candidate_impl),
+            "candidate_source_path": str(candidate["source_path"]),
+            "metadata": candidate["metadata"],
+            "result_evaluation_contract": candidate["result"].get("evaluation_contract"),
+            "override_evaluation_contract": candidate["override"].get("evaluation_contract"),
+            "override_target_global_vars": candidate["override"].get("target_global_vars"),
+            "source_func_name": candidate["source_func_name"],
+            "source_func_type": type(candidate["source_func"]).__name__,
+            "source_owner_global_vars": None
+            if not hasattr(candidate["source_owner"], "get_global_vars")
+            else [gv.name_hint for gv in candidate["source_owner"].get_global_vars()],
+        },
+        "scheduled_vs_handwritten": {
+            "candidate_source_matches_operator_name": bool(
+                candidate["override"].get("target_global_vars")
+                and operator in candidate["override"].get("target_global_vars")
+            ),
+            "scheduled_reference_available": scheduled_ir_module is not None,
+            "handwritten_source_available": candidate["source_func"] is not None,
+            "scheduled_reference_func_type": None
+            if scheduled_ir_module is None
+            else type(lookup_global_func(scheduled_ir_module, "main")).__name__,
+            "structural_equal_scheduled_ref_vs_handwritten": (
+                None
+                if scheduled_ir_module is None
+                else bool(
+                    tvm.ir.structural_equal(
+                        lookup_global_func(scheduled_ir_module, "main"),
+                        candidate["source_func"],
+                    )
+                )
+            ),
+            "scheduled_param_count": None
+            if scheduled_ir_module is None
+            else len(lookup_global_func(scheduled_ir_module, "main").params),
+            "handwritten_param_count": len(candidate["source_func"].params),
+            "mechanically_swappable_post_db": bool(
+                applied_operator_present and candidate["source_func"] is not None
+            ),
+        },
         "recommended_seam": {
             "seam_id": "post_database_scheduled_primfunc_swap",
             "why": (
@@ -297,6 +465,7 @@ def main() -> None:
         task_summary_path=args.task_summary,
         database_dir=args.database_dir,
         operator=args.operator,
+        candidate_impl=args.candidate_impl,
         build_standalone_scheduled_task=args.build_standalone_scheduled_task,
     )
     payload = json.dumps(report, indent=2, ensure_ascii=False)

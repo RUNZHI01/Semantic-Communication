@@ -122,6 +122,11 @@ After that helper exists and is stable, the next code step should be one of:
 - **B2:** wire `rpc_tune.py` to route a handwritten candidate through the
   DB-recovered scheduled task seam instead of the current raw pre-compile seam
 
+Update: `104fe46` already proved the DB-recovered scheduled seam is mechanically
+reachable. The next concrete milestone is for the helper to compare that
+scheduled reference against the checked-in handwritten candidate module and say
+whether a future post-DB scheduled swap is structurally plausible.
+
 ## Recommendation in one sentence
 
 Do **not** resume operator-side `v1` work yet; first build a local
