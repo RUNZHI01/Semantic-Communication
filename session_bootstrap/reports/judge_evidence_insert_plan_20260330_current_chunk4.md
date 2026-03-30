@@ -95,12 +95,12 @@
   - 已完成可信 stage-weight hotspot evidence
   - 也已拿到 remote runtime per-op profiling 的 sample 级结果
   - 当前 runtime hotspot candidates 为：
-    - `fused_conv2d_transpose1_add9`
     - `fused_conv2d_transpose2_add12`
+    - `fused_conv2d_transpose1_add9`
   - 若需要再展开，可补一句 raw top ops 还包括：
     - `fused_conv2d_transpose_add6`
     - `fused_conv2d3_add15`
-  - 需要诚实说明：当前还只是 `1 sample` 级别的 runtime profile，后续可继续补多 sample 稳定性
+  - 需要诚实说明：当前已取得 `3 samples` 的小样本稳定 runtime profile，后续仍可继续补更多样本做统计增强
 
 ## 3. PPT 页结构建议
 
