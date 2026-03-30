@@ -34,6 +34,6 @@
   "notes": [
     "The pre-compile seed snapshot captured the Relax callsite under `main`.",
     "The editable TIR in this directory is extracted from the local MetaSchedule task log for the selected operator workload.",
-    "The checked-in manual candidate module is hook-facing bookkeeping only until a later compile-time override step consumes it."
+    "The checked-in manual candidate module exposes the local/staging handwritten override descriptor for candidate v0."
   ]
 }
