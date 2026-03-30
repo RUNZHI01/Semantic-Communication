@@ -82,6 +82,12 @@
   - `session_bootstrap/reports/cpu3_state_watch_20260318_144316.log`
 - Speaker note: 结束页主动交代边界，会显著减少被评委抓住 mode mixing、control-plane overclaim、CPU tradeoff 这三类风险。
 
+## 附录页入口（新增）
+
+若评委继续追问质量、资源、SNR 或 profiling 边界，直接接：
+
+- `session_bootstrap/reports/defense_appendix_pages_9_12_judge_evidence_20260330.md`
+
 ## 页面级统一要求
 
 - 每一页都优先使用“飞腾多核弱网安全语义视觉回传系统”或其同义表述，不用“TVM/MNN optimization project”做主标题。
