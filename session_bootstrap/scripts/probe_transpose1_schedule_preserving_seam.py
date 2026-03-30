@@ -1,123 +1,310 @@
 #!/usr/bin/env python3
-"""Probe the schedule-preserving seam for fused_conv2d_transpose1_add9.
+"""Probe a schedule-preserving handwritten evaluation seam from local artifacts.
 
-This helper is intentionally local-only and diagnostic-only. It does not claim to
-perform a valid handwritten performance evaluation. It only proves that the best
-staging DB can recover the scheduled task/module for the transpose1 operator.
+This helper is intentionally local-only. It does not claim performance validity.
+It answers a narrower contract question:
+
+- can the best scheduled task for a chosen operator be recovered from the
+  staged MetaSchedule database?
+- after MetaScheduleApplyDatabase, does the full module still expose a
+  scheduled PrimFunc for that operator that could become a post-database
+  handwritten hook seam?
 """
 
 from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
 from typing import Any
 
+from relax_ms_utils import load_onnx_to_relax, summarize_task_stages
 
-SCRIPT_DIR = Path(__file__).resolve().parent
-SESSION_DIR = SCRIPT_DIR.parent
-PROJECT_DIR = SESSION_DIR.parent
-if str(PROJECT_DIR) not in sys.path:
-    sys.path.insert(0, str(PROJECT_DIR))
+DEFAULT_OPERATOR = "fused_conv2d_transpose1_add9"
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Verify that the best-staging MetaSchedule DB can recover the scheduled "
-            "transpose1 task/module for local seam design work."
+            "Probe whether a local tune output exposes a schedule-preserving "
+            "handwritten seam for a specific operator."
         )
     )
     parser.add_argument(
         "--task-summary",
+        type=Path,
         required=True,
-        help="Path to a task_summary.json generated from the staged run.",
+        help="Path to task_summary.json from a staged tune output.",
     )
     parser.add_argument(
-        "--db-dir",
+        "--database-dir",
+        type=Path,
         required=True,
         help="Directory containing database_workload.json and database_tuning_record.json.",
     )
     parser.add_argument(
-        "--task-name",
-        default="fused_conv2d_transpose1_add9",
-        help="Exact extracted task name to inspect.",
+        "--operator",
+        default=DEFAULT_OPERATOR,
+        help=f"Operator/task name to probe. Default: {DEFAULT_OPERATOR}",
+    )
+    parser.add_argument(
+        "--build-standalone-scheduled-task",
+        action="store_true",
+        help=(
+            "Also attempt a local tvm.build() of the scheduled per-task IRModule. "
+            "This is a structural build probe only, not a benchmark."
+        ),
+    )
+    parser.add_argument(
+        "--output-json",
+        type=Path,
+        help="Optional output path for the probe JSON report.",
     )
     return parser.parse_args()
 
 
-def main() -> int:
-    args = parse_args()
+def require_file(path: Path, label: str) -> Path:
+    if not path.is_file():
+        raise SystemExit(f"ERROR: {label} not found: {path}")
+    return path
 
-    task_summary_path = Path(args.task_summary).resolve()
-    db_dir = Path(args.db_dir).resolve()
-    workload_path = db_dir / "database_workload.json"
-    tuning_record_path = db_dir / "database_tuning_record.json"
 
+def require_dir(path: Path, label: str) -> Path:
+    if not path.is_dir():
+        raise SystemExit(f"ERROR: {label} not found: {path}")
+    return path
+
+
+def require_database_dir(path: Path) -> Path:
+    directory = require_dir(path, "database dir")
+    require_file(directory / "database_workload.json", "database workload")
+    require_file(directory / "database_tuning_record.json", "database tuning record")
+    return directory
+
+
+def parse_input_shape(raw_value: str) -> list[int]:
+    dims = [item.strip() for item in str(raw_value).split(",") if item.strip()]
+    if not dims:
+        raise SystemExit(f"ERROR: invalid input_shape: {raw_value!r}")
+    try:
+        return [int(item) for item in dims]
+    except ValueError as err:
+        raise SystemExit(f"ERROR: invalid input_shape: {raw_value!r}") from err
+
+
+def load_task_summary(path: Path) -> dict[str, Any]:
+    payload = json.loads(require_file(path, "task summary").read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise SystemExit(f"ERROR: unexpected task summary payload in {path}")
+    return payload
+
+
+def find_stage_task_row(task_summary: dict[str, Any], operator: str) -> dict[str, Any] | None:
+    stages = task_summary.get("stages")
+    if not isinstance(stages, dict):
+        return None
+
+    for stage_name, stage_payload in stages.items():
+        if not isinstance(stage_payload, dict):
+            continue
+        tasks = stage_payload.get("tasks")
+        if not isinstance(tasks, list):
+            continue
+        for row in tasks:
+            if not isinstance(row, dict):
+                continue
+            if row.get("task_name") == operator:
+                result = dict(row)
+                result["stage_name"] = stage_name
+                return result
+    return None
+
+
+def _as_float_list(values: Any) -> list[float] | None:
+    if values is None:
+        return None
+    if not isinstance(values, (list, tuple)):
+        return None
+    result: list[float] = []
+    for value in values:
+        try:
+            result.append(float(value))
+        except (TypeError, ValueError):
+            return None
+    return result
+
+
+def probe_schedule_seam(
+    task_summary_path: Path,
+    database_dir: Path,
+    operator: str,
+    *,
+    build_standalone_scheduled_task: bool,
+) -> dict[str, Any]:
     import tvm  # pylint: disable=import-outside-toplevel
-    from tvm.relax.transform import MetaScheduleApplyDatabase  # pylint: disable=import-outside-toplevel
-    from tvm.s_tir.meta_schedule.database import JSONDatabase  # pylint: disable=import-outside-toplevel
-    from tvm.s_tir.meta_schedule.relax_integration import extract_tasks  # pylint: disable=import-outside-toplevel
-
-    from session_bootstrap.scripts.relax_ms_utils import (  # pylint: disable=import-outside-toplevel
-        load_onnx_to_relax,
-        summarize_task_stages,
+    from tvm.relax.transform import (  # pylint: disable=import-outside-toplevel
+        MetaScheduleApplyDatabase,
+    )
+    from tvm.s_tir.meta_schedule.database import (  # pylint: disable=import-outside-toplevel
+        JSONDatabase,
+    )
+    from tvm.s_tir.meta_schedule.relax_integration import (  # pylint: disable=import-outside-toplevel
+        extract_tasks,
     )
 
-    summary = json.loads(task_summary_path.read_text(encoding="utf-8"))
-    input_shape = [int(x) for x in str(summary["input_shape"]).split(",")]
-    mod = load_onnx_to_relax(summary["onnx_path"], "input", input_shape, "float32")
-    target = tvm.target.Target(summary["target"])
-    tuned_mod, _ = summarize_task_stages(mod, target)
+    task_summary = load_task_summary(task_summary_path)
+    database_dir = require_database_dir(database_dir)
+    onnx_path = require_file(Path(task_summary["onnx_path"]), "onnx model")
+    input_shape = parse_input_shape(task_summary["input_shape"])
+    input_name = str(task_summary.get("input_name") or "input")
+    input_dtype = str(task_summary.get("input_dtype") or "float32")
+    target = tvm.target.Target(task_summary["target"])
 
-    db = JSONDatabase(str(workload_path), str(tuning_record_path))
-    extracted = list(extract_tasks(tuned_mod, target))
-    task = next((task for task in extracted if task.task_name == args.task_name), None)
-    if task is None:
-        raise SystemExit(f"ERROR: task not found: {args.task_name}")
+    raw_mod = load_onnx_to_relax(
+        onnx_path=str(onnx_path),
+        input_name=input_name,
+        input_shape=input_shape,
+        input_dtype=input_dtype,
+    )
+    tuned_mod, task_stages = summarize_task_stages(raw_mod, target)
+    extracted_tasks = list(extract_tasks(tuned_mod, target))
+    extracted_task = next((task for task in extracted_tasks if task.task_name == operator), None)
+    if extracted_task is None:
+        raise SystemExit(
+            "ERROR: operator is absent from extracted tuned tasks: "
+            f"{operator}"
+        )
 
-    task_mod = task.dispatched[0]
-    record = db.query_tuning_record(task_mod, target, task.task_name)
-    scheduled_mod = db.query_ir_module(task_mod, target, task.task_name)
-    schedule = db.query_schedule(task_mod, target, task.task_name)
+    db = JSONDatabase(
+        str(database_dir / "database_workload.json"),
+        str(database_dir / "database_tuning_record.json"),
+    )
+
+    scheduled_record = db.query_tuning_record(
+        extracted_task.dispatched[0],
+        target,
+        extracted_task.task_name,
+    )
+    scheduled_ir_module = db.query_ir_module(
+        extracted_task.dispatched[0],
+        target,
+        extracted_task.task_name,
+    )
+    scheduled_schedule = db.query_schedule(
+        extracted_task.dispatched[0],
+        target,
+        extracted_task.task_name,
+    )
+
+    standalone_build = {
+        "attempted": bool(build_standalone_scheduled_task),
+        "status": "skipped",
+        "error": None,
+    }
+    if build_standalone_scheduled_task:
+        if scheduled_ir_module is None:
+            standalone_build["status"] = "missing_scheduled_ir_module"
+        else:
+            try:
+                tvm.build(scheduled_ir_module, target=target)
+            except Exception as err:  # pragma: no cover - integration-only path
+                standalone_build["status"] = "failed"
+                standalone_build["error"] = f"{type(err).__name__}: {err}"
+            else:
+                standalone_build["status"] = "built"
 
     with target, db, tvm.transform.PassContext(opt_level=3):
-        applied = MetaScheduleApplyDatabase(enable_warning=False)(tuned_mod)
-    applied_gvars = [gv.name_hint for gv in applied.get_global_vars()]
-    scheduled_global_present = args.task_name in applied_gvars
-    scheduled_global_attrs: dict[str, Any] | None = None
-    if scheduled_global_present:
-        func = applied[applied.get_global_var(args.task_name)]
-        attrs = func.attrs if getattr(func, "attrs", None) else {}
-        scheduled_global_attrs = {
-            "tir.is_scheduled": bool(attrs.get("tir.is_scheduled", False)),
-            "global_symbol": attrs.get("global_symbol"),
-        }
+        applied_mod = MetaScheduleApplyDatabase(enable_warning=False)(tuned_mod)
 
-    payload = {
-        "status": "ok",
-        "task_name": args.task_name,
-        "task_found": True,
-        "task_weight": int(task.weight),
-        "task_dispatched_count": len(task.dispatched),
-        "db_query_tuning_record": record is not None,
-        "db_query_ir_module": scheduled_mod is not None,
-        "db_query_schedule": schedule is not None,
-        "query_schedule_trace_len": None if schedule is None else len(schedule.trace.insts),
-        "query_schedule_matches_query_ir_module": (
-            None
-            if schedule is None or scheduled_mod is None
-            else bool(tvm.ir.structural_equal(schedule.mod, scheduled_mod))
-        ),
-        "applied_module_has_named_global": scheduled_global_present,
-        "applied_module_global_attrs": scheduled_global_attrs,
-        "recommended_path_kind": "schedule_context_preserving_evaluation",
-        "recommended_next_target": "post_db_scheduled_primfunc_swap",
+    applied_global_var_names = [gv.name_hint for gv in applied_mod.get_global_vars()]
+    applied_operator_func: Any | None = None
+    applied_operator_present = operator in applied_global_var_names
+    if applied_operator_present:
+        applied_operator_func = applied_mod[applied_mod.get_global_var(operator)]
+
+    report = {
+        "task_summary_json": str(task_summary_path.resolve()),
+        "database_dir": str(database_dir.resolve()),
+        "operator": operator,
+        "task_summary_row": find_stage_task_row(task_summary, operator),
+        "reconstructed_task_row": find_stage_task_row({"stages": task_stages}, operator),
+        "extracted_task": {
+            "task_name": extracted_task.task_name,
+            "weight": int(extracted_task.weight),
+            "dispatched_count": len(extracted_task.dispatched),
+            "dispatched_global_vars": [
+                gv.name_hint for gv in extracted_task.dispatched[0].get_global_vars()
+            ],
+            "dispatched_tir_is_scheduled": bool(
+                extracted_task.dispatched[0].attrs
+                and extracted_task.dispatched[0].attrs.get("tir.is_scheduled", False)
+            ),
+        },
+        "database_lookup": {
+            "query_tuning_record_hit": scheduled_record is not None,
+            "query_ir_module_hit": scheduled_ir_module is not None,
+            "query_schedule_hit": scheduled_schedule is not None,
+            "scheduled_run_secs": None
+            if scheduled_record is None
+            else _as_float_list(scheduled_record.run_secs),
+            "scheduled_tuning_record_trace_inst_count": None
+            if scheduled_record is None
+            else len(scheduled_record.trace.insts),
+            "scheduled_trace_inst_count": None
+            if scheduled_schedule is None
+            else len(scheduled_schedule.trace.insts),
+            "scheduled_ir_module_global_vars": None
+            if scheduled_ir_module is None
+            else [gv.name_hint for gv in scheduled_ir_module.get_global_vars()],
+            "query_schedule_matches_query_ir_module": (
+                None
+                if scheduled_schedule is None or scheduled_ir_module is None
+                else bool(tvm.ir.structural_equal(scheduled_schedule.mod, scheduled_ir_module))
+            ),
+        },
+        "standalone_scheduled_task_build": standalone_build,
+        "post_database_apply": {
+            "operator_present": applied_operator_present,
+            "operator_tir_is_scheduled": bool(
+                applied_operator_func is not None
+                and applied_operator_func.attrs
+                and applied_operator_func.attrs.get("tir.is_scheduled", False)
+            ),
+            "operator_func_type": None
+            if applied_operator_func is None
+            else type(applied_operator_func).__name__,
+            "global_var_names_sample": applied_global_var_names[:40],
+        },
+        "recommended_seam": {
+            "seam_id": "post_database_scheduled_primfunc_swap",
+            "why": (
+                "Apply MetaScheduleApplyDatabase first, then expose/replace the "
+                "named scheduled PrimFunc inside the applied module."
+            ),
+            "precondition": (
+                "Handwritten candidates must be authored against the scheduled "
+                "operator form or an explicitly derived scheduled editable seed, "
+                "not the raw pre-compile seed."
+            ),
+        },
     }
-    print(json.dumps(payload, ensure_ascii=False, indent=2))
-    return 0
+    return report
+
+
+def main() -> None:
+    args = parse_args()
+    report = probe_schedule_seam(
+        task_summary_path=args.task_summary,
+        database_dir=args.database_dir,
+        operator=args.operator,
+        build_standalone_scheduled_task=args.build_standalone_scheduled_task,
+    )
+    payload = json.dumps(report, indent=2, ensure_ascii=False)
+    if args.output_json is not None:
+        args.output_json.parent.mkdir(parents=True, exist_ok=True)
+        args.output_json.write_text(payload + "\n", encoding="utf-8")
+    print(payload)
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    main()
