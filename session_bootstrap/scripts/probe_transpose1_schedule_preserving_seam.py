@@ -17,6 +17,7 @@ import argparse
 import importlib.util
 import json
 import sys
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -77,6 +78,14 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         help="Optional output path for the probe JSON report.",
     )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        help=(
+            "Optional local-only output directory for the swapped full-module "
+            "build/export artifact plus an adjacent JSON report."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -97,6 +106,14 @@ def require_database_dir(path: Path) -> Path:
     require_file(directory / "database_workload.json", "database workload")
     require_file(directory / "database_tuning_record.json", "database tuning record")
     return directory
+
+
+def file_sha256(path: Path) -> str:
+    digest = sha256()
+    with path.open("rb") as infile:
+        for chunk in iter(lambda: infile.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def parse_input_shape(raw_value: str) -> list[int]:
@@ -299,6 +316,80 @@ def _as_float_list(values: Any) -> list[float] | None:
     return result
 
 
+def build_output_layout(operator: str, output_dir: Path | None) -> dict[str, str | None]:
+    if output_dir is None:
+        return {
+            "output_dir": None,
+            "artifact_path": None,
+            "report_path": None,
+        }
+
+    resolved_output_dir = output_dir.resolve()
+    return {
+        "output_dir": str(resolved_output_dir),
+        "artifact_path": str(resolved_output_dir / f"{operator}_post_db_swap.so"),
+        "report_path": str(resolved_output_dir / f"{operator}_post_db_swap_report.json"),
+    }
+
+
+def export_built_artifact(executable: Any, artifact_path: Path) -> dict[str, Any]:
+    exporter_owner = "build_output"
+    exporter = getattr(executable, "export_library", None)
+    if not callable(exporter):
+        runtime_mod = getattr(executable, "mod", None)
+        exporter = getattr(runtime_mod, "export_library", None)
+        exporter_owner = "build_output.mod"
+
+    result = {
+        "attempted": True,
+        "status": "skipped",
+        "error": None,
+        "export_owner": None,
+        "artifact_exists": False,
+        "artifact_size_bytes": None,
+        "artifact_sha256": None,
+    }
+    if not callable(exporter):
+        result["status"] = "missing_export_library"
+        return result
+
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        exporter(str(artifact_path))
+    except Exception as err:  # pragma: no cover - integration-only path
+        result["status"] = "failed"
+        result["error"] = f"{type(err).__name__}: {err}"
+        result["export_owner"] = exporter_owner
+        return result
+
+    artifact_exists = artifact_path.exists()
+    result["status"] = "exported" if artifact_exists else "export_called_missing_artifact"
+    result["export_owner"] = exporter_owner
+    result["artifact_exists"] = artifact_exists
+    if artifact_exists and artifact_path.is_file():
+        result["artifact_size_bytes"] = artifact_path.stat().st_size
+        result["artifact_sha256"] = file_sha256(artifact_path)
+    return result
+
+
+def write_report_outputs(
+    payload: str,
+    *,
+    output_json: Path | None,
+    adjacent_report_path: Path | None,
+) -> None:
+    seen_paths: set[str] = set()
+    for path in (adjacent_report_path, output_json):
+        if path is None:
+            continue
+        resolved = str(path.resolve())
+        if resolved in seen_paths:
+            continue
+        seen_paths.add(resolved)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(payload + "\n", encoding="utf-8")
+
+
 def probe_schedule_seam(
     task_summary_path: Path,
     database_dir: Path,
@@ -306,6 +397,7 @@ def probe_schedule_seam(
     *,
     candidate_impl: Path,
     build_standalone_scheduled_task: bool,
+    output_dir: Path | None = None,
 ) -> dict[str, Any]:
     import tvm  # pylint: disable=import-outside-toplevel
     from tvm.relax.transform import (  # pylint: disable=import-outside-toplevel
@@ -320,6 +412,7 @@ def probe_schedule_seam(
 
     task_summary = load_task_summary(task_summary_path)
     database_dir = require_database_dir(database_dir)
+    output_layout = build_output_layout(operator, output_dir)
     onnx_path = require_file(Path(task_summary["onnx_path"]), "onnx model")
     input_shape = parse_input_shape(task_summary["input_shape"])
     input_name = str(task_summary.get("input_name") or "input")
@@ -402,6 +495,20 @@ def probe_schedule_seam(
         "build_status": "skipped",
         "build_error": None,
     }
+    local_build_output = {
+        "requested": output_dir is not None,
+        "output_dir": output_layout["output_dir"],
+        "artifact_path": output_layout["artifact_path"],
+        "report_path": output_layout["report_path"],
+        "build_executable_type": None,
+        "export_attempted": False,
+        "export_status": "skipped",
+        "export_error": None,
+        "export_owner": None,
+        "artifact_exists": False,
+        "artifact_size_bytes": None,
+        "artifact_sha256": None,
+    }
     if swapped_full_module["attempted"]:
         swapped_mod = replace_global_func(applied_mod, operator, candidate["source_func"])
         swapped_func = lookup_global_func(swapped_mod, operator)
@@ -422,12 +529,25 @@ def probe_schedule_seam(
             from tvm import relax  # pylint: disable=import-outside-toplevel
 
             with target, tvm.transform.PassContext(opt_level=3):
-                relax.build(swapped_mod, target=target)
+                built_executable = relax.build(swapped_mod, target=target)
         except Exception as err:  # pragma: no cover - integration-only path
             swapped_full_module["build_status"] = "failed"
             swapped_full_module["build_error"] = f"{type(err).__name__}: {err}"
         else:
             swapped_full_module["build_status"] = "built"
+            local_build_output["build_executable_type"] = type(built_executable).__name__
+            if output_dir is not None and output_layout["artifact_path"] is not None:
+                local_build_output["export_attempted"] = True
+                export_result = export_built_artifact(
+                    built_executable,
+                    Path(output_layout["artifact_path"]),
+                )
+                local_build_output["export_status"] = str(export_result["status"])
+                local_build_output["export_error"] = export_result["error"]
+                local_build_output["export_owner"] = export_result["export_owner"]
+                local_build_output["artifact_exists"] = bool(export_result["artifact_exists"])
+                local_build_output["artifact_size_bytes"] = export_result["artifact_size_bytes"]
+                local_build_output["artifact_sha256"] = export_result["artifact_sha256"]
 
     report = {
         "task_summary_json": str(task_summary_path.resolve()),
@@ -524,6 +644,7 @@ def probe_schedule_seam(
             ),
         },
         "post_db_scheduled_swap": swapped_full_module,
+        "local_build_output": local_build_output,
         "recommended_seam": {
             "seam_id": "post_database_scheduled_primfunc_swap",
             "why": (
@@ -548,11 +669,20 @@ def main() -> None:
         operator=args.operator,
         candidate_impl=args.candidate_impl,
         build_standalone_scheduled_task=args.build_standalone_scheduled_task,
+        output_dir=args.output_dir,
     )
     payload = json.dumps(report, indent=2, ensure_ascii=False)
-    if args.output_json is not None:
-        args.output_json.parent.mkdir(parents=True, exist_ok=True)
-        args.output_json.write_text(payload + "\n", encoding="utf-8")
+    adjacent_report_path = None
+    local_build_output = report.get("local_build_output")
+    if isinstance(local_build_output, dict):
+        report_path = local_build_output.get("report_path")
+        if isinstance(report_path, str) and report_path.strip():
+            adjacent_report_path = Path(report_path)
+    write_report_outputs(
+        payload,
+        output_json=args.output_json,
+        adjacent_report_path=adjacent_report_path,
+    )
     print(payload)
 
 
