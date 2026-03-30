@@ -9,6 +9,19 @@
   "primary_change": "Bias is fused into the convolution reduction init so the standalone compute_intermediate buffer and trailing T_add loop are removed.",
   "evaluation_outcome": "drop_not_for_reprobe",
   "regression_diagnosis": "The current pre_compile handwritten override changes the transpose1 workload structure enough to miss the best staging MetaSchedule records, so v0 is not a clean performance signal for another operator-side iteration yet.",
+  "evaluation_contract": {
+    "path_kind": "diagnostic_raw_pre_compile_replacement",
+    "schedule_context_guarantee": "not_guaranteed",
+    "performance_evaluable": false,
+    "comparison_semantics": "non_comparable_diagnostic_only",
+    "future_path_kind": "schedule_context_preserving_evaluation",
+    "future_path_status": "not_implemented",
+    "reason": "The current raw pre-compile handwritten replacement seam may miss the best staging schedule context, so any runtime number is diagnostic only.",
+    "notes": [
+      "Use this path to confirm hook targeting, artifact identity, and structural integration only.",
+      "Do not treat runtime measurements from this seam as candidate-performance evidence."
+    ]
+  },
   "non_changes": [
     "data_dilate remains materialized",
     "data_pad remains materialized",

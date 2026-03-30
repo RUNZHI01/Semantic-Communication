@@ -92,6 +92,23 @@ class FusedConv2dTranspose1Add9ManualCandidateTest(unittest.TestCase):
             metadata["validation_scope"],
             "local_staging_only_pre_compile_override",
         )
+        self.assertEqual(
+            metadata["evaluation_contract"]["path_kind"],
+            "diagnostic_raw_pre_compile_replacement",
+        )
+        self.assertEqual(
+            metadata["evaluation_contract"]["comparison_semantics"],
+            "non_comparable_diagnostic_only",
+        )
+        self.assertFalse(metadata["evaluation_contract"]["performance_evaluable"])
+        self.assertEqual(
+            metadata["evaluation_contract"]["schedule_context_guarantee"],
+            "not_guaranteed",
+        )
+        self.assertEqual(
+            metadata["evaluation_contract"]["future_path_kind"],
+            "schedule_context_preserving_evaluation",
+        )
         self.assertTrue(Path(metadata["candidate_tir"]).is_file())
         self.assertTrue(Path(metadata["editable_tir"]).is_file())
         self.assertTrue(Path(metadata["candidate_metadata"]).is_file())
@@ -122,8 +139,25 @@ class FusedConv2dTranspose1Add9ManualCandidateTest(unittest.TestCase):
         self.assertEqual(result["override"]["kind"], "replace_prim_func_from_source")
         self.assertEqual(result["override"]["candidate_version"], "v0")
         self.assertEqual(
+            result["evaluation_contract"]["path_kind"],
+            "diagnostic_raw_pre_compile_replacement",
+        )
+        self.assertEqual(
+            result["evaluation_contract"]["comparison_semantics"],
+            "non_comparable_diagnostic_only",
+        )
+        self.assertFalse(result["evaluation_contract"]["performance_evaluable"])
+        self.assertEqual(
+            result["evaluation_contract"]["schedule_context_guarantee"],
+            "not_guaranteed",
+        )
+        self.assertEqual(
             result["override"]["target_global_vars"],
             ["fused_conv2d_transpose1_add9"],
+        )
+        self.assertEqual(
+            result["override"]["evaluation_contract"]["path_kind"],
+            "diagnostic_raw_pre_compile_replacement",
         )
         self.assertEqual(result["override"]["source_path"], result["candidate_tir"])
 
@@ -169,6 +203,20 @@ class FusedConv2dTranspose1Add9ManualCandidateTest(unittest.TestCase):
         self.assertIs(updated_mod, fake_mod)
         self.assertEqual(summary["candidate_version"], "v0")
         self.assertEqual(summary["target_global_var"], "fused_conv2d_transpose1_add9")
+        self.assertEqual(
+            summary["evaluation_contract"]["path_kind"],
+            "diagnostic_raw_pre_compile_replacement",
+        )
+        self.assertEqual(
+            summary["evaluation_contract"]["comparison_semantics"],
+            "non_comparable_diagnostic_only",
+        )
+        self.assertFalse(summary["evaluation_contract"]["performance_evaluable"])
+        self.assertFalse(summary["evaluation_contract"]["performance_comparable"])
+        self.assertEqual(
+            summary["evaluation_contract"]["schedule_context_guarantee"],
+            "not_guaranteed",
+        )
         self.assertTrue(callable(fake_mod.mapping["fused_conv2d_transpose1_add9"]))
         self.assertEqual(
             fake_mod.mapping["fused_conv2d_transpose1_add9"].__name__,
