@@ -2,6 +2,8 @@
 
 适用范围：trusted current `chunk4` 路线的 remote runtime per-op profiling
 
+> 更新：本计划的核心 blocker 已在 `2026-03-30` 晚间被打通，最新成功入口见 `session_bootstrap/reports/profiling_judge_retry_parse_20260330_184026.md`。本 runbook 保留为“问题是怎么被定位并解决的”记录。
+
 ## 1. 当前状态
 
 当前 fresh probe 已确认：

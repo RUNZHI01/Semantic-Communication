@@ -27,7 +27,7 @@
 |---|---|
 | 当前成果 / 脚本 / 路径总索引 | `runbooks/artifact_registry.md` |
 | 评委补证工作流 | `runbooks/judge_evidence_workflow_2026-03-30.md` |
-| 评委技术证据总包（latest） | `reports/judge_evidence_pack_20260330_current_chunk4_lpips_full.md` |
+| 评委技术证据总包（latest） | `reports/judge_evidence_pack_20260330_current_chunk4_lpips_full_profiled.md` |
 | 正式质量报告（PSNR / SSIM / LPIPS，latest） | `reports/judge_quality_formal_report_20260330_lpips_full.md` |
 | 多 SNR 鲁棒性摘要（latest） | `reports/judge_snr_robustness_20260330_current_chunk4.md` |
 | trusted current payload 正式结论 | `reports/inference_compare_currentsafe_chunk4_refresh_20260313_1758.md` |
@@ -57,7 +57,7 @@
 - `runbooks/judge_evidence_workflow_2026-03-30.md`
 - `reports/judge_quality_formal_report_20260330_lpips_full.md`
 - `reports/judge_snr_robustness_20260330_current_chunk4.md`
-- `reports/judge_evidence_pack_20260330_current_chunk4_lpips_full.md`
+- `reports/judge_evidence_pack_20260330_current_chunk4_lpips_full_profiled.md`
 - `reports/defense_quick_reference_card_20260330_current_chunk4.md`
 
 说明：
