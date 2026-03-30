@@ -140,7 +140,26 @@ class PrepareFusedConv2dTranspose1Add9HandwrittenScaffoldTest(unittest.TestCase)
 
             self.assertEqual(bookkeeping["operator"], "fused_conv2d_transpose1_add9")
             self.assertEqual(bookkeeping["remote_archive_dir"], remote_archive)
+            self.assertEqual(
+                bookkeeping["default_workflow"],
+                [
+                    "prepare_manual_hook_overlay",
+                    "local_schedule_preserving_build",
+                    "compute_sha256",
+                    "validate",
+                    "profile",
+                ],
+            )
+            self.assertEqual(
+                bookkeeping["local_schedule_preserving_build_output_dir"],
+                "./session_bootstrap/tmp/transpose1_post_db_swap_local_build",
+            )
+            self.assertIn("schedule-preserving", bookkeeping["why_local_first"])
             self.assertIn("validation_report_template.md", bookkeeping["generated_files"])
+            self.assertIn(
+                "run_transpose1_post_db_local_build.py",
+                bookkeeping["commands"]["local_schedule_preserving_build"],
+            )
             self.assertIn(
                 "run_phytium_current_safe_one_shot.sh",
                 bookkeeping["commands"]["validate"],
@@ -152,11 +171,19 @@ class PrepareFusedConv2dTranspose1Add9HandwrittenScaffoldTest(unittest.TestCase)
             )
 
             self.assertIn("- candidate_sha256: `aaaaaaaa", validation_template)
+            self.assertIn("- local_build_output_dir: `./session_bootstrap/tmp/transpose1_post_db_swap_local_build`", validation_template)
+            self.assertIn("- local_build_swap_result: `<fill>`", validation_template)
+            self.assertIn(
+                "run_transpose1_post_db_local_build.py",
+                validation_template,
+            )
             self.assertIn(f"- remote_staging_archive: `{remote_archive}`", validation_template)
             self.assertIn("- payload_result: `<fill>`", validation_template)
             self.assertIn("- reprobe_run_id: `<fill>`", validation_template)
             self.assertIn("- decision: `<keep_staging_only|drop>`", validation_template)
 
+            self.assertIn("## Default workflow", readme)
+            self.assertIn("Only after the local build and SHA capture look sane", readme)
             self.assertIn("run_phytium_current_safe_one_shot.sh", readme)
             self.assertIn("run_task_5_1_operator_profile.py", readme)
             self.assertIn("validation_report_template.md", readme)
@@ -178,6 +205,8 @@ class PrepareFusedConv2dTranspose1Add9HandwrittenScaffoldTest(unittest.TestCase)
                 "transpose1_post_db_swap_local_build",
                 readme,
             )
+            self.assertIn("## Optional staging validation", readme)
+            self.assertIn("## Optional runtime reprobe", readme)
             self.assertIn("rpc_tune.py` already consumes `TVM_HANDWRITTEN_IMPL_PATH`", readme)
 
 
