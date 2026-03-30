@@ -20,6 +20,8 @@
 - `session_bootstrap/reports/judge_snr_robustness_20260330_current_chunk4_quality.svg`
 - `session_bootstrap/reports/judge_evidence_pack_20260330_current_chunk4_lpips_full.md`
 - `session_bootstrap/reports/judge_evidence_pack_20260330_current_chunk4_lpips_full.json`
+- `session_bootstrap/reports/judge_evidence_pack_20260330_current_chunk4_lpips_full_profiled.md`
+- `session_bootstrap/reports/judge_evidence_pack_20260330_current_chunk4_lpips_full_profiled.json`
 - `session_bootstrap/reports/defense_quick_reference_card_20260330_current_chunk4.md`
 - `session_bootstrap/reports/judge_evidence_legacy_index_20260330.md`
 
@@ -84,7 +86,7 @@ python3 ./session_bootstrap/scripts/build_snr_robustness_report.py \
 ### 2.3 Unified Judge Evidence Pack
 
 当前 latest 推荐入口：
-- `judge_evidence_pack_20260330_current_chunk4_lpips_full.*`
+- `judge_evidence_pack_20260330_current_chunk4_lpips_full_profiled.*`
 
 命令：
 
@@ -123,7 +125,7 @@ python3 ./session_bootstrap/scripts/build_judge_evidence_pack.py \
 当前 latest 正式入口已经写进：
 
 - `session_bootstrap/reports/judge_snr_robustness_20260330_current_chunk4.md`
-- `session_bootstrap/reports/judge_evidence_pack_20260330_current_chunk4_lpips_full.md`
+- `session_bootstrap/reports/judge_evidence_pack_20260330_current_chunk4_lpips_full_profiled.md`
 
 命令：
 
@@ -207,7 +209,7 @@ bash ./session_bootstrap/scripts/run_remote_resource_profile.sh \
 
 推荐评委材料引用顺序：
 
-1. `judge_evidence_pack_20260330_current_chunk4_lpips_full.md`
+1. `judge_evidence_pack_20260330_current_chunk4_lpips_full_profiled.md`
 2. `judge_quality_formal_report_20260330_lpips_full.md`
 3. `judge_snr_robustness_20260330_current_chunk4.md`
 4. `inference_compare_currentsafe_chunk4_refresh_20260313_1758.md`
@@ -222,4 +224,4 @@ bash ./session_bootstrap/scripts/run_remote_resource_profile.sh \
 - judge-facing 本地整理工作流已经具备。
 - 历史质量 / hotspot / resource / snr 结果已经被统一串成正式材料。
 - latest 默认引用已切到 `lpips_full`；若需要区分历史中间版本，直接看 `session_bootstrap/reports/judge_evidence_legacy_index_20260330.md`。
-- 当前真正还缺的，只剩 profiler-enabled runtime 这条需要继续上板攻关的技术项。
+- 当前 judge-evidence 主线已经补齐；若继续推进，更多是扩展 sample 数、做更完整的热点归因，而不再是补核心缺口。

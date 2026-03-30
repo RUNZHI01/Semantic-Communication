@@ -465,6 +465,49 @@ def run_runtime_phase(
     return phase
 
 
+def extract_top_ops_from_runtime_profile(runtime_profile: dict[str, Any], top_k: int = 8) -> list[dict[str, Any]]:
+    top_ops = list(runtime_profile.get("top_ops") or [])
+    if top_ops:
+        return top_ops[:top_k]
+
+    sample_results = runtime_profile.get("sample_results") or []
+    if not sample_results:
+        return []
+
+    report_json = sample_results[0].get("report_json") or {}
+    calls = report_json.get("calls") or []
+    rows: list[dict[str, Any]] = []
+    for call in calls:
+        name_payload = call.get("Name") or {}
+        duration_payload = call.get("Duration (us)") or {}
+        percent_payload = call.get("Percent") or {}
+        count_payload = call.get("Count") or {}
+        device_payload = call.get("Device") or {}
+        name = name_payload.get("string") if isinstance(name_payload, dict) else None
+        if not name:
+            continue
+        rows.append(
+            {
+                "name": name,
+                "mean_duration_us": duration_payload.get("microseconds") if isinstance(duration_payload, dict) else None,
+                "mean_percent": percent_payload.get("percent") if isinstance(percent_payload, dict) else None,
+                "samples": count_payload.get("count") if isinstance(count_payload, dict) else None,
+                "devices": [device_payload.get("string")] if isinstance(device_payload, dict) and device_payload.get("string") else [],
+            }
+        )
+
+    rows.sort(
+        key=lambda row: (
+            row.get("mean_duration_us") is None,
+            -(row.get("mean_duration_us") or 0.0),
+            row.get("name") or "",
+        )
+    )
+    if rows:
+        runtime_profile["top_ops"] = rows[:top_k]
+    return rows[:top_k]
+
+
 def md_table(headers: list[str], rows: list[list[Any]]) -> list[str]:
     lines = [
         "| " + " | ".join(headers) + " |",
@@ -542,6 +585,7 @@ def build_markdown(summary: dict[str, Any]) -> str:
 
     runtime_summary = runtime.get("summary") or {}
     runtime_profile = runtime_summary.get("runtime_profiling") or {}
+    top_ops = extract_top_ops_from_runtime_profile(runtime_profile)
     if runtime_summary:
         lines.extend(
             [
@@ -557,7 +601,6 @@ def build_markdown(summary: dict[str, Any]) -> str:
                 f"- runtime_profile_supported: {runtime_profile.get('supported')}",
             ]
         )
-    top_ops = runtime_profile.get("top_ops") or []
     if top_ops:
         lines.extend(
             [
@@ -637,9 +680,10 @@ def main() -> None:
     recommended = hotspot_phase.get("recommended_full_hotspot_tasks") or []
     runtime_summary = runtime_phase.get("summary") or {}
     runtime_profile = runtime_summary.get("runtime_profiling") or {}
+    top_ops = extract_top_ops_from_runtime_profile(runtime_profile)
     runtime_hotspots = [
         row.get("name")
-        for row in (runtime_profile.get("top_ops") or [])[:2]
+        for row in top_ops[:2]
         if row.get("name")
     ]
 
