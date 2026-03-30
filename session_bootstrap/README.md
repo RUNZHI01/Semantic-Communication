@@ -58,6 +58,7 @@
 - `reports/judge_quality_formal_report_20260330_lpips_full.md`
 - `reports/judge_snr_robustness_20260330_current_chunk4.md`
 - `reports/judge_evidence_pack_20260330_current_chunk4_lpips_full.md`
+- `reports/defense_quick_reference_card_20260330_current_chunk4.md`
 
 说明：
 
