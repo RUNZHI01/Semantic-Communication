@@ -20,6 +20,11 @@
 # - keep the scheduled-form v1 bias fusion intact
 # - retune the output-channel tiling from c_1 x c_3 = 6 x 4 to 3 x 8
 # - reuse each materialized data_dilate/data_pad tile across 8 output channels instead of 4
+#
+# P4 local micro-tuning edit on top of the accepted P2 state:
+# - keep the P2 output-channel tiling intact
+# - raise pragma_auto_unroll_max_step from 32 to 64 on the outer scheduled region
+# - keep the existing 4-lane vectorized inner stores/updates unchanged
 from tvm.script import ir as I
 from tvm.script import tir as T
 
@@ -42,7 +47,7 @@ class Module:
                     T.reads(param_0[v_i, v_o, T.int64(2) - v_h, T.int64(2) - v_w])
                     T.writes(kernel_transform[v_o, v_i, v_h, v_w])
                     kernel_transform[v_o, v_i, v_h, v_w] = param_0[v_i, v_o, T.int64(2) - v_h, T.int64(2) - v_w]
-        for b_0_c_0_h_0_w_0_fused_fused_fused in T.parallel(T.int64(32), annotations={"pragma_auto_unroll_max_step": 32, "pragma_unroll_explicit": 1}):
+        for b_0_c_0_h_0_w_0_fused_fused_fused in T.parallel(T.int64(32), annotations={"pragma_auto_unroll_max_step": 64, "pragma_unroll_explicit": 1}):
             for b_1, c_1 in T.grid(T.int64(1), T.int64(3)):
                 for ax0, ax1, ax2 in T.grid(T.int64(1), T.int64(48), T.int64(66)):
                     for ax0_1, ax1_1 in T.grid(T.int64(1), T.int64(1)):

@@ -42,8 +42,10 @@ class FusedConv2dTranspose1Add9ScheduledFormCandidateV1WorkingCopyTest(
         text = MODULE_PATH.read_text(encoding="utf-8")
 
         self.assertIn("First real scheduled-form v1 edit", text)
+        self.assertIn("P4 local micro-tuning edit", text)
         self.assertNotIn("compute_intermediate = T.alloc_buffer", text)
         self.assertNotIn('with T.sblock("T_add")', text)
+        self.assertIn('"pragma_auto_unroll_max_step": 64', text)
         self.assertIn(
             "T.reads(lv320[v_b, v_c, T.int64(0), T.int64(0)])",
             text,
@@ -89,10 +91,10 @@ class FusedConv2dTranspose1Add9ScheduledFormCandidateV1WorkingCopyTest(
         self.assertFalse(payload["working_copy_contract"]["performance_claims"])
         self.assertEqual(
             payload["current_edit_state"]["status"],
-            "p2_cortex_a72_output_channel_tile_tuning_applied",
+            "p4_cortex_a72_auto_unroll64_on_p2_applied",
         )
         self.assertIn(
-            "output-channel tiling is retuned from c_1 x c_3 = 6 x 4 to 3 x 8",
+            "raise pragma_auto_unroll_max_step from 32 to 64",
             payload["current_edit_state"]["concrete_change"],
         )
         self.assertEqual(
