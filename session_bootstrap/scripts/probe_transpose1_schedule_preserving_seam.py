@@ -17,12 +17,14 @@ import argparse
 import importlib.util
 import json
 import sys
+from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
 from relax_ms_utils import load_onnx_to_relax, summarize_task_stages
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_OPERATOR = "fused_conv2d_transpose1_add9"
 DEFAULT_CANDIDATE_IMPL = (
     Path(__file__).resolve().parents[1]
@@ -86,6 +88,14 @@ def parse_args() -> argparse.Namespace:
             "build/export artifact plus an adjacent JSON report."
         ),
     )
+    parser.add_argument(
+        "--scheduled-seed-dir",
+        type=Path,
+        help=(
+            "Optional output directory for a post-db scheduled reference seed "
+            "TIR + manifest handoff."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -114,6 +124,16 @@ def file_sha256(path: Path) -> str:
         for chunk in iter(lambda: infile.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def repo_native(path: Path | str) -> str:
+    value = Path(path)
+    resolved = value if value.is_absolute() else (PROJECT_ROOT / value).resolve()
+    try:
+        relative = resolved.relative_to(PROJECT_ROOT.resolve())
+    except ValueError:
+        return str(resolved)
+    return f"./{relative.as_posix()}"
 
 
 def parse_input_shape(raw_value: str) -> list[int]:
@@ -332,6 +352,223 @@ def build_output_layout(operator: str, output_dir: Path | None) -> dict[str, str
     }
 
 
+def build_post_db_scheduled_seed_layout(
+    operator: str,
+    output_dir: Path | None,
+) -> dict[str, str | None]:
+    if output_dir is None:
+        return {
+            "output_dir": None,
+            "reference_tir_path": None,
+            "manifest_path": None,
+        }
+
+    resolved_output_dir = output_dir.resolve()
+    return {
+        "output_dir": str(resolved_output_dir),
+        "reference_tir_path": str(
+            resolved_output_dir / f"{operator}_post_db_scheduled_reference_seed_tir.py"
+        ),
+        "manifest_path": str(
+            resolved_output_dir / "post_db_scheduled_reference_seed_manifest.json"
+        ),
+    }
+
+
+def normalize_tvm_script_text(script_text: str) -> str:
+    normalized = script_text.replace(
+        "# from tvm.script import ir as I\n# from tvm.script import tir as T\n",
+        "from tvm.script import ir as I\nfrom tvm.script import tir as T\n",
+        1,
+    ).strip()
+    if not normalized:
+        raise ValueError("rendered empty TVM script")
+    return normalized + "\n"
+
+
+def render_tvm_script(obj: Any) -> str:
+    script_method = getattr(obj, "script", None)
+    if not callable(script_method):
+        raise TypeError(f"object of type {type(obj).__name__} does not expose script()")
+
+    for kwargs in ({}, {"show_meta": False}):
+        try:
+            rendered = script_method(**kwargs)
+        except TypeError:
+            continue
+        return normalize_tvm_script_text(str(rendered))
+
+    rendered = script_method()
+    return normalize_tvm_script_text(str(rendered))
+
+
+def render_post_db_scheduled_reference_seed_tir(
+    *,
+    operator: str,
+    task_summary_path: Path,
+    database_dir: Path,
+    raw_precompile_seed_path: Path | None,
+    scheduled_reference_script: str,
+) -> str:
+    header = [
+        f"# Schedule-preserving reference/edit seed for {operator}.",
+        "#",
+        "# Source:",
+        "# - recovered from the post-database full-module path via MetaScheduleApplyDatabase",
+        f"# - source operator global: {operator}",
+        f"# - source task summary: {repo_native(task_summary_path)}",
+        f"# - source database dir: {repo_native(database_dir)}",
+    ]
+    if raw_precompile_seed_path is not None:
+        header.append(
+            f"# - distinct from the older raw pre-compile seed: {repo_native(raw_precompile_seed_path)}"
+        )
+    header.extend(
+        [
+            "#",
+            "# Contract:",
+            "# - local-only diagnostic reference/edit seed",
+            "# - preserve the scheduled form as recovered from the post-db path",
+            "# - no runtime or performance claims attach to this file by itself",
+            "",
+        ]
+    )
+    return "\n".join(header) + normalize_tvm_script_text(scheduled_reference_script)
+
+
+def build_post_db_scheduled_seed_manifest(
+    *,
+    operator: str,
+    task_summary_path: Path,
+    database_dir: Path,
+    reference_tir_path: Path,
+    raw_precompile_seed_path: Path | None,
+    raw_precompile_manifest_path: Path | None,
+    task_summary_row: dict[str, Any] | None,
+    reconstructed_task_row: dict[str, Any] | None,
+    post_db_operator_tir_is_scheduled: bool,
+    structural_equal_to_database_query_ir_module_main: bool | None,
+) -> dict[str, Any]:
+    related_files: dict[str, str] = {
+        "scheduled_reference_tir": repo_native(reference_tir_path),
+    }
+    if raw_precompile_seed_path is not None:
+        related_files["raw_precompile_edit_seed_tir"] = repo_native(raw_precompile_seed_path)
+    if raw_precompile_manifest_path is not None:
+        related_files["raw_precompile_seed_manifest"] = repo_native(raw_precompile_manifest_path)
+
+    return {
+        "generated_at_utc": datetime.now(timezone.utc)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z"),
+        "operator": operator,
+        "phase": "post_db_meta_schedule_apply",
+        "seed_capture_kind": "post_db_schedule_preserving_reference_seed",
+        "seed_contract": {
+            "path_kind": "diagnostic_post_db_scheduled_reference_seed",
+            "local_only": True,
+            "diagnostic_only": True,
+            "performance_claims": False,
+            "comparison_semantics": "reference_edit_seed_only",
+        },
+        "source": {
+            "task_summary_json": repo_native(task_summary_path),
+            "database_dir": repo_native(database_dir),
+            "operator_global_var": operator,
+            "post_db_operator_tir_is_scheduled": post_db_operator_tir_is_scheduled,
+            "structural_equal_to_database_query_ir_module_main": (
+                structural_equal_to_database_query_ir_module_main
+            ),
+            "source_seam_id": "post_database_scheduled_primfunc_swap",
+        },
+        "task_rows": {
+            "task_summary_row": task_summary_row,
+            "reconstructed_task_row": reconstructed_task_row,
+        },
+        "related_files": related_files,
+        "notes": [
+            "This manifest tracks the schedule-preserving reference/edit seed recovered from the post-db full-module path.",
+            "Keep this distinct from the older raw pre-compile seed when preparing the next handwritten candidate.",
+            "This handoff is local-only and diagnostic-only; it does not make performance claims.",
+        ],
+    }
+
+
+def write_post_db_scheduled_seed_outputs(
+    *,
+    operator: str,
+    output_dir: Path,
+    task_summary_path: Path,
+    database_dir: Path,
+    scheduled_reference_script: str,
+    task_summary_row: dict[str, Any] | None,
+    reconstructed_task_row: dict[str, Any] | None,
+    post_db_operator_tir_is_scheduled: bool,
+    structural_equal_to_database_query_ir_module_main: bool | None,
+) -> dict[str, Any]:
+    layout = build_post_db_scheduled_seed_layout(operator, output_dir)
+    reference_tir_path = Path(str(layout["reference_tir_path"]))
+    manifest_path = Path(str(layout["manifest_path"]))
+    raw_precompile_seed_path = output_dir.resolve() / f"{operator}_editable_seed_tir.py"
+    if not raw_precompile_seed_path.is_file():
+        raw_precompile_seed_path = None
+    raw_precompile_manifest_path = output_dir.resolve() / "seed_manifest.json"
+    if not raw_precompile_manifest_path.is_file():
+        raw_precompile_manifest_path = None
+
+    reference_tir_text = render_post_db_scheduled_reference_seed_tir(
+        operator=operator,
+        task_summary_path=task_summary_path,
+        database_dir=database_dir,
+        raw_precompile_seed_path=raw_precompile_seed_path,
+        scheduled_reference_script=scheduled_reference_script,
+    )
+    manifest = build_post_db_scheduled_seed_manifest(
+        operator=operator,
+        task_summary_path=task_summary_path,
+        database_dir=database_dir,
+        reference_tir_path=reference_tir_path,
+        raw_precompile_seed_path=raw_precompile_seed_path,
+        raw_precompile_manifest_path=raw_precompile_manifest_path,
+        task_summary_row=task_summary_row,
+        reconstructed_task_row=reconstructed_task_row,
+        post_db_operator_tir_is_scheduled=post_db_operator_tir_is_scheduled,
+        structural_equal_to_database_query_ir_module_main=(
+            structural_equal_to_database_query_ir_module_main
+        ),
+    )
+
+    reference_tir_path.parent.mkdir(parents=True, exist_ok=True)
+    reference_tir_path.write_text(reference_tir_text, encoding="utf-8")
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+    return {
+        "requested": True,
+        "status": "written",
+        "output_dir": str(output_dir.resolve()),
+        "reference_tir_path": str(reference_tir_path),
+        "reference_tir_sha256": file_sha256(reference_tir_path),
+        "manifest_path": str(manifest_path),
+        "manifest_sha256": file_sha256(manifest_path),
+        "post_db_operator_tir_is_scheduled": post_db_operator_tir_is_scheduled,
+        "structural_equal_to_database_query_ir_module_main": (
+            structural_equal_to_database_query_ir_module_main
+        ),
+        "raw_precompile_seed_path": (
+            None if raw_precompile_seed_path is None else str(raw_precompile_seed_path)
+        ),
+        "raw_precompile_manifest_path": (
+            None
+            if raw_precompile_manifest_path is None
+            else str(raw_precompile_manifest_path)
+        ),
+    }
+
+
 def export_built_artifact(executable: Any, artifact_path: Path) -> dict[str, Any]:
     exporter_owner = "build_output"
     exporter = getattr(executable, "export_library", None)
@@ -398,6 +635,7 @@ def probe_schedule_seam(
     candidate_impl: Path,
     build_standalone_scheduled_task: bool,
     output_dir: Path | None = None,
+    scheduled_seed_dir: Path | None = None,
 ) -> dict[str, Any]:
     import tvm  # pylint: disable=import-outside-toplevel
     from tvm.relax.transform import (  # pylint: disable=import-outside-toplevel
@@ -413,6 +651,7 @@ def probe_schedule_seam(
     task_summary = load_task_summary(task_summary_path)
     database_dir = require_database_dir(database_dir)
     output_layout = build_output_layout(operator, output_dir)
+    scheduled_seed_layout = build_post_db_scheduled_seed_layout(operator, scheduled_seed_dir)
     onnx_path = require_file(Path(task_summary["onnx_path"]), "onnx model")
     input_shape = parse_input_shape(task_summary["input_shape"])
     input_name = str(task_summary.get("input_name") or "input")
@@ -483,6 +722,14 @@ def probe_schedule_seam(
     applied_operator_present = operator in applied_global_var_names
     if applied_operator_present:
         applied_operator_func = applied_mod[applied_mod.get_global_var(operator)]
+    post_db_operator_tir_is_scheduled = bool(
+        applied_operator_func is not None
+        and applied_operator_func.attrs
+        and applied_operator_func.attrs.get("tir.is_scheduled", False)
+    )
+
+    task_summary_row = find_stage_task_row(task_summary, operator)
+    reconstructed_task_row = find_stage_task_row({"stages": task_stages}, operator)
 
     swapped_full_module = {
         "attempted": applied_operator_present and candidate["source_func"] is not None,
@@ -509,6 +756,57 @@ def probe_schedule_seam(
         "artifact_size_bytes": None,
         "artifact_sha256": None,
     }
+    post_db_scheduled_seed = {
+        "requested": scheduled_seed_dir is not None,
+        "status": "skipped",
+        "error": None,
+        "output_dir": scheduled_seed_layout["output_dir"],
+        "reference_tir_path": scheduled_seed_layout["reference_tir_path"],
+        "reference_tir_sha256": None,
+        "manifest_path": scheduled_seed_layout["manifest_path"],
+        "manifest_sha256": None,
+        "raw_precompile_seed_path": None,
+        "raw_precompile_manifest_path": None,
+        "post_db_operator_tir_is_scheduled": post_db_operator_tir_is_scheduled,
+        "structural_equal_to_database_query_ir_module_main": (
+            None
+            if applied_operator_func is None or scheduled_ir_module is None
+            else bool(
+                tvm.ir.structural_equal(
+                    applied_operator_func,
+                    lookup_global_func(scheduled_ir_module, "main"),
+                )
+            )
+        ),
+    }
+    if scheduled_seed_dir is not None:
+        if applied_operator_func is None:
+            post_db_scheduled_seed["status"] = "missing_post_db_operator"
+        else:
+            try:
+                scheduled_reference_module = tvm.IRModule(
+                    {operator: align_global_symbol(applied_operator_func, operator)}
+                )
+                scheduled_reference_script = render_tvm_script(scheduled_reference_module)
+                post_db_scheduled_seed = write_post_db_scheduled_seed_outputs(
+                    operator=operator,
+                    output_dir=scheduled_seed_dir,
+                    task_summary_path=task_summary_path,
+                    database_dir=database_dir,
+                    scheduled_reference_script=scheduled_reference_script,
+                    task_summary_row=task_summary_row,
+                    reconstructed_task_row=reconstructed_task_row,
+                    post_db_operator_tir_is_scheduled=post_db_operator_tir_is_scheduled,
+                    structural_equal_to_database_query_ir_module_main=(
+                        post_db_scheduled_seed[
+                            "structural_equal_to_database_query_ir_module_main"
+                        ]
+                    ),
+                )
+            except Exception as err:  # pragma: no cover - integration-only path
+                post_db_scheduled_seed["status"] = "failed"
+                post_db_scheduled_seed["error"] = f"{type(err).__name__}: {err}"
+
     if swapped_full_module["attempted"]:
         swapped_mod = replace_global_func(applied_mod, operator, candidate["source_func"])
         swapped_func = lookup_global_func(swapped_mod, operator)
@@ -553,8 +851,8 @@ def probe_schedule_seam(
         "task_summary_json": str(task_summary_path.resolve()),
         "database_dir": str(database_dir.resolve()),
         "operator": operator,
-        "task_summary_row": find_stage_task_row(task_summary, operator),
-        "reconstructed_task_row": find_stage_task_row({"stages": task_stages}, operator),
+        "task_summary_row": task_summary_row,
+        "reconstructed_task_row": reconstructed_task_row,
         "extracted_task": {
             "task_name": extracted_task.task_name,
             "weight": int(extracted_task.weight),
@@ -592,16 +890,13 @@ def probe_schedule_seam(
         "standalone_scheduled_task_build": standalone_build,
         "post_database_apply": {
             "operator_present": applied_operator_present,
-            "operator_tir_is_scheduled": bool(
-                applied_operator_func is not None
-                and applied_operator_func.attrs
-                and applied_operator_func.attrs.get("tir.is_scheduled", False)
-            ),
+            "operator_tir_is_scheduled": post_db_operator_tir_is_scheduled,
             "operator_func_type": None
             if applied_operator_func is None
             else type(applied_operator_func).__name__,
             "global_var_names_sample": applied_global_var_names[:40],
         },
+        "post_db_scheduled_seed": post_db_scheduled_seed,
         "handwritten_candidate": {
             "candidate_impl": str(candidate_impl),
             "candidate_source_path": str(candidate["source_path"]),
@@ -670,6 +965,7 @@ def main() -> None:
         candidate_impl=args.candidate_impl,
         build_standalone_scheduled_task=args.build_standalone_scheduled_task,
         output_dir=args.output_dir,
+        scheduled_seed_dir=args.scheduled_seed_dir,
     )
     payload = json.dumps(report, indent=2, ensure_ascii=False)
     adjacent_report_path = None
