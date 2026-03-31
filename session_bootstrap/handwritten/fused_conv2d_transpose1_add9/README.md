@@ -7,6 +7,7 @@ the repo without touching trusted current or launching any remote work.
 ## Files
 
 - `fused_conv2d_transpose1_add9_manual_candidate.py`: repo-native handwritten-hook entrypoint for this operator; it exposes the checked-in candidate v0 through the local/staging pre-compile override contract.
+- `fused_conv2d_transpose1_add9_scheduled_form_candidate_v1.py`: repo-native local-only post-db scheduled-swap entrypoint for the checked-in scheduled-form v1 working copy.
 - `fused_conv2d_transpose1_add9_editable_seed_tir.py`: editable operator TIR extracted from the local MetaSchedule task log.
 - `fused_conv2d_transpose1_add9_post_db_scheduled_reference_seed_tir.py`: schedule-preserving reference/edit seed recovered from the post-db full-module path.
 - `fused_conv2d_transpose1_add9_scheduled_form_candidate_v1_working_copy_tir.py`: editable scheduled-form v1 working copy cloned from the checked-in post-db scheduled reference seed, now carrying the first narrow local operator-side v1 edit.
@@ -147,7 +148,10 @@ This wrapper drives the checked-in best-staging task-summary / DB defaults,
 performs the post-DB scheduled `fused_conv2d_transpose1_add9` swap, syncs the
 result back into the scaffold bookkeeping pack, and prints a concise final JSON
 summary with the local artifact/report/SHA plus scaffold bookkeeping/template
-paths. The underlying `run_transpose1_post_db_local_build.py` and
+paths. By default this path now consumes
+`./session_bootstrap/handwritten/fused_conv2d_transpose1_add9/fused_conv2d_transpose1_add9_scheduled_form_candidate_v1.py`,
+which in turn points at the checked-in scheduled-form v1 working copy. The
+underlying `run_transpose1_post_db_local_build.py` and
 `sync_transpose1_post_db_local_build_result.py` commands remain available if you
 need to split those diagnostics.
 

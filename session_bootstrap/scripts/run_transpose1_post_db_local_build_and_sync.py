@@ -58,8 +58,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--candidate-impl",
         type=Path,
-        default=local_build.seam_probe.DEFAULT_CANDIDATE_IMPL,
-        help="Checked-in handwritten candidate entrypoint.",
+        default=local_build.DEFAULT_CANDIDATE_IMPL,
+        help="Checked-in scheduled-form v1 candidate entrypoint for the local post-db path.",
     )
     parser.add_argument(
         "--output-dir",
