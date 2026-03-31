@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local correctness compare for transpose1 scheduled reference vs working copy."""
+"""Local correctness compare for scheduled reference vs working copy."""
 
 from __future__ import annotations
 
@@ -13,52 +13,55 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-import tvm
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-OPERATOR_NAME = "fused_conv2d_transpose1_add9"
-DEFAULT_REFERENCE_TIR = (
-    PROJECT_ROOT
-    / "session_bootstrap"
-    / "handwritten"
-    / OPERATOR_NAME
-    / f"{OPERATOR_NAME}_post_db_scheduled_reference_seed_tir.py"
-)
-DEFAULT_CANDIDATE_TIR = (
-    PROJECT_ROOT
-    / "session_bootstrap"
-    / "handwritten"
-    / OPERATOR_NAME
-    / f"{OPERATOR_NAME}_scheduled_form_candidate_v1_working_copy_tir.py"
-)
-
-INPUT_SHAPES = {
-    "lv318": (1, 48, 64, 64),
-    "param_0": (48, 24, 3, 3),
-    "lv320": (1, 24, 1, 1),
-    "output": (1, 24, 128, 128),
+DEFAULT_OPERATOR_NAME = "fused_conv2d_transpose1_add9"
+OPERATOR_CONFIGS = {
+    "fused_conv2d_transpose1_add9": {
+        "input_specs": [
+            ("lv318", (1, 48, 64, 64)),
+            ("param_0", (48, 24, 3, 3)),
+            ("lv320", (1, 24, 1, 1)),
+        ],
+        "output_shape": (1, 24, 128, 128),
+    },
+    "fused_conv2d_transpose2_add12": {
+        "input_specs": [
+            ("lv332", (1, 24, 128, 128)),
+            ("param_0", (24, 12, 3, 3)),
+            ("lv334", (1, 12, 1, 1)),
+        ],
+        "output_shape": (1, 12, 256, 256),
+    },
 }
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Build the transpose1 scheduled reference seed and the current working "
-            "copy locally, then compare outputs on a fixed random seed."
+            "Build the scheduled reference seed and the current working copy "
+            "locally, then compare outputs on a fixed random seed."
         )
+    )
+    parser.add_argument(
+        "--operator-name",
+        choices=sorted(OPERATOR_CONFIGS),
+        default=DEFAULT_OPERATOR_NAME,
+        help=(
+            "Operator preset that selects the packed function name and default "
+            "input/output shapes."
+        ),
     )
     parser.add_argument(
         "--reference-tir",
         type=Path,
-        default=DEFAULT_REFERENCE_TIR,
-        help="Checked-in frozen scheduled reference seed TIR.",
+        help="Checked-in frozen scheduled reference seed TIR. Defaults from the operator preset.",
     )
     parser.add_argument(
         "--candidate-tir",
         type=Path,
-        default=DEFAULT_CANDIDATE_TIR,
-        help="Checked-in scheduled-form working copy TIR to compare.",
+        help="Checked-in scheduled-form working copy TIR to compare. Defaults from the operator preset.",
     )
     parser.add_argument(
         "--target",
@@ -77,6 +80,30 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Optional JSON output path.",
     )
     return parser.parse_args(argv)
+
+
+def operator_dir(operator_name: str) -> Path:
+    return (
+        PROJECT_ROOT
+        / "session_bootstrap"
+        / "handwritten"
+        / operator_name
+    )
+
+
+def default_reference_tir(operator_name: str) -> Path:
+    return operator_dir(operator_name) / f"{operator_name}_post_db_scheduled_reference_seed_tir.py"
+
+
+def default_candidate_tir(operator_name: str) -> Path:
+    return operator_dir(operator_name) / f"{operator_name}_scheduled_form_candidate_v1_working_copy_tir.py"
+
+
+def get_operator_config(operator_name: str) -> dict[str, Any]:
+    try:
+        return OPERATOR_CONFIGS[operator_name]
+    except KeyError as exc:
+        raise SystemExit(f"ERROR: unsupported operator preset: {operator_name}") from exc
 
 
 def require_file(path: Path, label: str) -> Path:
@@ -102,8 +129,18 @@ def repo_native(path: Path) -> str:
     return f"./{relative.as_posix()}"
 
 
-def load_python_module(module_path: Path):
-    module_name = f"transpose1_correctness_{module_path.stem}"
+def import_tvm():
+    try:
+        import tvm  # type: ignore
+    except ModuleNotFoundError as exc:
+        raise SystemExit(
+            "ERROR: python module `tvm` is required for the correctness compare"
+        ) from exc
+    return tvm
+
+
+def load_python_module(module_path: Path, *, operator_name: str):
+    module_name = f"{operator_name}_correctness_{module_path.stem}"
     spec = importlib.util.spec_from_file_location(module_name, module_path)
     if spec is None or spec.loader is None:
         raise SystemExit(f"ERROR: unable to load module from {module_path}")
@@ -117,8 +154,8 @@ def load_python_module(module_path: Path):
     return module
 
 
-def load_ir_module(module_path: Path):
-    loaded = load_python_module(module_path)
+def load_ir_module(module_path: Path, *, operator_name: str):
+    loaded = load_python_module(module_path, operator_name=operator_name)
     ir_module = getattr(loaded, "Module", None)
     if ir_module is None:
         raise SystemExit(f"ERROR: no `Module` IRModule found in {module_path}")
@@ -126,44 +163,56 @@ def load_ir_module(module_path: Path):
 
 
 def build_runtime(ir_module: Any, target: str):
+    tvm = import_tvm()
     return tvm.build(ir_module, target=target)
 
 
-def get_packed_func(runtime_module: tvm.runtime.Module):
-    func = runtime_module.get_function(OPERATOR_NAME)
+def get_packed_func(runtime_module: Any, *, function_name: str):
+    func = runtime_module.get_function(function_name)
     if func is None:
         raise SystemExit(
-            f"ERROR: runtime module does not expose packed func {OPERATOR_NAME!r}"
+            f"ERROR: runtime module does not expose packed func {function_name!r}"
         )
     return func
 
 
-def make_inputs(seed: int) -> dict[str, np.ndarray]:
+def make_inputs(seed: int, *, input_specs: list[tuple[str, tuple[int, ...]]]) -> dict[str, np.ndarray]:
     rng = np.random.default_rng(seed)
     return {
-        "lv318": rng.uniform(-1.0, 1.0, size=INPUT_SHAPES["lv318"]).astype("float32"),
-        "param_0": rng.uniform(-1.0, 1.0, size=INPUT_SHAPES["param_0"]).astype("float32"),
-        "lv320": rng.uniform(-1.0, 1.0, size=INPUT_SHAPES["lv320"]).astype("float32"),
+        name: rng.uniform(-1.0, 1.0, size=shape).astype("float32")
+        for name, shape in input_specs
     }
 
 
-def run_module(runtime_module: tvm.runtime.Module, inputs: dict[str, np.ndarray]) -> np.ndarray:
-    func = get_packed_func(runtime_module)
+def run_module(
+    runtime_module: Any,
+    *,
+    function_name: str,
+    input_specs: list[tuple[str, tuple[int, ...]]],
+    output_shape: tuple[int, ...],
+    inputs: dict[str, np.ndarray],
+) -> np.ndarray:
+    tvm = import_tvm()
+    func = get_packed_func(runtime_module, function_name=function_name)
     device = tvm.cpu(0)
-    lv318 = tvm.runtime.tensor(inputs["lv318"], device=device)
-    param_0 = tvm.runtime.tensor(inputs["param_0"], device=device)
-    lv320 = tvm.runtime.tensor(inputs["lv320"], device=device)
-    output = tvm.runtime.empty(INPUT_SHAPES["output"], "float32", device=device)
-    func(lv318, param_0, lv320, output)
+    input_tensors = [
+        tvm.runtime.tensor(inputs[name], device=device)
+        for name, _shape in input_specs
+    ]
+    output = tvm.runtime.empty(output_shape, "float32", device=device)
+    func(*input_tensors, output)
     return output.numpy()
 
 
 def build_report(
     *,
+    operator_name: str,
     reference_tir: Path,
     candidate_tir: Path,
     target: str,
     seed: int,
+    input_specs: list[tuple[str, tuple[int, ...]]],
+    output_shape: tuple[int, ...],
     reference_output: np.ndarray,
     candidate_output: np.ndarray,
 ) -> dict[str, Any]:
@@ -175,14 +224,17 @@ def build_report(
 
     return {
         "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "operator": OPERATOR_NAME,
+        "operator": operator_name,
         "reference_tir": repo_native(reference_tir),
         "reference_tir_sha256": file_sha256(reference_tir),
         "candidate_tir": repo_native(candidate_tir),
         "candidate_tir_sha256": file_sha256(candidate_tir),
         "target": target,
         "seed": seed,
-        "input_shapes": {name: list(shape) for name, shape in INPUT_SHAPES.items()},
+        "input_shapes": {
+            name: list(shape) for name, shape in input_specs
+        },
+        "output_shape": list(output_shape),
         "exact_equal": exact_equal,
         "allclose_atol0_rtol0": bool(
             np.allclose(reference_output, candidate_output, atol=0.0, rtol=0.0)
@@ -213,23 +265,48 @@ def maybe_write_json(payload: dict[str, Any], output_json: Path | None) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    reference_tir = require_file(args.reference_tir, "reference tir")
-    candidate_tir = require_file(args.candidate_tir, "candidate tir")
+    operator_name = args.operator_name
+    operator_config = get_operator_config(operator_name)
+    input_specs = operator_config["input_specs"]
+    output_shape = operator_config["output_shape"]
+    reference_tir = require_file(
+        args.reference_tir or default_reference_tir(operator_name),
+        "reference tir",
+    )
+    candidate_tir = require_file(
+        args.candidate_tir or default_candidate_tir(operator_name),
+        "candidate tir",
+    )
 
-    reference_module = load_ir_module(reference_tir)
-    candidate_module = load_ir_module(candidate_tir)
+    reference_module = load_ir_module(reference_tir, operator_name=operator_name)
+    candidate_module = load_ir_module(candidate_tir, operator_name=operator_name)
 
-    inputs = make_inputs(args.seed)
+    inputs = make_inputs(args.seed, input_specs=input_specs)
     reference_runtime = build_runtime(reference_module, args.target)
     candidate_runtime = build_runtime(candidate_module, args.target)
-    reference_output = run_module(reference_runtime, inputs)
-    candidate_output = run_module(candidate_runtime, inputs)
+    reference_output = run_module(
+        reference_runtime,
+        function_name=operator_name,
+        input_specs=input_specs,
+        output_shape=output_shape,
+        inputs=inputs,
+    )
+    candidate_output = run_module(
+        candidate_runtime,
+        function_name=operator_name,
+        input_specs=input_specs,
+        output_shape=output_shape,
+        inputs=inputs,
+    )
 
     report = build_report(
+        operator_name=operator_name,
         reference_tir=reference_tir,
         candidate_tir=candidate_tir,
         target=args.target,
         seed=args.seed,
+        input_specs=input_specs,
+        output_shape=output_shape,
         reference_output=reference_output,
         candidate_output=candidate_output,
     )
