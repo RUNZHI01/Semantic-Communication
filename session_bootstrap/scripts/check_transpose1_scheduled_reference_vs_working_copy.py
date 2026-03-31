@@ -34,6 +34,14 @@ OPERATOR_CONFIGS = {
         ],
         "output_shape": (1, 12, 256, 256),
     },
+    "fused_conv2d_transpose_add6": {
+        "input_specs": [
+            ("lv304", (1, 96, 32, 32)),
+            ("param_0", (96, 48, 3, 3)),
+            ("lv306", (1, 48, 1, 1)),
+        ],
+        "output_shape": (1, 48, 64, 64),
+    },
 }
 
 
