@@ -9,8 +9,10 @@ the repo without touching trusted current or launching any remote work.
 - `fused_conv2d_transpose1_add9_manual_candidate.py`: repo-native handwritten-hook entrypoint for this operator; it exposes the checked-in candidate v0 through the local/staging pre-compile override contract.
 - `fused_conv2d_transpose1_add9_editable_seed_tir.py`: editable operator TIR extracted from the local MetaSchedule task log.
 - `fused_conv2d_transpose1_add9_post_db_scheduled_reference_seed_tir.py`: schedule-preserving reference/edit seed recovered from the post-db full-module path.
+- `fused_conv2d_transpose1_add9_scheduled_form_candidate_v1_working_copy_tir.py`: editable scheduled-form v1 working copy cloned from the checked-in post-db scheduled reference seed.
 - `seed_manifest.json`: trimmed seed context copied from the captured seed JSON.
 - `post_db_scheduled_reference_seed_manifest.json`: small manifest for the scheduled-form reference/edit seed.
+- `scheduled_form_candidate_v1_working_copy_manifest.json`: small manifest for the editable scheduled-form v1 working copy.
 - `README.md`: short editing runbook.
 
 ## Why this exists
@@ -50,6 +52,24 @@ The helper reuses the local post-db schedule-preserving seam and writes:
 This handoff is still local-only and diagnostic-only. It gives a more honest
 reference/edit seed for the next handwritten pass, but it does not by itself
 justify runtime or performance claims.
+
+## Refresh the scheduled-form v1 working copy
+
+Once the checked-in scheduled reference seed is current, derive the editable
+scheduled-form v1 working copy from it with this narrow local-only helper:
+
+```bash
+python3 ./session_bootstrap/scripts/refresh_fused_conv2d_transpose1_add9_scheduled_form_working_copy.py \
+  --allow-overwrite
+```
+
+The helper reads the checked-in scheduled reference seed and writes:
+- `./session_bootstrap/handwritten/fused_conv2d_transpose1_add9/fused_conv2d_transpose1_add9_scheduled_form_candidate_v1_working_copy_tir.py`
+- `./session_bootstrap/handwritten/fused_conv2d_transpose1_add9/scheduled_form_candidate_v1_working_copy_manifest.json`
+
+Keep the scheduled reference seed frozen for backtracking and re-refresh, and
+make operator-side v1 edits in the working copy instead. This working-copy
+handoff is still local-only, diagnostic-only, and not hook-facing.
 
 ## Hook-facing candidate path
 
@@ -125,9 +145,10 @@ This is still build-level diagnostic evidence only, but it preserves the best
 staging schedule context much more honestly than the older raw pre-compile hook
 lane.
 
-For the smallest useful `v1` prep step, use the scheduled reference seed above
-as the edit starting point and keep the older raw pre-compile seed only for
-backtracking or hook-wiring comparison.
+For the smallest useful `v1` prep step, keep the scheduled reference seed as
+the frozen source of truth, refresh the scheduled-form v1 working copy from
+it, and keep the older raw pre-compile seed only for backtracking or
+hook-wiring comparison.
 
 ## Staging lane after a real override exists
 
