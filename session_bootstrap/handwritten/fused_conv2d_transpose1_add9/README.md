@@ -8,7 +8,9 @@ the repo without touching trusted current or launching any remote work.
 
 - `fused_conv2d_transpose1_add9_manual_candidate.py`: repo-native handwritten-hook entrypoint for this operator; it exposes the checked-in candidate v0 through the local/staging pre-compile override contract.
 - `fused_conv2d_transpose1_add9_editable_seed_tir.py`: editable operator TIR extracted from the local MetaSchedule task log.
+- `fused_conv2d_transpose1_add9_post_db_scheduled_reference_seed_tir.py`: schedule-preserving reference/edit seed recovered from the post-db full-module path.
 - `seed_manifest.json`: trimmed seed context copied from the captured seed JSON.
+- `post_db_scheduled_reference_seed_manifest.json`: small manifest for the scheduled-form reference/edit seed.
 - `README.md`: short editing runbook.
 
 ## Why this exists
@@ -29,6 +31,25 @@ The helper reads:
 - `./session_bootstrap/tmp/handwritten_fused_conv2d_transpose1_add9_seed_capture/tuning_logs/logs/tvm.s_tir.meta_schedule.logging.task_0_fused_conv2d_transpose1_add9.log`
 
 It refuses to overwrite this directory unless `--allow-overwrite` is passed.
+
+## Refresh the scheduled-form reference seed
+
+When the next operator-side iteration needs a schedule-preserving starting
+point, refresh the checked-in post-db scheduled reference seed instead of the
+older raw pre-compile seed:
+
+```bash
+python3 ./session_bootstrap/scripts/refresh_fused_conv2d_transpose1_add9_post_db_scheduled_seed.py \
+  --allow-overwrite
+```
+
+The helper reuses the local post-db schedule-preserving seam and writes:
+- `./session_bootstrap/handwritten/fused_conv2d_transpose1_add9/fused_conv2d_transpose1_add9_post_db_scheduled_reference_seed_tir.py`
+- `./session_bootstrap/handwritten/fused_conv2d_transpose1_add9/post_db_scheduled_reference_seed_manifest.json`
+
+This handoff is still local-only and diagnostic-only. It gives a more honest
+reference/edit seed for the next handwritten pass, but it does not by itself
+justify runtime or performance claims.
 
 ## Hook-facing candidate path
 
@@ -78,16 +99,23 @@ schedule-context-preserving evaluation contract exists.
 
 ## Preferred local schedule-preserving build path
 
-Once hook wiring is confirmed, prefer this local-only path before any future
-remote/staging validation:
+Once hook wiring is confirmed and the scaffold pack exists, prefer this
+one-shot local-only path before any future remote/staging validation:
 
 ```bash
-python3 ./session_bootstrap/scripts/run_transpose1_post_db_local_build.py
+python3 ./session_bootstrap/scripts/run_transpose1_post_db_local_build_and_sync.py \
+  --scaffold-dir ./session_bootstrap/tmp/handwritten_fused_conv2d_transpose1_add9_scaffold
 ```
 
 This wrapper drives the checked-in best-staging task-summary / DB defaults,
-performs the post-DB scheduled `fused_conv2d_transpose1_add9` swap, and exports a
-local artifact plus adjacent JSON report under:
+performs the post-DB scheduled `fused_conv2d_transpose1_add9` swap, syncs the
+result back into the scaffold bookkeeping pack, and prints a concise final JSON
+summary with the local artifact/report/SHA plus scaffold bookkeeping/template
+paths. The underlying `run_transpose1_post_db_local_build.py` and
+`sync_transpose1_post_db_local_build_result.py` commands remain available if you
+need to split those diagnostics.
+
+Default build outputs still land under:
 
 ```text
 ./session_bootstrap/tmp/transpose1_post_db_swap_local_build
@@ -96,6 +124,10 @@ local artifact plus adjacent JSON report under:
 This is still build-level diagnostic evidence only, but it preserves the best
 staging schedule context much more honestly than the older raw pre-compile hook
 lane.
+
+For the smallest useful `v1` prep step, use the scheduled reference seed above
+as the edit starting point and keep the older raw pre-compile seed only for
+backtracking or hook-wiring comparison.
 
 ## Staging lane after a real override exists
 
