@@ -76,6 +76,14 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--skip-handwritten-candidate",
+        action="store_true",
+        help=(
+            "Skip loading a handwritten candidate module. Use this when only the "
+            "DB recovery / scheduled seed path is needed."
+        ),
+    )
+    parser.add_argument(
         "--output-json",
         type=Path,
         help="Optional output path for the probe JSON report.",
@@ -632,7 +640,7 @@ def probe_schedule_seam(
     database_dir: Path,
     operator: str,
     *,
-    candidate_impl: Path,
+    candidate_impl: Path | None,
     build_standalone_scheduled_task: bool,
     output_dir: Path | None = None,
     scheduled_seed_dir: Path | None = None,
@@ -673,8 +681,11 @@ def probe_schedule_seam(
             f"{operator}"
         )
 
-    candidate_impl = require_file(candidate_impl.resolve(), "candidate impl")
-    candidate = load_candidate_override(candidate_impl, task_stages)
+    resolved_candidate_impl: Path | None = None
+    candidate = None
+    if candidate_impl is not None:
+        resolved_candidate_impl = require_file(candidate_impl.resolve(), "candidate impl")
+        candidate = load_candidate_override(resolved_candidate_impl, task_stages)
 
     db = JSONDatabase(
         str(database_dir / "database_workload.json"),
@@ -732,7 +743,11 @@ def probe_schedule_seam(
     reconstructed_task_row = find_stage_task_row({"stages": task_stages}, operator)
 
     swapped_full_module = {
-        "attempted": applied_operator_present and candidate["source_func"] is not None,
+        "attempted": bool(
+            applied_operator_present
+            and candidate is not None
+            and candidate["source_func"] is not None
+        ),
         "swap_succeeded": False,
         "swap_target_global": operator if applied_operator_present else None,
         "post_swap_global_present": False,
@@ -807,7 +822,7 @@ def probe_schedule_seam(
                 post_db_scheduled_seed["status"] = "failed"
                 post_db_scheduled_seed["error"] = f"{type(err).__name__}: {err}"
 
-    if swapped_full_module["attempted"]:
+    if swapped_full_module["attempted"] and candidate is not None:
         swapped_mod = replace_global_func(applied_mod, operator, candidate["source_func"])
         swapped_func = lookup_global_func(swapped_mod, operator)
         swapped_full_module["swap_succeeded"] = swapped_func is not None
@@ -898,31 +913,50 @@ def probe_schedule_seam(
         },
         "post_db_scheduled_seed": post_db_scheduled_seed,
         "handwritten_candidate": {
-            "candidate_impl": str(candidate_impl),
-            "candidate_source_path": str(candidate["source_path"]),
-            "metadata": candidate["metadata"],
-            "result_evaluation_contract": candidate["result"].get("evaluation_contract"),
-            "override_evaluation_contract": candidate["override"].get("evaluation_contract"),
-            "override_target_global_vars": candidate["override"].get("target_global_vars"),
-            "source_func_name": candidate["source_func_name"],
-            "source_func_type": type(candidate["source_func"]).__name__,
+            "candidate_requested": candidate is not None,
+            "candidate_impl": None
+            if resolved_candidate_impl is None
+            else str(resolved_candidate_impl),
+            "candidate_source_path": None
+            if candidate is None
+            else str(candidate["source_path"]),
+            "metadata": None if candidate is None else candidate["metadata"],
+            "result_evaluation_contract": None
+            if candidate is None
+            else candidate["result"].get("evaluation_contract"),
+            "override_evaluation_contract": None
+            if candidate is None
+            else candidate["override"].get("evaluation_contract"),
+            "override_target_global_vars": None
+            if candidate is None
+            else candidate["override"].get("target_global_vars"),
+            "source_func_name": None
+            if candidate is None
+            else candidate["source_func_name"],
+            "source_func_type": None
+            if candidate is None
+            else type(candidate["source_func"]).__name__,
             "source_owner_global_vars": None
-            if not hasattr(candidate["source_owner"], "get_global_vars")
+            if candidate is None or not hasattr(candidate["source_owner"], "get_global_vars")
             else [gv.name_hint for gv in candidate["source_owner"].get_global_vars()],
         },
         "scheduled_vs_handwritten": {
-            "candidate_source_matches_operator_name": bool(
+            "candidate_source_matches_operator_name": None
+            if candidate is None
+            else bool(
                 candidate["override"].get("target_global_vars")
                 and operator in candidate["override"].get("target_global_vars")
             ),
             "scheduled_reference_available": scheduled_ir_module is not None,
-            "handwritten_source_available": candidate["source_func"] is not None,
+            "handwritten_source_available": bool(
+                candidate is not None and candidate["source_func"] is not None
+            ),
             "scheduled_reference_func_type": None
             if scheduled_ir_module is None
             else type(lookup_global_func(scheduled_ir_module, "main")).__name__,
             "structural_equal_scheduled_ref_vs_handwritten": (
                 None
-                if scheduled_ir_module is None
+                if scheduled_ir_module is None or candidate is None
                 else bool(
                     tvm.ir.structural_equal(
                         lookup_global_func(scheduled_ir_module, "main"),
@@ -933,9 +967,13 @@ def probe_schedule_seam(
             "scheduled_param_count": None
             if scheduled_ir_module is None
             else len(lookup_global_func(scheduled_ir_module, "main").params),
-            "handwritten_param_count": len(candidate["source_func"].params),
+            "handwritten_param_count": None
+            if candidate is None
+            else len(candidate["source_func"].params),
             "mechanically_swappable_post_db": bool(
-                applied_operator_present and candidate["source_func"] is not None
+                applied_operator_present
+                and candidate is not None
+                and candidate["source_func"] is not None
             ),
         },
         "post_db_scheduled_swap": swapped_full_module,
@@ -962,7 +1000,9 @@ def main() -> None:
         task_summary_path=args.task_summary,
         database_dir=args.database_dir,
         operator=args.operator,
-        candidate_impl=args.candidate_impl,
+        candidate_impl=(
+            None if args.skip_handwritten_candidate else args.candidate_impl
+        ),
         build_standalone_scheduled_task=args.build_standalone_scheduled_task,
         output_dir=args.output_dir,
         scheduled_seed_dir=args.scheduled_seed_dir,
