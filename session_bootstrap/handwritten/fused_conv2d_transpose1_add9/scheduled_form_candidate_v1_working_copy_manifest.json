@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-03-31T02:04:48Z",
+  "generated_at_utc": "2026-03-31T11:28:42Z",
   "operator": "fused_conv2d_transpose1_add9",
   "phase": "scheduled_form_candidate_v1_prep",
   "working_copy_role": "editable_scheduled_form_candidate_v1_working_copy",
@@ -51,16 +51,17 @@
     }
   },
   "current_edit_state": {
-    "status": "p2_cortex_a72_output_channel_tile_tuning_applied",
-    "applied_at_utc": "2026-03-31T11:22:57Z",
-    "working_copy_tir_sha256": "6a860799b4b7e69bd0ec0e697ab0df55f8cefc71e2d9e9fe3709f4be026b7864",
-    "concrete_change": "On top of the accepted scheduled-form v1 bias-fusion baseline, the output-channel tiling is retuned from c_1 x c_3 = 6 x 4 to 3 x 8 so each materialized data_dilate/data_pad tile is reused across 8 output channels instead of 4 while compute semantics stay unchanged.",
+    "status": "p4_cortex_a72_auto_unroll64_on_p2_applied",
+    "applied_at_utc": "2026-03-31T11:28:42Z",
+    "working_copy_tir_sha256": "38bf482738392d5f5ace31a7630903935731ebe3b3c86a207fbaba2b265a256a",
+    "concrete_change": "On top of the accepted P2 scheduled-form state that keeps c_1 x c_3 = 3 x 8 output-channel tiling, raise pragma_auto_unroll_max_step from 32 to 64 on the outer scheduled region while leaving the existing 4-lane vectorized inner stores and updates unchanged.",
     "preserved_non_changes": [
       "data_dilate remains materialized",
       "data_pad remains materialized",
       "kernel_transform remains materialized",
       "the bias-fused compute_init/compute_update path remains intact",
-      "the surrounding scheduled h/w tiling, reduction split, and unroll annotation stay in the checked-in scheduled form"
+      "the P2 output-channel tiling remains c_1 x c_3 = 3 x 8",
+      "the surrounding scheduled h/w tiling, reduction split, and 4-lane vectorized inner loops stay in the checked-in scheduled form"
     ]
   },
   "related_files": {
@@ -75,7 +76,7 @@
     "This working copy is derived from the checked-in post-db scheduled reference seed so the first v1 edits start from a scheduled form.",
     "Keep the scheduled reference seed frozen and refresh this working copy when the reference seed changes.",
     "Keep this distinct from the older raw pre-compile editable seed and from the checked-in candidate v0.",
-    "The current checked-in working copy keeps the accepted v1 bias fusion and now adds one narrow P2 output-channel tile retune for local-only validation.",
+    "The current checked-in working copy keeps the accepted v1 bias fusion and P2 output-channel tiling and now adds one narrow P4 auto-unroll micro-tune for local-only validation.",
     "This handoff is local-only and diagnostic-only; it does not make performance claims."
   ]
 }
