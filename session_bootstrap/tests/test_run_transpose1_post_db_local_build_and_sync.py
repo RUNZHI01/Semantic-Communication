@@ -31,6 +31,14 @@ spec.loader.exec_module(module)
 
 
 class RunTranspose1PostDbLocalBuildAndSyncTest(unittest.TestCase):
+    def test_parse_args_defaults_to_local_build_v1_candidate(self) -> None:
+        args = module.parse_args([])
+        self.assertEqual(args.candidate_impl, module.local_build.DEFAULT_CANDIDATE_IMPL)
+        self.assertEqual(
+            args.candidate_impl.name,
+            "fused_conv2d_transpose1_add9_scheduled_form_candidate_v1.py",
+        )
+
     def test_main_runs_build_then_sync_and_emits_summary(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir_raw:
             temp_dir = Path(temp_dir_raw)

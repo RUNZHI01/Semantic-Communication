@@ -17,13 +17,17 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import subprocess
 import sys
+from typing import Any
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 import probe_transpose1_schedule_preserving_seam as seam_probe
+
+DEFAULT_PYTHON_EXECUTABLE = Path("/home/tianxing/.venvs/tvm-ms/bin/python")
 
 DEFAULT_TASK_SUMMARY = (
     Path(__file__).resolve().parents[1]
@@ -41,6 +45,12 @@ DEFAULT_OUTPUT_DIR = (
     Path(__file__).resolve().parents[1]
     / "tmp"
     / "transpose1_post_db_swap_local_build"
+)
+DEFAULT_CANDIDATE_IMPL = (
+    Path(__file__).resolve().parents[1]
+    / "handwritten"
+    / seam_probe.DEFAULT_OPERATOR
+    / f"{seam_probe.DEFAULT_OPERATOR}_scheduled_form_candidate_v1.py"
 )
 
 
@@ -66,8 +76,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--candidate-impl",
         type=Path,
-        default=seam_probe.DEFAULT_CANDIDATE_IMPL,
-        help="Checked-in handwritten candidate entrypoint.",
+        default=DEFAULT_CANDIDATE_IMPL,
+        help="Checked-in scheduled-form v1 candidate entrypoint for the local post-db path.",
     )
     parser.add_argument(
         "--output-dir",
@@ -80,18 +90,73 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=Path,
         help="Optional extra JSON report output path.",
     )
+    parser.add_argument(
+        "--python-executable",
+        type=Path,
+        default=DEFAULT_PYTHON_EXECUTABLE,
+        help=(
+            "Python executable used to run the underlying schedule-preserving seam probe. "
+            "Defaults to the repo's TVM-enabled virtualenv interpreter."
+        ),
+    )
     return parser.parse_args(argv)
+
+
+def resolve_python_executable(path: Path) -> Path:
+    candidate = path.expanduser()
+    if candidate.is_file():
+        return candidate
+    fallback = Path(sys.executable).resolve()
+    if fallback.is_file():
+        return fallback
+    raise SystemExit(f"ERROR: python executable not found: {path}")
+
+
+def capture_probe_output(*, python_executable: Path, argv: list[str]) -> dict[str, Any]:
+    completed = subprocess.run(
+        [str(python_executable), str(Path(seam_probe.__file__).resolve()), *argv],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        stderr = completed.stderr.strip()
+        raise SystemExit(
+            "ERROR: probe_transpose1_schedule_preserving_seam.py exited with status "
+            f"{completed.returncode}: {stderr or completed.stdout.strip()}"
+        )
+
+    payload = completed.stdout.strip()
+    if not payload:
+        raise SystemExit("ERROR: probe_transpose1_schedule_preserving_seam.py produced no JSON output")
+
+    try:
+        parsed = json.loads(payload)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(
+            f"ERROR: probe_transpose1_schedule_preserving_seam.py did not emit valid JSON: {exc}"
+        ) from exc
+    if not isinstance(parsed, dict):
+        raise SystemExit("ERROR: probe_transpose1_schedule_preserving_seam.py emitted a non-object JSON payload")
+    return parsed
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    report = seam_probe.probe_schedule_seam(
-        task_summary_path=args.task_summary,
-        database_dir=args.database_dir,
-        operator=seam_probe.DEFAULT_OPERATOR,
-        candidate_impl=args.candidate_impl,
-        build_standalone_scheduled_task=True,
-        output_dir=args.output_dir,
+    python_executable = resolve_python_executable(args.python_executable)
+    report = capture_probe_output(
+        python_executable=python_executable,
+        argv=[
+            "--task-summary",
+            str(args.task_summary),
+            "--database-dir",
+            str(args.database_dir),
+            "--candidate-impl",
+            str(args.candidate_impl),
+            "--build-standalone-scheduled-task",
+            "--output-dir",
+            str(args.output_dir),
+        ],
     )
     payload = json.dumps(report, indent=2, ensure_ascii=False)
     adjacent_report_path = None
