@@ -69,7 +69,7 @@ class FusedConv2dTranspose1Add9ScheduledFormCandidateV1Test(unittest.TestCase):
         self.assertEqual(metadata["candidate_version"], "v1_working_copy")
         self.assertEqual(
             metadata["candidate_status"],
-            "first_local_operator_side_v1_edit_applied",
+            "p2_cortex_a72_output_channel_tile_tuning_applied",
         )
         self.assertFalse(metadata["placeholder_only"])
         self.assertFalse(metadata["hook_target"])
