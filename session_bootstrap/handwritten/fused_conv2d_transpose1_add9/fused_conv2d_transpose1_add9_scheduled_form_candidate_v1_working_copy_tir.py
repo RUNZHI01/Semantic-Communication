@@ -11,6 +11,10 @@
 # - edit here for the first scheduled-form v1 handwritten pass
 # - keep the scheduled reference seed frozen so this file can be refreshed
 # - do not treat this file as hook-facing or as performance evidence
+#
+# First real scheduled-form v1 edit:
+# - fold the final bias add into the scheduled compute init/update path
+# - remove the full-size compute_intermediate buffer and trailing T_add pass
 from tvm.script import ir as I
 from tvm.script import tir as T
 
@@ -23,7 +27,6 @@ class Module:
         data_dilate = T.alloc_buffer((T.int64(1), T.int64(48), T.int64(127), T.int64(127)))
         data_pad = T.alloc_buffer((T.int64(1), T.int64(48), T.int64(130), T.int64(130)))
         kernel_transform = T.alloc_buffer((T.int64(24), T.int64(48), T.int64(3), T.int64(3)))
-        compute_intermediate = T.alloc_buffer((T.int64(1), T.int64(24), T.int64(128), T.int64(128)))
         for o_i_fused in T.parallel(T.int64(1152)):
             for h_w_fused in T.vectorized(T.int64(9)):
                 with T.sblock("kernel_transform"):
@@ -64,10 +67,10 @@ class Module:
                                 v_c = T.axis.spatial(T.int64(24), c_1 * T.int64(4) + c_2_init * T.int64(4) + c_3_init)
                                 v_h = T.axis.spatial(T.int64(128), b_0_c_0_h_0_w_0_fused_fused_fused // T.int64(16) * T.int64(64) + h_1 * T.int64(32) + h_2_init * T.int64(2) + h_3_init)
                                 v_w = T.axis.spatial(T.int64(128), b_0_c_0_h_0_w_0_fused_fused_fused % T.int64(16) * T.int64(8) + w_1 * T.int64(4) + w_2_init * T.int64(4) + w_3_fused_init)
-                                T.reads()
-                                T.writes(compute_intermediate[v_b, v_c, v_h, v_w])
+                                T.reads(lv320[v_b, v_c, T.int64(0), T.int64(0)])
+                                T.writes(T_add_intermediate[v_b, v_c, v_h, v_w])
                                 T.sblock_attr({"meta_schedule.tiling_structure": "SSRSRS"})
-                                compute_intermediate[v_b, v_c, v_h, v_w] = T.float32(0.0)
+                                T_add_intermediate[v_b, v_c, v_h, v_w] = lv320[v_b, v_c, T.int64(0), T.int64(0)]
                     for dc_0, dh_0, dw_0, b_2, c_2, h_2, w_2, dc_1, dh_1, dw_1, b_3, c_3, h_3 in T.grid(T.int64(12), T.int64(1), T.int64(1), T.int64(1), T.int64(1), T.int64(16), T.int64(1), T.int64(4), T.int64(3), T.int64(3), T.int64(1), T.int64(4), T.int64(2)):
                         for w_3_fused in T.vectorized(T.int64(4)):
                             with T.sblock("compute_update"):
@@ -78,16 +81,7 @@ class Module:
                                 v_dc = T.axis.reduce(T.int64(48), dc_0 * T.int64(4) + dc_1)
                                 v_dh = T.axis.reduce(T.int64(3), dh_0 * T.int64(3) + dh_1)
                                 v_dw = T.axis.reduce(T.int64(3), dw_0 * T.int64(3) + dw_1)
-                                T.reads(compute_intermediate[v_b, v_c, v_h, v_w], data_pad[v_b, v_dc, v_h + v_dh, v_w + v_dw], kernel_transform[v_c, v_dc, v_dh, v_dw])
-                                T.writes(compute_intermediate[v_b, v_c, v_h, v_w])
+                                T.reads(T_add_intermediate[v_b, v_c, v_h, v_w], data_pad[v_b, v_dc, v_h + v_dh, v_w + v_dw], kernel_transform[v_c, v_dc, v_dh, v_dw])
+                                T.writes(T_add_intermediate[v_b, v_c, v_h, v_w])
                                 T.sblock_attr({"meta_schedule.tiling_structure": "SSRSRS"})
-                                compute_intermediate[v_b, v_c, v_h, v_w] = compute_intermediate[v_b, v_c, v_h, v_w] + data_pad[v_b, v_dc, v_h + v_dh, v_w + v_dw] * kernel_transform[v_c, v_dc, v_dh, v_dw]
-            for ax0, ax1, ax2 in T.grid(T.int64(1), T.int64(24), T.int64(64)):
-                for ax3_fused in T.vectorized(T.int64(8)):
-                    with T.sblock("T_add"):
-                        v_ax0, v_ax1 = T.axis.remap("SS", [ax0, ax1])
-                        v_ax2 = T.axis.spatial(T.int64(128), b_0_c_0_h_0_w_0_fused_fused_fused // T.int64(16) * T.int64(64) + ax2)
-                        v_ax3 = T.axis.spatial(T.int64(128), b_0_c_0_h_0_w_0_fused_fused_fused % T.int64(16) * T.int64(8) + ax3_fused)
-                        T.reads(compute_intermediate[v_ax0, v_ax1, v_ax2, v_ax3], lv320[v_ax0, v_ax1, T.int64(0), T.int64(0)])
-                        T.writes(T_add_intermediate[v_ax0, v_ax1, v_ax2, v_ax3])
-                        T_add_intermediate[v_ax0, v_ax1, v_ax2, v_ax3] = compute_intermediate[v_ax0, v_ax1, v_ax2, v_ax3] + lv320[v_ax0, v_ax1, T.int64(0), T.int64(0)]
+                                T_add_intermediate[v_b, v_c, v_h, v_w] = T_add_intermediate[v_b, v_c, v_h, v_w] + data_pad[v_b, v_dc, v_h + v_dh, v_w + v_dw] * kernel_transform[v_c, v_dc, v_dh, v_dw]
