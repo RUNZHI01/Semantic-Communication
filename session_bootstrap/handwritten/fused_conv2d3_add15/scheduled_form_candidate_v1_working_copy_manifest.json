@@ -51,13 +51,14 @@
     }
   },
   "current_edit_state": {
-    "status": "seed_synced_unedited",
-    "applied_at_utc": "2026-03-31T13:53:19Z",
-    "working_copy_tir_sha256": "91474a44d505b25207c12073008ebd1bad67af0ff1bf5900ce4b75455ba6c5be",
-    "concrete_change": "No operator-side handwritten change yet. This working copy is an editable scheduled-form clone of the checked-in post-db scheduled reference seed for fused_conv2d3_add15.",
+    "status": "v1_bias_fusion_applied",
+    "applied_at_utc": "2026-03-31T14:04:33Z",
+    "working_copy_tir_sha256": "8a3a31242862fb9fcb9f4f0c897eeac75a1fda4b66104016c9e4c092f9ebe57a",
+    "concrete_change": "Bias is folded into the scheduled conv2d_nchw init/update path so the full-size conv2d_nchw_intermediate buffer and trailing T_add pass are removed.",
     "preserved_non_changes": [
       "the scheduled reference seed remains the frozen source of truth",
-      "no tiling, buffer, or epilogue edits have been applied yet",
+      "the direct lv347/param_0 convolution access pattern remains unchanged",
+      "the scheduled h/w tiling, reduction split, and pragma_auto_unroll_max_step=256 remain unchanged",
       "the file is still local-only, diagnostic-only, and not hook-facing"
     ]
   },
@@ -70,7 +71,7 @@
   "notes": [
     "This working copy is derived from the checked-in post-db scheduled reference seed so the first fused_conv2d3_add15 edits start from a scheduled form.",
     "Keep the scheduled reference seed frozen and refresh this working copy when the reference seed changes.",
-    "The current checked-in working copy is intentionally unedited and only opens the local scheduled-form edit surface.",
+    "The current checked-in working copy now carries the first narrow v1 bias-fold edit on top of the frozen scheduled reference seed.",
     "This handoff is local-only and diagnostic-only; it does not make performance claims."
   ]
 }

@@ -42,6 +42,14 @@ OPERATOR_CONFIGS = {
         ],
         "output_shape": (1, 48, 64, 64),
     },
+    "fused_conv2d3_add15": {
+        "input_specs": [
+            ("lv347", (1, 12, 262, 262)),
+            ("param_0", (3, 12, 7, 7)),
+            ("lv349", (1, 3, 1, 1)),
+        ],
+        "output_shape": (1, 3, 256, 256),
+    },
 }
 
 
