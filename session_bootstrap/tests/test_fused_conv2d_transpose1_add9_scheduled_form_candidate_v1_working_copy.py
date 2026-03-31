@@ -89,10 +89,10 @@ class FusedConv2dTranspose1Add9ScheduledFormCandidateV1WorkingCopyTest(
         self.assertFalse(payload["working_copy_contract"]["performance_claims"])
         self.assertEqual(
             payload["current_edit_state"]["status"],
-            "first_local_operator_side_v1_edit_applied",
+            "p2_cortex_a72_output_channel_tile_tuning_applied",
         )
         self.assertIn(
-            "compute_intermediate buffer and trailing T_add pass are removed",
+            "output-channel tiling is retuned from c_1 x c_3 = 6 x 4 to 3 x 8",
             payload["current_edit_state"]["concrete_change"],
         )
         self.assertEqual(
