@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-03-31T01:53:10Z",
+  "generated_at_utc": "2026-03-31T02:04:48Z",
   "operator": "fused_conv2d_transpose1_add9",
   "phase": "scheduled_form_candidate_v1_prep",
   "working_copy_role": "editable_scheduled_form_candidate_v1_working_copy",
@@ -50,6 +50,18 @@
       }
     }
   },
+  "current_edit_state": {
+    "status": "first_local_operator_side_v1_edit_applied",
+    "applied_at_utc": "2026-03-31T02:04:48Z",
+    "working_copy_tir_sha256": "2bda63c11d39172edcd82248327ba48ac5e436d5c433db28716e327a7d8949c6",
+    "concrete_change": "Bias is folded into the scheduled compute_init/compute_update path so the full-size compute_intermediate buffer and trailing T_add pass are removed.",
+    "preserved_non_changes": [
+      "data_dilate remains materialized",
+      "data_pad remains materialized",
+      "kernel_transform remains materialized",
+      "the surrounding scheduled loop nest stays in the checked-in scheduled form"
+    ]
+  },
   "related_files": {
     "scheduled_reference_tir": "./session_bootstrap/handwritten/fused_conv2d_transpose1_add9/fused_conv2d_transpose1_add9_post_db_scheduled_reference_seed_tir.py",
     "scheduled_reference_manifest": "./session_bootstrap/handwritten/fused_conv2d_transpose1_add9/post_db_scheduled_reference_seed_manifest.json",
@@ -62,6 +74,7 @@
     "This working copy is derived from the checked-in post-db scheduled reference seed so the first v1 edits start from a scheduled form.",
     "Keep the scheduled reference seed frozen and refresh this working copy when the reference seed changes.",
     "Keep this distinct from the older raw pre-compile editable seed and from the checked-in candidate v0.",
+    "The current checked-in working copy already applies one narrow operator-side v1 edit: bias is written directly into the scheduled output path and the extra T_add pass is removed.",
     "This handoff is local-only and diagnostic-only; it does not make performance claims."
   ]
 }

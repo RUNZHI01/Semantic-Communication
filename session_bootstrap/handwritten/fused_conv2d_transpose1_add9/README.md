@@ -9,7 +9,7 @@ the repo without touching trusted current or launching any remote work.
 - `fused_conv2d_transpose1_add9_manual_candidate.py`: repo-native handwritten-hook entrypoint for this operator; it exposes the checked-in candidate v0 through the local/staging pre-compile override contract.
 - `fused_conv2d_transpose1_add9_editable_seed_tir.py`: editable operator TIR extracted from the local MetaSchedule task log.
 - `fused_conv2d_transpose1_add9_post_db_scheduled_reference_seed_tir.py`: schedule-preserving reference/edit seed recovered from the post-db full-module path.
-- `fused_conv2d_transpose1_add9_scheduled_form_candidate_v1_working_copy_tir.py`: editable scheduled-form v1 working copy cloned from the checked-in post-db scheduled reference seed.
+- `fused_conv2d_transpose1_add9_scheduled_form_candidate_v1_working_copy_tir.py`: editable scheduled-form v1 working copy cloned from the checked-in post-db scheduled reference seed, now carrying the first narrow local operator-side v1 edit.
 - `seed_manifest.json`: trimmed seed context copied from the captured seed JSON.
 - `post_db_scheduled_reference_seed_manifest.json`: small manifest for the scheduled-form reference/edit seed.
 - `scheduled_form_candidate_v1_working_copy_manifest.json`: small manifest for the editable scheduled-form v1 working copy.
@@ -70,6 +70,22 @@ The helper reads the checked-in scheduled reference seed and writes:
 Keep the scheduled reference seed frozen for backtracking and re-refresh, and
 make operator-side v1 edits in the working copy instead. This working-copy
 handoff is still local-only, diagnostic-only, and not hook-facing.
+
+## Current checked-in v1 edit
+
+As of `2026-03-31`, the checked-in scheduled-form v1 working copy applies one
+small operator-side change while keeping the post-db scheduled reference seed
+frozen:
+
+- bias is written directly into `T_add_intermediate` inside the scheduled
+  `compute_init` block
+- the scheduled `compute_update` block now accumulates into that final output
+  buffer
+- the full-size `compute_intermediate` allocation and the trailing `T_add` pass
+  are removed
+
+This is still a local-only, diagnostic-only edit surface. It is not hook-facing
+and it is not performance evidence by itself.
 
 ## Hook-facing candidate path
 
@@ -145,10 +161,10 @@ This is still build-level diagnostic evidence only, but it preserves the best
 staging schedule context much more honestly than the older raw pre-compile hook
 lane.
 
-For the smallest useful `v1` prep step, keep the scheduled reference seed as
-the frozen source of truth, refresh the scheduled-form v1 working copy from
-it, and keep the older raw pre-compile seed only for backtracking or
-hook-wiring comparison.
+For continued `v1` work, keep the scheduled reference seed as the frozen source
+of truth, refresh the scheduled-form v1 working copy from it when needed, and
+re-apply or refine edits only in the working copy. Keep the older raw
+pre-compile seed only for backtracking or hook-wiring comparison.
 
 ## Staging lane after a real override exists
 
