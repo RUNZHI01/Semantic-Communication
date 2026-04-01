@@ -1,0 +1,48 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;  /* Increased from 4px */
+}
+
+.emptyText {
+  color: var(--color-text-tertiary);
+  font-size: 14px;
+}
+
+.loadingText {
+  color: var(--color-text-tertiary);
+  font-size: 14px;
+}
+
+.spaceWrapper {
+  width: 100%;
+}
+
+.jobTag {
+  font-family: var(--font-family-mono);
+  font-feature-settings: 'tnum' 1, 'zero' 1;
+}
+
+.stageRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;  /* Increased from 4px */
+}
+
+.stageIcon {
+  color: var(--color-text-tertiary);
+}
+
+.stageText {
+  color: var(--color-text-secondary);
+  font-size: 14px;
+}
+
+.messageText {
+  color: var(--color-text-tertiary);
+  font-size: 13px;
+}
+
+.timelineWrapper {
+  margin-top: 8px;  /* Increased from 6px */
+}

@@ -1,0 +1,216 @@
+.header {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: var(--space-lg);
+  padding: 0 var(--space-xl);
+  height: 56px;
+  background: var(--color-bg-header);
+  border-bottom: 1px solid var(--color-border-light);
+  box-shadow: none;
+  position: relative;
+  z-index: 10;
+}
+
+/* Subtle brand gradient accent line at header bottom */
+.header::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, var(--color-primary) 50%, transparent 100%);
+  opacity: 0.08;
+}
+
+/* ===== Title Group — refined with brand accent ===== */
+.titleGroup {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.logoIcon {
+  color: var(--color-primary);
+  flex-shrink: 0;
+}
+
+.title {
+  color: var(--color-text-primary);
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0;
+  white-space: nowrap;
+  letter-spacing: -0.01em;
+}
+
+/* ===== Nav Tabs — pill-style indicator (Google-inspired) ===== */
+.navTabs {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  background: var(--color-bg-section);
+  border-radius: var(--radius-full);
+  padding: 3px;
+}
+
+.navTab {
+  padding: 6px 20px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  border-radius: var(--radius-full);
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  transition: all 200ms var(--easing-standard);
+  white-space: nowrap;
+}
+
+.navTab:hover {
+  color: var(--color-text-primary);
+  background: rgba(255,255,255,0.6);
+}
+
+.navTab:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-bg-header), 0 0 0 4px var(--color-primary);
+}
+
+.navTabActive {
+  composes: navTab;
+  color: var(--color-primary);
+  background: var(--color-bg-card);
+  box-shadow: var(--elevation-1);
+  font-weight: 600;
+}
+
+.navTabActive:hover {
+  color: var(--color-primary);
+  background: var(--color-bg-card);
+}
+
+/* ===== Right Section — lightweight indicators ===== */
+.rightSection {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  flex-shrink: 0;
+}
+
+/* Inline status — pill badge */
+.statusInline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: var(--radius-full);
+  background: var(--color-bg-section);
+  transition: background 200ms var(--easing-standard);
+}
+
+.healthDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.healthOk {
+  composes: healthDot;
+  background: var(--color-success);
+  box-shadow: 0 0 0 2px rgba(5, 150, 105, 0.15);
+}
+
+.healthErr {
+  composes: healthDot;
+  background: var(--color-error);
+  box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.15);
+}
+
+.healthLabel {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.systemClock {
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+  font-family: var(--font-family-mono);
+  font-variant-numeric: tabular-nums;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-section);
+  border: none;
+}
+
+.iconBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: background 200ms var(--easing-standard), color 200ms var(--easing-standard);
+}
+
+.iconBtn:hover {
+  background: var(--color-bg-section);
+  color: var(--color-text-primary);
+}
+
+.iconBtn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--color-bg-header), 0 0 0 4px var(--color-primary);
+}
+
+/* ===== Content ===== */
+.content {
+  padding: 0;
+  overflow: hidden;
+  height: calc(100vh - 56px);
+  position: relative;
+  z-index: 1;
+}
+
+/* ===== Responsive Header ===== */
+@media (max-width: 1200px) {
+  .header {
+    gap: var(--space-sm);
+    padding: 0 var(--space-md);
+  }
+  .navTabs {
+    gap: 2px;
+    padding: 2px;
+  }
+  .navTab,
+  .navTabActive {
+    padding: 5px 14px;
+    font-size: 13px;
+  }
+  .healthLabel {
+    display: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .header {
+    gap: var(--space-xs);
+    padding: 0 var(--space-sm);
+  }
+  .navTabs {
+    display: none;
+  }
+  .systemClock {
+    display: none;
+  }
+}
