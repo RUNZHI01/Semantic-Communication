@@ -1,0 +1,25 @@
+.infoGroup {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;  /* Increased from 6px */
+}
+
+.statItem {
+  display: flex;
+  align-items: center;
+  gap: 14px;  /* Increased from 3px */
+}
+
+.statIcon {
+  color: var(--color-text-tertiary);
+}
+
+.statText {
+  color: var(--color-text-secondary);
+  font-size: 14px;
+}
+
+.emptyText {
+  color: var(--color-text-tertiary);
+  font-size: 14px;
+}
