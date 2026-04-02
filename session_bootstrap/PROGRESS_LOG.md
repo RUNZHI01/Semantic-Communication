@@ -147,6 +147,7 @@
   - 控制面最小闭环与三类正式 FIT 都已经完成真机收证，并且统一 evidence package 也已经生成；
   - 当前最值钱的下一步不再是继续补 `FIT-01/02/03`，而是把这套证据转成四幕 Demo、视频脚本、PPT 页结构和讲稿；
   - 仍未纳入当前正式口径的 OpenAMP 扩展项包括：`FIT-04/05`、`RESET_REQ/ACK`、deadline enforcement、sticky fault reset。
+  - 2026-04-03：`TC-002/010` 的“仍需补齐”也已拆开澄清：`TC-002` 现统一由 live reconstruction `300/300` 证据收口；`TC-010` 继续保留为 `RESET_REQ/ACK` / sticky fault reset 边界，不能为赶答辩口径而 overclaim。详见 `session_bootstrap/reports/openamp_tc002_tc010_defense_scope_note_2026-04-03.md`。
 - **payload-only 与 real reconstruction 结果不可混写**：
   - `session_bootstrap/reports/current_scheme_b_compare_20260311_195303.md` 只比较 current 内部 rebuild-only SHA `2fcf773fa34d6aa69f80740ffedde33faaf265a045cae97b72022ae2c62a8449` 与 incremental SHA `1946b08e6cf20a1259fa43f9e849a06f50ae1230c08d4df7081fba1edae4c644` 的 payload-symmetric 时间，不含 baseline；
   - `session_bootstrap/reports/inference_compare_currentsafe_chunk4_refresh_20260313_1758.md` 是当前 trusted current payload 正式 validate，结论是新 SHA `6f236b07...6dc1` 对应 `130.219 ms`；
