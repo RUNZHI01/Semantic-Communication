@@ -146,3 +146,18 @@
 4. `session_bootstrap/reports/openamp_control_plane_evidence_package_20260315/demo_four_act_runbook.md`
 5. `session_bootstrap/reports/openamp_control_plane_evidence_package_20260315/degraded_demo_plan.md`
 6. `session_bootstrap/reports/openamp_demo_handoff_manifest_m10_20260319.md`
+7. `session_bootstrap/reports/openamp_demo_rehearsal_go_nogo_template_2026-04-03.md`
+
+## 8. 彩排后如何回填
+
+完成最终彩排后，直接使用：
+
+- `session_bootstrap/reports/openamp_demo_rehearsal_go_nogo_template_2026-04-03.md`
+
+来记录：
+
+- 实际 chosen mode（`L0/L1/L2`）
+- 首屏字段是否齐全
+- 四幕是否稳定走通
+- 是否只能 docs-first 上台
+- 哪些任务板项可以正式勾完成
