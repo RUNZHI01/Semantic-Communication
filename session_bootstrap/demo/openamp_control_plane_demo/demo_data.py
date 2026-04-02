@@ -466,17 +466,31 @@ def build_aircraft_position_snapshot(feed: dict[str, Any] | None = None) -> dict
 
 
 def repo_relative(path: Path) -> str:
-    return path.resolve().relative_to(PROJECT_ROOT).as_posix()
+    try:
+        return path.resolve().relative_to(PROJECT_ROOT).as_posix()
+    except ValueError:
+        return str(path)
 
 
 def resolve_repo_path(raw_path: str) -> Path:
     path = Path(raw_path)
     if not path.is_absolute():
         path = (PROJECT_ROOT / path).resolve()
-    else:
-        path = path.resolve()
-    path.relative_to(PROJECT_ROOT)
-    return path
+        path.relative_to(PROJECT_ROOT)
+        return path
+
+    path = path.resolve()
+    try:
+        path.relative_to(PROJECT_ROOT)
+        return path
+    except ValueError:
+        # Absolute path from another machine: try to map a repo-internal suffix
+        # back under the current PROJECT_ROOT, but keep rejecting unrelated paths.
+        for index in range(1, len(path.parts)):
+            rebased = PROJECT_ROOT.joinpath(*path.parts[index:])
+            if rebased.exists():
+                return rebased
+        raise ValueError(f"path is outside repo: {path}")
 
 
 def read_text(path: Path) -> str:
@@ -497,6 +511,14 @@ def image_data_uri(path_value: str) -> str:
         ".jpeg": "image/jpeg",
         ".webp": "image/webp",
     }.get(suffix, "application/octet-stream")
+    if not path.exists():
+        # Use a 1x1 transparent PNG when assets are absent on another machine.
+        placeholder_png = base64.b64encode(
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+            b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01"
+            b"\x00\x00\x05\x00\x01\r\n\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+        ).decode("ascii")
+        return f"data:image/png;base64,{placeholder_png}"
     encoded = base64.b64encode(path.read_bytes()).decode("ascii")
     return f"data:{mime_type};base64,{encoded}"
 

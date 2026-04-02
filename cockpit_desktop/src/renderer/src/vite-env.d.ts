@@ -2,6 +2,7 @@
 
 export type CockpitPreload = {
   platform: NodeJS.Platform
+  backendUrl: string
 }
 
 declare global {

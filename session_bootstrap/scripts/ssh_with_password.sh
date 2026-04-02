@@ -107,7 +107,18 @@ if [[ "${SSH_WITH_PASSWORD_DISABLE_CONTROLMASTER:-0}" != "1" ]]; then
   )
 fi
 
-ASKPASS_FILE="$(mktemp /tmp/ssh_askpass_XXXXXX.sh)"
+create_temp_file() {
+  local tmp_dir="${TMPDIR:-/tmp}"
+  local template="${tmp_dir%/}/ssh_askpass.XXXXXX"
+  mktemp "$template" 2>/dev/null && return 0
+  mktemp -t ssh_askpass 2>/dev/null && return 0
+  return 1
+}
+
+ASKPASS_FILE="$(create_temp_file)" || {
+  echo "ERROR: failed to create a temporary SSH_ASKPASS helper file." >&2
+  exit 1
+}
 cleanup() {
   rm -f "$ASKPASS_FILE"
 }
@@ -119,12 +130,30 @@ printf '%s\n' "${SSH_ASKPASS_PASSWORD:-}"
 EOF
 chmod 700 "$ASKPASS_FILE"
 
-SSH_ASKPASS_PASSWORD="$SSH_PASS" \
-DISPLAY="${DISPLAY:-:0}" \
-SSH_ASKPASS="$ASKPASS_FILE" \
-SSH_ASKPASS_REQUIRE=force \
-setsid -w \
-ssh \
-  "${SSH_OPTIONS[@]}" \
-  "${SSH_USER}@${HOST}" \
+SSH_COMMAND=(
+  ssh
+  "${SSH_OPTIONS[@]}"
+  "${SSH_USER}@${HOST}"
   "$REMOTE_COMMAND"
+)
+
+if command -v sshpass >/dev/null 2>&1; then
+  SSHPASS="$SSH_PASS" exec sshpass -e "${SSH_COMMAND[@]}"
+fi
+
+if command -v setsid >/dev/null 2>&1 && setsid --help 2>&1 | grep -q -- '-w'; then
+  exec env \
+    SSH_ASKPASS_PASSWORD="$SSH_PASS" \
+    DISPLAY="${DISPLAY:-:0}" \
+    SSH_ASKPASS="$ASKPASS_FILE" \
+    SSH_ASKPASS_REQUIRE=force \
+    setsid -w \
+    "${SSH_COMMAND[@]}"
+fi
+
+exec env \
+  SSH_ASKPASS_PASSWORD="$SSH_PASS" \
+  DISPLAY="${DISPLAY:-:0}" \
+  SSH_ASKPASS="$ASKPASS_FILE" \
+  SSH_ASKPASS_REQUIRE=force \
+  "${SSH_COMMAND[@]}"

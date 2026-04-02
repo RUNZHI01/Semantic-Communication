@@ -18,7 +18,8 @@ import type {
 } from './types'
 
 /** Vite dev server proxies /api → Python；生产直连本机（CORS 已开）。 */
-const API_PREFIX = import.meta.env.DEV ? '' : 'http://127.0.0.1:8079'
+const runtimeBackendUrl = window.cockpit?.backendUrl?.replace(/\/+$/, '') ?? ''
+const API_PREFIX = import.meta.env.DEV ? '' : runtimeBackendUrl || 'http://127.0.0.1:8079'
 
 async function readJson<T>(response: Response): Promise<T> {
   return (await response.json()) as T
