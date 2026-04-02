@@ -102,6 +102,12 @@ bash ./session_bootstrap/scripts/run_openamp_demo.sh
 本轮已补充：
 
 ```bash
+bash ./session_bootstrap/scripts/run_openamp_demo.sh --check-readiness
+```
+
+如需直接调用脚本，也可运行：
+
+```bash
 python3 ./session_bootstrap/scripts/check_openamp_demo_session_readiness.py --format text
 ```
 
