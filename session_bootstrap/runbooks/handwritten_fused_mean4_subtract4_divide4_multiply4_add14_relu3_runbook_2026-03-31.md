@@ -1,13 +1,13 @@
 # Handwritten `fused_mean4_subtract4_divide4_multiply4_add14_relu3` Local-First Runbook
 
-Updated: `2026-03-31`
+Updated: `2026-04-03`
 
 ## Purpose
 
-Establish the smallest local handwritten lane for
+Establish and extend the handwritten lane for
 `fused_mean4_subtract4_divide4_multiply4_add14_relu3` using the frozen
-best-staging references and without touching trusted current or launching any
-SSH / remote benchmark work.
+best-staging references, first locally and then through the dedicated
+repo-pattern remote helper path when a socket-capable session is available.
 
 ## Fixed references
 
@@ -28,12 +28,17 @@ SSH / remote benchmark work.
 - `./session_bootstrap/handwritten/fused_mean4_subtract4_divide4_multiply4_add14_relu3/fused_mean4_subtract4_divide4_multiply4_add14_relu3_scheduled_form_candidate_v1_working_copy_tir.py`
 - `./session_bootstrap/handwritten/fused_mean4_subtract4_divide4_multiply4_add14_relu3/scheduled_form_candidate_v1_working_copy_manifest.json`
 - `./session_bootstrap/handwritten/fused_mean4_subtract4_divide4_multiply4_add14_relu3/fused_mean4_subtract4_divide4_multiply4_add14_relu3_scheduled_form_candidate_v1.py`
+- `./session_bootstrap/handwritten/fused_mean4_subtract4_divide4_multiply4_add14_relu3/fused_mean4_subtract4_divide4_multiply4_add14_relu3_scheduled_form_candidate_v2_working_copy_tir.py`
+- `./session_bootstrap/handwritten/fused_mean4_subtract4_divide4_multiply4_add14_relu3/scheduled_form_candidate_v2_working_copy_manifest.json`
+- `./session_bootstrap/handwritten/fused_mean4_subtract4_divide4_multiply4_add14_relu3/fused_mean4_subtract4_divide4_multiply4_add14_relu3_scheduled_form_candidate_v2.py`
 
 ## Operator-specific scripts
 
 - `./session_bootstrap/scripts/refresh_fused_mean4_subtract4_divide4_multiply4_add14_relu3_post_db_scheduled_seed.py`
 - `./session_bootstrap/scripts/refresh_fused_mean4_subtract4_divide4_multiply4_add14_relu3_scheduled_form_working_copy.py`
 - `./session_bootstrap/scripts/run_mean4_post_db_local_build.py`
+- `./session_bootstrap/scripts/prepare_handwritten_fused_mean4_subtract4_divide4_multiply4_add14_relu3_env.py`
+- `./session_bootstrap/scripts/run_mean4_remote_payload_benchmark.sh`
 
 ## Workflow
 
@@ -58,6 +63,40 @@ python3 ./session_bootstrap/scripts/run_mean4_post_db_local_build.py \
   --output-dir ./session_bootstrap/tmp/mean4_post_db_swap_local_build
 ```
 
+4. Run the first real handwritten follow-up locally:
+
+```bash
+python3 ./session_bootstrap/scripts/run_mean4_post_db_local_build.py \
+  --candidate-impl ./session_bootstrap/handwritten/fused_mean4_subtract4_divide4_multiply4_add14_relu3/fused_mean4_subtract4_divide4_multiply4_add14_relu3_scheduled_form_candidate_v2.py \
+  --output-dir ./session_bootstrap/tmp/mean4_post_db_swap_local_build_v2
+```
+
+5. If the local candidate is mature enough, prepare the dedicated payload env:
+
+```bash
+./session_bootstrap/scripts/prepare_handwritten_fused_mean4_subtract4_divide4_multiply4_add14_relu3_env.py \
+  --expected-sha256 <artifact_sha256>
+```
+
+6. Use the dedicated remote payload helper when the current session can open SSH sockets:
+
+```bash
+./session_bootstrap/scripts/run_mean4_remote_payload_benchmark.sh \
+  --inference-env ./session_bootstrap/tmp/handwritten_fused_mean4_subtract4_divide4_multiply4_add14_relu3_profile.env \
+  --local-artifact ./session_bootstrap/tmp/mean4_post_db_swap_local_build_v2/fused_mean4_subtract4_divide4_multiply4_add14_relu3_post_db_swap.so \
+  --database-dir ./session_bootstrap/tmp/phytium_runtime_joint_top6_targeted_staging_search_20260330_2315/tuning_logs
+```
+
+7. If you only need to validate upload integrity first, isolate that gate:
+
+```bash
+./session_bootstrap/scripts/run_mean4_remote_payload_benchmark.sh \
+  --upload-only \
+  --inference-env ./session_bootstrap/tmp/handwritten_fused_mean4_subtract4_divide4_multiply4_add14_relu3_profile.env \
+  --local-artifact ./session_bootstrap/tmp/mean4_post_db_swap_local_build_v2/fused_mean4_subtract4_divide4_multiply4_add14_relu3_post_db_swap.so \
+  --database-dir ./session_bootstrap/tmp/phytium_runtime_joint_top6_targeted_staging_search_20260330_2315/tuning_logs
+```
+
 ## Notes
 
 - Current best-staging keeps `fused_mean4_subtract4_divide4_multiply4_add14_relu3`
@@ -65,5 +104,11 @@ python3 ./session_bootstrap/scripts/run_mean4_post_db_local_build.py \
   direct tuning record, IRModule, or schedule for it.
 - The checked-in seed therefore comes from the post-db applied-module operator
   path via the existing seam, not from `query_schedule`.
-- This lane is deliberately local-only and diagnostic-only.
-- Do not run SSH or remote benchmark work from this runbook yet.
+- The checked-in `v1` files are still just the seed-clone baseline.
+- The checked-in `v2` files are the first real handwritten mean4 candidate.
+- The remote helper now uses byte-stable Python writes and verifies remote
+  `sha256 + size_bytes` before entering the payload benchmark.
+- Use `--upload-only` whenever the current blocker is upload integrity rather
+  than runtime performance.
+- In a socket-blocked sandbox, keep the remote step diagnostic-only and record
+  the blocker instead of claiming a board result.
