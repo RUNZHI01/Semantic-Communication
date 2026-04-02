@@ -110,7 +110,7 @@
 如果继续做本地可闭环工作，优先级建议是：
 
 1. 给任务板里这些 Demo 项统一加上“`docs frozen / pending presentation-day verification`”式说明
-2. 再整理一份 presentation-day 人工核对 checklist
+2. 已整理 `session_bootstrap/reports/openamp_demo_presentation_day_checklist_2026-04-03.md`，把 presentation-day 人工核对动作明确化
 3. 最后如果真要勾完成，再等真实 UI / 板侧彩排结果回填
 
 也就是说，当前最值钱的下一步不是再写更多讲稿，而是把“还差什么确认”写得更像工程收尾条件。
