@@ -33,7 +33,7 @@ python3 ./session_bootstrap/scripts/run_variance4_post_db_local_build.py   --can
 
 - focused variance4 unit tests: `30 tests`, `OK`
 - local post-db scheduled swap build: `swap_succeeded = true`, `build_status = built`, `export_status = exported`
-- local correctness compare against the frozen scheduled reference: `exact_equal = false`, `max_abs_diff = 5.960464477539063e-08`
+- local correctness compare against the frozen scheduled reference: `exact_equal = false`, `allclose_atol1e-6_rtol1e-6 = true`, `max_abs_diff = 5.960464477539063e-08`, `nonzero_diff_count = 3`
 - no SSH, scp, or remote board commands were used
 
 ## Outputs
@@ -41,7 +41,7 @@ python3 ./session_bootstrap/scripts/run_variance4_post_db_local_build.py   --can
 - build artifact:
   `./session_bootstrap/tmp/variance4_post_db_swap_local_build_v6/fused_variance4_add13_tir_sqrt4_post_db_swap.so`
 - build artifact SHA256:
-  `5846cde9d715f83ae788a62e99ef80ad063c1460d49a218b08826df7e533d9e6`
+  `2faca52fd5db32a367ca14f87f7c0f475f67faec852865ee518f5184b96b5541`
 - correctness JSON:
   `./session_bootstrap/tmp/variance4_v6_correctness_check.json`
 
@@ -56,8 +56,8 @@ Observed numerical drift:
 - `max_abs_diff = 5.960464477539063e-08`
 - `nonzero_diff_count = 3`
 
-That suggests the `T_multiply -> T_multiply_red` fold changed the floating-point accumulation order just enough to perturb a few outputs, even though the delta is still extremely small.
+That suggests the `T_multiply -> T_multiply_red` fold changed the floating-point behavior just enough to perturb a few outputs, even though the delta is still extremely small.
 
 ## Next Step
 
-Do **not** immediately stack a `v7` simplification on top of this result. First decide whether the handwritten variance4 line is allowed to accept `allclose`-only candidates, or whether this lane should keep the stronger `exact_equal` bar that held for `v2` through `v5`. If the stronger bar remains required, treat `v6` as the current local numerical boundary and stop further folding in this direction.
+Do **not** immediately stack a `v7` simplification on top of this result. First determine whether the `T_multiply -> T_multiply_red` fold can be made `exact_equal = true`; if not, keep `v5` as the last exact local candidate and choose a different next narrow simplification.

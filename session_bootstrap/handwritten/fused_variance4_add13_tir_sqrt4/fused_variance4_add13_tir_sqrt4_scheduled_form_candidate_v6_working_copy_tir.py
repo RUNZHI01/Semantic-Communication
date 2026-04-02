@@ -30,6 +30,7 @@ class Module:
         T.func_attr({"tir.noalias": True})
         # with T.sblock("root"):
         lv335_red = T.alloc_buffer((T.int64(1), T.int64(12), T.int64(1), T.int64(1)))
+        T_multiply_local = T.alloc_buffer((T.int64(1),), scope="local")
         T_multiply_red = T.alloc_buffer((T.int64(1), T.int64(12), T.int64(1), T.int64(1)))
         for ax0, ax1, ax2, ax3, k2, k3 in T.grid(
             T.int64(1), T.int64(12), T.int64(1), T.int64(1), T.int64(256), T.int64(256)
@@ -57,23 +58,27 @@ class Module:
                     lv335[v_ax0, v_ax1, v_k2, v_k3],
                     lv335_red[v_ax0, v_ax1, T.int64(0), T.int64(0)],
                 )
-                T.writes(T_multiply_red[v_ax0, v_ax1, v_ax2, v_ax3])
+                T.writes(
+                    T_multiply_local[T.int64(0)],
+                    T_multiply_red[v_ax0, v_ax1, v_ax2, v_ax3],
+                )
                 with T.init():
                     T_multiply_red[v_ax0, v_ax1, v_ax2, v_ax3] = T.float32(0.0)
+                T_multiply_local[T.int64(0)] = (
+                    (
+                        lv335[v_ax0, v_ax1, v_k2, v_k3]
+                        - lv335_red[v_ax0, v_ax1, T.int64(0), T.int64(0)]
+                        / T.float32(65536.0)
+                    )
+                    * (
+                        lv335[v_ax0, v_ax1, v_k2, v_k3]
+                        - lv335_red[v_ax0, v_ax1, T.int64(0), T.int64(0)]
+                        / T.float32(65536.0)
+                    )
+                )
                 T_multiply_red[v_ax0, v_ax1, v_ax2, v_ax3] = (
                     T_multiply_red[v_ax0, v_ax1, v_ax2, v_ax3]
-                    + (
-                        (
-                            lv335[v_ax0, v_ax1, v_k2, v_k3]
-                            - lv335_red[v_ax0, v_ax1, T.int64(0), T.int64(0)]
-                            / T.float32(65536.0)
-                        )
-                        * (
-                            lv335[v_ax0, v_ax1, v_k2, v_k3]
-                            - lv335_red[v_ax0, v_ax1, T.int64(0), T.int64(0)]
-                            / T.float32(65536.0)
-                        )
-                    )
+                    + T_multiply_local[T.int64(0)]
                 )
         for i0, i1, i2, i3 in T.grid(T.int64(1), T.int64(12), T.int64(1), T.int64(1)):
             with T.sblock("compute"):

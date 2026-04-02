@@ -8,7 +8,7 @@
 - 后端报错: `OSError: [Errno 98] Address already in use`
 
 ### 原因
-**端口8000被占用** - 之前的Python服务器进程没有正确关闭
+**默认后端端口被占用** - 之前的 Python 服务器进程没有正确关闭
 
 ---
 
@@ -17,12 +17,12 @@
 ### 方法1: 使用自动化脚本（推荐）
 
 ```bash
-cd /home/tianxing/tvm_metaschedule_execution_project/cockpit_desktop
+cd cockpit_desktop
 ./start-dev.sh
 ```
 
 这个脚本会：
-1. ✅ 自动检测并杀掉占用8000端口的进程
+1. ✅ 自动检测并释放默认后端端口（默认 `8079`）
 2. ✅ 启动后端服务器
 3. ✅ 启动前端开发服务器
 4. ✅ 验证所有服务正常运行
@@ -30,13 +30,13 @@ cd /home/tianxing/tvm_metaschedule_execution_project/cockpit_desktop
 ### 方法2: 手动修复
 
 ```bash
-# 1. 杀掉占用8000端口的进程
-PID=$(lsof -ti :8000)
+# 1. 杀掉占用默认后端端口的进程
+PID=$(lsof -ti :8079)
 kill -9 $PID
 
 # 2. 重新启动后端
-cd /home/tianxing/tvm_metaschedule_execution_project
-python session_bootstrap/demo/openamp_control_plane_demo/server.py --port 8000 &
+cd ..
+python3 session_bootstrap/demo/openamp_control_plane_demo/server.py --port 8079 &
 
 # 3. 刷新浏览器
 # Ctrl+Shift+R (强制刷新)
@@ -44,13 +44,13 @@ python session_bootstrap/demo/openamp_control_plane_demo/server.py --port 8000 &
 
 ### 方法3: 更换端口
 
-如果8000端口必须保留，可以使用其他端口：
+如果 `8079` 端口必须保留，可以使用其他端口：
 
 ```bash
-# 后端使用8001端口
-python session_bootstrap/demo/openamp_control_plane_demo/server.py --port 8001 &
+# 后端使用 8081 端口
+python3 session_bootstrap/demo/openamp_control_plane_demo/server.py --port 8081 &
 
-# 然后修改前端API配置（略复杂，不推荐）
+# 然后在同一终端里设置 COCKPIT_BACKEND_PORT=8081 再启动前端 / Electron
 ```
 
 ---
@@ -59,13 +59,13 @@ python session_bootstrap/demo/openamp_control_plane_demo/server.py --port 8001 &
 
 ### 检查后端
 ```bash
-curl http://localhost:8000/health
+curl http://localhost:8079/api/health
 # 应该返回: {"status":"ok"}
 ```
 
 ### 检查端口占用
 ```bash
-lsof -i :8000  # 查看后端
+lsof -i :8079  # 查看后端
 lsof -i :5173  # 查看前端
 ```
 
@@ -81,7 +81,7 @@ lsof -i :5173  # 查看前端
 ### 手动停止
 ```bash
 # 杀掉特定端口进程
-kill -9 $(lsof -ti :8000)  # 后端
+kill -9 $(lsof -ti :8079)  # 后端
 kill -9 $(lsof -ti :5173)  # 前端
 ```
 
@@ -123,7 +123,7 @@ cd cockpit_desktop
 ### ❌ "黑屏 + API错误"
 **原因**: 前端无法连接到后端
 **解决**:
-1. 检查后端是否运行: `curl http://localhost:8000/health`
+1. 检查后端是否运行: `curl http://localhost:8079/api/health`
 2. 检查浏览器控制台错误
 3. 强制刷新浏览器: Ctrl+Shift+R
 
@@ -146,14 +146,14 @@ cd cockpit_desktop
 
 ## 技术细节
 
-### 为什么端口8000会被占用？
+### 为什么默认后端端口会被占用？
 
 1. **之前的dev服务器没有正确关闭**
    - 直接关闭终端窗口
    - 使用Ctrl+Z而不是Ctrl+C
    - 程序崩溃但端口未释放
 
-2. **其他程序使用8000端口**
+2. **其他程序使用当前后端端口**
    - 其他Python服务
    - 系统服务
 

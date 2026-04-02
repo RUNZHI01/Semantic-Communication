@@ -1,31 +1,50 @@
-#!/bin/bash
-# Cockpit Desktop 开发环境停止脚本
+#!/usr/bin/env bash
+set -euo pipefail
 
-echo "🛑 停止 Cockpit Desktop 开发环境..."
+BACKEND_PORT="${COCKPIT_BACKEND_PORT:-8079}"
+FRONTEND_PORT="${COCKPIT_FRONTEND_PORT:-5173}"
 
-# 停止前端（Vite默认端口5173）
-FRONTEND_PIDS=$(lsof -ti :5173 || true)
-if [ -n "$FRONTEND_PIDS" ]; then
-    echo "⏹️  停止前端..."
-    kill -9 $FRONTEND_PIDS 2>/dev/null || true
-else
-    echo "ℹ️  前端未运行"
+find_port_pids() {
+  local port="$1"
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -ti TCP:"$port" -sTCP:LISTEN 2>/dev/null || true
+    return 0
+  fi
+  if command -v fuser >/dev/null 2>&1; then
+    fuser "$port/tcp" 2>/dev/null || true
+    return 0
+  fi
+  return 0
+}
+
+stop_pid_file() {
+  local pid_file="$1"
+  if [[ -f "$pid_file" ]]; then
+    local pid
+    pid="$(cat "$pid_file" 2>/dev/null || true)"
+    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+      kill "$pid" 2>/dev/null || true
+    fi
+    rm -f "$pid_file"
+  fi
+}
+
+echo "停止 Cockpit Desktop 开发环境..."
+
+stop_pid_file "${TMPDIR:-/tmp}/cockpit-dev.pid"
+stop_pid_file "${TMPDIR:-/tmp}/cockpit-backend.pid"
+
+BACKEND_PIDS="$(find_port_pids "$BACKEND_PORT")"
+if [[ -n "$BACKEND_PIDS" ]]; then
+  kill $BACKEND_PIDS 2>/dev/null || true
 fi
 
-# 停止后端（8000端口）
-BACKEND_PIDS=$(lsof -ti :8000 || true)
-if [ -n "$BACKEND_PIDS" ]; then
-    echo "⏹️  停止后端..."
-    kill -9 $BACKEND_PIDS 2>/dev/null || true
-else
-    echo "ℹ️  后端未运行"
+FRONTEND_PIDS="$(find_port_pids "$FRONTEND_PORT")"
+if [[ -n "$FRONTEND_PIDS" ]]; then
+  kill $FRONTEND_PIDS 2>/dev/null || true
 fi
 
-# 清理npm和node进程
-pkill -f "npm run dev" 2>/dev/null || true
-pkill -f "vite" 2>/dev/null || true
+pkill -f "electron-vite dev" 2>/dev/null || true
+pkill -f "server.py --host" 2>/dev/null || true
 
-# 清理可能的Python进程
-pkill -f "server.py" 2>/dev/null || true
-
-echo "✅ 所有服务已停止"
+echo "开发环境已停止"

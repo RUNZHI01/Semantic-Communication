@@ -2,6 +2,10 @@ import react from '@vitejs/plugin-react'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import { resolve } from 'node:path'
 
+const backendHost = process.env.COCKPIT_BACKEND_HOST ?? '127.0.0.1'
+const backendPort = process.env.COCKPIT_BACKEND_PORT ?? '8079'
+const backendTarget = `http://${backendHost}:${backendPort}`
+
 export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin()],
@@ -35,7 +39,7 @@ export default defineConfig({
     server: {
       proxy: {
         '/api': {
-          target: 'http://127.0.0.1:8079',
+          target: backendTarget,
           changeOrigin: true,
           secure: false,
           // 避免代理其他请求

@@ -1,14 +1,22 @@
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, dialog } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
-import { startPythonBackend, stopPythonBackend, type RunningBackend } from './pythonManager'
+import {
+  getBackendRuntimeConfig,
+  startPythonBackend,
+  stopPythonBackend,
+  type BackendRuntimeConfig,
+  type RunningBackend,
+} from './pythonManager'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+// WSLg often reports 100% scaling; allow an env override to match host DPI better.
+const WSL_SCALE = Number(process.env.WSL_SCALE_FACTOR ?? '1.25')
 
 let mainWindow: BrowserWindow | null = null
 let backend: RunningBackend | null = null
 
-function createWindow(): void {
+function createWindow(runtimeConfig: BackendRuntimeConfig): void {
   mainWindow = new BrowserWindow({
     width: 2560,
     height: 1440,
@@ -19,13 +27,16 @@ function createWindow(): void {
       preload: path.join(__dirname, '../preload/index.mjs'),
       contextIsolation: true,
       sandbox: false,
+      additionalArguments: [`--cockpit-backend-url=${runtimeConfig.baseUrl}`],
     },
   })
 
   mainWindow.on('ready-to-show', () => {
+    mainWindow?.webContents.setZoomFactor(WSL_SCALE)
     mainWindow?.show()
-    // Open DevTools in development to debug issues
-    mainWindow.webContents.openDevTools()
+    if (!app.isPackaged) {
+      mainWindow?.webContents.openDevTools()
+    }
   })
 
   if (process.env.ELECTRON_RENDERER_URL) {
@@ -39,12 +50,23 @@ function createWindow(): void {
 app.disableHardwareAcceleration()
 
 app.whenReady().then(() => {
-  backend = startPythonBackend()
-  createWindow()
+  let runtimeConfig: BackendRuntimeConfig
+  try {
+    runtimeConfig = getBackendRuntimeConfig()
+    backend = startPythonBackend(runtimeConfig)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    console.error('[cockpit-desktop] backend bootstrap failed:', error)
+    dialog.showErrorBox('Cockpit Desktop 启动失败', message)
+    app.quit()
+    return
+  }
+
+  createWindow(runtimeConfig)
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow()
+      createWindow(runtimeConfig)
     }
   })
 })

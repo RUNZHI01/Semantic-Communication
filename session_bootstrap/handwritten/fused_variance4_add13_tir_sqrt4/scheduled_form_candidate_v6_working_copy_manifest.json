@@ -58,7 +58,7 @@
   },
   "current_edit_state": {
     "status": "v6_multiply_stage_fused_into_multiply_red_on_top_of_v5_applied",
-    "working_copy_tir_sha256": "e68a9ab21695f09f82199075a5a34e8dafaa67a8ee8b48950cb7c2eb0e27796f",
+    "working_copy_tir_sha256": "9e4dfe94b4674099e978e015063efc35b5ce33a0aa9b1a422b1a99c608f81ff4",
     "concrete_change": "On top of the checked-in v5 scheduled-form working copy, remove the standalone T_multiply full-size stage and fold the squared subtract expression directly into T_multiply_red while keeping the v5 subtraction fold, the v4 mean divide fold, the v3 variance-normalization divide fold, the v2 epsilon add fused into sqrt, both remaining reductions, and the output signature unchanged.",
     "preserved_non_changes": [
       "the frozen v1 scheduled-form candidate remains intact as the seed-aligned baseline",
