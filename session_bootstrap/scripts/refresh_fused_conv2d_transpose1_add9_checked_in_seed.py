@@ -48,7 +48,19 @@ DEFAULT_OUTPUT_DIR = (
 )
 MANUAL_CANDIDATE_FILENAME = f"{OPERATOR_NAME}_manual_candidate.py"
 EDITABLE_TIR_FILENAME = f"{OPERATOR_NAME}_editable_seed_tir.py"
+POST_DB_SCHEDULED_REFERENCE_SEED_TIR_FILENAME = (
+    f"{OPERATOR_NAME}_post_db_scheduled_reference_seed_tir.py"
+)
 MANIFEST_FILENAME = "seed_manifest.json"
+POST_DB_SCHEDULED_REFERENCE_SEED_MANIFEST_FILENAME = (
+    "post_db_scheduled_reference_seed_manifest.json"
+)
+SCHEDULED_FORM_WORKING_COPY_TIR_FILENAME = (
+    f"{OPERATOR_NAME}_scheduled_form_candidate_v1_working_copy_tir.py"
+)
+SCHEDULED_FORM_WORKING_COPY_MANIFEST_FILENAME = (
+    "scheduled_form_candidate_v1_working_copy_manifest.json"
+)
 README_FILENAME = "README.md"
 TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2} ")
 
@@ -246,6 +258,18 @@ def render_readme(
 ) -> str:
     manual_candidate_path = repo_native(output_dir / MANUAL_CANDIDATE_FILENAME)
     editable_tir_path = repo_native(output_dir / EDITABLE_TIR_FILENAME)
+    scheduled_reference_seed_tir_path = repo_native(
+        output_dir / POST_DB_SCHEDULED_REFERENCE_SEED_TIR_FILENAME
+    )
+    scheduled_reference_seed_manifest_path = repo_native(
+        output_dir / POST_DB_SCHEDULED_REFERENCE_SEED_MANIFEST_FILENAME
+    )
+    scheduled_form_working_copy_tir_path = repo_native(
+        output_dir / SCHEDULED_FORM_WORKING_COPY_TIR_FILENAME
+    )
+    scheduled_form_working_copy_manifest_path = repo_native(
+        output_dir / SCHEDULED_FORM_WORKING_COPY_MANIFEST_FILENAME
+    )
     return "\n".join(
         [
             f"# Checked-in seed: `{OPERATOR_NAME}`",
@@ -258,7 +282,11 @@ def render_readme(
             "",
             f"- `{MANUAL_CANDIDATE_FILENAME}`: repo-native handwritten-hook entrypoint for this operator; it exposes the checked-in candidate v0 through the local/staging pre-compile override contract.",
             f"- `{EDITABLE_TIR_FILENAME}`: editable operator TIR extracted from the local MetaSchedule task log.",
+            f"- `{POST_DB_SCHEDULED_REFERENCE_SEED_TIR_FILENAME}`: schedule-preserving reference/edit seed recovered from the post-db full-module path.",
+            f"- `{SCHEDULED_FORM_WORKING_COPY_TIR_FILENAME}`: editable scheduled-form v1 working copy cloned from the checked-in post-db scheduled reference seed.",
             f"- `{MANIFEST_FILENAME}`: trimmed seed context copied from the captured seed JSON.",
+            f"- `{POST_DB_SCHEDULED_REFERENCE_SEED_MANIFEST_FILENAME}`: small manifest for the scheduled-form reference/edit seed.",
+            f"- `{SCHEDULED_FORM_WORKING_COPY_MANIFEST_FILENAME}`: small manifest for the editable scheduled-form v1 working copy.",
             f"- `{README_FILENAME}`: short editing runbook.",
             "",
             "## Why this exists",
@@ -279,6 +307,43 @@ def render_readme(
             f"- `{repo_native(task_log_path)}`",
             "",
             "It refuses to overwrite this directory unless `--allow-overwrite` is passed.",
+            "",
+            "## Refresh the scheduled-form reference seed",
+            "",
+            "When the next operator-side iteration needs a schedule-preserving starting",
+            "point, refresh the checked-in post-db scheduled reference seed instead of the",
+            "older raw pre-compile seed:",
+            "",
+            "```bash",
+            "python3 ./session_bootstrap/scripts/refresh_fused_conv2d_transpose1_add9_post_db_scheduled_seed.py \\",
+            "  --allow-overwrite",
+            "```",
+            "",
+            "The helper reuses the local post-db schedule-preserving seam and writes:",
+            f"- `{scheduled_reference_seed_tir_path}`",
+            f"- `{scheduled_reference_seed_manifest_path}`",
+            "",
+            "This handoff is still local-only and diagnostic-only. It gives a more honest",
+            "reference/edit seed for the next handwritten pass, but it does not by itself",
+            "justify runtime or performance claims.",
+            "",
+            "## Refresh the scheduled-form v1 working copy",
+            "",
+            "Once the checked-in scheduled reference seed is current, derive the editable",
+            "scheduled-form v1 working copy from it with this narrow local-only helper:",
+            "",
+            "```bash",
+            "python3 ./session_bootstrap/scripts/refresh_fused_conv2d_transpose1_add9_scheduled_form_working_copy.py \\",
+            "  --allow-overwrite",
+            "```",
+            "",
+            "The helper reads the checked-in scheduled reference seed and writes:",
+            f"- `{scheduled_form_working_copy_tir_path}`",
+            f"- `{scheduled_form_working_copy_manifest_path}`",
+            "",
+            "Keep the scheduled reference seed frozen for backtracking and re-refresh, and",
+            "make operator-side v1 edits in the working copy instead. This working-copy",
+            "handoff is still local-only, diagnostic-only, and not hook-facing.",
             "",
             "## Hook-facing candidate path",
             "",
@@ -328,16 +393,23 @@ def render_readme(
             "",
             "## Preferred local schedule-preserving build path",
             "",
-            "Once hook wiring is confirmed, prefer this local-only path before any future",
-            "remote/staging validation:",
+            "Once hook wiring is confirmed and the scaffold pack exists, prefer this",
+            "one-shot local-only path before any future remote/staging validation:",
             "",
             "```bash",
-            "python3 ./session_bootstrap/scripts/run_transpose1_post_db_local_build.py",
+            "python3 ./session_bootstrap/scripts/run_transpose1_post_db_local_build_and_sync.py \\",
+            "  --scaffold-dir ./session_bootstrap/tmp/handwritten_fused_conv2d_transpose1_add9_scaffold",
             "```",
             "",
             "This wrapper drives the checked-in best-staging task-summary / DB defaults,",
-            "performs the post-DB scheduled `fused_conv2d_transpose1_add9` swap, and exports a",
-            "local artifact plus adjacent JSON report under:",
+            "performs the post-DB scheduled `fused_conv2d_transpose1_add9` swap, syncs the",
+            "result back into the scaffold bookkeeping pack, and prints a concise final JSON",
+            "summary with the local artifact/report/SHA plus scaffold bookkeeping/template",
+            "paths. The underlying `run_transpose1_post_db_local_build.py` and",
+            "`sync_transpose1_post_db_local_build_result.py` commands remain available if you",
+            "need to split those diagnostics.",
+            "",
+            "Default build outputs still land under:",
             "",
             "```text",
             "./session_bootstrap/tmp/transpose1_post_db_swap_local_build",
@@ -346,6 +418,11 @@ def render_readme(
             "This is still build-level diagnostic evidence only, but it preserves the best",
             "staging schedule context much more honestly than the older raw pre-compile hook",
             "lane.",
+            "",
+            "For the smallest useful `v1` prep step, keep the scheduled reference seed as",
+            "the frozen source of truth, refresh the scheduled-form v1 working copy from",
+            "it, and keep the older raw pre-compile seed only for backtracking or",
+            "hook-wiring comparison.",
             "",
             "## Staging lane after a real override exists",
             "",

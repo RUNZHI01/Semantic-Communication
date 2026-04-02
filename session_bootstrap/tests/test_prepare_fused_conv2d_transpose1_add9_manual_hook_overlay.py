@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import json
 from pathlib import Path
 import tempfile
@@ -60,41 +62,54 @@ class FakeIRModule:
 
 
 class PrepareFusedConv2dTranspose1Add9ManualHookOverlayTest(unittest.TestCase):
-    def _write_scaffold_inputs(self, scaffold_dir: Path) -> tuple[Path, Path]:
+    def _write_scaffold_inputs(
+        self,
+        scaffold_dir: Path,
+        *,
+        include_preferred_local_build: bool = True,
+    ) -> tuple[Path, Path]:
         rebuild_env = scaffold_dir / "manual_rebuild.env"
         bookkeeping_json = scaffold_dir / "bookkeeping.json"
         write_text(rebuild_env, "TUNE_TOTAL_TRIALS=0\n")
+        bookkeeping = {
+            "operator": "fused_conv2d_transpose1_add9",
+            "current_best_staging": {
+                "artifact_sha256": (
+                    "5bd14b9f97d1d06f04a484cd8b1b3f57"
+                    "a955d65711ed65a22f9925dcec44698d"
+                )
+            },
+            "current_profile_json": "/tmp/current_profile.json",
+            "remote_archive_dir": "/tmp/handwritten_archive",
+            "operator_context": {
+                "current_argument_shapes": (
+                    "float32[1, 48, 64, 64], "
+                    "float32[48, 24, 3, 3], "
+                    "float32[1, 24, 1, 1], "
+                    "float32[1, 24, 128, 128]"
+                )
+            },
+        }
+        if include_preferred_local_build:
+            bookkeeping["preferred_local_post_db_build"] = {
+                "command": (
+                    "python3 ./session_bootstrap/scripts/"
+                    "run_transpose1_post_db_local_build.py "
+                    "--output-dir ./session_bootstrap/tmp/transpose1_post_db_swap_local_build"
+                ),
+                "output_dir": "./session_bootstrap/tmp/transpose1_post_db_swap_local_build",
+                "artifact_path": (
+                    "./session_bootstrap/tmp/transpose1_post_db_swap_local_build/"
+                    "fused_conv2d_transpose1_add9_post_db_swap.so"
+                ),
+                "report_path": (
+                    "./session_bootstrap/tmp/transpose1_post_db_swap_local_build/"
+                    "fused_conv2d_transpose1_add9_post_db_swap_report.json"
+                ),
+            }
         write_text(
             bookkeeping_json,
-            json.dumps(
-                {
-                    "operator": "fused_conv2d_transpose1_add9",
-                    "current_best_staging": {
-                        "artifact_sha256": (
-                            "5bd14b9f97d1d06f04a484cd8b1b3f57"
-                            "a955d65711ed65a22f9925dcec44698d"
-                        )
-                    },
-                    "current_profile_json": "/tmp/current_profile.json",
-                    "remote_archive_dir": "/tmp/handwritten_archive",
-                    "preferred_local_post_db_build": {
-                        "command": "python3 ./session_bootstrap/scripts/run_transpose1_post_db_local_build.py --output-dir ./session_bootstrap/tmp/transpose1_post_db_swap_local_build",
-                        "output_dir": "./session_bootstrap/tmp/transpose1_post_db_swap_local_build",
-                        "artifact_path": "./session_bootstrap/tmp/transpose1_post_db_swap_local_build/fused_conv2d_transpose1_add9_post_db_swap.so",
-                        "report_path": "./session_bootstrap/tmp/transpose1_post_db_swap_local_build/fused_conv2d_transpose1_add9_post_db_swap_report.json"
-                    },
-                    "operator_context": {
-                        "current_argument_shapes": (
-                            "float32[1, 48, 64, 64], "
-                            "float32[48, 24, 3, 3], "
-                            "float32[1, 24, 1, 1], "
-                            "float32[1, 24, 128, 128]"
-                        )
-                    },
-                },
-                indent=2,
-            )
-            + "\n",
+            json.dumps(bookkeeping, indent=2) + "\n",
         )
         return rebuild_env, bookkeeping_json
 
@@ -103,9 +118,6 @@ class PrepareFusedConv2dTranspose1Add9ManualHookOverlayTest(unittest.TestCase):
             temp_dir = Path(temp_dir_raw)
             scaffold_dir = temp_dir / "scaffold"
             rebuild_env, bookkeeping_json = self._write_scaffold_inputs(scaffold_dir)
-
-            import contextlib
-            import io
 
             stdout = io.StringIO()
             with contextlib.redirect_stdout(stdout):
@@ -143,9 +155,53 @@ class PrepareFusedConv2dTranspose1Add9ManualHookOverlayTest(unittest.TestCase):
                 (scaffold_dir / "fused_conv2d_transpose1_add9_manual_impl.py").exists()
             )
             self.assertEqual(result["overlay_role"], "hook_wiring_only")
+            self.assertTrue(result["overlay_is_hook_wiring_only"])
+            self.assertEqual(
+                result["preferred_local_build_command"],
+                "python3 ./session_bootstrap/scripts/run_transpose1_post_db_local_build.py --output-dir ./session_bootstrap/tmp/transpose1_post_db_swap_local_build",
+            )
             self.assertEqual(
                 result["preferred_local_build_output_dir"],
                 "./session_bootstrap/tmp/transpose1_post_db_swap_local_build",
+            )
+            self.assertEqual(
+                result["preferred_local_build_artifact_path"],
+                "./session_bootstrap/tmp/transpose1_post_db_swap_local_build/fused_conv2d_transpose1_add9_post_db_swap.so",
+            )
+            self.assertEqual(
+                result["preferred_local_build_report_path"],
+                "./session_bootstrap/tmp/transpose1_post_db_swap_local_build/fused_conv2d_transpose1_add9_post_db_swap_report.json",
+            )
+
+    def test_falls_back_to_default_local_build_references_for_older_bookkeeping(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir_raw:
+            temp_dir = Path(temp_dir_raw)
+            scaffold_dir = temp_dir / "scaffold"
+            self._write_scaffold_inputs(
+                scaffold_dir,
+                include_preferred_local_build=False,
+            )
+
+            stdout = io.StringIO()
+            with contextlib.redirect_stdout(stdout):
+                rc = module.main(["--scaffold-dir", str(scaffold_dir)])
+            self.assertEqual(rc, 0)
+            result = json.loads(stdout.getvalue())
+
+            overlay_env = (scaffold_dir / "manual_hook_overlay.env").read_text(encoding="utf-8")
+            self.assertIn("This overlay is hook wiring only", overlay_env)
+            self.assertIn("local-only and diagnostic-only", overlay_env)
+            self.assertIn(
+                "run_transpose1_post_db_local_build.py --output-dir ./session_bootstrap/tmp/transpose1_post_db_swap_local_build",
+                overlay_env,
+            )
+            self.assertIn(
+                "Preferred local build output dir: ./session_bootstrap/tmp/transpose1_post_db_swap_local_build",
+                overlay_env,
+            )
+            self.assertEqual(
+                result["preferred_local_build_command"],
+                "python3 ./session_bootstrap/scripts/run_transpose1_post_db_local_build.py --output-dir ./session_bootstrap/tmp/transpose1_post_db_swap_local_build",
             )
             self.assertEqual(
                 result["preferred_local_build_artifact_path"],

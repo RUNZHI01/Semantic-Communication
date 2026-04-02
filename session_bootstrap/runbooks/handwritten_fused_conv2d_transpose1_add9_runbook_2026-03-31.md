@@ -82,7 +82,8 @@ Generated pack contents:
 Before any remote/staging step, prefer the new local-only post-DB scheduled swap path:
 
 ```bash
-python3 ./session_bootstrap/scripts/run_transpose1_post_db_local_build.py
+python3 ./session_bootstrap/scripts/run_transpose1_post_db_local_build_and_sync.py \
+  --scaffold-dir ./session_bootstrap/tmp/handwritten_fused_conv2d_transpose1_add9_scaffold
 ```
 
 Default outputs land under:
@@ -97,6 +98,12 @@ This path now gives first-class local build evidence for:
 - post-database scheduled `fused_conv2d_transpose1_add9` swap
 - swapped full-module local build/export
 - artifact SHA / size / adjacent JSON report
+- scaffold bookkeeping/template path refresh through the existing sync helper
+
+The wrapper stays local-only and diagnostic-only. Use the underlying
+`run_transpose1_post_db_local_build.py` plus
+`sync_transpose1_post_db_local_build_result.py` commands separately only when
+you need to debug those steps in isolation.
 
 Use the older raw pre-compile hook lane only when you need hook-wiring diagnostics.
 

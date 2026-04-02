@@ -23,9 +23,9 @@ export function HeroMetrics({ system, inferenceProgress }: HeroMetricsProps) {
     ? ((payloadBaseline - payloadCurrent) / payloadBaseline * 100)
     : null
 
-  const progress = inferenceProgress?.data?.live_progress?.completed_count ?? 0
-  const totalImages = 300
-  const progressPct = totalImages > 0 ? (progress / totalImages) * 100 : 0
+  const lp = inferenceProgress?.data?.live_progress
+  const isActiveInference = !!inferenceProgress?.data && inferenceProgress.data.request_state === 'running'
+  const progressLabel = lp?.label ?? inferenceProgress?.data?.status_category ?? inferenceProgress?.data?.request_state
 
   return (
     <div className={s.container}>
@@ -95,20 +95,18 @@ export function HeroMetrics({ system, inferenceProgress }: HeroMetricsProps) {
         </div>
       )}
 
-      {/* Inference Progress */}
+      {/* Inference Status */}
       <div className={s.metricItem}>
         <div className={s.metricTop}>
           <Icons.BarChart size={11} className={s.metricIcon} aria-hidden="true" />
-          <span className={s.metricLabel}>推理进度</span>
+          <span className={s.metricLabel}>推理状态</span>
         </div>
-        <div className={s.progressGroup}>
-          <span className={s.metricValue}>
-            <CountUp end={progress} duration={300} />/{totalImages}
-          </span>
-          <div className={s.miniTrack}>
-            <div className={s.miniFill} style={{ width: `${progressPct}%` }} />
-          </div>
-        </div>
+        <span
+          className={s.metricValue}
+          style={isActiveInference ? { color: 'var(--color-primary)' } : undefined}
+        >
+          {progressLabel ?? '空闲'}
+        </span>
       </div>
     </div>
   )

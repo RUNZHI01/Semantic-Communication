@@ -11,9 +11,12 @@ introduce a separate raw pre-compile hook lane yet.
 
 - `fused_conv2d_transpose2_add12_post_db_scheduled_reference_seed_tir.py`: checked-in post-db scheduled reference seed recovered from the frozen best-staging DB.
 - `post_db_scheduled_reference_seed_manifest.json`: small manifest for that scheduled reference seed.
-- `fused_conv2d_transpose2_add12_scheduled_form_candidate_v1_working_copy_tir.py`: editable scheduled-form working copy cloned from the checked-in reference seed.
-- `scheduled_form_candidate_v1_working_copy_manifest.json`: small manifest for the editable working copy.
-- `fused_conv2d_transpose2_add12_scheduled_form_candidate_v1.py`: local-only candidate wrapper that points the existing post-db seam at the working copy.
+- `fused_conv2d_transpose2_add12_scheduled_form_candidate_v1_working_copy_tir.py`: accepted scheduled-form v1 working copy cloned from the checked-in reference seed and carrying the bias-fusion edit.
+- `scheduled_form_candidate_v1_working_copy_manifest.json`: small manifest for the accepted v1 working copy.
+- `fused_conv2d_transpose2_add12_scheduled_form_candidate_v1.py`: local-only candidate wrapper that points the existing post-db seam at the accepted v1 working copy.
+- `fused_conv2d_transpose2_add12_scheduled_form_candidate_v2_working_copy_tir.py`: isolated scheduled-form v2 working copy that tries a P1-style `data_dilate + data_pad -> data_dilate_pad` fusion on top of the accepted v1 state.
+- `scheduled_form_candidate_v2_working_copy_manifest.json`: small manifest for the v2 working copy.
+- `fused_conv2d_transpose2_add12_scheduled_form_candidate_v2.py`: local-only candidate wrapper for the checked-in v2 working copy.
 
 ## Refresh / Build
 
@@ -38,5 +41,20 @@ python3 ./session_bootstrap/scripts/run_transpose2_post_db_local_build.py \
   --output-dir ./session_bootstrap/tmp/transpose2_post_db_swap_local_build
 ```
 
-This lane is still local-only and diagnostic-only. Do not use it for SSH or
-remote benchmark claims until a real transpose2 handwritten edit exists.
+To build the isolated v2 candidate instead of the accepted v1 baseline:
+
+```bash
+python3 ./session_bootstrap/scripts/run_transpose2_post_db_local_build.py \
+  --candidate-impl ./session_bootstrap/handwritten/fused_conv2d_transpose2_add12/fused_conv2d_transpose2_add12_scheduled_form_candidate_v2.py \
+  --output-dir ./session_bootstrap/tmp/transpose2_post_db_swap_local_build_v2
+```
+
+Current repo state:
+
+- accepted remote baseline: `v1 bias fusion`, report `./session_bootstrap/reports/transpose2_v1_remote_benchmark_20260331_201239.md`, median `161.416 ms`
+- dropped follow-up experiments: `P2` and `P4`
+- current next local candidate: `v2` P1-style `data_dilate + data_pad` fusion
+
+This lane is still local-only and diagnostic-only inside the repo. Use the
+accepted `v1` artifact as the baseline when manually benchmarking the new `v2`
+candidate on the board.

@@ -297,6 +297,7 @@ echo "$RUN_ID"
 
 - 仓库内已补充 `session_bootstrap/scripts/compute_image_quality_metrics.py`。
 - 该脚本按统一约定输出 `session_bootstrap/reports/<run_id>.md` 与 `session_bootstrap/reports/<run_id>.json`。
+- `2026-03-30` 起，仓库还补了 `session_bootstrap/scripts/build_quality_matrix_report.py`，用于把多份 `quality_metrics_*.json` 收口成 judge-facing 正式质量报告。
 
 执行计划：
 
@@ -360,6 +361,12 @@ python3 session_bootstrap/scripts/compute_image_quality_metrics.py \
 - `session_bootstrap/reports/quality_metrics_<RUN_ID>.md`
 - `session_bootstrap/reports/quality_metrics_<RUN_ID>.json`
 - 一张可以直接进入论文的汇总表
+- 如需答辩 / 评委材料总表，再执行：
+
+```bash
+python3 ./session_bootstrap/scripts/build_quality_matrix_report.py \
+  --report-prefix ./session_bootstrap/reports/judge_quality_formal_report_$(date +%Y%m%d)
+```
 
 ### 5.2 任务 `5.3`：资源分析（功耗 / 内存 / CPU / 产物大小）
 
@@ -690,6 +697,7 @@ done
 
 - 对每个 `snr` 的 current 输出目录，用 `4.1` 的质量脚本计算 `PSNR / SSIM / LPIPS`
 - 汇总成 `snr -> metrics` 曲线
+- `2026-03-30` 起，优先用 `session_bootstrap/scripts/build_snr_robustness_report.py` 汇总历史 / 新补采的 SNR 点，并输出 `md + json + svg`
 
 本任务输出：
 
@@ -697,6 +705,13 @@ done
 - 一份汇总 `session_bootstrap/reports/snr_sweep_<RUN_ID>.md`
 - 一份机器可读 `session_bootstrap/reports/snr_sweep_<RUN_ID>.json`
 - 一张 `PSNR vs SNR` 曲线图
+- judge-facing 汇总入口：
+
+```bash
+python3 ./session_bootstrap/scripts/build_snr_robustness_report.py \
+  --summary-md ./session_bootstrap/reports/snr_sweep_<RUN_ID>.md \
+  --report-prefix ./session_bootstrap/reports/judge_snr_robustness_$(date +%Y%m%d)
+```
 
 通过标准：
 

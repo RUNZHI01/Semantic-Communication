@@ -6,6 +6,7 @@ import { useAppStore } from '../stores/appStore'
 export function useInferenceProgressPoll() {
   const activeJobId = useAppStore((s) => s.activeJobId)
   const setActiveJobId = useAppStore((s) => s.setActiveJobId)
+  const setLastCompletedInference = useAppStore((s) => s.setLastCompletedInference)
   const qc = useQueryClient()
 
   const query = useQuery({
@@ -17,11 +18,13 @@ export function useInferenceProgressPoll() {
 
   useEffect(() => {
     if (query.data && query.data.request_state !== 'running' && activeJobId) {
+      // Save completed data before clearing active job
+      setLastCompletedInference(query.data)
       setActiveJobId(null)
       void qc.invalidateQueries({ queryKey: ['system-status'] })
       void qc.invalidateQueries({ queryKey: ['snapshot'] })
     }
-  }, [query.data, activeJobId, setActiveJobId, qc])
+  }, [query.data, activeJobId, setActiveJobId, setLastCompletedInference, qc])
 
   return query
 }
