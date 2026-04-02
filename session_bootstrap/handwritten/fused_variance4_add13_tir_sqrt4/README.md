@@ -56,6 +56,9 @@ introduce a separate raw pre-compile hook lane yet.
 - `fused_variance4_add13_tir_sqrt4_scheduled_form_candidate_v14_working_copy_tir.py`: exactness-aware follow-up that keeps the full `v13` unit-axis-cleaned `.data`-volatile local round-trip intact while switching the one-element local declaration from `T.decl_buffer(..., scope="local")` to the alternate handle-free `T.alloc_buffer(..., scope="local")` encoding.
 - `scheduled_form_candidate_v14_working_copy_manifest.json`: manifest for the versioned `v14` working copy.
 - `fused_variance4_add13_tir_sqrt4_scheduled_form_candidate_v14.py`: local-only candidate wrapper for the `v14` working copy.
+- `fused_variance4_add13_tir_sqrt4_scheduled_form_candidate_v15_working_copy_tir.py`: performance-oriented exactness-aware follow-up that keeps the full `v14` handle-free `.data`-volatile local round-trip intact while making only the tiny `lv335_red` reduction buffer explicitly `scope="local"`.
+- `scheduled_form_candidate_v15_working_copy_manifest.json`: manifest for the versioned `v15` working copy.
+- `fused_variance4_add13_tir_sqrt4_scheduled_form_candidate_v15.py`: local-only candidate wrapper for the `v15` working copy.
 
 ## Refresh / Build
 
