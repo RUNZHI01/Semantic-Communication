@@ -25,6 +25,9 @@ touching trusted current or launching any SSH / remote benchmark work.
 - `./session_bootstrap/handwritten/fused_conv2d_transpose2_add12/fused_conv2d_transpose2_add12_scheduled_form_candidate_v1_working_copy_tir.py`
 - `./session_bootstrap/handwritten/fused_conv2d_transpose2_add12/scheduled_form_candidate_v1_working_copy_manifest.json`
 - `./session_bootstrap/handwritten/fused_conv2d_transpose2_add12/fused_conv2d_transpose2_add12_scheduled_form_candidate_v1.py`
+- `./session_bootstrap/handwritten/fused_conv2d_transpose2_add12/fused_conv2d_transpose2_add12_scheduled_form_candidate_v2_working_copy_tir.py`
+- `./session_bootstrap/handwritten/fused_conv2d_transpose2_add12/scheduled_form_candidate_v2_working_copy_manifest.json`
+- `./session_bootstrap/handwritten/fused_conv2d_transpose2_add12/fused_conv2d_transpose2_add12_scheduled_form_candidate_v2.py`
 
 ## Operator-specific scripts
 
@@ -55,8 +58,18 @@ python3 ./session_bootstrap/scripts/run_transpose2_post_db_local_build.py \
   --output-dir ./session_bootstrap/tmp/transpose2_post_db_swap_local_build
 ```
 
+4. When preparing the next manual board benchmark, build the isolated `v2`
+candidate instead of overwriting the accepted `v1` baseline:
+
+```bash
+python3 ./session_bootstrap/scripts/run_transpose2_post_db_local_build.py \
+  --candidate-impl ./session_bootstrap/handwritten/fused_conv2d_transpose2_add12/fused_conv2d_transpose2_add12_scheduled_form_candidate_v2.py \
+  --output-dir ./session_bootstrap/tmp/transpose2_post_db_swap_local_build_v2
+```
+
 ## Notes
 
 - This lane is deliberately local-only and diagnostic-only.
-- The working copy starts as an unedited scheduled-form clone of the checked-in reference seed.
+- The accepted checked-in `v1` working copy already carries the bias-fusion edit and has a remote baseline report at `161.416 ms`.
+- The new `v2` working copy is the isolated P1-style structural candidate that fuses `data_dilate + data_pad`.
 - Do not run SSH or remote benchmark work from this runbook yet.
