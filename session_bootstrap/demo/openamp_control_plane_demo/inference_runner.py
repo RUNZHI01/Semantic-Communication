@@ -73,7 +73,10 @@ def parse_json_stdout(raw: str) -> dict[str, Any]:
         line = line.strip()
         if not line:
             continue
-        payload = json.loads(line)
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
         if isinstance(payload, dict):
             return payload
     raise ValueError("runner produced no JSON payload")
