@@ -70,30 +70,6 @@
   color: var(--color-success);
 }
 
-/* Progress with mini track */
-.progressGroup {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  width: 100%;
-}
-
-.miniTrack {
-  width: 100%;
-  height: 3px;
-  background: var(--color-bg-section);
-  border-radius: 2px;
-  overflow: hidden;
-}
-
-.miniFill {
-  height: 100%;
-  background: linear-gradient(90deg, var(--color-primary) 0%, #3B82F6 100%);
-  border-radius: 2px;
-  transition: width 500ms var(--easing-standard);
-  min-width: 0;
-}
-
 /* ===== Responsive ===== */
 @media (max-width: 1200px) {
   .container {
