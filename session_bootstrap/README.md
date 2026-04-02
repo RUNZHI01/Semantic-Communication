@@ -115,6 +115,27 @@
 | 答辩讲稿 / 页结构提纲 | `reports/openamp_control_plane_evidence_package_20260315/defense_talk_outline.md` |
 | live 不稳时的降级方案 | `reports/openamp_control_plane_evidence_package_20260315/degraded_demo_plan.md` |
 | OpenAMP 总报告 | `reports/openamp_control_plane_evidence_package_20260315/summary_report.md` |
+
+### 当前仍真实未完成的主项（2026-04-03）
+
+如果你只想知道“现在项目还真差什么”，优先看这几类：
+
+1. **Demo 真实彩排 / UI / operator flow 回填**
+   - 四幕 Demo
+   - 首屏字段稳定露出
+   - 第三幕只出现两条正式口径
+   - 三个 fault 按钮是否在最终 build 中形成诚实的 replay/live 体验
+   - 入口：`reports/openamp_demo_presentation_day_checklist_2026-04-03.md`、`reports/openamp_demo_rehearsal_go_nogo_template_2026-04-03.md`
+2. **OpenAMP 剩余真机协议 / FIT 缺口**
+   - `FIT-04/05`
+   - `TC-007/008/009/010`
+   - 入口：`reports/openamp_remaining_protocol_fit_runplan_2026-04-03.md`
+3. **P2 仍未做的后置差异化项**
+   - 跨框架对比：TVM vs MNN vs NCNN / ORT
+   - TVM hotspot 定向深搜
+   - 手写 TIR 等更后置扩展
+
+说明：big.LITTLE、双层口径、发布基线谱系、平台表述策略、Demo 文档链等定义层/接入层事项，当前都已完成或已 docs-frozen，不再是主要 blocker。
 | OpenAMP 统一 coverage matrix / FIT summary | `reports/openamp_control_plane_evidence_package_20260315/coverage_matrix.md` |
 | FIT-02 历史 `batch=4` 故障正式案例卡（2026-04-03） | `reports/openamp_fit02_batch_contract_case_card_2026-04-03.md` |
 | `TC-002/010` 答辩口径拆分说明（2026-04-03） | `reports/openamp_tc002_tc010_defense_scope_note_2026-04-03.md` |
