@@ -43,6 +43,8 @@
 
 - `Link Director` 仍是 `ui_scaffold_only`，不会改写 live telemetry，也不会真的下发 tc/netem。
 - 第三幕默认基线仍以 PyTorch reference archive 为正式对照口径，不把 baseline TVM live 混进本场默认叙事。
+- 第三幕正式只引用 `1846.9 -> 130.219 ms` 与 `1850.0 -> 230.339 ms/image` 两条口径，不混写 demo live drift 数字。
+- `8115 / 300 / 300` 现在只用于 `TC-002` live reconstruction 收口，不延伸 claim `TC-010` / `RESET_REQ/ACK` / sticky fault reset 已闭环。
 - archive timeline 是本地 `JSONL + state_snapshot.json` replay，不是 rrweb，也不是全量浏览器录像。
 - 本轮新增的 refresh-hydration 只保证“最近一次已完成结果”在刷新后仍可见；正在运行中的 live job 仍以 active progress / operator cue 为主，不宣称实现了完整中途恢复。
 - SAFE_STOP / GPIO 物理所有权仍在 RTOS/Bare Metal，Linux UI 只做 mirror / control surface。
@@ -53,6 +55,14 @@
 - 执行只读探板。
 - 点击 gate preview、Current/PyTorch 运行、fault injection、SAFE_STOP。
 - 根据现场口径决定是否切换 link profile、是否展开第四幕。
+
+## April 3 wording freeze follow-up
+
+For the latest docs-first wording freeze, also cross-check:
+
+- `session_bootstrap/reports/openamp_demo_video_script_alignment_2026-04-03.md`
+- `session_bootstrap/reports/openamp_demo_topline_acceptance_note_2026-04-03.md`
+- `session_bootstrap/reports/openamp_tc002_tc010_defense_scope_note_2026-04-03.md`
 
 ## Focused Validation
 

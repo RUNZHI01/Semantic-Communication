@@ -14,6 +14,20 @@ After the M11 snapshot, the next minimal convergence pass was:
 
 See: `session_bootstrap/reports/openamp_demo_baseline_semantics_alignment_20260322.md`
 
+## 2026-04-03 Wording Freeze Follow-up
+
+The next docs-only convergence pass further froze the defense wording:
+
+- Scene 3 keeps the archived `PyTorch reference` as the default compare branch
+- Scene 3 only quotes the two formal lines `1846.9 -> 130.219 ms` and `1850.0 -> 230.339 ms/image`
+- `8115 / 300 / 300` is now explicitly framed as `TC-002` live reconstruction evidence, not `TC-010` / `RESET_REQ/ACK` closure
+- top-line status acceptance is treated as docs-first wording plus presentation-day human verification, not as a promise that every UI field is already final in all live builds
+
+See:
+- `session_bootstrap/reports/openamp_demo_video_script_alignment_2026-04-03.md`
+- `session_bootstrap/reports/openamp_demo_topline_acceptance_note_2026-04-03.md`
+- `session_bootstrap/reports/openamp_tc002_tc010_defense_scope_note_2026-04-03.md`
+
 ## Launch
 
 Supported launch command from the repo root:
@@ -37,6 +51,9 @@ Operator use:
 2. `session_bootstrap/reports/openamp_demo_operator_runbook_m9_20260319.md`
 3. `session_bootstrap/reports/openamp_demo_72s_script_m9_20260319.md`
 4. `session_bootstrap/reports/openamp_demo_readiness_m8_20260319.md`
+5. `session_bootstrap/reports/openamp_demo_topline_acceptance_note_2026-04-03.md`
+6. `session_bootstrap/reports/openamp_tc002_tc010_defense_scope_note_2026-04-03.md`
+7. `session_bootstrap/reports/openamp_demo_video_script_alignment_2026-04-03.md`
 
 Engineering context:
 
