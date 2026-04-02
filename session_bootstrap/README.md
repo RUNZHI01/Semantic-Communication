@@ -90,6 +90,9 @@
 | OpenAMP demo 最终交付快照（2026-03-17） | `reports/openamp_demo_live_delivery_snapshot_20260317.md` |
 | OpenAMP demo 交接清单 / handoff manifest（M10） | `reports/openamp_demo_handoff_manifest_m10_20260319.md` |
 | OpenAMP demo 最终交付索引（M11） | `reports/openamp_demo_delivery_index_m11_20260319.md` |
+| OpenAMP demo 视频脚本口径同步（2026-04-03） | `reports/openamp_demo_video_script_alignment_2026-04-03.md` |
+| OpenAMP demo 首屏验收口径说明（2026-04-03） | `reports/openamp_demo_topline_acceptance_note_2026-04-03.md` |
+| `TC-002/010` 答辩边界说明（2026-04-03） | `reports/openamp_tc002_tc010_defense_scope_note_2026-04-03.md` |
 | 集成 OpenAMP demo dashboard 启动器 | `scripts/run_openamp_demo.sh` |
 | cockpit_native 原生座舱答辩讲稿 | `runbooks/cockpit_native_demo_talk_track_2026-03-24.md` |
 | cockpit_native demo packet 索引 | `runbooks/cockpit_native_demo_packet_index_2026-03-24.md` |
