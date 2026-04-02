@@ -43,6 +43,29 @@ bash ./session_bootstrap/scripts/run_openamp_demo.sh \
   --probe-env ./session_bootstrap/config/phytium_pi_login.env
 ```
 
+## Session Readiness Check
+
+Before trying to continue the live operator flow, run the dedicated readiness check:
+
+```bash
+python3 ./session_bootstrap/scripts/check_openamp_demo_session_readiness.py --format text
+```
+
+Default JSON output is also available for machine-readable checks:
+
+```bash
+python3 ./session_bootstrap/scripts/check_openamp_demo_session_readiness.py
+```
+
+The readiness checker reuses the same demo defaults and field contracts as the dashboard server:
+
+- checks whether `host / user / port / password` are complete for the current session
+- reports whether the probe env defaults are present and whether the effective inference env is complete
+- distinguishes `docs-first only` from `can continue live probe` and `can continue live inference`
+- exits with `0` when the full live operator flow is ready, `2` when readiness blockers remain
+
+In the normal repo state, the check should explicitly report `missing password` while showing that the probe/inference defaults are already preloaded.
+
 Optional signed-manifest demo admission for the current artifact, baseline artifact, or both:
 
 ```bash
@@ -83,6 +106,16 @@ On startup, the demo now also preloads practical repo-backed defaults when they 
 - live inference now reuses that validated env contract directly instead of rewriting `INFERENCE_CURRENT_EXPECTED_SHA256` inside the demo server
 
 Repo-side password fields are ignored intentionally. The operator still enters the password once in the web UI, and the current demo-server process reuses it for later probe / inference / fault actions.
+
+If you want to re-check readiness with a runtime password without starting the dashboard first:
+
+```bash
+python3 ./session_bootstrap/scripts/check_openamp_demo_session_readiness.py \
+  --password '<runtime-password>' \
+  --format text
+```
+
+The checker only reports `has_password=true/false`; it does not print the raw password back out.
 
 ## Web-side credential flow
 

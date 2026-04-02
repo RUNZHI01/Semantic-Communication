@@ -97,7 +97,27 @@ bash ./session_bootstrap/scripts/run_openamp_demo.sh
 
 ---
 
-## 4. 对主清单的意义
+## 4. 新增可执行 readiness 检查入口
+
+本轮已补充：
+
+```bash
+python3 ./session_bootstrap/scripts/check_openamp_demo_session_readiness.py --format text
+```
+
+当前仓库状态下，实际输出会明确给出：
+
+- `mode: 待补全密码`
+- `missing_connection_fields: password`
+- `current: ready=no missing_env=password`
+- `baseline: ready=no missing_env=password`
+- `exit_code: 2`
+
+这一步把“当前 blocker 是缺 password”从报告描述，推进成了可重复执行的仓库内检查入口。
+
+---
+
+## 5. 对主清单的意义
 
 这轮检查进一步支持当前对 Demo 未完成项的解释：
 
@@ -110,20 +130,22 @@ bash ./session_bootstrap/scripts/run_openamp_demo.sh
 
 ---
 
-## 5. 建议下一步
+## 6. 建议下一步
 
 若继续推进 Demo 主线，默认顺序应是：
 
-1. 补齐板侧 password / 完整会话条件
-2. 重新运行 `run_openamp_demo.sh`
-3. 按 `openamp_demo_presentation_day_checklist_2026-04-03.md` 做真实彩排
-4. 用 `openamp_demo_rehearsal_go_nogo_template_2026-04-03.md` 回填结果
+1. 先运行 `check_openamp_demo_session_readiness.py`
+2. 补齐板侧 password / 完整会话条件
+3. 重新运行 `run_openamp_demo.sh`
+4. 按 `openamp_demo_presentation_day_checklist_2026-04-03.md` 做真实彩排
+5. 用 `openamp_demo_rehearsal_go_nogo_template_2026-04-03.md` 回填结果
 
 ---
 
-## 6. 关联入口
+## 7. 关联入口
 
 - `session_bootstrap/reports/openamp_demo_presentation_day_checklist_2026-04-03.md`
 - `session_bootstrap/reports/openamp_demo_rehearsal_go_nogo_template_2026-04-03.md`
 - `session_bootstrap/reports/openamp_demo_task_completion_gate_matrix_2026-04-03.md`
 - `session_bootstrap/reports/project_next_real_blockers_after_docs_freeze_2026-04-03.md`
+- `session_bootstrap/demo/openamp_control_plane_demo/README.md`
