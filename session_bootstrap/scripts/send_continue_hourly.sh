@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SESSION_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="$(cd "$SESSION_DIR/.." && pwd)"
 OPENCLAW_ROOT="/home/tianxing/agent-lab/openclaw"
+OPENCLAW_CONFIG_FILE="${OPENCLAW_CONFIG:-$HOME/.openclaw/openclaw.json}"
 DEFAULT_SESSION="main"
 DEFAULT_MESSAGE="继续"
 DEFAULT_PROJECT_FOCUS="tvm-飞腾派项目"
@@ -417,7 +418,37 @@ run_openclaw_gateway_call() {
   local method="$1"
   local params_json="$2"
   local cli_timeout_ms="${3:-30000}"
+  sync_gateway_auth_env_from_config
   node "$OPENCLAW_GATEWAY_CALL_BIN" gateway call "$method" --json --timeout "$cli_timeout_ms" --params "$params_json"
+}
+
+load_gateway_auth_token_from_config() {
+  if [[ ! -f "$OPENCLAW_CONFIG_FILE" ]]; then
+    return 0
+  fi
+
+  node - "$OPENCLAW_CONFIG_FILE" <<'NODE'
+const fs = require("fs");
+
+const configPath = process.argv[2];
+
+try {
+  const raw = fs.readFileSync(configPath, "utf8");
+  const cfg = JSON.parse(raw);
+  const token = cfg?.gateway?.auth?.token;
+  if (typeof token === "string" && token.trim()) {
+    process.stdout.write(token.trim());
+  }
+} catch {}
+NODE
+}
+
+sync_gateway_auth_env_from_config() {
+  local config_token=""
+  config_token="$(load_gateway_auth_token_from_config)"
+  if [[ -n "$config_token" ]]; then
+    export OPENCLAW_GATEWAY_TOKEN="$config_token"
+  fi
 }
 
 describe_pid_cmd() {
@@ -1492,6 +1523,7 @@ wait_for_target_session_idle() {
   local output=""
   local rc=0
 
+  sync_gateway_auth_env_from_config
   if output="$(pnpm --dir "$OPENCLAW_ROOT" exec tsx "$WAIT_FOR_SESSION_IDLE_HELPER" --session "$SESSION_KEY" --timeout-ms "$WAIT_TIMEOUT_MS" --history-limit "$HISTORY_LIMIT" 2>&1)"; then
     rc=0
   else
@@ -1544,6 +1576,7 @@ submit_once() {
   local anchor_json=""
   local effective_message=""
 
+  sync_gateway_auth_env_from_config
   "$OC_GATEWAY_ENSURE_BIN"
   if [[ "$SCHEDULE_MODE" == "after-complete" ]]; then
     local idle_wait_rc=0
