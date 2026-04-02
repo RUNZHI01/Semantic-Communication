@@ -69,7 +69,7 @@ class FusedConv2dTransposeAdd6ScheduledFormCandidateV2Test(unittest.TestCase):
         self.assertEqual(metadata["candidate_version"], "v2_working_copy")
         self.assertEqual(
             metadata["candidate_status"],
-            "v2_locality_seed_cloned_from_v1_ready",
+            "v2_dc0_slice_data_pad_reuse_applied",
         )
         self.assertFalse(metadata["placeholder_only"])
         self.assertFalse(metadata["hook_target"])

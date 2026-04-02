@@ -38,14 +38,18 @@ class DummyTVMScriptNamespace:
 class FusedConv2dTransposeAdd6ScheduledFormCandidateV2WorkingCopyTest(
     unittest.TestCase
 ):
-    def test_working_copy_is_an_isolated_locality_seed(self) -> None:
+    def test_working_copy_applies_the_first_locality_edit(self) -> None:
         text = MODULE_PATH.read_text(encoding="utf-8")
 
-        self.assertIn("New candidate goal", text)
-        self.assertIn("Current checked-in v2 state", text)
+        self.assertIn("First real v2 locality edit", text)
         self.assertIn("data_dilate = T.alloc_buffer", text)
         self.assertIn('with T.sblock("data_pad")', text)
         self.assertIn("kernel_transform = T.alloc_buffer", text)
+        self.assertIn("for dc_0 in T.serial(T.int64(6))", text)
+        self.assertIn(
+            "for ax0, ax1, ax2 in T.grid(T.int64(1), T.int64(16), T.int64(6))",
+            text,
+        )
         self.assertNotIn("compute_intermediate = T.alloc_buffer", text)
         self.assertNotIn('with T.sblock("T_add")', text)
         self.assertIn('"pragma_auto_unroll_max_step": 32', text)
@@ -86,10 +90,10 @@ class FusedConv2dTransposeAdd6ScheduledFormCandidateV2WorkingCopyTest(
         self.assertFalse(payload["working_copy_contract"]["performance_claims"])
         self.assertEqual(
             payload["current_edit_state"]["status"],
-            "v2_locality_seed_cloned_from_v1_ready",
+            "v2_dc0_slice_data_pad_reuse_applied",
         )
         self.assertIn(
-            "No operator-side TIR change is checked in yet",
+            "the tile-local data_pad patch is staged one dc_0 16-channel reduction slice at a time",
             payload["current_edit_state"]["concrete_change"],
         )
         self.assertEqual(

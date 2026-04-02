@@ -11,14 +11,14 @@
 # - keep the scheduled reference seed and accepted v1 baseline frozen
 # - do not treat this file as hook-facing or as performance evidence
 #
-# New candidate goal:
-# - preserve the accepted v1 bias-fused behavior exactly for now
-# - open a separate v2 surface for the first locality/carry-style follow-up
-# - spend this branch on reducing repeated data_dilate/data_pad staging before touching kernel layout or micro-tuning
-#
-# Current checked-in v2 state:
-# - operator body intentionally matches the accepted v1 implementation
-# - data_dilate, data_pad, kernel_transform, tiling, reduction split, and unroll settings stay unchanged
+# First real v2 locality edit:
+# - keep the accepted v1 bias-fused compute_init/compute_update path intact
+# - keep data_dilate materialized once for the whole operator call
+# - move the tile-local data_pad staging inside dc_0 so only one 16-channel
+#   reduction slice of the 6 x 10 padded patch is prepared at a time
+# - immediately reuse that staged dc_0 slice across all three c_1 groups before
+#   staging the next slice
+# - keep kernel_transform, tiling, reduction order, and unroll settings intact
 from tvm.script import ir as I
 from tvm.script import tir as T
 
@@ -83,38 +83,6 @@ class Module:
             annotations={"pragma_auto_unroll_max_step": 32, "pragma_unroll_explicit": 1},
         ):
             for b_1, c_1 in T.grid(T.int64(1), T.int64(3)):
-                for ax0, ax1, ax2 in T.grid(T.int64(1), T.int64(96), T.int64(6)):
-                    for ax3_fused in T.vectorized(T.int64(10)):
-                        with T.sblock("data_pad"):
-                            v_i0, v_i1 = T.axis.remap("SS", [ax0, ax1])
-                            v_i2 = T.axis.spatial(
-                                T.int64(66),
-                                b_0_c_0_h_0_w_0_fused_fused // T.int64(8)
-                                * T.int64(4)
-                                + ax2,
-                            )
-                            v_i3 = T.axis.spatial(
-                                T.int64(66),
-                                b_0_c_0_h_0_w_0_fused_fused % T.int64(8)
-                                * T.int64(8)
-                                + ax3_fused,
-                            )
-                            T.reads(
-                                data_dilate[
-                                    v_i0, v_i1, v_i2 - T.int64(1), v_i3 - T.int64(1)
-                                ]
-                            )
-                            T.writes(data_pad[v_i0, v_i1, v_i2, v_i3])
-                            data_pad[v_i0, v_i1, v_i2, v_i3] = T.if_then_else(
-                                T.int64(1) <= v_i2
-                                and v_i2 < T.int64(64)
-                                and T.int64(1) <= v_i3
-                                and v_i3 < T.int64(64),
-                                data_dilate[
-                                    v_i0, v_i1, v_i2 - T.int64(1), v_i3 - T.int64(1)
-                                ],
-                                T.float32(0.0),
-                            )
                 for h_1, w_1 in T.grid(T.int64(1), T.int64(1)):
                     for (
                         b_2_init,
@@ -166,76 +134,112 @@ class Module:
                                 T_add_intermediate[v_b, v_c, v_h, v_w] = lv306[
                                     v_b, v_c, T.int64(0), T.int64(0)
                                 ]
-                    for (
-                        dc_0,
-                        dh_0,
-                        dw_0,
-                        b_2,
-                        c_2,
-                        h_2,
-                        w_2,
-                        dc_1,
-                        dh_1,
-                        dw_1,
-                        b_3,
-                        c_3,
-                        h_3,
-                    ) in T.grid(
-                        T.int64(6),
-                        T.int64(1),
-                        T.int64(1),
-                        T.int64(1),
-                        T.int64(4),
-                        T.int64(2),
-                        T.int64(2),
-                        T.int64(16),
-                        T.int64(3),
-                        T.int64(3),
-                        T.int64(1),
-                        T.int64(4),
-                        T.int64(2),
-                    ):
-                        for w_3_fused in T.vectorized(T.int64(4)):
-                            with T.sblock("compute_update"):
-                                v_b = T.axis.spatial(T.int64(1), b_1 + b_2 + b_3)
-                                v_c = T.axis.spatial(
-                                    T.int64(48),
-                                    c_1 * T.int64(16) + c_2 * T.int64(4) + c_3,
-                                )
-                                v_h = T.axis.spatial(
-                                    T.int64(64),
-                                    b_0_c_0_h_0_w_0_fused_fused // T.int64(8)
-                                    * T.int64(4)
-                                    + h_1 * T.int64(4)
-                                    + h_2 * T.int64(2)
-                                    + h_3,
-                                )
-                                v_w = T.axis.spatial(
-                                    T.int64(64),
-                                    b_0_c_0_h_0_w_0_fused_fused % T.int64(8)
-                                    * T.int64(8)
-                                    + w_1 * T.int64(8)
-                                    + w_2 * T.int64(4)
-                                    + w_3_fused,
-                                )
-                                v_dc = T.axis.reduce(
-                                    T.int64(96), dc_0 * T.int64(16) + dc_1
-                                )
-                                v_dh = T.axis.reduce(
-                                    T.int64(3), dh_0 * T.int64(3) + dh_1
-                                )
-                                v_dw = T.axis.reduce(
-                                    T.int64(3), dw_0 * T.int64(3) + dw_1
-                                )
-                                T.reads(
-                                    T_add_intermediate[v_b, v_c, v_h, v_w],
-                                    data_pad[v_b, v_dc, v_h + v_dh, v_w + v_dw],
-                                    kernel_transform[v_c, v_dc, v_dh, v_dw],
-                                )
-                                T.writes(T_add_intermediate[v_b, v_c, v_h, v_w])
-                                T.sblock_attr({"meta_schedule.tiling_structure": "SSRSRS"})
-                                T_add_intermediate[v_b, v_c, v_h, v_w] = (
-                                    T_add_intermediate[v_b, v_c, v_h, v_w]
-                                    + data_pad[v_b, v_dc, v_h + v_dh, v_w + v_dw]
-                                    * kernel_transform[v_c, v_dc, v_dh, v_dw]
-                                )
+            for dc_0 in T.serial(T.int64(6)):
+                for ax0, ax1, ax2 in T.grid(T.int64(1), T.int64(16), T.int64(6)):
+                    for ax3_fused in T.vectorized(T.int64(10)):
+                        with T.sblock("data_pad"):
+                            v_i0 = T.axis.spatial(T.int64(1), ax0)
+                            v_i1 = T.axis.spatial(
+                                T.int64(96), dc_0 * T.int64(16) + ax1
+                            )
+                            v_i2 = T.axis.spatial(
+                                T.int64(66),
+                                b_0_c_0_h_0_w_0_fused_fused // T.int64(8)
+                                * T.int64(4)
+                                + ax2,
+                            )
+                            v_i3 = T.axis.spatial(
+                                T.int64(66),
+                                b_0_c_0_h_0_w_0_fused_fused % T.int64(8)
+                                * T.int64(8)
+                                + ax3_fused,
+                            )
+                            T.reads(
+                                data_dilate[
+                                    v_i0, v_i1, v_i2 - T.int64(1), v_i3 - T.int64(1)
+                                ]
+                            )
+                            T.writes(data_pad[v_i0, v_i1, v_i2, v_i3])
+                            data_pad[v_i0, v_i1, v_i2, v_i3] = T.if_then_else(
+                                T.int64(1) <= v_i2
+                                and v_i2 < T.int64(64)
+                                and T.int64(1) <= v_i3
+                                and v_i3 < T.int64(64),
+                                data_dilate[
+                                    v_i0, v_i1, v_i2 - T.int64(1), v_i3 - T.int64(1)
+                                ],
+                                T.float32(0.0),
+                            )
+                for b_1, c_1 in T.grid(T.int64(1), T.int64(3)):
+                    for h_1, w_1 in T.grid(T.int64(1), T.int64(1)):
+                        for (
+                            dh_0,
+                            dw_0,
+                            b_2,
+                            c_2,
+                            h_2,
+                            w_2,
+                            dc_1,
+                            dh_1,
+                            dw_1,
+                            b_3,
+                            c_3,
+                            h_3,
+                        ) in T.grid(
+                            T.int64(1),
+                            T.int64(1),
+                            T.int64(1),
+                            T.int64(4),
+                            T.int64(2),
+                            T.int64(2),
+                            T.int64(16),
+                            T.int64(3),
+                            T.int64(3),
+                            T.int64(1),
+                            T.int64(4),
+                            T.int64(2),
+                        ):
+                            for w_3_fused in T.vectorized(T.int64(4)):
+                                with T.sblock("compute_update"):
+                                    v_b = T.axis.spatial(T.int64(1), b_1 + b_2 + b_3)
+                                    v_c = T.axis.spatial(
+                                        T.int64(48),
+                                        c_1 * T.int64(16) + c_2 * T.int64(4) + c_3,
+                                    )
+                                    v_h = T.axis.spatial(
+                                        T.int64(64),
+                                        b_0_c_0_h_0_w_0_fused_fused // T.int64(8)
+                                        * T.int64(4)
+                                        + h_1 * T.int64(4)
+                                        + h_2 * T.int64(2)
+                                        + h_3,
+                                    )
+                                    v_w = T.axis.spatial(
+                                        T.int64(64),
+                                        b_0_c_0_h_0_w_0_fused_fused % T.int64(8)
+                                        * T.int64(8)
+                                        + w_1 * T.int64(8)
+                                        + w_2 * T.int64(4)
+                                        + w_3_fused,
+                                    )
+                                    v_dc = T.axis.reduce(
+                                        T.int64(96), dc_0 * T.int64(16) + dc_1
+                                    )
+                                    v_dh = T.axis.reduce(
+                                        T.int64(3), dh_0 * T.int64(3) + dh_1
+                                    )
+                                    v_dw = T.axis.reduce(
+                                        T.int64(3), dw_0 * T.int64(3) + dw_1
+                                    )
+                                    T.reads(
+                                        T_add_intermediate[v_b, v_c, v_h, v_w],
+                                        data_pad[v_b, v_dc, v_h + v_dh, v_w + v_dw],
+                                        kernel_transform[v_c, v_dc, v_dh, v_dw],
+                                    )
+                                    T.writes(T_add_intermediate[v_b, v_c, v_h, v_w])
+                                    T.sblock_attr({"meta_schedule.tiling_structure": "SSRSRS"})
+                                    T_add_intermediate[v_b, v_c, v_h, v_w] = (
+                                        T_add_intermediate[v_b, v_c, v_h, v_w]
+                                        + data_pad[v_b, v_dc, v_h + v_dh, v_w + v_dw]
+                                        * kernel_transform[v_c, v_dc, v_dh, v_dw]
+                                    )
