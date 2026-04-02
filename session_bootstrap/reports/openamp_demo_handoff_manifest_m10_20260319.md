@@ -49,7 +49,7 @@ Practical note:
 ## Quick Sanity Check
 
 1. Open `http://127.0.0.1:8079` and confirm the page loads.
-2. Confirm the top-line status still shows the established demo facts: `8115`, `Current 300 / 300`, `PyTorch reference 300 / 300 (archive)`, plus the `4-core Linux performance mode` vs `3-core Linux + RTOS demo mode` boundary.
+2. Confirm the top-line status still shows the established demo facts: `8115`, `Current 300 / 300`, `PyTorch reference 300 / 300 (archive)`, plus the `4-core Linux performance mode` vs `3-core Linux + RTOS demo mode` boundary. For the frozen acceptance wording and the `TC-002 / TC-010` boundary, cross-check `session_bootstrap/reports/openamp_demo_topline_acceptance_note_2026-04-03.md`.
 3. Check health:
 
 ```bash
