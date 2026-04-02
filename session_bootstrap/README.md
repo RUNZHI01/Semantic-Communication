@@ -104,6 +104,7 @@
 | OpenAMP 总报告 | `reports/openamp_control_plane_evidence_package_20260315/summary_report.md` |
 | OpenAMP 统一 coverage matrix / FIT summary | `reports/openamp_control_plane_evidence_package_20260315/coverage_matrix.md` |
 | FIT-02 历史 `batch=4` 故障正式案例卡（2026-04-03） | `reports/openamp_fit02_batch_contract_case_card_2026-04-03.md` |
+| `TC-002/010` 答辩口径拆分说明（2026-04-03） | `reports/openamp_tc002_tc010_defense_scope_note_2026-04-03.md` |
 | 历史时间线真相源 | `PROGRESS_LOG.md` |
 
 如果你只想知道“现在应该复现哪条线”，默认优先：
