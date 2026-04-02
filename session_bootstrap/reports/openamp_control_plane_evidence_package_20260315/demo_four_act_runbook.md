@@ -31,16 +31,17 @@
 1. [summary_report.md](summary_report.md)
 2. [coverage_matrix.md](coverage_matrix.md)
 3. [../openamp_demo_live_dualpath_status_20260317.md](../openamp_demo_live_dualpath_status_20260317.md)
-4. [../openamp_phase5_release_v1.4.0_cold_boot_and_demo_success_2026-03-14.md](../openamp_phase5_release_v1.4.0_cold_boot_and_demo_success_2026-03-14.md)
-5. [../openamp_wrapper_hook_board_smoke_success_2026-03-14.md](../openamp_wrapper_hook_board_smoke_success_2026-03-14.md)
-6. [../openamp_phase5_job_done_success_2026-03-15.md](../openamp_phase5_job_done_success_2026-03-15.md)
-7. [../openamp_phase5_fit01_wrong_sha_success_2026-03-15.md](../openamp_phase5_fit01_wrong_sha_success_2026-03-15.md)
-8. [../openamp_phase5_fit02_input_contract_success_2026-03-15.md](../openamp_phase5_fit02_input_contract_success_2026-03-15.md)
-9. [../openamp_phase5_fit03_timeout_gap_2026-03-15.md](../openamp_phase5_fit03_timeout_gap_2026-03-15.md)
-10. [../openamp_phase5_fit03_watchdog_success_2026-03-15.md](../openamp_phase5_fit03_watchdog_success_2026-03-15.md)
-11. [../inference_compare_currentsafe_chunk4_refresh_20260313_1758.md](../inference_compare_currentsafe_chunk4_refresh_20260313_1758.md)
-12. [../inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md](../inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md)
-13. [../../PROGRESS_LOG.md](../../PROGRESS_LOG.md)
+4. [../openamp_tc002_tc010_defense_scope_note_2026-04-03.md](../openamp_tc002_tc010_defense_scope_note_2026-04-03.md)
+5. [../openamp_phase5_release_v1.4.0_cold_boot_and_demo_success_2026-03-14.md](../openamp_phase5_release_v1.4.0_cold_boot_and_demo_success_2026-03-14.md)
+6. [../openamp_wrapper_hook_board_smoke_success_2026-03-14.md](../openamp_wrapper_hook_board_smoke_success_2026-03-14.md)
+7. [../openamp_phase5_job_done_success_2026-03-15.md](../openamp_phase5_job_done_success_2026-03-15.md)
+8. [../openamp_phase5_fit01_wrong_sha_success_2026-03-15.md](../openamp_phase5_fit01_wrong_sha_success_2026-03-15.md)
+9. [../openamp_phase5_fit02_input_contract_success_2026-03-15.md](../openamp_phase5_fit02_input_contract_success_2026-03-15.md)
+10. [../openamp_phase5_fit03_timeout_gap_2026-03-15.md](../openamp_phase5_fit03_timeout_gap_2026-03-15.md)
+11. [../openamp_phase5_fit03_watchdog_success_2026-03-15.md](../openamp_phase5_fit03_watchdog_success_2026-03-15.md)
+12. [../inference_compare_currentsafe_chunk4_refresh_20260313_1758.md](../inference_compare_currentsafe_chunk4_refresh_20260313_1758.md)
+13. [../inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md](../inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md)
+14. [../../PROGRESS_LOG.md](../../PROGRESS_LOG.md)
 
 如果要插入 live cue，额外要求：
 
@@ -65,7 +66,7 @@
 
 ### 默认路径
 
-1. 先打开 [../openamp_demo_live_dualpath_status_20260317.md](../openamp_demo_live_dualpath_status_20260317.md)，用一句话把最近 live 状态定住：**8115 是当前唯一有效 demo 实例，current 已成功跑通，baseline 也已通过 signed sideband 进入真机执行，且两侧最新 live reconstruction 均完成 `300/300`。**
+1. 先打开 [../openamp_demo_live_dualpath_status_20260317.md](../openamp_demo_live_dualpath_status_20260317.md)，用一句话把最近 live 状态定住：**8115 是当前唯一有效 demo 实例，current 已成功跑通，baseline 也已通过 signed sideband 进入真机执行，且两侧最新 live reconstruction 均完成 `300/300`。** 这也是当前 `TC-002` 的正式收口入口：live reconstruction `300/300` 已足以说明 payload / reconstruction 正常作业闭环，不再临时制造新的 `TC-002` 专用脚本。
 2. 再打开 [summary_report.md](summary_report.md)，先报总判定：`P0 已板级闭环；P1 FIT-01 / FIT-02 / FIT-03 最终均为 PASS`。
 3. 切到 [../openamp_phase5_release_v1.4.0_cold_boot_and_demo_success_2026-03-14.md](../openamp_phase5_release_v1.4.0_cold_boot_and_demo_success_2026-03-14.md)，强调三个关键事实：
    - `remoteproc0=running`
@@ -237,6 +238,7 @@
    - `FIT-02` 证明非法输入契约进不来
    - `FIT-03` 证明运行中 heartbeat 丢失已能收敛到 `HEARTBEAT_TIMEOUT`
 5. 最后强调边界：当前定位是“高性能 current artifact 的安全可靠执行入口”，不是“已完成全部 fault-recovery 子系统”。
+   - `TC-010` 对应的 `RESET_REQ/ACK` / sticky fault reset 仍属于后续协议扩展，不在本轮正式 claim。
 
 ### 可选 live cue
 
@@ -262,6 +264,7 @@
 
 - 不要把 TVM 性能结论说成由 OpenAMP 直接带来的。
 - 不要把 current artifact 的性能结论与 out-of-scope FIT 混在一起。
+- 不要把 `TC-002` 的 `300/300` 收口延伸成 `TC-010` 已完成。
 
 ## 7. 结尾一句话
 

@@ -25,7 +25,7 @@
 
 ## 控制面与安全亮点（约 85 秒）
 
-“再看 demo mode，也就是 3-core Linux + RTOS。OpenAMP 这条线的价值不是让模型更快，而是证明这条高性能执行链有安全控制边界。当前真机证据已经覆盖了 `STATUS_REQ/RESP`、`JOB_REQ/JOB_ACK`、`HEARTBEAT_ACK`、`SAFE_STOP` 和 `JOB_DONE`。其中一个关键证据是 wrapper-backed board smoke，它证明 Linux wrapper 不是自己伪造放行，而是基于真实 firmware 的 `JOB_ACK(ALLOW)` 才让 runner 继续执行。最新 live 状态还确认，8115 这块板上 current 和 baseline 双路径都已经完成过 `300/300`，说明这不是离线 mock，而是真实在线系统。再往前一步，我们还有三项正式 FIT：错误 SHA 会被 admission gate 拒绝，非法参数会被 contract gate 拒绝，heartbeat timeout 则保留了 **fail -> fix -> pass** 的完整历史链。也就是说，我们不是只展示一个能收发消息的 OpenAMP demo，而是在展示一个**可准入、可拒绝、可监护、可安全停止**的最小控制闭环。” 
+“再看 demo mode，也就是 3-core Linux + RTOS。OpenAMP 这条线的价值不是让模型更快，而是证明这条高性能执行链有安全控制边界。当前真机证据已经覆盖了 `STATUS_REQ/RESP`、`JOB_REQ/JOB_ACK`、`HEARTBEAT_ACK`、`SAFE_STOP` 和 `JOB_DONE`。其中一个关键证据是 wrapper-backed board smoke，它证明 Linux wrapper 不是自己伪造放行，而是基于真实 firmware 的 `JOB_ACK(ALLOW)` 才让 runner 继续执行。最新 live 状态还确认，8115 这块板上 current 和 baseline 双路径都已经完成过 `300/300`，说明这不是离线 mock，而是真实在线系统。这里对外只把它当作 `TC-002` 的 live reconstruction 收口，证明正常作业闭环已经有真机证据；`TC-010` 对应的 `RESET_REQ/ACK` 和 sticky fault reset 仍明确不在本轮正式 claim 内。再往前一步，我们还有三项正式 FIT：错误 SHA 会被 admission gate 拒绝，非法参数会被 contract gate 拒绝，heartbeat timeout 则保留了 **fail -> fix -> pass** 的完整历史链。也就是说，我们不是只展示一个能收发消息的 OpenAMP demo，而是在展示一个**可准入、可拒绝、可监护、可安全停止**的最小控制闭环。” 
 
 ## 收尾（约 35 秒）
 
@@ -38,3 +38,4 @@
 - `session_bootstrap/reports/defense_deck_outline_20260319.md`
 - `session_bootstrap/reports/project_reframing_for_feiteng_cup_20260319.md`
 - `session_bootstrap/reports/openamp_control_plane_evidence_package_20260315/summary_report.md`
+- `session_bootstrap/reports/openamp_tc002_tc010_defense_scope_note_2026-04-03.md`

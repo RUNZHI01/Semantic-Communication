@@ -9,7 +9,7 @@
 1. 先讲一句定位：`不是 generic TVM 项目，而是飞腾多核弱网安全语义视觉回传系统`
 2. 再讲双模式：`4-core Linux performance mode` vs `3-core Linux + RTOS demo mode`
 3. 性能页只说 `484.183 / 231.522 / 134.617 / +56.077%`
-4. Demo 页默认只说：`Current 数据面在线推进`、`PyTorch reference archive 300/300`、`OpenAMP 负责 control plane / safety`
+4. Demo 页默认只说：`Current 数据面在线推进`、`PyTorch reference archive 300/300`、`OpenAMP 负责 control plane / safety`；如果被问 test-case 编号，只把这页当 `TC-002` 的 live reconstruction 收口
 5. 安全页只说 OpenAMP 控制闭环和 `FIT-01/02/03`
 
 ## 台上可以展示什么
@@ -26,6 +26,7 @@
 - 手工 stop/start `remoteproc0`
 - 新的 wrapper smoke 或新的 fault injection
 - 实时排障、滚日志找原因、切终端试命令
+- 把 `RESET_REQ/ACK` / sticky fault reset 讲成当前正式 claim
 - `347.375 / 295.255 / 239.233` 这组 drift 数字，除非评委追问板态风险
 - `363.687`、`1891.9` 这类 live demo run median，避免和 headline performance 混写
 
@@ -42,6 +43,7 @@
 - `demo mode 也是完整 4-core Linux`
 - `第三幕这些 live 数字就是 headline performance`
 - `我们现场再打一遍 FIT 给您看`
+- `TC-010 也已经靠 300/300 一起收口了`
 
 ## 备份窗口
 
@@ -59,6 +61,7 @@
 | 为什么要分两种 mode | `session_bootstrap/reports/project_reframing_for_feiteng_cup_20260319.md` + `session_bootstrap/reports/cpu3_state_watch_20260318_144316.log` |
 | OpenAMP 是不是只会 echo | `session_bootstrap/reports/openamp_control_plane_evidence_package_20260315/coverage_matrix.md` + `session_bootstrap/reports/openamp_wrapper_hook_board_smoke_success_2026-03-14.md` |
 | 最新 live 还有没有板级事实 | `session_bootstrap/reports/openamp_demo_live_dualpath_status_20260317.md` + `session_bootstrap/reports/openamp_demo_dashboard_local_acceptance_20260317.md` |
+| `TC-002/010` 现在到底怎么讲 | `session_bootstrap/reports/openamp_tc002_tc010_defense_scope_note_2026-04-03.md` + `session_bootstrap/reports/openamp_control_plane_evidence_package_20260315/summary_report.md` |
 | FIT 怎么证明不是口头承诺 | `session_bootstrap/reports/openamp_phase5_fit01_wrong_sha_success_2026-03-15.md` + `session_bootstrap/reports/openamp_phase5_fit02_input_contract_success_2026-03-15.md` + `session_bootstrap/reports/openamp_phase5_fit03_timeout_gap_2026-03-15.md` + `session_bootstrap/reports/openamp_phase5_fit03_watchdog_success_2026-03-15.md` |
 
 ## 现场失稳时的 10 秒切换话术
