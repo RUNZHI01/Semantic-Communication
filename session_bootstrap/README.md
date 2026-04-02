@@ -100,6 +100,7 @@
 | 当前正式发布基线 + 历史优化谱系总览（2026-04-03） | `reports/project_release_baseline_and_optimization_lineage_2026-04-03.md` |
 | 飞腾平台表述策略正式说明（2026-04-03） | `reports/phytium_platform_wording_strategy_2026-04-03.md` |
 | 文档冻结后项目下一步真实 blocker / 优先级说明（2026-04-03） | `reports/project_next_real_blockers_after_docs_freeze_2026-04-03.md` |
+| P2 后置差异化 / 暂缓 / 备线策略说明（2026-04-03） | `reports/post_closure_differentiator_gating_policy_2026-04-03.md` |
 | OpenAMP 剩余协议 / FIT 缺口执行计划（2026-04-03） | `reports/openamp_remaining_protocol_fit_runplan_2026-04-03.md` |
 | `TC-002/010` 答辩边界说明（2026-04-03） | `reports/openamp_tc002_tc010_defense_scope_note_2026-04-03.md` |
 | 集成 OpenAMP demo dashboard 启动器 | `scripts/run_openamp_demo.sh` |
