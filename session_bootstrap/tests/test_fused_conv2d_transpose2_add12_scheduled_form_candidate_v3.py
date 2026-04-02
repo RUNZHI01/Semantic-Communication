@@ -67,10 +67,6 @@ class FusedConv2dTranspose2Add12ScheduledFormCandidateV3Test(unittest.TestCase):
         metadata = module.describe_placeholder()
         self.assertEqual(metadata["operator"], "fused_conv2d_transpose2_add12")
         self.assertEqual(metadata["candidate_version"], "v3_working_copy")
-        self.assertEqual(
-            metadata["candidate_status"],
-            "v3_kernel_transform_side_scaffold_unedited",
-        )
         self.assertFalse(metadata["placeholder_only"])
         self.assertFalse(metadata["hook_target"])
         self.assertTrue(metadata["schedule_preserving_override_available"])
@@ -86,6 +82,14 @@ class FusedConv2dTranspose2Add12ScheduledFormCandidateV3Test(unittest.TestCase):
         self.assertEqual(
             metadata["accepted_baseline"]["remote_median_ms"],
             161.416,
+        )
+        self.assertEqual(
+            metadata["candidate_status"],
+            "v3_kernel_transform_oc_inner_pack_applied",
+        )
+        self.assertIn(
+            "Repack the materialized kernel_transform",
+            metadata["current_edit_state"]["concrete_change"],
         )
         self.assertTrue(Path(metadata["working_copy_tir"]).is_file())
         self.assertTrue(Path(metadata["working_copy_manifest"]).is_file())

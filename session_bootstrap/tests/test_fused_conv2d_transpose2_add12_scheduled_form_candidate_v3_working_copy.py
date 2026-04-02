@@ -38,17 +38,22 @@ class DummyTVMScriptNamespace:
 class FusedConv2dTranspose2Add12ScheduledFormCandidateV3WorkingCopyTest(
     unittest.TestCase
 ):
-    def test_working_copy_keeps_the_v3_scaffold_isolated(self) -> None:
+    def test_working_copy_keeps_the_v3_kernel_pack_edit_local_and_isolated(self) -> None:
         text = MODULE_PATH.read_text(encoding="utf-8")
 
-        self.assertIn("Next candidate goal", text)
-        self.assertIn("kernel_transform-side locality edit", text)
+        self.assertIn("First real v3 candidate goal", text)
+        self.assertIn("output-channel-inner layout", text)
         self.assertIn("data_dilate = T.alloc_buffer", text)
         self.assertIn("data_pad = T.alloc_buffer", text)
-        self.assertIn("kernel_transform = T.alloc_buffer", text)
+        self.assertIn(
+            "kernel_transform = T.alloc_buffer((T.int64(24), T.int64(3), T.int64(3), T.int64(12)))",
+            text,
+        )
+        self.assertIn("kernel_transform[v_dc, v_dh, v_dw, v_c]", text)
         self.assertNotIn("data_dilate_pad = T.alloc_buffer", text)
         self.assertNotIn("compute_intermediate = T.alloc_buffer", text)
         self.assertNotIn('with T.sblock("T_add")', text)
+        self.assertNotIn("kernel_transform[v_c, v_dc, v_dh, v_dw]", text)
         self.assertIn('"pragma_auto_unroll_max_step": 32', text)
 
         script_module = types.ModuleType("tvm.script")
@@ -76,7 +81,7 @@ class FusedConv2dTranspose2Add12ScheduledFormCandidateV3WorkingCopyTest(
 
         self.assertTrue(hasattr(loaded, "Module"))
 
-    def test_manifest_records_the_current_checked_in_v3_scaffold(self) -> None:
+    def test_manifest_records_the_current_checked_in_v3_edit(self) -> None:
         payload = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
 
         self.assertEqual(payload["operator"], "fused_conv2d_transpose2_add12")
@@ -87,10 +92,10 @@ class FusedConv2dTranspose2Add12ScheduledFormCandidateV3WorkingCopyTest(
         self.assertFalse(payload["working_copy_contract"]["performance_claims"])
         self.assertEqual(
             payload["current_edit_state"]["status"],
-            "v3_kernel_transform_side_scaffold_unedited",
+            "v3_kernel_transform_oc_inner_pack_applied",
         )
         self.assertIn(
-            "No operator-side TIR change is applied yet",
+            "Repack the materialized kernel_transform",
             payload["current_edit_state"]["concrete_change"],
         )
         self.assertEqual(

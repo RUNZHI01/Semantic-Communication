@@ -1,9 +1,9 @@
 """Checked-in local post-db candidate wrapper for fused_conv2d_transpose2_add12 v3.
 
-This module points the local schedule-preserving seam at an isolated v3 working
-copy scaffold. The scaffold intentionally keeps the accepted v1 operator body
-unchanged so the next real edit can target a new kernel_transform-side locality
-seam without mutating the accepted transpose2 baseline.
+This module points the local schedule-preserving seam at the first real v3
+working-copy candidate. The edit repacks kernel_transform so the unchanged inner
+output-channel walk reads contiguous weights without mutating the accepted
+transpose2 v1 baseline.
 """
 
 from __future__ import annotations
@@ -27,11 +27,11 @@ DEFAULT_EVALUATION_CONTRACT = {
     "comparison_semantics": "local_build_structural_only",
     "reason": (
         "This wrapper only points the local post-db scheduled swap seam at the "
-        "checked-in transpose2 scheduled-form v3 scaffold, so resulting "
+        "checked-in transpose2 scheduled-form v3 candidate, so resulting "
         "evidence is local-only build/probe evidence."
     ),
     "notes": [
-        "Use this path to confirm that the transpose2 scheduled-form v3 scaffold can be consumed by the existing local schedule-preserving seam.",
+        "Use this path to confirm that the transpose2 scheduled-form v3 candidate can be consumed by the existing local schedule-preserving seam.",
         "Do not treat this path as runtime or performance evidence.",
     ],
 }
@@ -140,9 +140,8 @@ def describe_placeholder(context: dict[str, Any] | None = None) -> dict[str, obj
         "validation_scope": "local_only_post_db_scheduled_swap",
         "evaluation_contract": dict(DEFAULT_EVALUATION_CONTRACT),
         "next_step": (
-            "Apply the first real kernel_transform-side v3 edit in the isolated "
-            "working copy, then rerun run_transpose2_post_db_local_build.py "
-            "through this wrapper."
+            "Benchmark the exported v3 kernel_transform-pack artifact on the "
+            "board against the accepted transpose2 v1 baseline."
         ),
     }
 
@@ -178,7 +177,7 @@ def build_manual_impl(context: dict[str, Any] | None = None) -> dict[str, object
             "evaluation_contract": dict(DEFAULT_EVALUATION_CONTRACT),
         },
         "notes": [
-            "The checked-in transpose2 scheduled-form v3 scaffold is consumed only through the local post-db scheduled swap seam here.",
+            "The checked-in transpose2 scheduled-form v3 candidate is consumed only through the local post-db scheduled swap seam here.",
             "This path stays diagnostic-only and does not make performance claims.",
         ],
     }

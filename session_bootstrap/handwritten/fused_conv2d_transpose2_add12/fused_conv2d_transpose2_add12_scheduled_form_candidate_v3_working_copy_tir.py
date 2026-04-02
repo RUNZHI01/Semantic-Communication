@@ -7,13 +7,14 @@
 # - keep the accepted v1 candidate intact; iterate here for the next step
 # - do not treat this file as hook-facing or as performance evidence
 #
-# Next candidate goal:
-# - keep the accepted v1 bias-fused compute path intact for now
-# - establish an isolated v3 surface for the next still-untried transpose2 seam:
-#   a kernel_transform-side locality edit
-# - explicitly avoid reopening the dropped P1/P2/P4 branches here
-# - the current checked-in v3 scaffold intentionally matches the accepted v1
-#   operator body until the first real v3 edit is applied
+# First real v3 candidate goal:
+# - keep the accepted v1 bias-fused compute path intact
+# - keep data_dilate/data_pad materialized so this lane does not revisit the
+#   dropped P1-style fusion
+# - repack the materialized kernel_transform into an input-major,
+#   output-channel-inner layout so the inner c_3 walk reads contiguous weights
+# - preserve the scheduled h/w tiling, reduction split, outer w_0 sweep, and
+#   pragma_auto_unroll_max_step=32
 from tvm.script import ir as I
 from tvm.script import tir as T
 
@@ -26,7 +27,7 @@ class Module:
         # with T.sblock("root"):
         data_dilate = T.alloc_buffer((T.int64(1), T.int64(24), T.int64(255), T.int64(255)))
         data_pad = T.alloc_buffer((T.int64(1), T.int64(24), T.int64(258), T.int64(258)))
-        kernel_transform = T.alloc_buffer((T.int64(12), T.int64(24), T.int64(3), T.int64(3)))
+        kernel_transform = T.alloc_buffer((T.int64(24), T.int64(3), T.int64(3), T.int64(12)))
         for o_i_fused in T.parallel(T.int64(288)):
             for h_w_fused in T.vectorized(T.int64(9)):
                 with T.sblock("kernel_transform"):
@@ -35,8 +36,8 @@ class Module:
                     v_h = T.axis.spatial(T.int64(3), h_w_fused // T.int64(3))
                     v_w = T.axis.spatial(T.int64(3), h_w_fused % T.int64(3))
                     T.reads(param_0[v_i, v_o, T.int64(2) - v_h, T.int64(2) - v_w])
-                    T.writes(kernel_transform[v_o, v_i, v_h, v_w])
-                    kernel_transform[v_o, v_i, v_h, v_w] = param_0[v_i, v_o, T.int64(2) - v_h, T.int64(2) - v_w]
+                    T.writes(kernel_transform[v_i, v_h, v_w, v_o])
+                    kernel_transform[v_i, v_h, v_w, v_o] = param_0[v_i, v_o, T.int64(2) - v_h, T.int64(2) - v_w]
         for b_0_c_0_h_0_fused_fused_fused in T.parallel(T.int64(32), annotations={"pragma_auto_unroll_max_step": 32, "pragma_unroll_explicit": 1}):
             for ax0, ax1, ax2 in T.grid(T.int64(1), T.int64(24), T.int64(10)):
                 for ax0_1, ax1_1, ax2_1, ax3 in T.grid(T.int64(1), T.int64(1), T.int64(1), T.int64(255)):
@@ -80,7 +81,7 @@ class Module:
                                 v_dc = T.axis.reduce(T.int64(24), dc_0 * T.int64(6) + dc_1)
                                 v_dh = T.axis.reduce(T.int64(3), dh_0 * T.int64(3) + dh_1)
                                 v_dw = T.axis.reduce(T.int64(3), dw_0 * T.int64(3) + dw_1)
-                                T.reads(T_add_intermediate[v_b, v_c, v_h, v_w], data_pad[v_b, v_dc, v_h + v_dh, v_w + v_dw], kernel_transform[v_c, v_dc, v_dh, v_dw])
+                                T.reads(T_add_intermediate[v_b, v_c, v_h, v_w], data_pad[v_b, v_dc, v_h + v_dh, v_w + v_dw], kernel_transform[v_dc, v_dh, v_dw, v_c])
                                 T.writes(T_add_intermediate[v_b, v_c, v_h, v_w])
                                 T.sblock_attr({"meta_schedule.tiling_structure": "SSRSRS"})
-                                T_add_intermediate[v_b, v_c, v_h, v_w] = T_add_intermediate[v_b, v_c, v_h, v_w] + data_pad[v_b, v_dc, v_h + v_dh, v_w + v_dw] * kernel_transform[v_c, v_dc, v_dh, v_dw]
+                                T_add_intermediate[v_b, v_c, v_h, v_w] = T_add_intermediate[v_b, v_c, v_h, v_w] + data_pad[v_b, v_dc, v_h + v_dh, v_w + v_dw] * kernel_transform[v_dc, v_dh, v_dw, v_c]
