@@ -33,6 +33,7 @@
 | [../openamp_demo_topline_acceptance_note_2026-04-03.md](../openamp_demo_topline_acceptance_note_2026-04-03.md) | 首屏 / top-line status 的 docs-first 验收标准 | 首屏验收 |
 | [../openamp_demo_presentation_day_checklist_2026-04-03.md](../openamp_demo_presentation_day_checklist_2026-04-03.md) | presentation-day 的 GO/NO-GO、四幕核对与降级切换清单 | 彩排清单 |
 | [../openamp_demo_rehearsal_go_nogo_template_2026-04-03.md](../openamp_demo_rehearsal_go_nogo_template_2026-04-03.md) | 彩排结束后的结果回填与任务板勾选模板 | 回填模板 |
+| [../openamp_demo_docs_closure_summary_2026-04-03.md](../openamp_demo_docs_closure_summary_2026-04-03.md) | April 3 这轮 Demo 文档收尾链的单页交接总览 | 总入口 |
 | [../openamp_tc002_tc010_defense_scope_note_2026-04-03.md](../openamp_tc002_tc010_defense_scope_note_2026-04-03.md) | `TC-002` 已收口 / `TC-010` 仍属边界的正式说明 | 边界口径 |
 | [../../demo/openamp_control_plane_demo/README.md](../../demo/openamp_control_plane_demo/README.md) | 集成 dashboard 软件说明、启动命令与 live probe 边界 | 软件入口 |
 | [../../scripts/run_openamp_demo.sh](../../scripts/run_openamp_demo.sh) | 本地启动集成 OpenAMP demo UI | 启动器 |
