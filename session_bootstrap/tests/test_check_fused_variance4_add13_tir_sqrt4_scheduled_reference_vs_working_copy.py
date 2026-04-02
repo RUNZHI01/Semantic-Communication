@@ -97,11 +97,11 @@ class FakeCompareHelper:
 class CheckFusedVariance4Add13TirSqrt4ScheduledReferenceVsWorkingCopyTest(
     unittest.TestCase
 ):
-    def test_parse_args_defaults_to_the_v5_candidate(self) -> None:
+    def test_parse_args_defaults_to_the_v6_candidate(self) -> None:
         args = module.parse_args([])
         self.assertEqual(
             args.candidate_tir.name,
-            "fused_variance4_add13_tir_sqrt4_scheduled_form_candidate_v5_working_copy_tir.py",
+            "fused_variance4_add13_tir_sqrt4_scheduled_form_candidate_v6_working_copy_tir.py",
         )
 
     def test_main_builds_a_variance4_specific_report(self) -> None:
