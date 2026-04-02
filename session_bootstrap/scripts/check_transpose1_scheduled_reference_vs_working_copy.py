@@ -50,6 +50,15 @@ OPERATOR_CONFIGS = {
         ],
         "output_shape": (1, 3, 256, 256),
     },
+    "fused_mean4_subtract4_divide4_multiply4_add14_relu3": {
+        "input_specs": [
+            ("lv335", (1, 12, 256, 256)),
+            ("lv340", (1, 12, 1, 1)),
+            ("lv342", (12, 1, 1)),
+            ("lv344", (12, 1, 1)),
+        ],
+        "output_shape": (1, 12, 256, 256),
+    },
 }
 
 
