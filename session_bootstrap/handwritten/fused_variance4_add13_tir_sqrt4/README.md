@@ -65,6 +65,9 @@ introduce a separate raw pre-compile hook lane yet.
 - `fused_variance4_add13_tir_sqrt4_scheduled_form_candidate_v17_working_copy_tir.py`: performance-oriented exactness-aware follow-up that returns to the checked-in `v15` baseline, treats `v16` only as negative evidence, and adds a tiny `lv335_mean_local` handoff buffer so the normalized mean is materialized once per channel and reused inside the hot `T_multiply_local` loop.
 - `scheduled_form_candidate_v17_working_copy_manifest.json`: manifest for the versioned `v17` working copy.
 - `fused_variance4_add13_tir_sqrt4_scheduled_form_candidate_v17.py`: local-only candidate wrapper for the `v17` working copy.
+- `fused_variance4_add13_tir_sqrt4_scheduled_form_candidate_v18_working_copy_tir.py`: performance-oriented exactness-aware follow-up that starts from the checked-in board-proven `v17` state, keeps the `lv335_mean_local` normalized-mean handoff intact, and adds a tiny one-element `T_subtract_local` handoff so the centered value is materialized once and reused for the square.
+- `scheduled_form_candidate_v18_working_copy_manifest.json`: manifest for the versioned `v18` working copy.
+- `fused_variance4_add13_tir_sqrt4_scheduled_form_candidate_v18.py`: local-only candidate wrapper for the `v18` working copy.
 
 ## Refresh / Build
 
