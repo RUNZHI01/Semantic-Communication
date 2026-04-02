@@ -94,6 +94,7 @@
 | OpenAMP demo 首屏验收口径说明（2026-04-03） | `reports/openamp_demo_topline_acceptance_note_2026-04-03.md` |
 | OpenAMP demo presentation-day 核对清单（2026-04-03） | `reports/openamp_demo_presentation_day_checklist_2026-04-03.md` |
 | OpenAMP demo 彩排结果回填 / GO-NO-GO 模板（2026-04-03） | `reports/openamp_demo_rehearsal_go_nogo_template_2026-04-03.md` |
+| OpenAMP demo 本地启动健康检查（2026-04-03） | `reports/openamp_demo_local_launch_healthcheck_2026-04-03.md` |
 | OpenAMP demo 文档收尾总览（2026-04-03） | `reports/openamp_demo_docs_closure_summary_2026-04-03.md` |
 | OpenAMP demo 任务完成判定矩阵（2026-04-03） | `reports/openamp_demo_task_completion_gate_matrix_2026-04-03.md` |
 | 项目双层口径 / 双层主叙事正式说明（2026-04-03） | `reports/project_dual_layer_narrative_and_wording_system_2026-04-03.md` |
