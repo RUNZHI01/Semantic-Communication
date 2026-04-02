@@ -26,16 +26,16 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* ===== Card System — cool shadow-based layering ===== */
+/* ===== Card System — clean border-based layering ===== */
 .card {
   background: var(--color-bg-card);
   border-radius: var(--radius-lg);
   border: 1px solid var(--color-border-light);
-  box-shadow: var(--elevation-1);
+  box-shadow: none;
   transition: box-shadow 250ms var(--easing-standard), border-color 250ms var(--easing-standard);
   overflow: hidden;
 }
-.card:hover { box-shadow: var(--elevation-2); border-color: var(--color-border-base); }
+.card:hover { box-shadow: var(--elevation-1); border-color: var(--color-border-base); }
 
 .card-elevated {
   background: var(--color-bg-card);
