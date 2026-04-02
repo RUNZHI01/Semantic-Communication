@@ -27,6 +27,7 @@ See:
 - `session_bootstrap/reports/openamp_demo_video_script_alignment_2026-04-03.md`
 - `session_bootstrap/reports/openamp_demo_topline_acceptance_note_2026-04-03.md`
 - `session_bootstrap/reports/openamp_tc002_tc010_defense_scope_note_2026-04-03.md`
+- `session_bootstrap/reports/openamp_demo_docs_closure_summary_2026-04-03.md`
 
 ## Launch
 

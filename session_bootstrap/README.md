@@ -94,6 +94,7 @@
 | OpenAMP demo 首屏验收口径说明（2026-04-03） | `reports/openamp_demo_topline_acceptance_note_2026-04-03.md` |
 | OpenAMP demo presentation-day 核对清单（2026-04-03） | `reports/openamp_demo_presentation_day_checklist_2026-04-03.md` |
 | OpenAMP demo 彩排结果回填 / GO-NO-GO 模板（2026-04-03） | `reports/openamp_demo_rehearsal_go_nogo_template_2026-04-03.md` |
+| OpenAMP demo 文档收尾总览（2026-04-03） | `reports/openamp_demo_docs_closure_summary_2026-04-03.md` |
 | `TC-002/010` 答辩边界说明（2026-04-03） | `reports/openamp_tc002_tc010_defense_scope_note_2026-04-03.md` |
 | 集成 OpenAMP demo dashboard 启动器 | `scripts/run_openamp_demo.sh` |
 | cockpit_native 原生座舱答辩讲稿 | `runbooks/cockpit_native_demo_talk_track_2026-03-24.md` |
