@@ -32,8 +32,8 @@ Keep this wording fixed throughout the demo:
 | Scene 1C | Click `demo-only 票据预检`. | `这只是 preview-only gate 检查；会写 preview-only JOB_* 事件，但不会发送 JOB_REQ，也不会启动板端执行。` | `Job Manifest Gate` updates in place. Preferred state is `可放行`; acceptable degraded states are `待补全`, `待复核`, or `暂不放行`, with reasons shown in the card. |
 | Link Director detour (optional) | If weak-link planning is worth one sentence, point at `Link Status`. Only click a profile if you explicitly want the visual change. | `Link Director 当前只是导演台预案；backend_binding 仍是 ui_scaffold_only，我不宣称这里已经执行 tc/netem 或物理断链。` | The card shows the selected profile and `backend_binding=ui_scaffold_only`. If you click another profile, only the preset label changes; live telemetry must not magically change with it. |
 | Scene 2 | Click `启动 Current 数据面 300 张图在线推进`. Stay on Act 2 while the progress strip moves. | `第二幕是手动发起的 Current live。页面负责显示进度和证据，不伪装自动闭环。` | `liveProgressBadge` leaves the waiting state. The stage chips and log panel begin updating. Honest live labels are `真实在线推进` or `真实在线执行（控制面降级）`; honest fallback labels keep `归档样例` wording visible. |
-| Scene 3 | Click `03 正式对照` or the `第三幕 Compare` jump. Do not click baseline live by default. | `第三幕默认基线是 2026-03-12 归档的 PyTorch reference，不把 2026-03-17 的 baseline live 历史结论当成本场默认 operator flow。` | The performance cards stay visible. In `Compare Viewer`, the right pane is still the PyTorch reference side. The left pane is `latest live result` only if this round has really finished; otherwise it stays `current archive` and must be described that way. |
-| Scene 4 (optional) | If asked for safety/fault, go to Act 4 and click `注入错误 SHA`. Only click `SAFE_STOP 收口` if you actually want to show the recover path. | `第四幕也是 operator-driven。若这里进入回放模式，我会直接说是回放，不把它讲成真机自动化。Linux UI 只做 SAFE_STOP / GPIO mirror，不拥有物理所有权。` | `faultStatusHeadline` changes to `真机注入` or the truthful replay label such as `FIT-01 回放模式`. `last_fault_code` updates. When the launcher path is active and events have been written, `Event Timeline` moves from fallback copy to a real archive session. |
+| Scene 3 | Click `03 正式对照` or the `第三幕 Compare` jump. Do not click baseline live by default. | `第三幕默认基线是 2026-03-12 归档的 PyTorch reference，不把 2026-03-17 的 baseline live 历史结论当成本场默认 operator flow；这页只引用两条正式口径：1846.9 -> 130.219 ms 与 1850.0 -> 230.339 ms/image。` | The performance cards stay visible. In `Compare Viewer`, the right pane is still the PyTorch reference side. The left pane is `latest live result` only if this round has really finished; otherwise it stays `current archive` and must be described that way. |
+| Scene 4 (optional) | If asked for safety/fault, go to Act 4 and click `注入错误 SHA`. Only click `SAFE_STOP 收口` if you actually want to show the recover path. | `第四幕也是 operator-driven。若这里进入回放模式，我会直接说是回放，不把它讲成真机自动化；8115 上 recent 300/300 只用于 TC-002 的 live reconstruction 收口，不把它延伸成 TC-010 / RESET_REQ/ACK 已闭环。Linux UI 只做 SAFE_STOP / GPIO mirror，不拥有物理所有权。` | `faultStatusHeadline` changes to `真机注入` or the truthful replay label such as `FIT-01 回放模式`. `last_fault_code` updates. When the launcher path is active and events have been written, `Event Timeline` moves from fallback copy to a real archive session. |
 
 ## Scene Notes
 
@@ -62,8 +62,10 @@ The committed cockpit already separates these things. Keep them separated in spe
 
 - `Compare Viewer` is a side-by-side viewer, not a slider.
 - The default third-act baseline is the archived PyTorch reference.
+- Scene 3 only quotes the two formal lines: `1846.9 -> 130.219 ms` and `1850.0 -> 230.339 ms/image`.
 - The performance cards are still the `4-core Linux performance mode` headline.
 - The live operator flow that just ran belongs to `3-core Linux + RTOS demo mode`.
+- `8115` recent `300/300` is valid as `TC-002` live reconstruction evidence, but not as shorthand for `TC-010` / `RESET_REQ/ACK` closure.
 
 ### Scene 4 anchor
 
@@ -89,6 +91,8 @@ For a tight defense, use the fastest admission-shaped fault:
 - Do not say the `Link Director` has already applied real `tc/netem`, qdisc, or physical weak-link control.
 - Do not say `demo-only 票据预检` has already sent a real `JOB_REQ` or started board execution.
 - Do not say the `Compare Viewer` is an interactive slider or a pixel-diff tool.
+- Do not use Scene 3 to quote anything other than `1846.9 -> 130.219 ms` and `1850.0 -> 230.339 ms/image`.
+- Do not treat `300/300` as proof that `TC-010`, `RESET_REQ/ACK`, or sticky fault reset are already closed.
 - Do not say Linux owns physical `SAFE_STOP` or GPIO.
 - Do not say the `Blackbox Timeline` is rrweb, a browser recording, or full session playback.
 - Do not say OpenAMP made the inference faster.
