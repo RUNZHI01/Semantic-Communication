@@ -68,6 +68,9 @@ introduce a separate raw pre-compile hook lane yet.
 - `fused_variance4_add13_tir_sqrt4_scheduled_form_candidate_v18_working_copy_tir.py`: performance-oriented exactness-aware follow-up that starts from the checked-in board-proven `v17` state, keeps the `lv335_mean_local` normalized-mean handoff intact, and adds a tiny one-element `T_subtract_local` handoff so the centered value is materialized once and reused for the square.
 - `scheduled_form_candidate_v18_working_copy_manifest.json`: manifest for the versioned `v18` working copy.
 - `fused_variance4_add13_tir_sqrt4_scheduled_form_candidate_v18.py`: local-only candidate wrapper for the `v18` working copy.
+- `fused_variance4_add13_tir_sqrt4_scheduled_form_candidate_v19_working_copy_tir.py`: performance-oriented exactness-aware follow-up that starts from the checked-in board-proven `v18` state, keeps the centered-value `T_subtract_local` reuse intact, and tightens the normalized-mean handoff itself to a one-element per-channel local scalar reused across the full inner loop.
+- `scheduled_form_candidate_v19_working_copy_manifest.json`: manifest for the versioned `v19` working copy.
+- `fused_variance4_add13_tir_sqrt4_scheduled_form_candidate_v19.py`: local-only candidate wrapper for the `v19` working copy.
 
 ## Refresh / Build
 
@@ -335,5 +338,7 @@ summary, but does not expose a direct `query_schedule` / `query_ir_module` /
 `query_tuning_record` hit for it. This lane therefore starts from the post-db
 applied-module operator form recovered through the existing seam.
 
-This lane is still local-only and diagnostic-only. Do not use it for SSH or
-remote benchmark claims until a real variance4 handwritten edit exists.
+The checked-in working copies in this directory remain local-only and
+diagnostic-only. When a candidate is later staged onto the board, record that
+separately under `session_bootstrap/reports/` rather than treating the wrapper
+itself as benchmark evidence.
