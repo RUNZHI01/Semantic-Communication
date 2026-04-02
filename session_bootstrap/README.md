@@ -126,7 +126,8 @@
    - 首屏字段稳定露出
    - 第三幕只出现两条正式口径
    - 三个 fault 按钮是否在最终 build 中形成诚实的 replay/live 体验
-   - 入口：`reports/openamp_demo_presentation_day_checklist_2026-04-03.md`、`reports/openamp_demo_rehearsal_go_nogo_template_2026-04-03.md`
+   - 先跑：`python3 ./session_bootstrap/scripts/check_openamp_demo_session_readiness.py --format text`
+   - 入口：`reports/openamp_demo_presentation_day_checklist_2026-04-03.md`、`reports/openamp_demo_rehearsal_go_nogo_template_2026-04-03.md`、`reports/openamp_demo_local_launch_healthcheck_2026-04-03.md`
 2. **OpenAMP 剩余真机协议 / FIT 缺口**
    - `FIT-04/05`
    - `TC-007/008/009/010`
