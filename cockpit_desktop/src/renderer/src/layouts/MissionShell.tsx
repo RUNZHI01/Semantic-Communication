@@ -75,7 +75,9 @@ export function MissionShell() {
             />
             <span className={s.healthLabel}>{linkOk ? '在线' : '离线'}</span>
           </div>
+          <div className={s.divider} aria-hidden="true" />
           <SystemClock />
+          <div className={s.divider} aria-hidden="true" />
           <button
             className={s.iconBtn}
             onClick={handleFullscreen}

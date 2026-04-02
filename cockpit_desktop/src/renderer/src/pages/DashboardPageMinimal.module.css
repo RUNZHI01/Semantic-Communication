@@ -4,16 +4,21 @@
   height: 100%;
   overflow: hidden;
   background: var(--color-bg-primary);
-  /* Subtle dot grid — Google-inspired visual depth */
-  background-image: radial-gradient(circle, rgba(15,23,42,0.018) 1px, transparent 1px);
-  background-size: 20px 20px;
 }
 
 /* ===== Toast Notification — pill style ===== */
-.toast {
+.toastContainer {
   position: fixed;
   top: 72px;
   right: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 100;
+  pointer-events: none;
+}
+
+.toast {
   display: flex;
   align-items: center;
   gap: var(--space-sm);
@@ -22,8 +27,8 @@
   font-size: 13px;
   font-weight: 500;
   box-shadow: var(--elevation-3);
-  z-index: 100;
   animation: toastSlideIn 350ms var(--easing-emphasized);
+  pointer-events: auto;
 }
 
 .toastSuccess {
@@ -88,7 +93,7 @@
   min-height: 0;
 }
 
-/* ===== Section Card — white bg + refined shadow ===== */
+/* ===== Section Card — white bg + refined border ===== */
 .sectionCard {
   display: flex;
   flex-direction: column;
@@ -97,12 +102,12 @@
   background: var(--color-bg-card);
   border-radius: var(--radius-lg);
   border: 1px solid var(--color-border-light);
-  box-shadow: var(--elevation-1);
+  box-shadow: none;
   transition: box-shadow 250ms var(--easing-standard), border-color 250ms var(--easing-standard);
 }
 
 .sectionCard:hover {
-  box-shadow: var(--elevation-2);
+  box-shadow: var(--elevation-1);
   border-color: var(--color-border-base);
 }
 
@@ -113,7 +118,7 @@
 }
 
 .sectionCardAccent:hover {
-  box-shadow: var(--elevation-2);
+  box-shadow: var(--elevation-1);
   border-color: var(--color-border-base);
 }
 
@@ -135,14 +140,14 @@
   background: var(--color-bg-card);
   border-radius: var(--radius-lg);
   border: 1px solid var(--color-border-light);
-  box-shadow: var(--elevation-1);
+  box-shadow: none;
   transition: box-shadow 250ms var(--easing-standard), border-color 250ms var(--easing-standard);
   flex: 1;
   min-height: 160px;
 }
 
 .resultCard:hover {
-  box-shadow: var(--elevation-2);
+  box-shadow: var(--elevation-1);
   border-color: var(--color-border-base);
 }
 
@@ -283,7 +288,7 @@
   to { transform: rotate(360deg); }
 }
 
-/* Filled (primary) — gradient-enhanced */
+/* Filled (primary) — solid color */
 .btnFilled {
   display: flex;
   align-items: center;
@@ -291,14 +296,13 @@
   gap: var(--space-sm);
   padding: 0 var(--space-lg);
   height: 48px;
-  background: linear-gradient(135deg, #1A56DB 0%, #2563EB 50%, #3B82F6 100%);
+  background: var(--color-primary);
   border: none;
   border-radius: var(--radius-md);
   color: #FFFFFF;
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
-  box-shadow: 0 2px 8px rgba(26, 86, 219, 0.25), var(--elevation-1);
   transition: all 200ms var(--easing-standard);
   width: 100%;
   position: relative;
@@ -306,14 +310,11 @@
 }
 
 .btnFilled:hover:not(:disabled) {
-  background: linear-gradient(135deg, #1444B0 0%, #1D4ED8 100%);
-  box-shadow: 0 4px 14px rgba(26, 86, 219, 0.30), var(--elevation-2);
-  transform: translateY(-1px);
+  background: #1444B0;
 }
 
 .btnFilled:active:not(:disabled) {
-  transform: translateY(0) scale(0.99);
-  box-shadow: 0 1px 4px rgba(26, 86, 219, 0.20), var(--elevation-1);
+  background: #1D4ED8;
 }
 
 .btnFilled:focus-visible {
@@ -324,7 +325,6 @@
 .btnFilled:disabled {
   opacity: 0.45;
   cursor: not-allowed;
-  box-shadow: none;
   background: var(--color-primary);
 }
 
@@ -513,85 +513,98 @@
   color: var(--color-text-muted);
 }
 
-/* ===== Result Comparison ===== */
-.resultRow {
-  display: flex;
-  align-items: center;
-  gap: 0;
-  background: var(--color-bg-primary);
-  border-radius: var(--radius-md);
-  overflow: hidden;
-}
-
-.resultItem {
-  flex: 1;
+/* ===== Result Comparison (Bento Box / Bar Chart) ===== */
+.comparisonShowcase {
   display: flex;
   flex-direction: column;
+  gap: var(--space-md);
+  margin-top: var(--space-sm);
+}
+
+.barRow {
+  display: flex;
   align-items: center;
-  gap: 4px;
-  padding: var(--space-md) var(--space-sm);
+  gap: var(--space-md);
 }
 
-.resultLabel {
-  font-size: 11px;
+.barLabel {
+  width: 64px;
+  font-size: 12px;
   font-weight: 600;
-  color: var(--color-text-tertiary);
+  color: var(--color-text-secondary);
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
-.resultValue {
-  font-size: 22px;
-  font-weight: 600;
-  color: var(--color-text-primary);
-  font-family: var(--font-family-mono);
-  font-feature-settings: 'tnum' 1, 'zero' 1;
-  line-height: 1.2;
-}
-
-.resultValueHighlight {
-  composes: resultValue;
-  color: var(--color-primary);
-}
-
-.resultDivider {
-  width: 1px;
-  height: 36px;
-  background: var(--color-border-light);
+  letter-spacing: 0.05em;
   flex-shrink: 0;
 }
 
-/* Speedup highlight — pill badge */
-.speedupBar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: var(--space-sm) var(--space-md);
-  background: var(--color-success-container);
-  border-radius: var(--radius-sm);
-  border: 1px solid rgba(5, 150, 105, 0.10);
-  margin-top: 4px;
+.barTrack {
+  flex: 1;
+  height: 8px;
+  background: var(--color-bg-primary);
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
 }
 
-.speedupLabel {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--color-text-secondary);
+.barFillBaseline {
+  height: 100%;
+  background: var(--color-border-base);
+  border-radius: 4px;
+  transition: width 500ms var(--easing-standard);
 }
 
-.speedupValue {
+.barFillCurrent {
+  height: 100%;
+  background: var(--color-primary);
+  border-radius: 4px;
+  box-shadow: 0 0 8px rgba(26, 86, 219, 0.4);
+  transition: width 500ms var(--easing-standard);
+}
+
+.barValue {
+  width: 80px;
   font-size: 14px;
   font-weight: 600;
-  color: var(--color-success);
+  color: var(--color-text-secondary);
   font-family: var(--font-family-mono);
   font-feature-settings: 'tnum' 1;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.barValueHighlight {
+  width: 140px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  font-family: var(--font-family-mono);
+  font-feature-settings: 'tnum' 1;
+  flex-shrink: 0;
+}
+
+.trendBadge {
+  display: inline-flex;
+  align-items: center;
+  background: var(--color-success-container);
+  color: var(--color-success);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font-family-base);
 }
 
 /* Quality metrics row */
-.qualityRow {
+.qualityMetrics {
   display: flex;
   gap: var(--space-sm);
-  margin-top: 4px;
+  margin-top: var(--space-sm);
+  padding-top: var(--space-md);
+  border-top: 1px solid var(--color-border-light);
 }
 
 .qualityItem {
@@ -633,6 +646,41 @@
   min-height: 120px;
 }
 
+.emptyIconWrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--color-bg-section);
+  margin-bottom: 16px;
+}
+
+.emptyIcon {
+  color: var(--color-text-secondary);
+  opacity: 0.8;
+}
+
+.emptyTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  margin-bottom: 4px;
+}
+
+.emptySubtitle {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.emptyDescription {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin-top: 8px;
+  max-width: 280px;
+}
+
 /* ===== Map Section — refined ===== */
 .mapSection {
   flex: 1;
@@ -641,7 +689,7 @@
   overflow: hidden;
   background: var(--color-bg-card);
   border: 1px solid var(--color-border-light);
-  box-shadow: var(--elevation-1);
+  box-shadow: none;
 }
 
 /* ===== Responsive ===== */
@@ -653,11 +701,12 @@
 
 @media (max-width: 1200px) {
   .mainContent {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr;
+    display: flex;
+    flex-direction: column;
     overflow-y: auto;
   }
   .rightPanel {
+    order: -1;
     align-items: stretch;
   }
   .mapSection {

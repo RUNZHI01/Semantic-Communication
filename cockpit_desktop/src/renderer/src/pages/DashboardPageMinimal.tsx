@@ -30,7 +30,7 @@ export function DashboardPageMinimal() {
   const chinaTheater = useAppStore((s) => s.chinaTheater)
   const setChinaTheater = useAppStore((s) => s.setChinaTheater)
   const [boardPassword, setBoardPassword] = useState('')
-  const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null)
+  const [toasts, setToasts] = useState<{ id: number; text: string; type: 'success' | 'error' }[]>([])
   const [faultExpanded, setFaultExpanded] = useState(false)
 
   const probeMut = useProbeBoard()
@@ -40,15 +40,15 @@ export function DashboardPageMinimal() {
   const recoverMut = useRecover()
   const boardAccessMut = useSetBoardAccess()
 
-  const showToast = useCallback((text: string, type: 'success' | 'error') => {
-    setToastMessage({ text, type })
+  const removeToast = useCallback((id: number) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id))
   }, [])
 
-  useEffect(() => {
-    if (!toastMessage) return
-    const id = setTimeout(() => setToastMessage(null), 3000)
-    return () => clearTimeout(id)
-  }, [toastMessage])
+  const showToast = useCallback((text: string, type: 'success' | 'error') => {
+    const id = Date.now()
+    setToasts((prev) => [...prev, { id, text, type }])
+    setTimeout(() => removeToast(id), 3000)
+  }, [removeToast])
 
   const handleRunInference = useMemo(
     () => () => {
@@ -104,13 +104,15 @@ export function DashboardPageMinimal() {
 
   return (
     <PageTransition className={s.root}>
-      {/* Toast Notification */}
-      {toastMessage && (
-        <div className={`${s.toast} ${toastMessage.type === 'error' ? s.toastError : s.toastSuccess}`}>
-          {toastMessage.type === 'error' ? <Icons.AlertTriangle size={16} /> : <Icons.Check size={16} />}
-          <span>{toastMessage.text}</span>
-        </div>
-      )}
+      {/* Toast Notification Container */}
+      <div className={s.toastContainer}>
+        {toasts.map((toast) => (
+          <div key={toast.id} className={`${s.toast} ${toast.type === 'error' ? s.toastError : s.toastSuccess}`}>
+            {toast.type === 'error' ? <Icons.AlertTriangle size={16} /> : <Icons.Check size={16} />}
+            <span>{toast.text}</span>
+          </div>
+        ))}
+      </div>
 
       {/* Metrics Bar */}
       <div className={s.metricsBar}>
@@ -252,31 +254,39 @@ export function DashboardPageMinimal() {
                 <div className={s.sectionTitle}>推理结果对比</div>
                 {payloadMs != null && baselineMs != null ? (
                   <>
-                    <div className={s.resultRow}>
-                      <div className={s.resultItem}>
-                        <span className={s.resultLabel}>Current</span>
-                        <span className={s.resultValueHighlight}>
-                          <CountUp end={payloadMs} decimals={1} duration={400} /> ms
-                        </span>
-                      </div>
-                      <div className={s.resultDivider} />
-                      <div className={s.resultItem}>
-                        <span className={s.resultLabel}>Baseline</span>
-                        <span className={s.resultValue}>
+                    <div className={s.comparisonShowcase}>
+                      <div className={s.barRow}>
+                        <div className={s.barLabel}>Baseline</div>
+                        <div className={s.barTrack}>
+                          <div className={s.barFillBaseline} style={{ width: '100%' }} />
+                        </div>
+                        <div className={s.barValue}>
                           <CountUp end={baselineMs} decimals={1} duration={400} /> ms
-                        </span>
-                      </div>
-                    </div>
-                    {speedup != null && (
-                      <div className={s.speedupBar}>
-                        <div className={s.speedupLabel}>加速比</div>
-                        <div className={s.speedupValue}>
-                          <CountUp end={speedup} decimals={1} duration={400} />% faster
                         </div>
                       </div>
-                    )}
+                      <div className={s.barRow}>
+                        <div className={s.barLabel}>Current</div>
+                        <div className={s.barTrack}>
+                          <div
+                            className={s.barFillCurrent}
+                            style={{ width: `${Math.min((payloadMs / (baselineMs || 1)) * 100, 100)}%` }}
+                          />
+                        </div>
+                        <div className={s.barValueHighlight}>
+                          <span><CountUp end={payloadMs} decimals={1} duration={400} /> ms</span>
+                          {speedup != null && (
+                            <span className={s.trendBadge} style={{ 
+                              background: speedup >= 0 ? 'var(--color-success-container)' : 'var(--color-error-container)',
+                              color: speedup >= 0 ? 'var(--color-success)' : 'var(--color-error)'
+                            }}>
+                              {speedup >= 0 ? '↓' : '↑'} <CountUp end={Math.abs(speedup)} decimals={1} duration={400} />%
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
                     {currentResult?.quality && (
-                      <div className={s.qualityRow}>
+                      <div className={s.qualityMetrics}>
                         {currentResult.quality.psnr_db != null && (
                           <div className={s.qualityItem}>
                             <span className={s.qualityLabel}>PSNR</span>
@@ -294,14 +304,16 @@ export function DashboardPageMinimal() {
                   </>
                 ) : (
                   <div className={s.resultEmpty}>
-                    <Icons.Zap size={32} style={{ opacity: 0.25, marginBottom: 12 }} />
-                    <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--color-text-secondary)', marginBottom: 4 }}>
+                    <div className={s.emptyIconWrapper}>
+                      <Icons.Activity size={24} className={s.emptyIcon} />
+                    </div>
+                    <div className={s.emptyTitle}>
                       暂无推理结果
                     </div>
-                    <div style={{ fontSize: 13, color: 'var(--color-text-tertiary)' }}>
+                    <div className={s.emptySubtitle}>
                       点击上方「启动 Current 重建」开始首次推理
                     </div>
-                    <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 8 }}>
+                    <div className={s.emptyDescription}>
                       推理完成后将展示 Current vs Baseline 延迟对比、加速比、PSNR/SSIM 质量指标
                     </div>
                   </div>

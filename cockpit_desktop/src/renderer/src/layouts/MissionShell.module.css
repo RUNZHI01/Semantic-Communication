@@ -93,31 +93,30 @@
   background: var(--color-bg-card);
 }
 
-/* ===== Right Section — unified indicator bar ===== */
+/* ===== Right Section — clean flat layout ===== */
 .rightSection {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 16px;
   flex-shrink: 0;
-  background: var(--color-bg-section);
-  border-radius: var(--radius-full);
-  padding: 3px;
 }
 
-/* Status indicator — same sizing as .navTab / .navTabActive */
+.divider {
+  width: 1px;
+  height: 16px;
+  background: var(--color-border-base);
+  opacity: 0.6;
+}
+
+/* Status indicator — flat text */
 .statusInline {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 2px 12px;
-  border-radius: var(--radius-full);
-  border: none;
   cursor: default;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--color-primary);
-  background: var(--color-bg-card);
-  box-shadow: var(--elevation-1);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
   white-space: nowrap;
 }
 
@@ -145,24 +144,19 @@
   white-space: nowrap;
 }
 
-/* Clock — same sizing as .navTab (inactive) */
+/* Clock — pure text */
 .systemClock {
   font-size: 13px;
   font-weight: 500;
   color: var(--color-text-secondary);
   font-family: var(--font-family-mono);
   font-variant-numeric: tabular-nums;
-  padding: 2px 12px;
-  border-radius: var(--radius-full);
-  border: none;
-  background: transparent;
   cursor: default;
   transition: color 200ms var(--easing-standard);
 }
 
 .systemClock:hover {
   color: var(--color-text-primary);
-  background: rgba(255,255,255,0.6);
 }
 
 .iconBtn {
