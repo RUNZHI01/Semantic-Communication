@@ -27,7 +27,7 @@ DEFAULT_CANDIDATE_TIR = (
     Path(__file__).resolve().parents[1]
     / "handwritten"
     / OPERATOR_NAME
-    / f"{OPERATOR_NAME}_scheduled_form_candidate_v4_working_copy_tir.py"
+    / f"{OPERATOR_NAME}_scheduled_form_candidate_v5_working_copy_tir.py"
 )
 
 
