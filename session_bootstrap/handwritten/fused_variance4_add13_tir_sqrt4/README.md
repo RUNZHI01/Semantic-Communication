@@ -41,6 +41,9 @@ introduce a separate raw pre-compile hook lane yet.
 - `fused_variance4_add13_tir_sqrt4_scheduled_form_candidate_v9_working_copy_tir.py`: exactness-aware follow-up that keeps the explicit one-element local store/load round-trip from `v8` but removes the `volatile_scope` attribute from the local allocation to test whether the store/load boundary alone is sufficient for exact equality.
 - `scheduled_form_candidate_v9_working_copy_manifest.json`: manifest for the versioned `v9` working copy.
 - `fused_variance4_add13_tir_sqrt4_scheduled_form_candidate_v9.py`: local-only candidate wrapper for the `v9` working copy.
+- `fused_variance4_add13_tir_sqrt4_scheduled_form_candidate_v10_working_copy_tir.py`: exactness-aware follow-up that keeps the full `v8` one-element local store/load round-trip intact while moving the explicit `volatile_scope` marker from the raw local allocation handle to the declared one-element local buffer.
+- `scheduled_form_candidate_v10_working_copy_manifest.json`: manifest for the versioned `v10` working copy.
+- `fused_variance4_add13_tir_sqrt4_scheduled_form_candidate_v10.py`: local-only candidate wrapper for the `v10` working copy.
 
 ## Refresh / Build
 
@@ -216,6 +219,23 @@ Run the local correctness compare for the current `v9` working copy:
 python3 ./session_bootstrap/scripts/check_fused_variance4_add13_tir_sqrt4_scheduled_reference_vs_working_copy.py \
   --candidate-tir ./session_bootstrap/handwritten/fused_variance4_add13_tir_sqrt4/fused_variance4_add13_tir_sqrt4_scheduled_form_candidate_v9_working_copy_tir.py \
   --output-json ./session_bootstrap/tmp/variance4_v9_correctness_check.json
+```
+
+Run the local-only post-db scheduled swap build for the exactness-aware `v10`
+candidate:
+
+```bash
+python3 ./session_bootstrap/scripts/run_variance4_post_db_local_build.py \
+  --candidate-impl ./session_bootstrap/handwritten/fused_variance4_add13_tir_sqrt4/fused_variance4_add13_tir_sqrt4_scheduled_form_candidate_v10.py \
+  --output-dir ./session_bootstrap/tmp/variance4_post_db_swap_local_build_v10
+```
+
+Run the local correctness compare for the current `v10` working copy:
+
+```bash
+python3 ./session_bootstrap/scripts/check_fused_variance4_add13_tir_sqrt4_scheduled_reference_vs_working_copy.py \
+  --candidate-tir ./session_bootstrap/handwritten/fused_variance4_add13_tir_sqrt4/fused_variance4_add13_tir_sqrt4_scheduled_form_candidate_v10_working_copy_tir.py \
+  --output-json ./session_bootstrap/tmp/variance4_v10_correctness_check.json
 ```
 
 Current best-staging keeps `fused_variance4_add13_tir_sqrt4` in the task
