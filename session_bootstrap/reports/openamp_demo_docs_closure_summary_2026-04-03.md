@@ -64,6 +64,8 @@
    - 看“presentation-day 到底要核对什么”
 6. `session_bootstrap/reports/openamp_demo_rehearsal_go_nogo_template_2026-04-03.md`
    - 看“彩排完怎么回填、怎么判 GO / NO-GO、怎么改任务板”
+7. `session_bootstrap/reports/openamp_demo_task_completion_gate_matrix_2026-04-03.md`
+   - 看“任务板里哪些 Demo 项满足什么条件才允许勾完成”
 
 ---
 
