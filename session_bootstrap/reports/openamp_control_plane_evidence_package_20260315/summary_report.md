@@ -12,6 +12,8 @@
 
 当前仓库已经形成一套可直接用于答辩 / 演示的 OpenAMP 控制面证据链。底座方面，`release_v1.4.0` 派生控制固件已经在飞腾派真实板上依次打通 `STATUS_REQ/RESP`、`JOB_REQ/JOB_ACK`、`HEARTBEAT/HEARTBEAT_ACK`、`SAFE_STOP`、`JOB_DONE`，并由 wrapper-backed board smoke 证明 Linux wrapper 会基于真实 firmware `JOB_ACK(ALLOW)` 放行 runner。风险收口方面，`FIT-01` 与 `FIT-02` 已分别证明错误 SHA 和输入契约违规会在 admission gate 被真机拒绝；`FIT-03` 则保留了完整历史链条，即旧 live firmware 先真实暴露 watchdog 缺口，随后在部署基于本地提交 `0503b04 openamp: add lazy firmware heartbeat timeout watchdog` 构建出的修复固件后，以同一探针顺序复跑转为 PASS。
 
+补充到 `FIT-02` 的答辩口径层：历史上真实出现过一次 `batch=4` 撞上模型固定 `batch=1` 的 runtime 失败；现在仓库已把它正式改写为输入契约案例卡，保留 mock 层的原始 `batch=4` 样本，并用真机 `expected_outputs=2 -> ILLEGAL_PARAM_RANGE` 证明同类契约 / 计数违规已经被前移到 admission gate。入口见 [../openamp_fit02_batch_contract_case_card_2026-04-03.md](../openamp_fit02_batch_contract_case_card_2026-04-03.md)。
+
 补充到最近一轮 live 事实层：见 [../openamp_demo_live_dualpath_status_20260317.md](../openamp_demo_live_dualpath_status_20260317.md)。该摘要明确确认 **8115 是当前唯一有效 demo 实例**，且最近一轮 live 中 **current 已成功跑通、baseline 也已通过 signed sideband 进入真机执行，两侧 reconstruction 均完成 `300/300`**。
 
 补充到本地可运行性层：见 [../openamp_demo_dashboard_local_acceptance_20260317.md](../openamp_demo_dashboard_local_acceptance_20260317.md)。该验收报告确认本地执行 `run_openamp_demo.sh --port 8092` 后，`/api/health` 返回 `ok`，并且 `/api/snapshot` 已实际暴露 `latest_live_status`，说明这份 3/17 最新状态不只存在于文档里，也已经真实进入 dashboard 运行面。
@@ -32,6 +34,22 @@
 2. 再用 [coverage_matrix.md](coverage_matrix.md) 说明 P0 不是 mock，而是板级 `STATUS -> JOB_REQ -> HEARTBEAT -> SAFE_STOP / JOB_DONE` 全链路都有证据。
 3. 接着强调 wrapper 不是本地自判： [../openamp_wrapper_hook_board_smoke_success_2026-03-14.md](../openamp_wrapper_hook_board_smoke_success_2026-03-14.md) 已证明真实 `firmware_job_ack` 可以驱动 runner 放行。
 4. 最后用三项 FIT 收口风险：`FIT-01` 收口未知 artifact 执行风险，`FIT-02` 收口输入契约违规风险，`FIT-03` 以“先失败、后修复、再通过”的方式收口 heartbeat watchdog 风险。
+
+## FIT-02 历史说明
+
+`FIT-02` 现在建议按“历史原型 + mock 原型 + 真机收证”三层来讲：
+
+- 历史原型：
+  - [../../PROGRESS_LOG.md](../../PROGRESS_LOG.md)
+  - realcmd 曾真实出现 `--batch_size 4` 撞上模型固定 `batch=1` 的 runtime 失败，说明输入契约风险不是假设题，而是真实发生过。
+- mock 原型：
+  - [../openamp_mock_examples/smoke_20260313_p0p1/deny_input/fit_report_FIT-02.md](../openamp_mock_examples/smoke_20260313_p0p1/deny_input/fit_report_FIT-02.md)
+  - 这里明确保留了原始 `batch=4` 样例，对应 `DENY(F002 / INPUT_CONTRACT_INVALID)`。
+- 真机收证：
+  - [../openamp_input_contract_fit_20260315_014542/fit_report_FIT-02.md](../openamp_input_contract_fit_20260315_014542/fit_report_FIT-02.md)
+  - 当前板级协议没有单独暴露 literal `batch` 字段，但已经通过 `expected_outputs=2` 实际拿到 `JOB_ACK(DENY, F009 / ILLEGAL_PARAM_RANGE)`，并确认 runner 未启动。
+
+正式案例卡见 [../openamp_fit02_batch_contract_case_card_2026-04-03.md](../openamp_fit02_batch_contract_case_card_2026-04-03.md)。对外主张应保持精确：我们已经把历史 `batch=4` 运行时故障升级为 `FIT-02` 输入契约门禁样例，并完成了同类风险的真机 admission-gate 拒绝收证；不要把它表述成“当前真机已直接发送 literal `batch=4` 字段并复现同字段报错”。
 
 ## FIT-03 历史说明
 
