@@ -11,7 +11,7 @@
 | 1 | 为什么今天不做现场试错 | 这是已完成真机证据的 defense，而不是再做一轮实验 | [summary_report.md](summary_report.md) | 开场就声明：不 reboot，不做新 fault injection，结论以证据包为准 |
 | 2 | 系统角色与边界 | OpenAMP 控制面是 trusted current 的执行入口，不是单独炫协议 | [summary_report.md](summary_report.md) / [coverage_matrix.md](coverage_matrix.md) | 先讲“它为谁服务”，再讲“它能做什么” |
 | 3 | 总结论页 | `P0 已板级闭环；P1 FIT-01/02/03 最终 PASS` | [summary_report.md](summary_report.md) | 把评委先带到总判定，避免细节先行 |
-| 4 | Act 1: trusted boot 与在线基线 | cold boot / RPMsg demo 路径已板级验证，且 2026-03-17 最新 live 已确认 8115 上 current / baseline 双路径都已成功执行 | [../openamp_demo_live_dualpath_status_20260317.md](../openamp_demo_live_dualpath_status_20260317.md) / [../openamp_phase5_release_v1.4.0_cold_boot_and_demo_success_2026-03-14.md](../openamp_phase5_release_v1.4.0_cold_boot_and_demo_success_2026-03-14.md) / [../../PROGRESS_LOG.md](../../PROGRESS_LOG.md) | 强调“今天 live 只从已在线状态开始” |
+| 4 | Act 1: trusted boot 与在线基线 | cold boot / RPMsg demo 路径已板级验证，且 2026-03-17 最新 live 已确认 8115 上 current / baseline 双路径都已成功执行；这页也是当前 `TC-002` 的 live reconstruction 收口入口 | [../openamp_demo_live_dualpath_status_20260317.md](../openamp_demo_live_dualpath_status_20260317.md) / [../openamp_tc002_tc010_defense_scope_note_2026-04-03.md](../openamp_tc002_tc010_defense_scope_note_2026-04-03.md) / [../openamp_phase5_release_v1.4.0_cold_boot_and_demo_success_2026-03-14.md](../openamp_phase5_release_v1.4.0_cold_boot_and_demo_success_2026-03-14.md) / [../../PROGRESS_LOG.md](../../PROGRESS_LOG.md) | 强调“今天 live 只从已在线状态开始” |
 | 5 | Act 2: STATUS -> JOB -> HEARTBEAT | 最小控制协议不是 echo，而是会改变 guard state | [coverage_matrix.md](coverage_matrix.md) | 讲 `READY -> JOB_ACTIVE` 和 `heartbeat_ok=1` |
 | 6 | Act 2: wrapper-backed smoke + JOB_DONE | firmware `ALLOW` 会真实放行 runner，作业完成后会回到 clean `READY` | [../openamp_wrapper_hook_board_smoke_success_2026-03-14.md](../openamp_wrapper_hook_board_smoke_success_2026-03-14.md) / [../openamp_phase5_job_done_success_2026-03-15.md](../openamp_phase5_job_done_success_2026-03-15.md) | 这是“控制面影响真实执行”的证据 |
 | 7 | Act 3: FIT 总表 | 三个正式 FIT 已收口，且 FIT-03 保留历史 FAIL | [coverage_matrix.md](coverage_matrix.md) | 一页打全局，再展开单项 |
@@ -19,19 +19,19 @@
 | 9 | Act 3: FIT-03 fail -> fix -> pass | 旧 live firmware 的缺口没有被掩盖，修复后用相同探针顺序复验通过 | [../openamp_phase5_fit03_timeout_gap_2026-03-15.md](../openamp_phase5_fit03_timeout_gap_2026-03-15.md) / [../openamp_phase5_fit03_watchdog_success_2026-03-15.md](../openamp_phase5_fit03_watchdog_success_2026-03-15.md) | 这是最强的可信度页 |
 | 10 | Act 4: 性能价值 | trusted current 在 payload 与 e2e 两个口径都显著优于 baseline | [../inference_compare_currentsafe_chunk4_refresh_20260313_1758.md](../inference_compare_currentsafe_chunk4_refresh_20260313_1758.md) / [../inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md](../inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md) | 把 OpenAMP 放在整机价值链里讲 |
 | 11 | 为什么说它是 safe reliable positioning | 同一个 trusted SHA 既有性能结论，也有 wrong-SHA / contract / watchdog 保护 | [coverage_matrix.md](coverage_matrix.md) / [../../PROGRESS_LOG.md](../../PROGRESS_LOG.md) | 讲“高性能 + 可审计执行边界” |
-| 12 | 边界与下一步 | 不主张 `FIT-04/05`、`RESET_REQ/ACK`、deadline、sticky reset | [README.md](README.md) / [summary_report.md](summary_report.md) | 主动讲边界，减少被动追问 |
+| 12 | 边界与下一步 | 不主张 `FIT-04/05`、`TC-010` 对应的 `RESET_REQ/ACK`、deadline、sticky reset | [README.md](README.md) / [summary_report.md](summary_report.md) / [../openamp_tc002_tc010_defense_scope_note_2026-04-03.md](../openamp_tc002_tc010_defense_scope_note_2026-04-03.md) | 主动讲边界，减少被动追问 |
 
 ## 2. 建议口头版本
 
 ### 10~12 分钟完整版
 
 1. 先报总判定，再说明今天不把答辩变成新实验。
-2. 用 `openamp_demo_live_dualpath_status_20260317.md` 先把最近一次 live 板端事实定住：**8115 是唯一有效 demo 实例，current 已成功跑通，baseline 也已通过 signed sideband 进入真机执行，且两侧 recent live reconstruction 均为 `300/300`。**
+2. 用 `openamp_demo_live_dualpath_status_20260317.md` 先把最近一次 live 板端事实定住：**8115 是唯一有效 demo 实例，current 已成功跑通，baseline 也已通过 signed sideband 进入真机执行，且两侧 recent live reconstruction 均为 `300/300`。** 这页同时就是当前 `TC-002` 的正式收口入口。
 3. 用 Act 1 立住“系统真实在线”。
 3. 用 Act 2 讲“控制面不只是收发消息，而是会影响 runner 放行和状态回收”。
 4. 用 Act 3 讲“安全性有正式 FIT，而且 FIT-03 的失败历史没有被藏起来”。
 5. 用 Act 4 讲“为什么这套控制面值得做”，即为高性能 trusted current 提供安全执行边界。
-6. 最后主动讲 out-of-scope，避免评委把问题扩到未收口范围。
+6. 最后主动讲 out-of-scope，避免评委把问题扩到未收口范围，尤其明确 `TC-010` 仍停在 `RESET_REQ/ACK` / sticky fault reset 扩展。
 
 ### 5 分钟压缩版
 
@@ -83,6 +83,7 @@
 推荐回答：
 
 > 当前不主张 `FIT-04/05`、`RESET_REQ/ACK`、deadline enforcement、sticky fault reset。  
+> `TC-002` 已由 live reconstruction `300/300` 收口；`TC-010` 对应的 `RESET_REQ/ACK` / sticky fault reset 仍不在本轮正式 claim。  
 > 这次 defense 聚焦的是已经完成并有板级证据的最小控制闭环与三项正式 FIT。
 
 ## 5. 备份页建议
