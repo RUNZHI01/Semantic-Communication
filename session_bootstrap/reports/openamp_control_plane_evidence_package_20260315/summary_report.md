@@ -16,6 +16,8 @@
 
 补充到最近一轮 live 事实层：见 [../openamp_demo_live_dualpath_status_20260317.md](../openamp_demo_live_dualpath_status_20260317.md)。该摘要明确确认 **8115 是当前唯一有效 demo 实例**，且最近一轮 live 中 **current 已成功跑通、baseline 也已通过 signed sideband 进入真机执行，两侧 reconstruction 均完成 `300/300`**。
 
+补充到 `TC-002 / TC-010` 的答辩边界层：见 [../openamp_tc002_tc010_defense_scope_note_2026-04-03.md](../openamp_tc002_tc010_defense_scope_note_2026-04-03.md)。当前更准确的口径是：`TC-002` 已由上述 live reconstruction `300/300` 证据完成答辩收口；`TC-010` 则继续明确保留为 `RESET_REQ/ACK` / sticky fault reset 扩展，不在本轮正式 claim 内。
+
 补充到本地可运行性层：见 [../openamp_demo_dashboard_local_acceptance_20260317.md](../openamp_demo_dashboard_local_acceptance_20260317.md)。该验收报告确认本地执行 `run_openamp_demo.sh --port 8092` 后，`/api/health` 返回 `ok`，并且 `/api/snapshot` 已实际暴露 `latest_live_status`，说明这份 3/17 最新状态不只存在于文档里，也已经真实进入 dashboard 运行面。
 
 ## 最终状态

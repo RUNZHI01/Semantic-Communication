@@ -4,7 +4,7 @@
 - package_id: `openamp_control_plane_evidence_package_20260315`
 - scope: `release_v1.4.0` 派生最小控制面在飞腾派真机上的答辩 / 演示证据收口
 - final_verdict: `P0 milestones verified on board; P1 FIT-01 / FIT-02 / FIT-03 final PASS`
-- historical_note: `FIT-03` 明确保留了 pre-fix FAIL -> post-fix PASS 的两阶段证据；`FIT-02` 已补历史 `batch=4` vs `batch=1` 的正式案例卡
+- historical_note: `FIT-03` 明确保留了 pre-fix FAIL -> post-fix PASS 的两阶段证据；`FIT-02` 已补历史 `batch=4` vs `batch=1` 的正式案例卡；`TC-002/010` 已补“live reconstruction 已收口 / sticky reset 仍属边界”的拆分说明
 
 ## 答辩最短路径
 
@@ -55,6 +55,8 @@
 - FIT-02 bundle:
   - [../openamp_input_contract_fit_20260315_014542/fit_report_FIT-02.md](../openamp_input_contract_fit_20260315_014542/fit_report_FIT-02.md)
   - [../openamp_fit02_batch_contract_case_card_2026-04-03.md](../openamp_fit02_batch_contract_case_card_2026-04-03.md)
+- `TC-002/010` defense scope note:
+  - [../openamp_tc002_tc010_defense_scope_note_2026-04-03.md](../openamp_tc002_tc010_defense_scope_note_2026-04-03.md)
 - FIT-03 pre-fix bundle:
   - [../openamp_heartbeat_timeout_fit_20260315_015841/fit_report_FIT-03.md](../openamp_heartbeat_timeout_fit_20260315_015841/fit_report_FIT-03.md)
 - FIT-03 post-fix bundle:
