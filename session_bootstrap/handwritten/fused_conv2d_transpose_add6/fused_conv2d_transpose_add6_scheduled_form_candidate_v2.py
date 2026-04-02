@@ -1,8 +1,9 @@
 """Checked-in local post-db candidate wrapper for fused_conv2d_transpose_add6 v2.
 
-This module points the local schedule-preserving seam at a new v2 working copy
-that keeps the accepted v1 behavior intact while opening a separate locality
-edit surface for the next transpose_add6 branch.
+This module points the local schedule-preserving seam at the first real v2
+locality edit, which keeps the accepted v1 bias-fused compute path intact while
+staging the tile-local padded patch one `dc_0` slice at a time for reuse across
+all three `c_1` groups.
 """
 
 from __future__ import annotations

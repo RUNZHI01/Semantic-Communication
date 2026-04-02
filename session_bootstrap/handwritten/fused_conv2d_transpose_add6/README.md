@@ -14,9 +14,9 @@ introduce a separate raw pre-compile hook lane.
 - `fused_conv2d_transpose_add6_scheduled_form_candidate_v1_working_copy_tir.py`: editable scheduled-form working copy cloned from the checked-in reference seed.
 - `scheduled_form_candidate_v1_working_copy_manifest.json`: small manifest for the editable working copy.
 - `fused_conv2d_transpose_add6_scheduled_form_candidate_v1.py`: local-only candidate wrapper that points the existing post-db seam at the working copy.
-- `fused_conv2d_transpose_add6_scheduled_form_candidate_v2_working_copy_tir.py`: isolated locality-seed working copy cloned from the accepted v1 state so the next transpose1-style locality edit does not mutate the accepted baseline.
-- `scheduled_form_candidate_v2_working_copy_manifest.json`: manifest for the v2 locality seed.
-- `fused_conv2d_transpose_add6_scheduled_form_candidate_v2.py`: local-only candidate wrapper for the v2 locality seed.
+- `fused_conv2d_transpose_add6_scheduled_form_candidate_v2_working_copy_tir.py`: isolated v2 working copy carrying the first transpose1-style locality edit on top of the accepted v1 state.
+- `scheduled_form_candidate_v2_working_copy_manifest.json`: manifest for the v2 locality edit.
+- `fused_conv2d_transpose_add6_scheduled_form_candidate_v2.py`: local-only candidate wrapper for the v2 locality edit.
 
 ## Refresh / Build
 
@@ -42,7 +42,7 @@ python3 ./session_bootstrap/scripts/run_transpose_add6_post_db_local_build.py \
 ```
 
 Run the local-only post-db scheduled swap build for the isolated v2 locality
-seed:
+edit:
 
 ```bash
 python3 ./session_bootstrap/scripts/run_transpose_add6_post_db_local_build.py \
@@ -50,5 +50,13 @@ python3 ./session_bootstrap/scripts/run_transpose_add6_post_db_local_build.py \
   --output-dir ./session_bootstrap/tmp/transpose_add6_post_db_swap_local_build_v2_locality_seed
 ```
 
-This lane is local-only and diagnostic-only. Do not use it for SSH or remote
-benchmark claims until a real transpose_add6 handwritten edit exists.
+Current checked-in v2 move:
+
+- keep the accepted v1 bias-fused compute path intact
+- keep `data_dilate` and `kernel_transform` materialized
+- stage the tile-local `data_pad` patch one `dc_0` slice (`16` channels) at a
+  time and reuse that staged slice across all three `c_1` groups before
+  staging the next slice
+
+This lane is still local-only and diagnostic-only. Do not use it for SSH or
+remote benchmark claims until the edited v2 path is board-validated.
