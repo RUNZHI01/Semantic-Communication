@@ -97,6 +97,7 @@
 | OpenAMP demo 文档收尾总览（2026-04-03） | `reports/openamp_demo_docs_closure_summary_2026-04-03.md` |
 | OpenAMP demo 任务完成判定矩阵（2026-04-03） | `reports/openamp_demo_task_completion_gate_matrix_2026-04-03.md` |
 | 项目双层口径 / 双层主叙事正式说明（2026-04-03） | `reports/project_dual_layer_narrative_and_wording_system_2026-04-03.md` |
+| 当前正式发布基线 + 历史优化谱系总览（2026-04-03） | `reports/project_release_baseline_and_optimization_lineage_2026-04-03.md` |
 | `TC-002/010` 答辩边界说明（2026-04-03） | `reports/openamp_tc002_tc010_defense_scope_note_2026-04-03.md` |
 | 集成 OpenAMP demo dashboard 启动器 | `scripts/run_openamp_demo.sh` |
 | cockpit_native 原生座舱答辩讲稿 | `runbooks/cockpit_native_demo_talk_track_2026-03-24.md` |
