@@ -51,6 +51,12 @@ Before trying to continue the live operator flow, run the dedicated readiness ch
 python3 ./session_bootstrap/scripts/check_openamp_demo_session_readiness.py --format text
 ```
 
+The launcher now also exposes the same preflight entrypoint:
+
+```bash
+bash ./session_bootstrap/scripts/run_openamp_demo.sh --check-readiness
+```
+
 Default JSON output is also available for machine-readable checks:
 
 ```bash
