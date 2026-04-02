@@ -21,10 +21,11 @@
 # - keep the accepted P4 pragma_auto_unroll_max_step = 64
 # - keep data_dilate, data_pad, and kernel_transform materialized
 #
-# New candidate goal:
-# - isolate the next transpose1 experiment in a new v4 file
-# - do not re-run raw pre-compile v0, P1 dilate+pad fusion, or P3 direct-stride-read
-# - only land a future edit here once it is a genuinely different locality/schedule idea
+# First real v4 locality/schedule edit:
+# - keep data_dilate, data_pad, and kernel_transform materialized
+# - hoist the per-spatial-tile data_dilate/data_pad fill outside the c_1 loop
+# - reuse each staged data tile across all three output-channel groups
+# - do not reopen raw pre-compile v0, P1 dilate+pad fusion, or P3 direct-stride-read
 from tvm.script import ir as I
 from tvm.script import tir as T
 
@@ -48,27 +49,27 @@ class Module:
                     T.writes(kernel_transform[v_o, v_i, v_h, v_w])
                     kernel_transform[v_o, v_i, v_h, v_w] = param_0[v_i, v_o, T.int64(2) - v_h, T.int64(2) - v_w]
         for b_0_c_0_h_0_w_0_fused_fused_fused in T.parallel(T.int64(32), annotations={"pragma_auto_unroll_max_step": 64, "pragma_unroll_explicit": 1}):
+            for ax0, ax1, ax2 in T.grid(T.int64(1), T.int64(48), T.int64(66)):
+                for ax0_1, ax1_1 in T.grid(T.int64(1), T.int64(1)):
+                    for ax2_ax3_fused in T.vectorized(T.int64(10)):
+                        with T.sblock("data_dilate"):
+                            v_i0 = T.axis.spatial(T.int64(1), ax0_1)
+                            v_i1 = T.axis.spatial(T.int64(48), ax1 + ax1_1)
+                            v_i2 = T.axis.spatial(T.int64(127), b_0_c_0_h_0_w_0_fused_fused_fused // T.int64(16) * T.int64(64) + ax2 + T.int64(-1))
+                            v_i3 = T.axis.spatial(T.int64(127), b_0_c_0_h_0_w_0_fused_fused_fused % T.int64(16) * T.int64(8) + ax2_ax3_fused + T.int64(-1))
+                            T.where(T.int64(1) <= b_0_c_0_h_0_w_0_fused_fused_fused % T.int64(32) // T.int64(16) * T.int64(64) + ax2 and b_0_c_0_h_0_w_0_fused_fused_fused % T.int64(32) // T.int64(16) * T.int64(64) + ax2 < T.int64(128) and T.int64(1) <= b_0_c_0_h_0_w_0_fused_fused_fused % T.int64(16) * T.int64(8) + ax2_ax3_fused % T.int64(10) and b_0_c_0_h_0_w_0_fused_fused_fused % T.int64(16) * T.int64(8) + ax2_ax3_fused % T.int64(10) < T.int64(128))
+                            T.reads(lv318[v_i0, v_i1, v_i2 // T.int64(2), v_i3 // T.int64(2)])
+                            T.writes(data_dilate[v_i0, v_i1, v_i2, v_i3])
+                            data_dilate[v_i0, v_i1, v_i2, v_i3] = T.if_then_else(v_i2 % T.int64(2) == T.int64(0) and v_i3 % T.int64(2) == T.int64(0), lv318[v_i0, v_i1, v_i2 // T.int64(2), v_i3 // T.int64(2)], T.float32(0.0))
+                for ax3_fused in T.vectorized(T.int64(10)):
+                    with T.sblock("data_pad"):
+                        v_i0, v_i1 = T.axis.remap("SS", [ax0, ax1])
+                        v_i2 = T.axis.spatial(T.int64(130), b_0_c_0_h_0_w_0_fused_fused_fused // T.int64(16) * T.int64(64) + ax2)
+                        v_i3 = T.axis.spatial(T.int64(130), b_0_c_0_h_0_w_0_fused_fused_fused % T.int64(16) * T.int64(8) + ax3_fused)
+                        T.reads(data_dilate[v_i0, v_i1, v_i2 - T.int64(1), v_i3 - T.int64(1)])
+                        T.writes(data_pad[v_i0, v_i1, v_i2, v_i3])
+                        data_pad[v_i0, v_i1, v_i2, v_i3] = T.if_then_else(T.int64(1) <= v_i2 and v_i2 < T.int64(128) and T.int64(1) <= v_i3 and v_i3 < T.int64(128), data_dilate[v_i0, v_i1, v_i2 - T.int64(1), v_i3 - T.int64(1)], T.float32(0.0))
             for b_1, c_1 in T.grid(T.int64(1), T.int64(3)):
-                for ax0, ax1, ax2 in T.grid(T.int64(1), T.int64(48), T.int64(66)):
-                    for ax0_1, ax1_1 in T.grid(T.int64(1), T.int64(1)):
-                        for ax2_ax3_fused in T.vectorized(T.int64(10)):
-                            with T.sblock("data_dilate"):
-                                v_i0 = T.axis.spatial(T.int64(1), ax0_1)
-                                v_i1 = T.axis.spatial(T.int64(48), ax1 + ax1_1)
-                                v_i2 = T.axis.spatial(T.int64(127), b_0_c_0_h_0_w_0_fused_fused_fused // T.int64(16) * T.int64(64) + ax2 + T.int64(-1))
-                                v_i3 = T.axis.spatial(T.int64(127), b_0_c_0_h_0_w_0_fused_fused_fused % T.int64(16) * T.int64(8) + ax2_ax3_fused + T.int64(-1))
-                                T.where(T.int64(1) <= b_0_c_0_h_0_w_0_fused_fused_fused % T.int64(32) // T.int64(16) * T.int64(64) + ax2 and b_0_c_0_h_0_w_0_fused_fused_fused % T.int64(32) // T.int64(16) * T.int64(64) + ax2 < T.int64(128) and T.int64(1) <= b_0_c_0_h_0_w_0_fused_fused_fused % T.int64(16) * T.int64(8) + ax2_ax3_fused % T.int64(10) and b_0_c_0_h_0_w_0_fused_fused_fused % T.int64(16) * T.int64(8) + ax2_ax3_fused % T.int64(10) < T.int64(128))
-                                T.reads(lv318[v_i0, v_i1, v_i2 // T.int64(2), v_i3 // T.int64(2)])
-                                T.writes(data_dilate[v_i0, v_i1, v_i2, v_i3])
-                                data_dilate[v_i0, v_i1, v_i2, v_i3] = T.if_then_else(v_i2 % T.int64(2) == T.int64(0) and v_i3 % T.int64(2) == T.int64(0), lv318[v_i0, v_i1, v_i2 // T.int64(2), v_i3 // T.int64(2)], T.float32(0.0))
-                    for ax3_fused in T.vectorized(T.int64(10)):
-                        with T.sblock("data_pad"):
-                            v_i0, v_i1 = T.axis.remap("SS", [ax0, ax1])
-                            v_i2 = T.axis.spatial(T.int64(130), b_0_c_0_h_0_w_0_fused_fused_fused // T.int64(16) * T.int64(64) + ax2)
-                            v_i3 = T.axis.spatial(T.int64(130), b_0_c_0_h_0_w_0_fused_fused_fused % T.int64(16) * T.int64(8) + ax3_fused)
-                            T.reads(data_dilate[v_i0, v_i1, v_i2 - T.int64(1), v_i3 - T.int64(1)])
-                            T.writes(data_pad[v_i0, v_i1, v_i2, v_i3])
-                            data_pad[v_i0, v_i1, v_i2, v_i3] = T.if_then_else(T.int64(1) <= v_i2 and v_i2 < T.int64(128) and T.int64(1) <= v_i3 and v_i3 < T.int64(128), data_dilate[v_i0, v_i1, v_i2 - T.int64(1), v_i3 - T.int64(1)], T.float32(0.0))
                 for h_1, w_1 in T.grid(T.int64(2), T.int64(2)):
                     for b_2_init, c_2_init, h_2_init, w_2_init, b_3_init, c_3_init, h_3_init in T.grid(T.int64(1), T.int64(1), T.int64(16), T.int64(1), T.int64(1), T.int64(8), T.int64(2)):
                         for w_3_fused_init in T.vectorized(T.int64(4)):

@@ -1,9 +1,9 @@
 """Checked-in local post-db candidate wrapper for fused_conv2d_transpose1_add9 v4.
 
-This module points the local schedule-preserving seam at a new v4 working copy
-that currently matches the accepted transpose1 P2+P4 state byte-for-byte. The
-purpose is to give the next genuinely different transpose1 experiment an
-isolated edit surface without mutating the accepted baseline files.
+This module points the local schedule-preserving seam at a v4 working copy that
+keeps the accepted transpose1 P2+P4 structure intact while hoisting the
+materialized data-dilate/data-pad tile staging out of the `c_1` loop so each
+spatial tile is prepared once before all three output-channel groups consume it.
 """
 
 from __future__ import annotations
@@ -27,12 +27,13 @@ DEFAULT_EVALUATION_CONTRACT = {
     "comparison_semantics": "local_build_structural_only",
     "reason": (
         "This wrapper only points the local post-db scheduled swap seam at the "
-        "checked-in scheduled-form v4 scaffold, so resulting evidence is "
-        "local-only build/probe evidence for the next transpose1 edit surface."
+        "checked-in scheduled-form v4 working copy, so resulting evidence is "
+        "local-only build/probe evidence for this first transpose1 v4 "
+        "locality/schedule edit."
     ),
     "notes": [
-        "Use this path to confirm that the scheduled-form v4 scaffold can be consumed by the existing local schedule-preserving seam.",
-        "The checked-in v4 file intentionally matches the accepted transpose1 P2+P4 baseline until a new edit is applied.",
+        "Use this path to confirm that the scheduled-form v4 working copy can be consumed by the existing local schedule-preserving seam.",
+        "The checked-in v4 file keeps materialized data/kernel staging but stages each spatial data tile only once before the c_1 loop reuses it.",
         "Do not treat this path as runtime or performance evidence.",
     ],
 }
@@ -135,15 +136,15 @@ def describe_placeholder(context: dict[str, Any] | None = None) -> dict[str, obj
         "working_copy_manifest": str(_working_copy_manifest_path()),
         "accepted_baseline": manifest.get("accepted_baseline"),
         "current_edit_state": current_edit_state,
-        "placeholder_only": True,
+        "placeholder_only": False,
         "hook_target": False,
         "schedule_preserving_override_available": True,
         "validation_scope": "local_only_post_db_scheduled_swap",
         "evaluation_contract": dict(DEFAULT_EVALUATION_CONTRACT),
         "next_step": (
-            "Apply one genuinely different transpose1 locality/schedule edit on "
-            "top of this accepted-state clone, then run the existing local "
-            "post-db build path before any board benchmark."
+            "Take this exact v4 working copy through the existing local proof "
+            "path, then benchmark the resulting swapped artifact on the board "
+            "without mutating the accepted v1/P2/P4 files."
         ),
     }
 
@@ -179,8 +180,8 @@ def build_manual_impl(context: dict[str, Any] | None = None) -> dict[str, object
             "evaluation_contract": dict(DEFAULT_EVALUATION_CONTRACT),
         },
         "notes": [
-            "The checked-in scheduled-form v4 scaffold is consumed only through the local post-db scheduled swap seam here.",
-            "It currently matches the accepted transpose1 P2+P4 baseline and exists only to isolate the next real edit.",
+            "The checked-in scheduled-form v4 working copy is consumed only through the local post-db scheduled swap seam here.",
+            "This first real v4 edit stages each spatial data tile once outside c_1 while keeping the accepted materialized buffers and compute structure intact.",
             "This path stays diagnostic-only and does not make performance claims.",
         ],
     }

@@ -38,11 +38,11 @@ class DummyTVMScriptNamespace:
 class FusedConv2dTranspose1Add9ScheduledFormCandidateV4WorkingCopyTest(
     unittest.TestCase
 ):
-    def test_working_copy_keeps_the_accepted_p2_p4_state_frozen_in_v4(self) -> None:
+    def test_working_copy_keeps_the_v4_edit_local_and_isolated(self) -> None:
         text = MODULE_PATH.read_text(encoding="utf-8")
 
         self.assertIn("Accepted baseline carried forward into this v4 scaffold", text)
-        self.assertIn("New candidate goal", text)
+        self.assertIn("First real v4 locality/schedule edit", text)
         self.assertIn("kernel_transform = T.alloc_buffer", text)
         self.assertIn("data_dilate = T.alloc_buffer", text)
         self.assertIn("data_pad = T.alloc_buffer", text)
@@ -51,6 +51,14 @@ class FusedConv2dTranspose1Add9ScheduledFormCandidateV4WorkingCopyTest(
         self.assertNotIn("compute_intermediate = T.alloc_buffer", text)
         self.assertNotIn('with T.sblock("T_add")', text)
         self.assertIn('"pragma_auto_unroll_max_step": 64', text)
+        self.assertLess(
+            text.index("for ax0, ax1, ax2 in T.grid"),
+            text.index("for b_1, c_1 in T.grid"),
+        )
+        self.assertIn(
+            "reuse each staged data tile across all three output-channel groups",
+            text,
+        )
 
         script_module = types.ModuleType("tvm.script")
         script_module.ir = DummyTVMScriptNamespace()
@@ -88,10 +96,10 @@ class FusedConv2dTranspose1Add9ScheduledFormCandidateV4WorkingCopyTest(
         self.assertFalse(payload["working_copy_contract"]["performance_claims"])
         self.assertEqual(
             payload["current_edit_state"]["status"],
-            "v4_scaffold_matches_accepted_p2_p4",
+            "v4_data_staging_hoisted_outside_c1_applied",
         )
         self.assertIn(
-            "clean clone of the accepted transpose1 P2+P4 scheduled-form state",
+            "hoist the materialized data_dilate/data_pad tile fill outside the c_1 loop",
             payload["current_edit_state"]["concrete_change"],
         )
         self.assertEqual(

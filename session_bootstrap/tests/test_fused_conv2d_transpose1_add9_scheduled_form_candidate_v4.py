@@ -69,9 +69,9 @@ class FusedConv2dTranspose1Add9ScheduledFormCandidateV4Test(unittest.TestCase):
         self.assertEqual(metadata["candidate_version"], "v4_working_copy")
         self.assertEqual(
             metadata["candidate_status"],
-            "v4_scaffold_matches_accepted_p2_p4",
+            "v4_data_staging_hoisted_outside_c1_applied",
         )
-        self.assertTrue(metadata["placeholder_only"])
+        self.assertFalse(metadata["placeholder_only"])
         self.assertFalse(metadata["hook_target"])
         self.assertTrue(metadata["schedule_preserving_override_available"])
         self.assertEqual(
@@ -88,7 +88,7 @@ class FusedConv2dTranspose1Add9ScheduledFormCandidateV4Test(unittest.TestCase):
             159.356,
         )
         self.assertIn(
-            "genuinely different transpose1 locality/schedule edit",
+            "benchmark the resulting swapped artifact on the board",
             metadata["next_step"],
         )
         self.assertTrue(Path(metadata["working_copy_tir"]).is_file())
