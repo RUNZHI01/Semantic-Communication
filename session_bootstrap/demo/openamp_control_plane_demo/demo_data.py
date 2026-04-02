@@ -466,7 +466,10 @@ def build_aircraft_position_snapshot(feed: dict[str, Any] | None = None) -> dict
 
 
 def repo_relative(path: Path) -> str:
-    return path.resolve().relative_to(PROJECT_ROOT).as_posix()
+    try:
+        return path.resolve().relative_to(PROJECT_ROOT).as_posix()
+    except ValueError:
+        return str(path)
 
 
 def resolve_repo_path(raw_path: str) -> Path:
@@ -475,7 +478,13 @@ def resolve_repo_path(raw_path: str) -> Path:
         path = (PROJECT_ROOT / path).resolve()
     else:
         path = path.resolve()
-    path.relative_to(PROJECT_ROOT)
+    try:
+        path.relative_to(PROJECT_ROOT)
+    except ValueError:
+        # Absolute path from another machine — try to rebase under PROJECT_ROOT
+        rebased = PROJECT_ROOT / path.relative_to(path.anchor)
+        if rebased.exists():
+            path = rebased
     return path
 
 
@@ -497,6 +506,14 @@ def image_data_uri(path_value: str) -> str:
         ".jpeg": "image/jpeg",
         ".webp": "image/webp",
     }.get(suffix, "application/octet-stream")
+    if not path.exists():
+        # Return a 1x1 transparent PNG placeholder when the file is missing
+        _PLACEHOLDER_PNG = base64.b64encode(
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+            b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01"
+            b"\x00\x00\x05\x00\x01\r\n\xb4\x00\x00\x00\x00IEND\xaeB`\x82"
+        ).decode("ascii")
+        return f"data:image/png;base64,{_PLACEHOLDER_PNG}"
     encoded = base64.b64encode(path.read_bytes()).decode("ascii")
     return f"data:{mime_type};base64,{encoded}"
 

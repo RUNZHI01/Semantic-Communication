@@ -23,9 +23,10 @@ function createWindow(): void {
   })
 
   mainWindow.on('ready-to-show', () => {
+    mainWindow?.webContents.setZoomFactor(WSL_SCALE)
     mainWindow?.show()
     // Open DevTools in development to debug issues
-    mainWindow.webContents.openDevTools()
+    mainWindow?.webContents.openDevTools()
   })
 
   if (process.env.ELECTRON_RENDERER_URL) {
@@ -37,6 +38,9 @@ function createWindow(): void {
 
 // Disable GPU acceleration for WSL compatibility
 app.disableHardwareAcceleration()
+
+// WSLg reports 100% scaling; override to match host DPI
+const WSL_SCALE = Number(process.env.WSL_SCALE_FACTOR ?? '1.25')
 
 app.whenReady().then(() => {
   backend = startPythonBackend()
