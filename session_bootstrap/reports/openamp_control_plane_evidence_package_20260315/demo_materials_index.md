@@ -29,6 +29,9 @@
 | [demo_four_act_runbook.md](demo_four_act_runbook.md) | 四幕演示脚本、操作顺序、每幕话术与证据落点 | 主文档 |
 | [defense_talk_outline.md](defense_talk_outline.md) | PPT 页结构 + speaking outline + 高频问答口径 | 讲稿 / 做页 |
 | [degraded_demo_plan.md](degraded_demo_plan.md) | live 不稳时的降级策略、时间压缩版与红线 | 兜底文档 |
+| [../openamp_demo_video_script_alignment_2026-04-03.md](../openamp_demo_video_script_alignment_2026-04-03.md) | 72 秒脚本 / cheat sheet / operator runbook 的统一口径说明 | 视频脚本收口 |
+| [../openamp_demo_topline_acceptance_note_2026-04-03.md](../openamp_demo_topline_acceptance_note_2026-04-03.md) | 首屏 / top-line status 的 docs-first 验收标准 | 首屏验收 |
+| [../openamp_tc002_tc010_defense_scope_note_2026-04-03.md](../openamp_tc002_tc010_defense_scope_note_2026-04-03.md) | `TC-002` 已收口 / `TC-010` 仍属边界的正式说明 | 边界口径 |
 | [../../demo/openamp_control_plane_demo/README.md](../../demo/openamp_control_plane_demo/README.md) | 集成 dashboard 软件说明、启动命令与 live probe 边界 | 软件入口 |
 | [../../scripts/run_openamp_demo.sh](../../scripts/run_openamp_demo.sh) | 本地启动集成 OpenAMP demo UI | 启动器 |
 
@@ -37,13 +40,14 @@
 如果答辩前只剩 10 分钟，按这个顺序打开：
 
 1. [demo_four_act_runbook.md](demo_four_act_runbook.md)
-2. [../openamp_demo_live_dualpath_status_20260317.md](../openamp_demo_live_dualpath_status_20260317.md)
-3. [../openamp_demo_dashboard_local_acceptance_20260317.md](../openamp_demo_dashboard_local_acceptance_20260317.md)
-4. [../openamp_demo_live_delivery_snapshot_20260317.md](../openamp_demo_live_delivery_snapshot_20260317.md)
-5. [degraded_demo_plan.md](degraded_demo_plan.md)
-6. [summary_report.md](summary_report.md)
-7. [coverage_matrix.md](coverage_matrix.md)
-8. [../../scripts/run_openamp_demo.sh](../../scripts/run_openamp_demo.sh)
+2. [../openamp_demo_topline_acceptance_note_2026-04-03.md](../openamp_demo_topline_acceptance_note_2026-04-03.md)
+3. [../openamp_tc002_tc010_defense_scope_note_2026-04-03.md](../openamp_tc002_tc010_defense_scope_note_2026-04-03.md)
+4. [../openamp_demo_video_script_alignment_2026-04-03.md](../openamp_demo_video_script_alignment_2026-04-03.md)
+5. [../openamp_demo_live_dualpath_status_20260317.md](../openamp_demo_live_dualpath_status_20260317.md)
+6. [degraded_demo_plan.md](degraded_demo_plan.md)
+7. [summary_report.md](summary_report.md)
+8. [coverage_matrix.md](coverage_matrix.md)
+9. [../../scripts/run_openamp_demo.sh](../../scripts/run_openamp_demo.sh)
 
 ## 四幕与证据映射
 
