@@ -4,6 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 SERVER="$PROJECT_ROOT/session_bootstrap/demo/openamp_control_plane_demo/server.py"
+READINESS_CHECKER="$PROJECT_ROOT/session_bootstrap/scripts/check_openamp_demo_session_readiness.py"
 SERVER_SUFFIX="/session_bootstrap/demo/openamp_control_plane_demo/server.py"
 DEFAULT_HOST="127.0.0.1"
 DEFAULT_PORT="8079"
@@ -50,6 +51,47 @@ parse_bind_args() {
         esac
         shift
     done
+}
+
+run_readiness_check_if_requested() {
+    local -a readiness_args=()
+    local readiness_requested=0
+    local readiness_format="text"
+
+    while (($#)); do
+        case "$1" in
+            --check-readiness|--check-readiness-only)
+                readiness_requested=1
+                ;;
+            --readiness-format)
+                if (($# >= 2)); then
+                    readiness_format="$2"
+                    shift 2
+                    continue
+                fi
+                break
+                ;;
+            --readiness-format=*)
+                readiness_format="${1#*=}"
+                ;;
+            --probe-env|--host|--user|--password|--port|--env-file)
+                if (($# >= 2)); then
+                    readiness_args+=("$1" "$2")
+                    shift 2
+                    continue
+                fi
+                break
+                ;;
+            --probe-env=*|--host=*|--user=*|--password=*|--port=*|--env-file=*)
+                readiness_args+=("$1")
+                ;;
+        esac
+        shift
+    done
+
+    if ((readiness_requested)); then
+        exec python3 "$READINESS_CHECKER" --format "$readiness_format" "${readiness_args[@]}"
+    fi
 }
 
 bind_listener_conflicts() {
@@ -433,6 +475,7 @@ reclaim_demo_listener_if_safe() {
 }
 
 main() {
+    run_readiness_check_if_requested "$@"
     parse_bind_args REQUESTED_HOST REQUESTED_PORT "$@"
 
     if [[ ! "$REQUESTED_PORT" =~ ^[0-9]+$ ]]; then
