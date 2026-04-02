@@ -17,6 +17,9 @@ introduce a separate raw pre-compile hook lane yet.
 - `fused_conv2d_transpose2_add12_scheduled_form_candidate_v2_working_copy_tir.py`: isolated scheduled-form v2 working copy that tries a P1-style `data_dilate + data_pad -> data_dilate_pad` fusion on top of the accepted v1 state.
 - `scheduled_form_candidate_v2_working_copy_manifest.json`: small manifest for the v2 working copy.
 - `fused_conv2d_transpose2_add12_scheduled_form_candidate_v2.py`: local-only candidate wrapper for the checked-in v2 working copy.
+- `fused_conv2d_transpose2_add12_scheduled_form_candidate_v3_working_copy_tir.py`: isolated scheduled-form v3 scaffold reserved for the next kernel_transform-side locality edit.
+- `scheduled_form_candidate_v3_working_copy_manifest.json`: small manifest for the v3 scaffold.
+- `fused_conv2d_transpose2_add12_scheduled_form_candidate_v3.py`: local-only candidate wrapper for the checked-in v3 scaffold.
 
 ## Refresh / Build
 
@@ -49,12 +52,21 @@ python3 ./session_bootstrap/scripts/run_transpose2_post_db_local_build.py \
   --output-dir ./session_bootstrap/tmp/transpose2_post_db_swap_local_build_v2
 ```
 
+To build the isolated v3 scaffold instead of the accepted v1 baseline:
+
+```bash
+python3 ./session_bootstrap/scripts/run_transpose2_post_db_local_build.py \
+  --candidate-impl ./session_bootstrap/handwritten/fused_conv2d_transpose2_add12/fused_conv2d_transpose2_add12_scheduled_form_candidate_v3.py \
+  --output-dir ./session_bootstrap/tmp/transpose2_post_db_swap_local_build_v3
+```
+
 Current repo state:
 
 - accepted remote baseline: `v1 bias fusion`, report `./session_bootstrap/reports/transpose2_v1_remote_benchmark_20260331_201239.md`, median `161.416 ms`
-- dropped follow-up experiments: `P2` and `P4`
-- current next local candidate: `v2` P1-style `data_dilate + data_pad` fusion
+- dropped follow-up experiments: `P2`, `P4`, and `v2` P1-style `data_dilate + data_pad` fusion
+- current next local surface: isolated `v3` scaffold for a kernel_transform-side locality edit
+- target-selection rationale: `./session_bootstrap/reports/next_handwritten_speedup_target_after_variance4_20260402.md`
 
 This lane is still local-only and diagnostic-only inside the repo. Use the
-accepted `v1` artifact as the baseline when manually benchmarking the new `v2`
-candidate on the board.
+accepted `v1` artifact as the baseline when manually benchmarking any future
+real `v3` candidate on the board.
