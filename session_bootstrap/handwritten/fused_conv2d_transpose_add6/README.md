@@ -14,6 +14,9 @@ introduce a separate raw pre-compile hook lane.
 - `fused_conv2d_transpose_add6_scheduled_form_candidate_v1_working_copy_tir.py`: editable scheduled-form working copy cloned from the checked-in reference seed.
 - `scheduled_form_candidate_v1_working_copy_manifest.json`: small manifest for the editable working copy.
 - `fused_conv2d_transpose_add6_scheduled_form_candidate_v1.py`: local-only candidate wrapper that points the existing post-db seam at the working copy.
+- `fused_conv2d_transpose_add6_scheduled_form_candidate_v2_working_copy_tir.py`: isolated locality-seed working copy cloned from the accepted v1 state so the next transpose1-style locality edit does not mutate the accepted baseline.
+- `scheduled_form_candidate_v2_working_copy_manifest.json`: manifest for the v2 locality seed.
+- `fused_conv2d_transpose_add6_scheduled_form_candidate_v2.py`: local-only candidate wrapper for the v2 locality seed.
 
 ## Refresh / Build
 
@@ -36,6 +39,15 @@ Run the local-only post-db scheduled swap build:
 ```bash
 python3 ./session_bootstrap/scripts/run_transpose_add6_post_db_local_build.py \
   --output-dir ./session_bootstrap/tmp/transpose_add6_post_db_swap_local_build
+```
+
+Run the local-only post-db scheduled swap build for the isolated v2 locality
+seed:
+
+```bash
+python3 ./session_bootstrap/scripts/run_transpose_add6_post_db_local_build.py \
+  --candidate-impl ./session_bootstrap/handwritten/fused_conv2d_transpose_add6/fused_conv2d_transpose_add6_scheduled_form_candidate_v2.py \
+  --output-dir ./session_bootstrap/tmp/transpose_add6_post_db_swap_local_build_v2_locality_seed
 ```
 
 This lane is local-only and diagnostic-only. Do not use it for SSH or remote
