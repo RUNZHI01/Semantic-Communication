@@ -152,6 +152,31 @@ There is also a shorthand alias for the same flow:
 bash ./session_bootstrap/scripts/run_openamp_demo.sh --prompt-password-probe-startup
 ```
 
+If you want a one-shot startup-probe capture instead of keeping the dashboard running, use:
+
+```bash
+bash ./session_bootstrap/scripts/run_openamp_demo_probe_once.sh --prompt-password
+```
+
+Default behavior:
+
+- binds the temporary demo server on `127.0.0.1:18079` so it does not reclaim your usual manual `8079` dashboard by accident
+- launches the existing demo launcher with startup probe enabled
+- waits for `/api/health`, captures `/api/health`, `/api/system-status`, and `/api/snapshot`
+- writes the raw JSON plus launcher logs under `session_bootstrap/tmp/openamp_demo_probe_once_<timestamp>/`
+- prints a concise summary for `execution_mode`, `connection_ready`, `missing_connection_fields`, `mode.effective_label`, `board.current_status.label / summary`, and `valid_instance`
+- stops the temporary demo process automatically after capture
+
+If you already have a runtime password and accept the usual shell-history/process-list tradeoff, the helper also supports:
+
+```bash
+bash ./session_bootstrap/scripts/run_openamp_demo_probe_once.sh \
+  --password '<runtime-password>' \
+  --probe-timeout-sec 5
+```
+
+The helper stays honest about snapshot freshness. If the capture still says `保存的只读 SSH 探板` and the summary says the result comes from a saved record, treat that as saved-probe replay rather than claiming a fresh startup probe succeeded.
+
 Direct checker usage still works when needed:
 
 ```bash
