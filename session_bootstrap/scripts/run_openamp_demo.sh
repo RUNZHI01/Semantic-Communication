@@ -139,6 +139,10 @@ run_server_with_prompt_password_if_requested() {
             --prompt-password)
                 prompt_password_requested=1
                 ;;
+            --prompt-password-probe-startup)
+                prompt_password_requested=1
+                server_args+=("--probe-startup")
+                ;;
             *)
                 server_args+=("$1")
                 ;;
