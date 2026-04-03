@@ -14,6 +14,7 @@ OUTPUT_DIR=""
 PASSWORD=""
 PROMPT_PASSWORD=0
 PROBE_ENV=""
+POST_PROBE_BOARD=0
 EXTRA_LAUNCHER_ARGS=()
 
 usage() {
@@ -32,6 +33,7 @@ Options:
   --output-dir <dir>    Capture directory
   --probe-env <path>    Forward a probe env file to the launcher
   --probe-timeout-sec <n>  Forward startup probe timeout to the launcher
+  --post-probe-board    After startup, POST /api/probe-board and capture the result too
   --password <value>    Use one runtime password without prompting
   --prompt-password     Prompt once (no echo) for runtime password
   -- <args...>          Forward any remaining args to run_openamp_demo.sh
@@ -63,6 +65,10 @@ while (($#)); do
       ;;
     --probe-timeout-sec=*)
       EXTRA_LAUNCHER_ARGS+=("$1")
+      shift
+      ;;
+    --post-probe-board)
+      POST_PROBE_BOARD=1
       shift
       ;;
     --password)
@@ -103,6 +109,7 @@ API_BASE="http://${HOST}:${PORT}"
 HEALTH_JSON="$OUTPUT_DIR/api_health.json"
 SYSTEM_STATUS_JSON="$OUTPUT_DIR/api_system_status.json"
 SNAPSHOT_JSON="$OUTPUT_DIR/api_snapshot.json"
+PROBE_BOARD_JSON="$OUTPUT_DIR/api_probe_board.json"
 SUMMARY_JSON="$OUTPUT_DIR/summary.json"
 LAUNCHER_LOG="$OUTPUT_DIR/launcher.log"
 DEMO_PID=""
@@ -162,18 +169,37 @@ PY
 capture_endpoint() {
   local path="$1"
   local output_path="$2"
-  "$PYTHON_BIN" - <<'PY' "$API_BASE" "$path" "$output_path"
+  local method="${3:-GET}"
+  local timeout_sec="${4:-2.0}"
+  local allow_error_payload="${5:-0}"
+  "$PYTHON_BIN" - <<'PY' "$API_BASE" "$path" "$output_path" "$method" "$timeout_sec" "$allow_error_payload"
 from __future__ import annotations
 import json
 import sys
 import urllib.request
 from pathlib import Path
 
-base, path, output_path = sys.argv[1:4]
+base, path, output_path, method, timeout_sec, allow_error_payload = sys.argv[1:7]
 opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
-request = urllib.request.Request(base.rstrip("/") + path, headers={"Accept": "application/json"})
-with opener.open(request, timeout=2.0) as response:
-    payload = json.loads(response.read().decode("utf-8"))
+request = urllib.request.Request(
+    base.rstrip("/") + path,
+    data=b"{}" if method.upper() == "POST" else None,
+    headers={"Accept": "application/json", "Content-Type": "application/json"},
+    method=method.upper(),
+)
+try:
+    with opener.open(request, timeout=float(timeout_sec)) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+except Exception as exc:
+    if allow_error_payload == "1":
+        payload = {
+            "status": "error",
+            "reachable": False,
+            "summary": f"fresh {path} request failed: {exc}",
+            "error": str(exc),
+        }
+    else:
+        raise
 Path(output_path).write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 PY
 }
@@ -214,8 +240,11 @@ fi
 capture_endpoint "/api/health" "$HEALTH_JSON"
 capture_endpoint "/api/system-status" "$SYSTEM_STATUS_JSON"
 capture_endpoint "/api/snapshot" "$SNAPSHOT_JSON"
+if [[ "$POST_PROBE_BOARD" -eq 1 ]]; then
+  capture_endpoint "/api/probe-board" "$PROBE_BOARD_JSON" POST 10.0 1
+fi
 
-"$PYTHON_BIN" - <<'PY' "$HEALTH_JSON" "$SYSTEM_STATUS_JSON" "$SNAPSHOT_JSON" "$SUMMARY_JSON"
+"$PYTHON_BIN" - <<'PY' "$HEALTH_JSON" "$SYSTEM_STATUS_JSON" "$SNAPSHOT_JSON" "$SUMMARY_JSON" "$POST_PROBE_BOARD" "$PROBE_BOARD_JSON"
 from __future__ import annotations
 import json
 import sys
@@ -225,6 +254,9 @@ health = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 system = json.loads(Path(sys.argv[2]).read_text(encoding="utf-8"))
 snapshot = json.loads(Path(sys.argv[3]).read_text(encoding="utf-8"))
 summary_path = Path(sys.argv[4])
+post_probe_board = sys.argv[5] == "1"
+probe_board_path = Path(sys.argv[6])
+probe_board = json.loads(probe_board_path.read_text(encoding="utf-8")) if post_probe_board and probe_board_path.exists() else None
 
 board_status = snapshot.get("board", {}).get("current_status", {})
 board_label = str(board_status.get("label") or "")
@@ -246,6 +278,11 @@ summary = {
     "valid_instance": snapshot.get("latest_live_status", {}).get("valid_instance"),
     "fresh_probe_visible": fresh_probe_visible,
     "startup_probe_note": startup_probe_note,
+    "probe_board_requested": post_probe_board,
+    "probe_board_status": probe_board.get("status") if probe_board else None,
+    "probe_board_reachable": probe_board.get("reachable") if probe_board else None,
+    "probe_board_summary": probe_board.get("summary") if probe_board else None,
+    "probe_board_error": probe_board.get("error") if probe_board else None,
 }
 summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 print("[probe-once] summary:")
@@ -258,5 +295,10 @@ print(f"  board.current_status.summary: {summary['board_current_status_summary']
 print(f"  valid_instance: {summary['valid_instance']}")
 print(f"  fresh_probe_visible: {summary['fresh_probe_visible']}")
 print(f"  startup_probe_note: {summary['startup_probe_note']}")
+if post_probe_board:
+    print(f"  probe_board.status: {summary['probe_board_status']}")
+    print(f"  probe_board.reachable: {summary['probe_board_reachable']}")
+    print(f"  probe_board.summary: {summary['probe_board_summary']}")
+    print(f"  probe_board.error: {summary['probe_board_error']}")
 print(f"[probe-once] capture_dir: {summary_path.parent}")
 PY

@@ -65,18 +65,26 @@ class OpenAMPDemoProbeOnceTest(unittest.TestCase):
                 },
                 "latest_live_status": {"valid_instance": "8115"},
             }
+            PROBE_BOARD = {
+                "status": "error",
+                "reachable": False,
+                "summary": "板卡 SSH 认证失败，请检查用户名、密码或 SSH 端口设置。",
+                "error": "板卡 SSH 认证失败，请检查用户名、密码或 SSH 端口设置。",
+            }
 
             if 'base + "/api/health"' in script and len(args) == 1:
                 raise SystemExit(0)
 
-            if 'base.rstrip("/") + path' in script and len(args) == 3:
-                _, path, output_path = args
+            if 'base.rstrip("/") + path' in script and len(args) == 6:
+                _, path, output_path, method, timeout_sec, allow_error_payload = args
                 if path == "/api/health":
                     payload = {"status": "ok"}
                 elif path == "/api/system-status":
                     payload = SYSTEM_STATUS
                 elif path == "/api/snapshot":
                     payload = SNAPSHOT
+                elif path == "/api/probe-board":
+                    payload = PROBE_BOARD
                 else:
                     raise SystemExit(f"unsupported path: {path}")
                 Path(output_path).write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\\n", encoding="utf-8")
@@ -185,6 +193,7 @@ class OpenAMPDemoProbeOnceTest(unittest.TestCase):
             self.assertTrue((output_dir / "api_health.json").is_file())
             self.assertTrue((output_dir / "api_system_status.json").is_file())
             self.assertTrue((output_dir / "api_snapshot.json").is_file())
+            self.assertFalse((output_dir / "api_probe_board.json").exists())
             self.assertTrue((output_dir / "summary.json").is_file())
 
             summary = json.loads((output_dir / "summary.json").read_text(encoding="utf-8"))
@@ -239,6 +248,51 @@ class OpenAMPDemoProbeOnceTest(unittest.TestCase):
             )
 
             self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(password_log_path.read_text(encoding="utf-8").strip(), password)
+            self.assertNotIn(password, result.stdout)
+            self.assertNotIn(password, result.stderr)
+            self.assertEqual(term_log_path.read_text(encoding="utf-8").strip(), "terminated")
+
+    def test_probe_once_post_probe_board_captures_probe_result(self) -> None:
+        password = "prompt-pass"
+        port = 18092
+
+        with tempfile.TemporaryDirectory() as temp_dir_name:
+            temp_dir = Path(temp_dir_name)
+            output_dir = temp_dir / "capture"
+            env, _, password_log_path, term_log_path = self.build_mock_runtime(temp_dir)
+
+            result = subprocess.run(
+                [
+                    "bash",
+                    str(HELPER),
+                    "--prompt-password",
+                    "--post-probe-board",
+                    "--output-dir",
+                    str(output_dir),
+                    "--port",
+                    str(port),
+                ],
+                cwd=REPO_ROOT,
+                env=env,
+                input=f"{password}\n",
+                capture_output=True,
+                text=True,
+                timeout=20,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertTrue((output_dir / "api_probe_board.json").is_file())
+            probe_board = json.loads((output_dir / "api_probe_board.json").read_text(encoding="utf-8"))
+            self.assertEqual(probe_board["status"], "error")
+            self.assertFalse(probe_board["reachable"])
+            self.assertIn("SSH 认证失败", probe_board["summary"])
+            summary = json.loads((output_dir / "summary.json").read_text(encoding="utf-8"))
+            self.assertTrue(summary["probe_board_requested"])
+            self.assertEqual(summary["probe_board_status"], "error")
+            self.assertFalse(summary["probe_board_reachable"])
+            self.assertIn("SSH 认证失败", summary["probe_board_summary"])
             self.assertEqual(password_log_path.read_text(encoding="utf-8").strip(), password)
             self.assertNotIn(password, result.stdout)
             self.assertNotIn(password, result.stderr)
