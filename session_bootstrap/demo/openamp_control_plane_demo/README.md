@@ -146,6 +146,12 @@ If you want the same launch to immediately attempt one read-only startup probe, 
 bash ./session_bootstrap/scripts/run_openamp_demo.sh --prompt-password --probe-startup
 ```
 
+There is also a shorthand alias for the same flow:
+
+```bash
+bash ./session_bootstrap/scripts/run_openamp_demo.sh --prompt-password-probe-startup
+```
+
 Direct checker usage still works when needed:
 
 ```bash
