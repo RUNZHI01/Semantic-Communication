@@ -134,7 +134,7 @@
    - 若希望同一轮里也主动触发 fresh `/api/probe-board`：`bash ./session_bootstrap/scripts/run_openamp_demo_probe_once.sh --prompt-password --post-probe-board`
    - 若希望这条 fresh probe 在失败时直接给出非零退出码（便于自动化/严格检查）：`bash ./session_bootstrap/scripts/run_openamp_demo_probe_once.sh --prompt-password --strict-probe-board`
    - 若希望直接验证 startup probe 路径但保持诚实 capture：优先用上一条 helper，而不是手工起服务再 curl
-   - 当前这条 helper 已真实跑通，但抓到的仍是 `保存的只读 SSH 探板`；随后对 `/api/probe-board` 的 fresh probe 也已真实触发，并如实返回 `SSH 认证失败`，说明当前主 blocker 已进一步收窄为“真实可用 password”，而不是 endpoint/launcher 缺失
+   - 当前这条 helper 已真实跑通，但抓到的仍是 `保存的只读 SSH 探板`；随后对 `/api/probe-board` 的 fresh probe 也已真实触发，并如实返回 `SSH 认证失败`（strict 模式下也会给出非零退出码），说明当前主 blocker 已进一步收窄为“真实可用 SSH 凭据”，而不是 endpoint/launcher 缺失
    - 如需直接脚本输出：`python3 ./session_bootstrap/scripts/check_openamp_demo_session_readiness.py --format text`
    - 入口：`reports/openamp_demo_presentation_day_checklist_2026-04-03.md`、`reports/openamp_demo_rehearsal_go_nogo_template_2026-04-03.md`、`reports/openamp_demo_local_launch_healthcheck_2026-04-03.md`
 2. **OpenAMP 剩余真机协议 / FIT 缺口**
