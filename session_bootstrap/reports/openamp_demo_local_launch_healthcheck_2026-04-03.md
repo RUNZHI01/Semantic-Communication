@@ -171,10 +171,11 @@ curl -X POST http://127.0.0.1:8079/api/probe-board -H 'Content-Type: application
 
 ### 当前真实 blocker
 
-- 当前会话没有可用板侧密码，因此：
-  - `board_access.connection_ready = false`
-  - 无法在本次会话里继续推进 live operator flow
-  - 也无法把 Demo 未完成项直接改成完成
+- launcher 级 readiness / prompt-password / startup-probe / one-shot helper 都已经打通；
+- 但 fresh `/api/probe-board` 的真实尝试仍会返回 `SSH 认证失败` 或超时，因此：
+  - 当前真正缺的不是入口或会话字段注入
+  - 而是**真实可用 SSH 凭据（以及必要时正确端口/用户名）**
+  - 在拿到可用凭据前，仍无法把 Demo 未完成项直接改成完成
 
 ### 这意味着什么
 
@@ -235,9 +236,9 @@ python3 ./session_bootstrap/scripts/check_openamp_demo_session_readiness.py --fo
 
 1. 先运行 `bash ./session_bootstrap/scripts/run_openamp_demo.sh --check-readiness`
 2. 若只差一次运行时 password，可先运行 `bash ./session_bootstrap/scripts/run_openamp_demo.sh --check-readiness-prompt-password`
-3. 准备继续 live 时，可直接运行 `bash ./session_bootstrap/scripts/run_openamp_demo.sh --prompt-password`
-4. 若希望启动时就做一次只读探板，可运行 `bash ./session_bootstrap/scripts/run_openamp_demo.sh --prompt-password --probe-startup`
-5. 按 `openamp_demo_presentation_day_checklist_2026-04-03.md` 做真实彩排
+3. 若希望一轮完成 fresh probe capture，优先运行 `bash ./session_bootstrap/scripts/run_openamp_demo_probe_once.sh --prompt-password --post-probe-board`
+4. 若希望 fresh probe 失败时直接给出非零退出码，运行 `bash ./session_bootstrap/scripts/run_openamp_demo_probe_once.sh --prompt-password --strict-probe-board`
+5. 若 fresh probe 真成功，再按 `openamp_demo_presentation_day_checklist_2026-04-03.md` 做真实彩排
 6. 用 `openamp_demo_rehearsal_go_nogo_template_2026-04-03.md` 回填结果
 
 ---
