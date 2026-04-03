@@ -140,6 +140,12 @@ If the readiness retry passes and you want to launch the dashboard with one temp
 bash ./session_bootstrap/scripts/run_openamp_demo.sh --prompt-password
 ```
 
+If you want the same launch to immediately attempt one read-only startup probe, use:
+
+```bash
+bash ./session_bootstrap/scripts/run_openamp_demo.sh --prompt-password --probe-startup
+```
+
 Direct checker usage still works when needed:
 
 ```bash
