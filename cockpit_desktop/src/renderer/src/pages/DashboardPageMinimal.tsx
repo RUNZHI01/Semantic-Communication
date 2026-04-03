@@ -126,6 +126,13 @@ export function DashboardPageMinimal() {
 
   return (
     <PageTransition className={s.root}>
+      {/* Ambient Mesh Gradient Background */}
+      <div className={s.meshBackground}>
+        <div className={s.meshBlob1} />
+        <div className={s.meshBlob2} />
+        <div className={s.meshBlob3} />
+      </div>
+
       {/* Toast Notification Container */}
       <div className={s.toastContainer}>
         {toasts.map((toast) => (
@@ -148,7 +155,7 @@ export function DashboardPageMinimal() {
           <StaggeredList staggerDelay={0.06}>
             <AnimatedListItem>
               {/* Progress Section */}
-              <div className={`${s.sectionCard} ${isRunning ? s.cardActiveGlow : ''}`}>
+              <div className={`${s.sectionCard} ${isRunning ? `${s.cardActiveGlow} ${s.scanlineOverlay}` : ''}`}>
                 <div className={s.progressHeader}>
                   <div>
                     <div className={s.progressLabel}>Current 重建进度</div>

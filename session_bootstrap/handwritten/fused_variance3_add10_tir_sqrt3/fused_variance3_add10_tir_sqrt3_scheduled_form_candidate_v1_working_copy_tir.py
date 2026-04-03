@@ -43,7 +43,11 @@ class Module:
         # One-element local for centered value reuse
         T_subtract_local = T.alloc_buffer((T.int64(1),), "float32", scope="local")
         # Accumulator for sum-of-squares
-        T_multiply_red = T.alloc_buffer((T.int64(1), T.int64(24), T.int64(1), T.int64(1)))
+        T_multiply_red = T.alloc_buffer(
+            (T.int64(1), T.int64(24), T.int64(1), T.int64(1)),
+            "float32",
+            scope="local",
+        )
         # One-element local for squared value
         T_multiply_local = T.alloc_buffer((T.int64(1),), "float32", scope="local")
         T.attr(T_multiply_local.data, "volatile_scope", 1)

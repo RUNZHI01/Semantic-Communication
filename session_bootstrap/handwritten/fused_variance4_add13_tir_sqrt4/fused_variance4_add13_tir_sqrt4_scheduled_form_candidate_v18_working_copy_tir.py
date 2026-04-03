@@ -42,7 +42,11 @@ class Module:
             scope="local",
         )
         T_subtract_local = T.alloc_buffer((T.int64(1),), "float32", scope="local")
-        T_multiply_red = T.alloc_buffer((T.int64(1), T.int64(12), T.int64(1), T.int64(1)))
+        T_multiply_red = T.alloc_buffer(
+            (T.int64(1), T.int64(12), T.int64(1), T.int64(1)),
+            "float32",
+            scope="local",
+        )
         T_multiply_local = T.alloc_buffer((T.int64(1),), "float32", scope="local")
         T.attr(T_multiply_local.data, "volatile_scope", 1)
         for ax0, ax1, ax2, ax3, k2, k3 in T.grid(
