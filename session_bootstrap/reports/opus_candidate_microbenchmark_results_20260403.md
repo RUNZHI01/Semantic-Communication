@@ -38,17 +38,28 @@
 - All 5 candidates pass with max_abs_diff < 1e-5 (threshold: 1e-3)
 - Welford floating-point accumulation error is negligible even at 256×256
 
-## Candidates for Integration (Phase 2)
+## Phase 2: A/B Testing & Final Candidate
 
-Only operators with positive benchmark results should be integrated:
+### Per-Operator A/B Test (30 synthetic samples each)
 
-| Operator | Version to Integrate | Expected e2e Impact |
-|---|---|---|
-| fused_variance3_add10_tir_sqrt3 | v1.1 (scope fix) | ~0.5-1ms payload improvement |
-| fused_variance1_add3_tir_sqrt1 | v1 (Welford) | ~0.3-0.5ms payload improvement |
-| fused_mean4_subtract4_divide4_multiply4_add14_relu3 | v4 (fused) | ~0.5-0.8ms payload improvement |
+| Variant | Correctness | e2e Median | vs Trusted | Verdict |
+|---|---|---|---|---|
+| variance3_only (scope fix) | PASS 5.25e-06 | 247.9ms | +0.39% | ✅ Neutral, safe |
+| variance1_only (Welford) | PASS 5.13e-06 | 263.4ms | **+4.6%** | ❌ **REGRESSION — discard** |
+| mean4_only (fused loop) | PASS 5.25e-06 | 242.9ms | **-3.26%** | ✅ **Best single win** |
+| All 3 together | PASS | 256.0ms | +1.99% | ❌ variance1 drags down |
+| **Final (v3 + mean4 only)** | **PASS 5.25e-06** | **241.45ms** | **-1.22%** | ✅ **RECOMMENDED** |
 
-**Total estimated payload improvement**: ~1.3-2.3ms (~1-1.8% of 130.219ms baseline)
+### Key Insight
+Welford's microbenchmark -73.7% at 32×32 was misleading. In the full model, the Welford division pattern prevents LLVM NEON vectorization of downstream ops, causing +4.6% regression. Only mean4 loop fusion provides real e2e gain.
+
+### Final Candidate
+- **Artifacts**: `session_bootstrap/tmp/opus_final_v3_scope_fix_plus_mean4_fused/optimized_model.so`
+- **SHA-256**: `2aa25d2ba2ea3f76533b6c40809521e19ade5c8798160b369c3527834e0ae216`
+- **Size**: 1,674,120 bytes
+- **e2e**: -1.22% (241.45ms vs 244.43ms trusted)
+- **Correctness**: PASS (max_abs_diff 5.25e-06)
+- **Trusted Current**: Untouched, SHA verified
 
 ## Files Produced
 
