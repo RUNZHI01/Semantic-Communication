@@ -45,16 +45,16 @@ bash ./session_bootstrap/scripts/run_openamp_demo.sh \
 
 ## Session Readiness Check
 
-Before trying to continue the live operator flow, run the dedicated readiness check:
-
-```bash
-python3 ./session_bootstrap/scripts/check_openamp_demo_session_readiness.py --format text
-```
-
-The launcher now also exposes the same preflight entrypoint:
+Before trying to continue the live operator flow, run the launcher-level readiness preflight first:
 
 ```bash
 bash ./session_bootstrap/scripts/run_openamp_demo.sh --check-readiness
+```
+
+If you need the raw checker directly, you can still run:
+
+```bash
+python3 ./session_bootstrap/scripts/check_openamp_demo_session_readiness.py --format text
 ```
 
 Default JSON output is also available for machine-readable checks:
@@ -113,7 +113,15 @@ On startup, the demo now also preloads practical repo-backed defaults when they 
 
 Repo-side password fields are ignored intentionally. The operator still enters the password once in the web UI, and the current demo-server process reuses it for later probe / inference / fault actions.
 
-If you want to re-check readiness with a runtime password without starting the dashboard first:
+If you want to re-check readiness with a runtime password without starting the dashboard first, prefer the same launcher entrypoint:
+
+```bash
+bash ./session_bootstrap/scripts/run_openamp_demo.sh \
+  --check-readiness \
+  --password '<runtime-password>'
+```
+
+Direct checker usage still works when needed:
 
 ```bash
 python3 ./session_bootstrap/scripts/check_openamp_demo_session_readiness.py \
@@ -121,7 +129,7 @@ python3 ./session_bootstrap/scripts/check_openamp_demo_session_readiness.py \
   --format text
 ```
 
-The checker only reports `has_password=true/false`; it does not print the raw password back out.
+The readiness outputs only report `has_password=true/false`; they do not print the raw password back out.
 
 ## Web-side credential flow
 
