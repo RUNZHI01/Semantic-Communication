@@ -183,6 +183,14 @@ bash ./session_bootstrap/scripts/run_openamp_demo_probe_once.sh \
   --post-probe-board
 ```
 
+If you want the helper to fail fast for automation whenever fresh `/api/probe-board` is not actually successful, use:
+
+```bash
+bash ./session_bootstrap/scripts/run_openamp_demo_probe_once.sh \
+  --prompt-password \
+  --strict-probe-board
+```
+
 The helper stays honest about snapshot freshness. If the capture still says `保存的只读 SSH 探板` and the summary says the result comes from a saved record, treat that as saved-probe replay rather than claiming a fresh startup probe succeeded.
 
 Direct checker usage still works when needed:

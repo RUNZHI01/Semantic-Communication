@@ -298,6 +298,47 @@ class OpenAMPDemoProbeOnceTest(unittest.TestCase):
             self.assertNotIn(password, result.stderr)
             self.assertEqual(term_log_path.read_text(encoding="utf-8").strip(), "terminated")
 
+    def test_probe_once_strict_probe_board_exits_nonzero_on_probe_failure(self) -> None:
+        password = "prompt-pass"
+        port = 18093
+
+        with tempfile.TemporaryDirectory() as temp_dir_name:
+            temp_dir = Path(temp_dir_name)
+            output_dir = temp_dir / "capture"
+            env, _, password_log_path, term_log_path = self.build_mock_runtime(temp_dir)
+
+            result = subprocess.run(
+                [
+                    "bash",
+                    str(HELPER),
+                    "--prompt-password",
+                    "--strict-probe-board",
+                    "--output-dir",
+                    str(output_dir),
+                    "--port",
+                    str(port),
+                ],
+                cwd=REPO_ROOT,
+                env=env,
+                input=f"{password}\n",
+                capture_output=True,
+                text=True,
+                timeout=20,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 3, result.stderr)
+            self.assertTrue((output_dir / "api_probe_board.json").is_file())
+            summary = json.loads((output_dir / "summary.json").read_text(encoding="utf-8"))
+            self.assertTrue(summary["probe_board_requested"])
+            self.assertEqual(summary["probe_board_status"], "error")
+            self.assertIn("SSH 认证失败", summary["probe_board_summary"])
+            self.assertIn("strict probe-board mode", result.stderr)
+            self.assertEqual(password_log_path.read_text(encoding="utf-8").strip(), password)
+            self.assertNotIn(password, result.stdout)
+            self.assertNotIn(password, result.stderr)
+            self.assertEqual(term_log_path.read_text(encoding="utf-8").strip(), "terminated")
+
 
 if __name__ == "__main__":
     unittest.main()
