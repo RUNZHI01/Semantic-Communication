@@ -46,51 +46,66 @@
   letter-spacing: -0.01em;
 }
 
-/* ===== Nav Tabs — pill-style indicator (Google-inspired) ===== */
+/* ===== Nav Tabs — underline indicator (Modern SaaS) ===== */
 .navTabs {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
-  background: var(--color-bg-section);
-  border-radius: var(--radius-full);
-  padding: 3px;
+  gap: 24px;
+  height: 100%;
 }
 
 .navTab {
-  padding: 6px 20px;
-  font-size: 13px;
+  height: 100%;
+  padding: 0 4px;
+  font-size: 14px;
   font-weight: 500;
   color: var(--color-text-secondary);
-  border-radius: var(--radius-full);
   border: none;
   background: transparent;
   cursor: pointer;
-  transition: all 200ms var(--easing-standard);
+  transition: color 200ms var(--easing-standard);
   white-space: nowrap;
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.navTab::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--color-primary);
+  opacity: 0;
+  transform: scaleX(0.8);
+  transition: all 200ms var(--easing-standard);
 }
 
 .navTab:hover {
   color: var(--color-text-primary);
-  background: rgba(255,255,255,0.6);
 }
 
 .navTab:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px var(--color-bg-header), 0 0 0 4px var(--color-primary);
+  color: var(--color-primary);
 }
 
 .navTabActive {
   composes: navTab;
   color: var(--color-primary);
-  background: var(--color-bg-card);
-  box-shadow: var(--elevation-1);
   font-weight: 600;
+}
+
+.navTabActive::after {
+  opacity: 1;
+  transform: scaleX(1);
 }
 
 .navTabActive:hover {
   color: var(--color-primary);
-  background: var(--color-bg-card);
 }
 
 /* ===== Right Section — clean flat layout ===== */

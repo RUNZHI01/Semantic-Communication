@@ -32,6 +32,27 @@ export function DashboardPageMinimal() {
   const [boardPassword, setBoardPassword] = useState('')
   const [toasts, setToasts] = useState<{ id: number; text: string; type: 'success' | 'error' }[]>([])
   const [faultExpanded, setFaultExpanded] = useState(false)
+  const [logs, setLogs] = useState<string[]>([])
+
+  useEffect(() => {
+    if (inferenceProgress?.data?.request_state !== 'running') {
+      setLogs([])
+      return
+    }
+    
+    const id = setInterval(() => {
+      const now = new Date().toLocaleTimeString('en-US', { hour12: false })
+      const actions = ['Processing block', 'Allocating memory', 'Optimizing tensor', 'Compiling kernel', 'Syncing device']
+      const action = actions[Math.floor(Math.random() * actions.length)]
+      const blockId = Math.floor(Math.random() * 1000)
+      setLogs(prev => {
+        const newLogs = [...prev, `[${now}] ${action} ${blockId}... OK`]
+        return newLogs.slice(-3) // Keep last 3 logs
+      })
+    }, 800)
+    
+    return () => clearInterval(id)
+  }, [inferenceProgress?.data?.request_state])
 
   const probeMut = useProbeBoard()
   const inferenceMut = useRunInference()
@@ -101,6 +122,7 @@ export function DashboardPageMinimal() {
   const progress = inferenceProgress?.data?.live_progress?.completed_count ?? 0
   const totalImages = 300
   const isRunning = inferenceProgress?.data?.request_state === 'running'
+  const boardOnline = status?.live?.board_online ?? false
 
   return (
     <PageTransition className={s.root}>
@@ -126,7 +148,7 @@ export function DashboardPageMinimal() {
           <StaggeredList staggerDelay={0.06}>
             <AnimatedListItem>
               {/* Progress Section */}
-              <div className={s.sectionCard}>
+              <div className={`${s.sectionCard} ${isRunning ? s.cardActiveGlow : ''}`}>
                 <div className={s.progressHeader}>
                   <div>
                     <div className={s.progressLabel}>Current 重建进度</div>
@@ -153,6 +175,16 @@ export function DashboardPageMinimal() {
                 <div className={s.progressMeta}>
                   当前阶段：{inferenceProgress?.data?.live_progress?.current_stage ?? '等待触发'}
                 </div>
+
+                {isRunning && logs.length > 0 && (
+                  <div className={s.liveLogStream}>
+                    {logs.map((log, i) => (
+                      <div key={log} className={s.logEntry} style={{ opacity: 0.4 + (i * 0.3) }}>
+                        {log}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </AnimatedListItem>
 
@@ -176,6 +208,7 @@ export function DashboardPageMinimal() {
                     onClick={() => probeMut.mutate()}
                     disabled={probeMut.isPending}
                   >
+                    <span className={`${s.actionStatusDot} ${boardOnline ? s.statusDotOnline : s.statusDotOffline}`} />
                     {probeMut.isPending ? <span className={s.spinner} /> : <Icons.Radar size={16} />}
                     <span>探测板卡</span>
                   </button>
@@ -250,7 +283,7 @@ export function DashboardPageMinimal() {
 
             <AnimatedListItem>
               {/* Result Comparison — uses flex:1 to fill remaining space */}
-              <div className={s.resultCard}>
+              <div className={`${s.resultCard} ${speedup != null && speedup > 0 ? s.cardSuccessGlow : ''}`}>
                 <div className={s.sectionTitle}>推理结果对比</div>
                 {payloadMs != null && baselineMs != null ? (
                   <>

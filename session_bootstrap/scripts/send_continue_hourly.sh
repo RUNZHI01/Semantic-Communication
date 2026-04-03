@@ -419,10 +419,20 @@ run_openclaw_gateway_call() {
   local params_json="$2"
   local cli_timeout_ms="${3:-30000}"
   sync_gateway_auth_env_from_config
-  node "$OPENCLAW_GATEWAY_CALL_BIN" gateway call "$method" --json --timeout "$cli_timeout_ms" --params "$params_json"
+  local -a cmd=(node "$OPENCLAW_GATEWAY_CALL_BIN" gateway call "$method" --json --timeout "$cli_timeout_ms" --params "$params_json")
+  if [[ -n "${OPENCLAW_GATEWAY_URL_OVERRIDE:-}" ]]; then
+    cmd+=(--url "$OPENCLAW_GATEWAY_URL_OVERRIDE")
+  fi
+  if [[ -n "${OPENCLAW_GATEWAY_TOKEN_OVERRIDE:-}" ]]; then
+    cmd+=(--token "$OPENCLAW_GATEWAY_TOKEN_OVERRIDE")
+  fi
+  if [[ -n "${OPENCLAW_GATEWAY_PASSWORD_OVERRIDE:-}" ]]; then
+    cmd+=(--password "$OPENCLAW_GATEWAY_PASSWORD_OVERRIDE")
+  fi
+  "${cmd[@]}"
 }
 
-load_gateway_auth_token_from_config() {
+load_gateway_connection_from_config() {
   if [[ ! -f "$OPENCLAW_CONFIG_FILE" ]]; then
     return 0
   fi
@@ -435,19 +445,50 @@ const configPath = process.argv[2];
 try {
   const raw = fs.readFileSync(configPath, "utf8");
   const cfg = JSON.parse(raw);
-  const token = cfg?.gateway?.auth?.token;
-  if (typeof token === "string" && token.trim()) {
-    process.stdout.write(token.trim());
-  }
+  const gateway = cfg?.gateway ?? {};
+  const remote = gateway?.remote ?? {};
+  const mode = gateway?.mode === "remote" ? "remote" : "local";
+  const tlsEnabled = gateway?.tls?.enabled === true;
+  const port =
+    Number.isFinite(gateway?.port) && Number(gateway.port) > 0 ? Number(gateway.port) : 18789;
+  const remoteUrl = typeof remote?.url === "string" ? remote.url.trim() : "";
+  const localUrl = `${tlsEnabled ? "wss" : "ws"}://127.0.0.1:${port}`;
+  const url = mode === "remote" && remoteUrl ? remoteUrl : localUrl;
+
+  const authToken = typeof gateway?.auth?.token === "string" ? gateway.auth.token.trim() : "";
+  const remoteToken = typeof remote?.token === "string" ? remote.token.trim() : "";
+  const authPassword =
+    typeof gateway?.auth?.password === "string" ? gateway.auth.password.trim() : "";
+  const remotePassword =
+    typeof remote?.password === "string" ? remote.password.trim() : "";
+
+  const token = authToken || remoteToken;
+  const password = authPassword || remotePassword;
+  process.stdout.write([url, token, password].join("\t"));
 } catch {}
 NODE
 }
 
+OPENCLAW_GATEWAY_URL_OVERRIDE=""
+OPENCLAW_GATEWAY_TOKEN_OVERRIDE=""
+OPENCLAW_GATEWAY_PASSWORD_OVERRIDE=""
+
 sync_gateway_auth_env_from_config() {
+  local connection=""
+  local config_url=""
   local config_token=""
-  config_token="$(load_gateway_auth_token_from_config)"
-  if [[ -n "$config_token" ]]; then
-    export OPENCLAW_GATEWAY_TOKEN="$config_token"
+  local config_password=""
+  connection="$(load_gateway_connection_from_config)"
+  if [[ -n "$connection" ]]; then
+    IFS=$'\t' read -r config_url config_token config_password <<<"$connection"
+  fi
+
+  OPENCLAW_GATEWAY_URL_OVERRIDE="${config_url:-}"
+  OPENCLAW_GATEWAY_TOKEN_OVERRIDE="${config_token:-}"
+  OPENCLAW_GATEWAY_PASSWORD_OVERRIDE="${config_password:-}"
+
+  if [[ -n "$OPENCLAW_GATEWAY_TOKEN_OVERRIDE" ]]; then
+    export OPENCLAW_GATEWAY_TOKEN="$OPENCLAW_GATEWAY_TOKEN_OVERRIDE"
   fi
 }
 

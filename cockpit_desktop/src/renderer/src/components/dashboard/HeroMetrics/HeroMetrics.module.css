@@ -62,6 +62,17 @@
   line-height: 1.2;
 }
 
+.metricValueContainer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.sparkline {
+  opacity: 0.6;
+  margin-bottom: 2px;
+}
+
 .metricHighlight {
   color: var(--color-primary);
 }
