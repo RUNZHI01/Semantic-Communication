@@ -131,6 +131,7 @@
    - 准备继续 live 时：`bash ./session_bootstrap/scripts/run_openamp_demo.sh --prompt-password`
    - 若希望启动时就顺手做一次只读探板：`bash ./session_bootstrap/scripts/run_openamp_demo.sh --prompt-password-probe-startup`
    - 若希望“一次启动 + 抓三口 + 自动关停”并把原始 JSON 落盘：`bash ./session_bootstrap/scripts/run_openamp_demo_probe_once.sh --prompt-password`
+   - 若希望直接验证 startup probe 路径但保持诚实 capture：优先用上一条 helper，而不是手工起服务再 curl
    - 如需直接脚本输出：`python3 ./session_bootstrap/scripts/check_openamp_demo_session_readiness.py --format text`
    - 入口：`reports/openamp_demo_presentation_day_checklist_2026-04-03.md`、`reports/openamp_demo_rehearsal_go_nogo_template_2026-04-03.md`、`reports/openamp_demo_local_launch_healthcheck_2026-04-03.md`
 2. **OpenAMP 剩余真机协议 / FIT 缺口**
