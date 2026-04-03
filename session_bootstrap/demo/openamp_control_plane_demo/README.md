@@ -116,6 +116,19 @@ Repo-side password fields are ignored intentionally. The operator still enters t
 If you want to re-check readiness with a runtime password without starting the dashboard first, prefer the same launcher entrypoint:
 
 ```bash
+bash ./session_bootstrap/scripts/run_openamp_demo.sh --check-readiness-prompt-password
+```
+
+The launcher reads the password once from stdin without echoing it, forwards it only to the readiness checker process, and does not write it back into repo files.
+If you prefer the split form, this is equivalent:
+
+```bash
+bash ./session_bootstrap/scripts/run_openamp_demo.sh --check-readiness --prompt-password
+```
+
+The older explicit override still works when you intentionally want a non-interactive call:
+
+```bash
 bash ./session_bootstrap/scripts/run_openamp_demo.sh \
   --check-readiness \
   --password '<runtime-password>'
