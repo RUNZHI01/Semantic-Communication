@@ -668,10 +668,20 @@ def build_demo_default_board_access(
         if trusted_current_local_source:
             startup_env_values["LOCAL_CURRENT_ARTIFACT_SOURCE"] = trusted_current_local_source
 
-    host = first_non_empty(ssh_env_values, HOST_KEYS) or first_non_empty(inference_env_values, HOST_KEYS)
-    user = first_non_empty(ssh_env_values, USER_KEYS) or first_non_empty(inference_env_values, USER_KEYS)
+    host = (
+        first_non_empty(startup_env_values, HOST_KEYS)
+        or first_non_empty(ssh_env_values, HOST_KEYS)
+        or first_non_empty(inference_env_values, HOST_KEYS)
+    )
+    user = (
+        first_non_empty(startup_env_values, USER_KEYS)
+        or first_non_empty(ssh_env_values, USER_KEYS)
+        or first_non_empty(inference_env_values, USER_KEYS)
+    )
+    password = first_non_empty(startup_env_values, PASSWORD_KEYS)
     port = normalize_port(
-        first_non_empty(ssh_env_values, PORT_KEYS)
+        first_non_empty(startup_env_values, PORT_KEYS)
+        or first_non_empty(ssh_env_values, PORT_KEYS)
         or first_non_empty(inference_env_values, PORT_KEYS)
         or "22"
     )
@@ -681,7 +691,7 @@ def build_demo_default_board_access(
         env_file_values=inference_env_values,
         host=host,
         user=user,
-        password="",
+        password=password,
         port=port,
     )
     preloaded_values = {
@@ -693,7 +703,7 @@ def build_demo_default_board_access(
     field_sources = build_field_sources(
         host=host,
         user=user,
-        password="",
+        password=password,
         port=port,
         env_file=inference_env_path,
         preloaded_values=preloaded_values,
@@ -702,7 +712,7 @@ def build_demo_default_board_access(
     return BoardAccessConfig(
         host=host,
         user=user,
-        password="",
+        password=password,
         port=port,
         env_file=inference_env_path,
         env_values=merged_env,

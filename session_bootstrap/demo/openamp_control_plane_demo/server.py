@@ -2560,6 +2560,8 @@ def demo_startup_env_overrides(args: argparse.Namespace) -> dict[str, str]:
             DEMO_BASELINE_SIGNED_MANIFEST_PUBLIC_KEY_ENV,
             str(getattr(args, "baseline_signed_manifest_public_key", "") or "").strip(),
         ),
+        ("REMOTE_PASS", ""),
+        ("PHYTIUM_PI_PASSWORD", ""),
     )
 
     for env_name, cli_value in env_or_arg_pairs:
