@@ -175,6 +175,14 @@ bash ./session_bootstrap/scripts/run_openamp_demo_probe_once.sh \
   --probe-timeout-sec 5
 ```
 
+If you also want the same one-shot helper to trigger a fresh `/api/probe-board` attempt and capture the returned auth/probe result, use:
+
+```bash
+bash ./session_bootstrap/scripts/run_openamp_demo_probe_once.sh \
+  --prompt-password \
+  --post-probe-board
+```
+
 The helper stays honest about snapshot freshness. If the capture still says `保存的只读 SSH 探板` and the summary says the result comes from a saved record, treat that as saved-probe replay rather than claiming a fresh startup probe succeeded.
 
 Direct checker usage still works when needed:
