@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 SERVER="$PROJECT_ROOT/session_bootstrap/demo/openamp_control_plane_demo/server.py"
 READINESS_CHECKER="$PROJECT_ROOT/session_bootstrap/scripts/check_openamp_demo_session_readiness.py"
+READINESS_PASSWORD_ENV_VAR="OPENAMP_DEMO_READINESS_PASSWORD"
 SERVER_SUFFIX="/session_bootstrap/demo/openamp_control_plane_demo/server.py"
 DEFAULT_HOST="127.0.0.1"
 DEFAULT_PORT="8079"
@@ -12,6 +13,16 @@ PORT_RECLAIM_TERM_WAIT_STEPS=10
 PORT_RECLAIM_TERM_WAIT_SEC="0.1"
 PORT_RECLAIM_KILL_WAIT_STEPS=50
 PORT_RECLAIM_KILL_WAIT_SEC="0.1"
+
+prompt_readiness_password() {
+    local -n password_ref="$1"
+    printf 'Readiness password: ' >&2
+    if ! IFS= read -r -s password_ref; then
+        printf '\nFailed to read readiness password from stdin.\n' >&2
+        exit 1
+    fi
+    printf '\n' >&2
+}
 
 parse_bind_args() {
     local -n host_ref="$1"
@@ -57,11 +68,20 @@ run_readiness_check_if_requested() {
     local -a readiness_args=()
     local readiness_requested=0
     local readiness_format="text"
+    local prompt_password_requested=0
+    local password_arg_provided=0
 
     while (($#)); do
         case "$1" in
             --check-readiness|--check-readiness-only)
                 readiness_requested=1
+                ;;
+            --check-readiness-prompt-password)
+                readiness_requested=1
+                prompt_password_requested=1
+                ;;
+            --prompt-password)
+                prompt_password_requested=1
                 ;;
             --readiness-format)
                 if (($# >= 2)); then
@@ -76,6 +96,9 @@ run_readiness_check_if_requested() {
                 ;;
             --probe-env|--host|--user|--password|--port|--env-file)
                 if (($# >= 2)); then
+                    if [[ "$1" == "--password" ]]; then
+                        password_arg_provided=1
+                    fi
                     readiness_args+=("$1" "$2")
                     shift 2
                     continue
@@ -83,13 +106,31 @@ run_readiness_check_if_requested() {
                 break
                 ;;
             --probe-env=*|--host=*|--user=*|--password=*|--port=*|--env-file=*)
+                if [[ "$1" == --password=* ]]; then
+                    password_arg_provided=1
+                fi
                 readiness_args+=("$1")
                 ;;
         esac
         shift
     done
 
+    if ((!readiness_requested && prompt_password_requested)); then
+        printf '%s\n' "--prompt-password only applies to readiness checks. Use it with --check-readiness." >&2
+        exit 1
+    fi
+
     if ((readiness_requested)); then
+        if ((prompt_password_requested && password_arg_provided)); then
+            printf '%s\n' "Refusing to combine --prompt-password with explicit --password. Use one password input path." >&2
+            exit 1
+        fi
+        if ((prompt_password_requested)); then
+            local readiness_password=""
+            prompt_readiness_password readiness_password
+            exec env "$READINESS_PASSWORD_ENV_VAR=$readiness_password" \
+                python3 "$READINESS_CHECKER" --format "$readiness_format" "${readiness_args[@]}"
+        fi
         exec python3 "$READINESS_CHECKER" --format "$readiness_format" "${readiness_args[@]}"
     fi
 }
