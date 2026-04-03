@@ -140,7 +140,7 @@
    - TVM hotspot 定向深搜
    - 手写 TIR 等更后置扩展
 
-说明：big.LITTLE、双层口径、发布基线谱系、平台表述策略、Demo 文档链等定义层/接入层事项，当前都已完成或已 docs-frozen，不再是主要 blocker。
+说明：big.LITTLE、双层口径、发布基线谱系、平台表述策略、Demo 文档链等定义层/接入层事项，当前都已完成或已 docs-frozen，不再是主要 blocker。对 Demo 线来说，launcher 级 readiness / prompt-password 入口也已具备；后续主 blocker 更偏向真实板侧交互与彩排回填，而不是本地会话字段无法注入。
 | OpenAMP 统一 coverage matrix / FIT summary | `reports/openamp_control_plane_evidence_package_20260315/coverage_matrix.md` |
 | FIT-02 历史 `batch=4` 故障正式案例卡（2026-04-03） | `reports/openamp_fit02_batch_contract_case_card_2026-04-03.md` |
 | `TC-002/010` 答辩口径拆分说明（2026-04-03） | `reports/openamp_tc002_tc010_defense_scope_note_2026-04-03.md` |
