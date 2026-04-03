@@ -35,6 +35,7 @@ class OpenAMPDemoLauncherTest(unittest.TestCase):
         ps_call_count_path = temp_dir / "ps.calls"
         lsof_call_count_path = temp_dir / "lsof.calls"
         python_log_path = temp_dir / "python.log"
+        python_password_env_log_path = temp_dir / "python.password.log"
         kill_log_path = temp_dir / "kill.log"
         bash_env_path = temp_dir / "bash_env.sh"
         ss_output_dir = temp_dir / "ss"
@@ -132,9 +133,12 @@ class OpenAMPDemoLauncherTest(unittest.TestCase):
             bin_dir / "python3",
             textwrap.dedent(
                 """\
-                #!/usr/bin/env bash
-                set -euo pipefail
+                #!/bin/sh
+                set -eu
                 printf '%s\n' "$*" > "${MOCK_PYTHON_LOG_FILE}"
+                if [ -n "${OPENAMP_DEMO_READINESS_PASSWORD:-}" ]; then
+                    printf '%s\n' "${OPENAMP_DEMO_READINESS_PASSWORD}" > "${MOCK_PYTHON_PASSWORD_ENV_LOG_FILE}"
+                fi
                 exit 0
                 """
             ),
@@ -156,9 +160,10 @@ class OpenAMPDemoLauncherTest(unittest.TestCase):
                 "MOCK_LSOF_CALL_COUNT_FILE": str(lsof_call_count_path),
                 "MOCK_KILL_LOG_FILE": str(kill_log_path),
                 "MOCK_PYTHON_LOG_FILE": str(python_log_path),
+                "MOCK_PYTHON_PASSWORD_ENV_LOG_FILE": str(python_password_env_log_path),
             }
         )
-        return env, python_log_path, kill_log_path
+        return env, python_log_path, python_password_env_log_path, kill_log_path
 
     def test_reclaims_existing_demo_server_listener_before_restart(self) -> None:
         port = "8090"
@@ -169,7 +174,7 @@ class OpenAMPDemoLauncherTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir_name:
             temp_dir = Path(temp_dir_name)
-            env, python_log_path, kill_log_path = self.build_mock_env(temp_dir, ss_outputs, ps_outputs, lsof_outputs)
+            env, python_log_path, _, kill_log_path = self.build_mock_env(temp_dir, ss_outputs, ps_outputs, lsof_outputs)
 
             result = subprocess.run(
                 ["bash", str(LAUNCHER), "--port", port],
@@ -192,7 +197,7 @@ class OpenAMPDemoLauncherTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir_name:
             temp_dir = Path(temp_dir_name)
-            env, python_log_path, kill_log_path = self.build_mock_env(temp_dir, ss_outputs, [""], lsof_outputs)
+            env, python_log_path, _, kill_log_path = self.build_mock_env(temp_dir, ss_outputs, [""], lsof_outputs)
 
             result = subprocess.run(
                 ["bash", str(LAUNCHER), f"--port={port}"],
@@ -218,7 +223,7 @@ class OpenAMPDemoLauncherTest(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as temp_dir_name:
             temp_dir = Path(temp_dir_name)
-            env, python_log_path, kill_log_path = self.build_mock_env(temp_dir, ss_outputs, ps_outputs, lsof_outputs)
+            env, python_log_path, _, kill_log_path = self.build_mock_env(temp_dir, ss_outputs, ps_outputs, lsof_outputs)
 
             result = subprocess.run(
                 ["bash", str(LAUNCHER), "--port", port],
@@ -242,6 +247,58 @@ class OpenAMPDemoLauncherTest(unittest.TestCase):
             )
             self.assertEqual(kill_log_path.read_text(encoding="utf-8").splitlines(), [f"-TERM {fake_pid}", f"-KILL {fake_pid}"])
             self.assertEqual(python_log_path.read_text(encoding="utf-8").strip(), f"{SERVER} --port {port}")
+
+    def test_check_readiness_still_execs_checker_without_prompt(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir_name:
+            temp_dir = Path(temp_dir_name)
+            env, python_log_path, python_password_env_log_path, kill_log_path = self.build_mock_env(temp_dir, [""], [""], [""])
+
+            result = subprocess.run(
+                ["bash", str(LAUNCHER), "--check-readiness", "--readiness-format", "json", "--host", "10.0.0.8"],
+                cwd=REPO_ROOT,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                python_log_path.read_text(encoding="utf-8").strip(),
+                f"{REPO_ROOT / 'session_bootstrap' / 'scripts' / 'check_openamp_demo_session_readiness.py'} --format json --host 10.0.0.8",
+            )
+            self.assertFalse(python_password_env_log_path.exists())
+            self.assertFalse(kill_log_path.exists())
+
+    def test_check_readiness_prompt_password_reads_from_stdin_without_exposing_password(self) -> None:
+        password = "demo-pass"
+
+        with tempfile.TemporaryDirectory() as temp_dir_name:
+            temp_dir = Path(temp_dir_name)
+            env, python_log_path, python_password_env_log_path, kill_log_path = self.build_mock_env(temp_dir, [""], [""], [""])
+
+            result = subprocess.run(
+                ["bash", str(LAUNCHER), "--check-readiness-prompt-password", "--readiness-format", "text"],
+                cwd=REPO_ROOT,
+                env=env,
+                input=f"{password}\n",
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                python_log_path.read_text(encoding="utf-8").strip(),
+                f"{REPO_ROOT / 'session_bootstrap' / 'scripts' / 'check_openamp_demo_session_readiness.py'} --format text",
+            )
+            self.assertEqual(python_password_env_log_path.read_text(encoding="utf-8").strip(), password)
+            self.assertNotIn(password, result.stdout)
+            self.assertNotIn(password, result.stderr)
+            self.assertNotIn(password, python_log_path.read_text(encoding="utf-8"))
+            self.assertFalse(kill_log_path.exists())
 
 
 if __name__ == "__main__":
