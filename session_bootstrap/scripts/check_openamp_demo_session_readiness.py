@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import sys
 from typing import Any
@@ -40,6 +41,7 @@ EXIT_READY = 0
 EXIT_BLOCKED = 2
 EXIT_ERROR = 1
 VARIANTS = ("current", "baseline")
+READINESS_PASSWORD_ENV_VAR = "OPENAMP_DEMO_READINESS_PASSWORD"
 
 
 def parse_args() -> argparse.Namespace:
@@ -391,12 +393,13 @@ def render_text(report: dict[str, Any]) -> str:
 
 def main() -> int:
     args = parse_args()
+    password = args.password or os.environ.get(READINESS_PASSWORD_ENV_VAR, "")
     try:
         report = build_readiness_report(
             probe_env=args.probe_env,
             host=args.host,
             user=args.user,
-            password=args.password,
+            password=password,
             port=args.port,
             env_file=args.env_file,
         )
