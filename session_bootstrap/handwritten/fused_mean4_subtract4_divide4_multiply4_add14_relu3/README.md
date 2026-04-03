@@ -17,6 +17,9 @@ introduce a separate raw pre-compile hook lane yet.
 - `fused_mean4_subtract4_divide4_multiply4_add14_relu3_scheduled_form_candidate_v2_working_copy_tir.py`: first real handwritten follow-up on top of the checked-in v1 seed clone.
 - `scheduled_form_candidate_v2_working_copy_manifest.json`: manifest for the v2 scalar-epilogue-handoff working copy.
 - `fused_mean4_subtract4_divide4_multiply4_add14_relu3_scheduled_form_candidate_v2.py`: local post-db wrapper for the v2 working copy.
+- `fused_mean4_subtract4_divide4_multiply4_add14_relu3_scheduled_form_candidate_v3_working_copy_tir.py`: operator-specific ablation after v2 board regression; keep v1 structure and change only the tiny mean handoff buffer placement (`scope="local"`).
+- `scheduled_form_candidate_v3_working_copy_manifest.json`: manifest for the v3 local-mean-handoff-only ablation working copy.
+- `fused_mean4_subtract4_divide4_multiply4_add14_relu3_scheduled_form_candidate_v3.py`: local post-db wrapper for the v3 working copy.
 
 ## Refresh / Build
 
@@ -47,6 +50,14 @@ Run the first real handwritten v2 follow-up:
 python3 ./session_bootstrap/scripts/run_mean4_post_db_local_build.py \
   --candidate-impl ./session_bootstrap/handwritten/fused_mean4_subtract4_divide4_multiply4_add14_relu3/fused_mean4_subtract4_divide4_multiply4_add14_relu3_scheduled_form_candidate_v2.py \
   --output-dir ./session_bootstrap/tmp/mean4_post_db_swap_local_build_v2
+```
+
+Run the v3 local ablation follow-up:
+
+```bash
+python3 ./session_bootstrap/scripts/run_mean4_post_db_local_build.py \
+  --candidate-impl ./session_bootstrap/handwritten/fused_mean4_subtract4_divide4_multiply4_add14_relu3/fused_mean4_subtract4_divide4_multiply4_add14_relu3_scheduled_form_candidate_v3.py \
+  --output-dir ./session_bootstrap/tmp/mean4_post_db_swap_local_build_v3
 ```
 
 Prepare a dedicated handwritten env for a board payload attempt:
@@ -86,6 +97,8 @@ Important scope note:
 - the checked-in `v1` lane remains only a seed-clone edit surface
 - `v2` is the first real mean4 handwritten edit and the first one worth a
   board payload attempt
+- `v3` is a smallest operator-specific ablation to isolate whether v2's
+  regression came from scalar epilogue fusion vs tiny mean-handoff placement
 - the remote payload helper now verifies remote `sha256 + size_bytes` before
   it runs the benchmark, and `--upload-only` isolates that gate
 - board claims still require a successful remote upload, SHA match, and payload

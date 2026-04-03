@@ -122,6 +122,39 @@
   border-color: var(--color-border-base);
 }
 
+/* Ambient Glow Effects (Showcase) */
+.cardActiveGlow {
+  position: relative;
+}
+.cardActiveGlow::before {
+  content: '';
+  position: absolute;
+  top: -2px; left: -2px; right: -2px; bottom: -2px;
+  background: linear-gradient(45deg, rgba(26, 86, 219, 0.15), transparent 60%);
+  border-radius: calc(var(--radius-lg) + 2px);
+  z-index: -1;
+  filter: blur(8px);
+  animation: pulseGlow 3s ease-in-out infinite;
+}
+
+.cardSuccessGlow {
+  position: relative;
+}
+.cardSuccessGlow::before {
+  content: '';
+  position: absolute;
+  top: -2px; left: -2px; right: -2px; bottom: -2px;
+  background: linear-gradient(45deg, rgba(5, 150, 105, 0.1), transparent 60%);
+  border-radius: calc(var(--radius-lg) + 2px);
+  z-index: -1;
+  filter: blur(8px);
+}
+
+@keyframes pulseGlow {
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.01); }
+}
+
 .sectionTitle {
   font-size: 13px;
   font-weight: 600;
@@ -269,6 +302,46 @@
   font-weight: 400;
 }
 
+/* Live Log Stream */
+.liveLogStream {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  background: var(--color-bg-primary);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-light);
+  height: 64px;
+  overflow: hidden;
+  justify-content: flex-end;
+}
+
+.logEntry {
+  font-family: var(--font-family-mono);
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  animation: slideUpFadeIn 300ms var(--easing-standard);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.logEntry::before {
+  content: '>';
+  color: var(--color-success);
+  font-weight: 700;
+  opacity: 0.8;
+}
+
+@keyframes slideUpFadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 /* ===== Button System — 3-tier: Filled / Tonal / Outlined ===== */
 
 /* Loading spinner */
@@ -381,6 +454,25 @@
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
   gap: 8px;
+}
+
+/* Action Status Dots */
+.actionStatusDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-right: 2px;
+  flex-shrink: 0;
+}
+
+.statusDotOnline {
+  background: var(--color-success);
+  box-shadow: 0 0 6px rgba(5, 150, 105, 0.6);
+}
+
+.statusDotOffline {
+  background: var(--color-error);
+  opacity: 0.5;
 }
 
 /* Outlined — refined */
