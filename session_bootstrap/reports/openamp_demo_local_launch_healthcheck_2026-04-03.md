@@ -75,6 +75,37 @@ printf 'demo-pass\n' | bash ./session_bootstrap/scripts/run_openamp_demo.sh --pr
 - 它已经能把运行时 password 真正注入到 demo 会话配置里
 - 当前若仍无法继续 live，下一步就不再是“会话字段没带进去”，而是更后续的真实板侧交互问题
 
+### `--prompt-password --probe-startup` launcher path（补充验证）
+
+进一步实际验证：
+
+```bash
+printf 'demo-pass\n' | bash ./session_bootstrap/scripts/run_openamp_demo.sh --prompt-password --probe-startup
+```
+
+随后检查：
+
+- `/api/health` 仍返回 `{"status":"ok"}`
+- `/api/system-status` 显示：
+  - `execution_mode.label = 在线模式`
+  - `board_access.connection_ready = true`
+  - `missing_connection_fields = []`
+- `/api/snapshot` 显示：
+  - `mode.effective_label = 在线读数可用`
+  - `board.current_status.label = 保存的只读 SSH 探板`
+  - `board.current_status.summary` 仍明确写作“该结果来自上一次成功探板的保存记录”
+  - `valid_instance = 8115`
+
+这条验证能说明：
+
+- `--prompt-password --probe-startup` 这条 launcher 路径本身是可执行的
+- password 注入与 startup probe 参数传递没有把服务搞挂
+- 但**当前还不能据此宣称 fresh live probe 已经成功**；从 snapshot 口径看，页面仍主要恢复的是保存的成功探板记录
+
+因此，这一步更准确的意义是：
+
+> launcher 已经具备“带运行时 password + 请求 startup probe”能力；下一步真正还需补的，是 fresh board-side probe / live interaction 的实证，而不是入口能力缺失。
+
 ### `/api/snapshot`
 
 关键结论：
