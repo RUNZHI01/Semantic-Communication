@@ -48,6 +48,33 @@ bash ./session_bootstrap/scripts/run_openamp_demo.sh
 - dashboard 本地进程本身没有挂
 - 当前不能继续把 live 会话推进下去的直接原因，不是服务没起，而是**板侧会话缺密码**
 
+### `--prompt-password` launcher path（补充验证）
+
+在补完 launcher 级 password prompt 后，额外实际验证：
+
+```bash
+printf 'demo-pass\n' | bash ./session_bootstrap/scripts/run_openamp_demo.sh --prompt-password
+```
+
+随后检查：
+
+- `/api/health` 仍返回 `{"status":"ok"}`
+- `/api/system-status` 显示：
+  - `execution_mode.label = 在线模式`
+  - `board_access.connection_ready = true`
+  - `missing_connection_fields = []`
+- `/api/snapshot` 仍能正确返回：
+  - `mode.effective_label = 在线读数可用`
+  - `board.current_status.label = 保存的只读 SSH 探板`
+  - `valid_instance = 8115`
+  - `artifact_sha = 6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1`
+
+这说明：
+
+- launcher 的 `--prompt-password` 不只是把 password 带进 readiness preflight
+- 它已经能把运行时 password 真正注入到 demo 会话配置里
+- 当前若仍无法继续 live，下一步就不再是“会话字段没带进去”，而是更后续的真实板侧交互问题
+
 ### `/api/snapshot`
 
 关键结论：
