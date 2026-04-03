@@ -57,9 +57,22 @@ Welford's microbenchmark -73.7% at 32×32 was misleading. In the full model, the
 - **Artifacts**: `session_bootstrap/tmp/opus_final_v3_scope_fix_plus_mean4_fused/optimized_model.so`
 - **SHA-256**: `2aa25d2ba2ea3f76533b6c40809521e19ade5c8798160b369c3527834e0ae216`
 - **Size**: 1,674,120 bytes
-- **e2e**: -1.22% (241.45ms vs 244.43ms trusted)
-- **Correctness**: PASS (max_abs_diff 5.25e-06)
+- **Synthetic e2e**: -1.22% (241.45ms vs 244.43ms trusted)
+- **Real data e2e (300 images)**: **-0.57% (240.53ms vs 241.91ms trusted)** ✅
+- **Correctness**: PASS (max_abs_diff 6.59e-06, 0/300 failures)
 - **Trusted Current**: Untouched, SHA verified
+
+### Trusted Current Upgrade Readiness
+
+| Condition | Status | Value |
+|---|---|---|
+| 300 images max_abs_diff < 1e-3 | ✅ PASS | 6.59e-06 |
+| payload median < 130.219ms | ⚠️ N/A | Model-level timing (240ms includes encoder+decoder) |
+| e2e median < 230.339ms | ⚠️ N/A | Same — model-level vs image-level timing |
+| SHA-256 recorded | ✅ | 2aa25d... (candidate), 6f236b... (trusted) |
+| Human approval | ⏳ Pending | — |
+
+> Note: The Opus plan's 130.219ms payload and 230.339ms e2e baselines may use a different measurement methodology (image-level vs model-level). The 240ms median here is model-level inference time. This discrepancy needs clarification before proceeding with upgrade.
 
 ## Files Produced
 
