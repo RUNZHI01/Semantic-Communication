@@ -134,6 +134,12 @@ bash ./session_bootstrap/scripts/run_openamp_demo.sh \
   --password '<runtime-password>'
 ```
 
+If the readiness retry passes and you want to launch the dashboard with one temporary runtime password, the launcher now also supports:
+
+```bash
+bash ./session_bootstrap/scripts/run_openamp_demo.sh --prompt-password
+```
+
 Direct checker usage still works when needed:
 
 ```bash

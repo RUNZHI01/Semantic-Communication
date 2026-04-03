@@ -138,6 +138,8 @@ class OpenAMPDemoLauncherTest(unittest.TestCase):
                 printf '%s\n' "$*" > "${MOCK_PYTHON_LOG_FILE}"
                 if [ -n "${OPENAMP_DEMO_READINESS_PASSWORD:-}" ]; then
                     printf '%s\n' "${OPENAMP_DEMO_READINESS_PASSWORD}" > "${MOCK_PYTHON_PASSWORD_ENV_LOG_FILE}"
+                elif [ -n "${REMOTE_PASS:-}" ]; then
+                    printf '%s\n' "${REMOTE_PASS}" > "${MOCK_PYTHON_PASSWORD_ENV_LOG_FILE}"
                 fi
                 exit 0
                 """
@@ -298,6 +300,34 @@ class OpenAMPDemoLauncherTest(unittest.TestCase):
             self.assertNotIn(password, result.stdout)
             self.assertNotIn(password, result.stderr)
             self.assertNotIn(password, python_log_path.read_text(encoding="utf-8"))
+            self.assertFalse(kill_log_path.exists())
+
+    def test_prompt_password_launches_server_with_runtime_password_env_without_echo(self) -> None:
+        password = "demo-pass"
+
+        with tempfile.TemporaryDirectory() as temp_dir_name:
+            temp_dir = Path(temp_dir_name)
+            env, python_log_path, python_password_env_log_path, kill_log_path = self.build_mock_env(temp_dir, [""], [""], [""])
+
+            result = subprocess.run(
+                ["bash", str(LAUNCHER), "--prompt-password", "--port", "8093"],
+                cwd=REPO_ROOT,
+                env=env,
+                input=f"{password}\n",
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                python_log_path.read_text(encoding="utf-8").strip(),
+                f"{SERVER} --port 8093",
+            )
+            self.assertEqual(python_password_env_log_path.read_text(encoding="utf-8").strip(), password)
+            self.assertNotIn(password, result.stdout)
+            self.assertNotIn(password, result.stderr)
             self.assertFalse(kill_log_path.exists())
 
 

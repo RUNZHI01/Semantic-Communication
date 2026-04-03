@@ -141,8 +141,8 @@ python3 ./session_bootstrap/scripts/check_openamp_demo_session_readiness.py --fo
 若继续推进 Demo 主线，默认顺序应是：
 
 1. 先运行 `bash ./session_bootstrap/scripts/run_openamp_demo.sh --check-readiness`
-2. 补齐板侧 password / 完整会话条件
-3. 重新运行 `run_openamp_demo.sh`
+2. 若只差一次运行时 password，可先运行 `bash ./session_bootstrap/scripts/run_openamp_demo.sh --check-readiness-prompt-password`
+3. 准备继续 live 时，可直接运行 `bash ./session_bootstrap/scripts/run_openamp_demo.sh --prompt-password`
 4. 按 `openamp_demo_presentation_day_checklist_2026-04-03.md` 做真实彩排
 5. 用 `openamp_demo_rehearsal_go_nogo_template_2026-04-03.md` 回填结果
 

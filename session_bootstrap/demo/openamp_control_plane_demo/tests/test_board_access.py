@@ -245,6 +245,16 @@ class DemoBoardAccessDefaultsTest(unittest.TestCase):
         )
         self.assertEqual(access.field_sources["password"], "session")
 
+    def test_demo_defaults_accept_runtime_password_override(self) -> None:
+        access = build_demo_default_board_access(None, startup_env_overrides={"REMOTE_PASS": "demo-pass"})
+
+        self.assertEqual(access.host, "100.121.87.73")
+        self.assertEqual(access.user, "user")
+        self.assertEqual(access.password, "demo-pass")
+        self.assertTrue(access.connection_ready)
+        self.assertEqual(access.missing_connection_fields(), [])
+        self.assertEqual(access.build_env()["REMOTE_PASS"], "demo-pass")
+
     def test_explicit_env_file_preserves_validated_torch_sidecar_when_older_env_blanks_it(self) -> None:
         defaults = build_demo_default_board_access(None)
         validated_torch_pythonpath = defaults.build_env().get("REMOTE_TORCH_PYTHONPATH", "")

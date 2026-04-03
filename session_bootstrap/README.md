@@ -128,6 +128,7 @@
    - 三个 fault 按钮是否在最终 build 中形成诚实的 replay/live 体验
    - 先跑：`bash ./session_bootstrap/scripts/run_openamp_demo.sh --check-readiness`
    - 若只差一次运行时 password：`bash ./session_bootstrap/scripts/run_openamp_demo.sh --check-readiness-prompt-password`
+   - 准备继续 live 时：`bash ./session_bootstrap/scripts/run_openamp_demo.sh --prompt-password`
    - 如需直接脚本输出：`python3 ./session_bootstrap/scripts/check_openamp_demo_session_readiness.py --format text`
    - 入口：`reports/openamp_demo_presentation_day_checklist_2026-04-03.md`、`reports/openamp_demo_rehearsal_go_nogo_template_2026-04-03.md`、`reports/openamp_demo_local_launch_healthcheck_2026-04-03.md`
 2. **OpenAMP 剩余真机协议 / FIT 缺口**

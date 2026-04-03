@@ -115,11 +115,6 @@ run_readiness_check_if_requested() {
         shift
     done
 
-    if ((!readiness_requested && prompt_password_requested)); then
-        printf '%s\n' "--prompt-password only applies to readiness checks. Use it with --check-readiness." >&2
-        exit 1
-    fi
-
     if ((readiness_requested)); then
         if ((prompt_password_requested && password_arg_provided)); then
             printf '%s\n' "Refusing to combine --prompt-password with explicit --password. Use one password input path." >&2
@@ -132,6 +127,29 @@ run_readiness_check_if_requested() {
                 python3 "$READINESS_CHECKER" --format "$readiness_format" "${readiness_args[@]}"
         fi
         exec python3 "$READINESS_CHECKER" --format "$readiness_format" "${readiness_args[@]}"
+    fi
+}
+
+run_server_with_prompt_password_if_requested() {
+    local prompt_password_requested=0
+    local -a server_args=()
+
+    while (($#)); do
+        case "$1" in
+            --prompt-password)
+                prompt_password_requested=1
+                ;;
+            *)
+                server_args+=("$1")
+                ;;
+        esac
+        shift
+    done
+
+    if ((prompt_password_requested)); then
+        local launch_password=""
+        prompt_readiness_password launch_password
+        exec env REMOTE_PASS="$launch_password" PHYTIUM_PI_PASSWORD="$launch_password" python3 "$SERVER" "${server_args[@]}"
     fi
 }
 
@@ -520,10 +538,12 @@ main() {
     parse_bind_args REQUESTED_HOST REQUESTED_PORT "$@"
 
     if [[ ! "$REQUESTED_PORT" =~ ^[0-9]+$ ]]; then
+        run_server_with_prompt_password_if_requested "$@"
         exec python3 "$SERVER" "$@"
     fi
 
     reclaim_demo_listener_if_safe
+    run_server_with_prompt_password_if_requested "$@"
     exec python3 "$SERVER" "$@"
 }
 
