@@ -106,6 +106,41 @@ printf 'demo-pass\n' | bash ./session_bootstrap/scripts/run_openamp_demo.sh --pr
 
 > launcher 已经具备“带运行时 password + 请求 startup probe”能力；下一步真正还需补的，是 fresh board-side probe / live interaction 的实证，而不是入口能力缺失。
 
+### `/api/probe-board` fresh probe path（补充验证）
+
+进一步实际验证：
+
+1. 先运行：
+
+```bash
+printf 'demo-pass\n' | bash ./session_bootstrap/scripts/run_openamp_demo.sh --prompt-password
+```
+
+2. 再调用：
+
+```bash
+curl -X POST http://127.0.0.1:8079/api/probe-board -H 'Content-Type: application/json' -d '{}'
+```
+
+实际返回：
+
+- `status = error`
+- `reachable = false`
+- `summary = 板卡 SSH 认证失败，请检查用户名、密码或 SSH 端口设置。`
+- `error = 板卡 SSH 认证失败，请检查用户名、密码或 SSH 端口设置。`
+
+同时，后续 `/api/snapshot` 仍显示：
+
+- `mode.effective_label = 在线读数可用`
+- `board.current_status.label = 保存的只读 SSH 探板`
+- `board.current_status.summary` 继续说明该结果来自上一次成功探板的保存记录
+
+这说明：
+
+- fresh probe 请求路径本身已经被真实触发，不再只是理论入口
+- 当前缺的不是 endpoint / launcher / session 注入能力
+- 当前缺的是**真实可用 password**；在占位 password 下，系统会如实返回 SSH 认证失败，并继续保留上一次成功探板记录
+
 ### `/api/snapshot`
 
 关键结论：
