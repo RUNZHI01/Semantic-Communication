@@ -330,6 +330,34 @@ class OpenAMPDemoLauncherTest(unittest.TestCase):
             self.assertNotIn(password, result.stderr)
             self.assertFalse(kill_log_path.exists())
 
+    def test_prompt_password_keeps_probe_startup_arg_when_launching_server(self) -> None:
+        password = "demo-pass"
+
+        with tempfile.TemporaryDirectory() as temp_dir_name:
+            temp_dir = Path(temp_dir_name)
+            env, python_log_path, python_password_env_log_path, kill_log_path = self.build_mock_env(temp_dir, [""], [""], [""])
+
+            result = subprocess.run(
+                ["bash", str(LAUNCHER), "--prompt-password", "--probe-startup", "--port", "8094"],
+                cwd=REPO_ROOT,
+                env=env,
+                input=f"{password}\n",
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                python_log_path.read_text(encoding="utf-8").strip(),
+                f"{SERVER} --probe-startup --port 8094",
+            )
+            self.assertEqual(python_password_env_log_path.read_text(encoding="utf-8").strip(), password)
+            self.assertNotIn(password, result.stdout)
+            self.assertNotIn(password, result.stderr)
+            self.assertFalse(kill_log_path.exists())
+
 
 if __name__ == "__main__":
     unittest.main()

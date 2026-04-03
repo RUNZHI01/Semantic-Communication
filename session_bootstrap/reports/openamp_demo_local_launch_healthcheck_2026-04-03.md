@@ -170,8 +170,9 @@ python3 ./session_bootstrap/scripts/check_openamp_demo_session_readiness.py --fo
 1. 先运行 `bash ./session_bootstrap/scripts/run_openamp_demo.sh --check-readiness`
 2. 若只差一次运行时 password，可先运行 `bash ./session_bootstrap/scripts/run_openamp_demo.sh --check-readiness-prompt-password`
 3. 准备继续 live 时，可直接运行 `bash ./session_bootstrap/scripts/run_openamp_demo.sh --prompt-password`
-4. 按 `openamp_demo_presentation_day_checklist_2026-04-03.md` 做真实彩排
-5. 用 `openamp_demo_rehearsal_go_nogo_template_2026-04-03.md` 回填结果
+4. 若希望启动时就做一次只读探板，可运行 `bash ./session_bootstrap/scripts/run_openamp_demo.sh --prompt-password --probe-startup`
+5. 按 `openamp_demo_presentation_day_checklist_2026-04-03.md` 做真实彩排
+6. 用 `openamp_demo_rehearsal_go_nogo_template_2026-04-03.md` 回填结果
 
 ---
 
