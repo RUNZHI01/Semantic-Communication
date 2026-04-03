@@ -1,12 +1,16 @@
 {
   "session": "main",
   "last_success": {
-    "run_id": "continue-main-1775214111-31724",
+    "run_id": "continue-main-1775223979-10238",
     "submit_status": "started",
-    "submitted_at": "1775214103",
-    "anchor_fingerprint": "",
-    "tail_fingerprint": "",
-    "latest_visible": null,
+    "submitted_at": "1775223971",
+    "anchor_fingerprint": "02f6a5e87ba93bdf6225f6ee007452e331980129",
+    "tail_fingerprint": "f77605a07d1622492c5df58c5af2c6b47141e3ec",
+    "latest_visible": {
+      "role": "assistant",
+      "text": "Shell quoting issue with the complex ENV string through SSH. Let me fix by writing a wrapper script on the remote side:",
+      "timestamp": "2026-04-03 21:32:47 +0800"
+    },
     "unchanged_tail_skips": 0
   }
 }
