@@ -44,6 +44,18 @@
 | big.LITTLE 异构流水线 runbook | `runbooks/big_little_pipeline_runbook_2026-03-18.md` |
 | 后续性能优化路线 | `runbooks/optimization_roadmap.md` |
 
+### 3/31–4/2 TVM 算子优化结果
+
+3/31已围绕runtime hotspot建成多算子post-db scheduled-form线并闭环；仅留transpose1 v7(-1.97%)、variance4 v18(-0.99%)。近6次尝试连退，项目已暂停手写优化，转向Demo/OpenAMP/judge-facing。
+
+- `session_bootstrap/reports/handwritten_operator_materials_archive_20260331.md`
+- `session_bootstrap/reports/current_best_staging_candidate_20260331.md`
+- `session_bootstrap/reports/transpose1_v7_remote_benchmark_20260402_182039.md`
+- `session_bootstrap/reports/variance4_v18_remote_benchmark_20260403_0239.md`
+- `session_bootstrap/reports/handwritten_optimization_status_summary_20260403.md`
+- `session_bootstrap/reports/project_speedup_rerank_after_mean4_v2_regression_20260403.md`
+- `session_bootstrap/reports/handwritten_optimization_success_pattern_analysis_20260403.md`
+
 ## Judge Evidence Workflow（2026-03-30）
 
 如果当前目标是补评委追问证据，而不是继续做 demo / admission 交付，默认走下面这条线：

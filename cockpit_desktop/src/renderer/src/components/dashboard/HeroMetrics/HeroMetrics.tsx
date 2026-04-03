@@ -143,14 +143,14 @@ export function HeroMetrics({ system, inferenceProgress }: HeroMetricsProps) {
       {displayImprovement != null && (
         <div className={s.metricItem}>
           <div className={s.metricTop}>
-            <Icons.TrendingUp size={11} className={s.metricIcon} style={{ color: 'var(--color-success)' }} aria-hidden="true" />
+            <Icons.TrendingUp size={11} className={s.metricIcon} style={{ color: 'var(--color-primary)' }} aria-hidden="true" />
             <span className={s.metricLabel}>加速</span>
           </div>
           <div className={s.metricValueContainer}>
-            <span className={`${s.metricValue} ${s.metricSuccess}`}>
+            <span className={s.metricValueGiant}>
               <CountUp end={displayImprovement} decimals={1} duration={350} />%
             </span>
-            {isActiveInference && <Sparkline data={mockSpeedupData} color="var(--color-success)" />}
+            {isActiveInference && <Sparkline data={mockSpeedupData} color="var(--color-primary)" />}
           </div>
         </div>
       )}
