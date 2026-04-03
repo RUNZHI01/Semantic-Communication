@@ -15,6 +15,7 @@ PASSWORD=""
 PROMPT_PASSWORD=0
 PROBE_ENV=""
 POST_PROBE_BOARD=0
+STRICT_PROBE_BOARD=0
 EXTRA_LAUNCHER_ARGS=()
 
 usage() {
@@ -34,6 +35,7 @@ Options:
   --probe-env <path>    Forward a probe env file to the launcher
   --probe-timeout-sec <n>  Forward startup probe timeout to the launcher
   --post-probe-board    After startup, POST /api/probe-board and capture the result too
+  --strict-probe-board  Exit non-zero if captured /api/probe-board result is not successful
   --password <value>    Use one runtime password without prompting
   --prompt-password     Prompt once (no echo) for runtime password
   -- <args...>          Forward any remaining args to run_openamp_demo.sh
@@ -71,6 +73,10 @@ while (($#)); do
       POST_PROBE_BOARD=1
       shift
       ;;
+    --strict-probe-board)
+      STRICT_PROBE_BOARD=1
+      shift
+      ;;
     --password)
       PASSWORD="${2:?missing value for --password}"
       shift 2
@@ -98,6 +104,10 @@ done
 if [[ -n "$PASSWORD" && "$PROMPT_PASSWORD" -eq 1 ]]; then
   echo "Refusing to combine --password with --prompt-password. Use one password input path." >&2
   exit 2
+fi
+
+if [[ "$STRICT_PROBE_BOARD" -eq 1 ]]; then
+  POST_PROBE_BOARD=1
 fi
 
 if [[ -z "$OUTPUT_DIR" ]]; then
@@ -302,3 +312,22 @@ if post_probe_board:
     print(f"  probe_board.error: {summary['probe_board_error']}")
 print(f"[probe-once] capture_dir: {summary_path.parent}")
 PY
+
+if [[ "$STRICT_PROBE_BOARD" -eq 1 ]]; then
+  if ! "$PYTHON_BIN" - <<'PY' "$PROBE_BOARD_JSON"
+from __future__ import annotations
+import json
+import sys
+from pathlib import Path
+
+probe_board = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+status_ok = str(probe_board.get("status") or "").strip().lower() in {"ok", "success", "ready"}
+reachable = probe_board.get("reachable")
+raise SystemExit(0 if status_ok and reachable is True else 1)
+PY
+  then
+    echo "ERROR: strict probe-board mode requires a successful fresh /api/probe-board result." >&2
+    echo "probe_board_json=$PROBE_BOARD_JSON" >&2
+    exit 3
+  fi
+fi
