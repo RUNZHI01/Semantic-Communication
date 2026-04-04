@@ -1504,9 +1504,10 @@ class DashboardState:
         }
 
         with self._lock:
-            if not self._crypto_enabled:
-                return _disabled
             board_access = self._board_access
+            if not self._crypto_enabled:
+                bc = bool(board_access and board_access.connection_ready)
+                return {**_disabled, "board_configured": bc}
             cached = self._crypto_status_cache
             cache_ts = self._crypto_status_cache_ts
             if cached is not None and (_time.monotonic() - cache_ts) < 1.5:
