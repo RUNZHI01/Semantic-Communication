@@ -14,6 +14,7 @@ import {
 } from '../hooks/useActions'
 import { HeroMetrics } from '../components/dashboard/HeroMetrics'
 import { MinimalStatusPanel } from '../components/dashboard/MinimalStatusPanel'
+import { CryptoStatusPanel } from '../components/dashboard/CryptoStatusPanel'
 import { FlightPanel } from '../components/dashboard/FlightPanel'
 import { PageTransition, StaggeredList, AnimatedListItem } from '../components/animations'
 import { Icons } from '../components/icons'
@@ -404,6 +405,8 @@ export function DashboardPageMinimal() {
             inferenceProgress={inferenceProgress?.data}
             activeJobId={activeJobId}
           />
+
+          <CryptoStatusPanel />
         </div>
       </div>
     </PageTransition>
