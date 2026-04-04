@@ -2,7 +2,7 @@
  * ML-KEM crypto channel status — returned by /api/crypto-status
  */
 
-export type CryptoChannelState = 'idle' | 'handshaking' | 'ready' | 'closed'
+export type CryptoChannelState = 'idle' | 'handshaking' | 'ready' | 'closed' | 'disabled'
 
 export type CryptoStatusResponse = {
   /** KEM backend name, e.g. "tongsuo-ML-KEM-768" or "liboqs-ML-KEM-768" */
@@ -31,4 +31,14 @@ export type CryptoStatusResponse = {
   session_count?: number
   /** Error message if any */
   error?: string
+  /** Whether ML-KEM is enabled via toggle */
+  enabled: boolean
+}
+
+export type CryptoTestResult = {
+  status: 'ok' | 'error'
+  message?: string
+  handshake_ms?: number
+  sha256_match?: boolean
+  wall_ms?: number
 }
