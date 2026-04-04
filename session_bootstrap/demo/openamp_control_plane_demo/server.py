@@ -6,6 +6,9 @@ import html
 import json
 import mimetypes
 import os
+import re
+import subprocess
+import time
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -18,6 +21,18 @@ from urllib.error import URLError
 from archive_replay import ArchiveSessionNotFoundError, list_archive_sessions, load_archive_session
 from board_access import BoardAccessConfig, build_board_access_config, build_demo_default_board_access
 from board_probe import DEFAULT_LIVE_PROBE_OUTPUT, is_successful_probe, load_probe_output, run_live_probe, write_probe_output
+from crypto_runtime import (
+    DEFAULT_CRYPTO_PORT,
+    DEFAULT_STATUS_PORT,
+    STATUS_PORT_KEYS,
+    build_local_crypto_client_command,
+    build_remote_crypto_server_command,
+    first_config_value,
+    parse_int_config,
+    resolve_local_crypto_client,
+    resolve_local_crypto_server,
+    run_ssh_command,
+)
 from demo_data import (
     PROJECT_ROOT,
     build_aircraft_position_snapshot,
@@ -1483,8 +1498,6 @@ class DashboardState:
         3. 请求板卡 :8080/status → 成功则缓存并返回
         4. 请求失败 → 保留上次正常值，只更新 error 字段
         """
-        import time as _time
-
         _disabled = {
             "channel_state": "disabled",
             "kem_backend": "-",
@@ -1510,7 +1523,7 @@ class DashboardState:
                 return {**_disabled, "board_configured": bc}
             cached = self._crypto_status_cache
             cache_ts = self._crypto_status_cache_ts
-            if cached is not None and (_time.monotonic() - cache_ts) < 1.5:
+            if cached is not None and (time.monotonic() - cache_ts) < 1.5:
                 return {**cached, "enabled": True}
 
         board_configured = bool(board_access and board_access.connection_ready)
@@ -1535,7 +1548,10 @@ class DashboardState:
             }
 
         host = board_access.host
-        status_port = int(board_access.env_values.get("MLKEM_STATUS_PORT", "8080")) if board_access.env_values else 8080
+        status_port = parse_int_config(
+            first_config_value(board_access.env_values, keys=STATUS_PORT_KEYS),
+            DEFAULT_STATUS_PORT,
+        )
         url = f"http://{host}:{status_port}/status"
 
         try:
@@ -1546,7 +1562,7 @@ class DashboardState:
             data["board_configured"] = True
             with self._lock:
                 self._crypto_status_cache = data
-                self._crypto_status_cache_ts = _time.monotonic()
+                self._crypto_status_cache_ts = time.monotonic()
             return data
         except (URLError, OSError, json.JSONDecodeError, TimeoutError) as exc:
             # 保留上次正常值，只更新 error
@@ -1557,7 +1573,7 @@ class DashboardState:
                            "error": f"board not reachable: {exc}"}
                 with self._lock:
                     self._crypto_status_cache = fallback
-                    self._crypto_status_cache_ts = _time.monotonic()
+                    self._crypto_status_cache_ts = time.monotonic()
                 return fallback
             # 从未成功获取过 → 返回带 error 的 idle
             cold: dict[str, Any] = {
@@ -1579,7 +1595,7 @@ class DashboardState:
             }
             with self._lock:
                 self._crypto_status_cache = cold
-                self._crypto_status_cache_ts = _time.monotonic()
+                self._crypto_status_cache_ts = time.monotonic()
             return cold
 
     def set_crypto_toggle(self, enabled: bool) -> dict[str, Any]:
@@ -1599,13 +1615,15 @@ class DashboardState:
 
     def _ensure_board_tcp_server(self, board_access: BoardAccessConfig) -> None:
         """通过 SSH 检测板卡 tcp_server 是否运行，如果没有则启动它。"""
-        import subprocess as _sp
-
         host = board_access.host
         user = board_access.user
         password = board_access.password
         ssh_port = board_access.port or "22"
-        status_port = 8080
+        env_values = board_access.build_env()
+        status_port = parse_int_config(
+            first_config_value(env_values, keys=STATUS_PORT_KEYS),
+            DEFAULT_STATUS_PORT,
+        )
 
         # 1) 检测 status 端口是否响应
         try:
@@ -1617,30 +1635,29 @@ class DashboardState:
             pass  # 没运行，继续启动
 
         # 2) SSH 到板卡启动 tcp_server
-        ssh_cmd = [
-            "sshpass", "-p", password,
-            "ssh", "-o", "StrictHostKeyChecking=no",
-            f"{user}@{host}", "-p", str(ssh_port),
-            "bash -lc 'source ~/anaconda3/bin/activate mlkem 2>/dev/null; "
-            "export LD_LIBRARY_PATH=/usr/local/tongsuo/lib:$LD_LIBRARY_PATH; "
-            "export TONGSUO_KEM_BRIDGE=/usr/local/tongsuo/lib/libtongsuo_kem_bridge.so; "
-            "nohup python ~/tcp_server.py "
-            "--host 0.0.0.0 --port 9527 --status-port 8080 --tvm --snr 10 "
-            "> /tmp/tcp_server.log 2>&1 &'",
-        ]
+        local_server_script, _ = resolve_local_crypto_server(env_values)
+        remote_command = build_remote_crypto_server_command(
+            env_values,
+            local_server_script=local_server_script,
+        )
 
         try:
-            proc = _sp.run(ssh_cmd, capture_output=True, text=True, timeout=15)
+            proc = run_ssh_command(
+                host=host,
+                user=user,
+                password=password,
+                port=ssh_port,
+                remote_command=remote_command,
+                timeout=15,
+            )
             if proc.returncode != 0:
-                print(f"[ML-KEM auto-start] SSH failed: {proc.stderr.strip()}")
+                error_output = proc.stderr.strip() or proc.stdout.strip() or "unknown error"
+                print(f"[ML-KEM auto-start] SSH failed: {error_output}")
         except Exception as exc:
             print(f"[ML-KEM auto-start] error: {exc}")
 
     def run_crypto_test(self) -> dict[str, Any]:
         """通过 tcp_client.py 向板卡发送测试 latent，验证 ML-KEM 加密通道"""
-        import subprocess as _sp
-        import time as _time
-
         with self._lock:
             board_access = self._board_access
             if not self._crypto_enabled:
@@ -1650,45 +1667,37 @@ class DashboardState:
             return {"status": "error", "message": "board not configured, please enter board password first"}
 
         host = board_access.host
+        env_values = board_access.build_env()
+        tcp_client, searched_paths = resolve_local_crypto_client(env_values)
+        if tcp_client is None:
+            searched_text = ", ".join(str(path) for path in searched_paths[:5]) or "no candidate paths"
+            return {
+                "status": "error",
+                "message": "tcp_client.py not found; set MLKEM_CLIENT_SCRIPT/MLKEM_LOCAL_REPO_ROOT. "
+                f"searched: {searched_text}",
+            }
 
-        # 定位 tcp_client.py — 在父仓库 scripts/ 目录
-        # __file__ = Semantic-Communication/session_bootstrap/demo/openamp_control_plane_demo/server.py
-        # parents[4] = ICCompetition2026/
-        repo_root = Path(__file__).resolve().parents[4]
-        tcp_client = repo_root / "scripts" / "tcp_client.py"
-        if not tcp_client.exists():
-            return {"status": "error", "message": f"tcp_client.py not found at {tcp_client}"}
+        # 生成测试 latent：优先使用 .bin，避免本机必须装 numpy。
+        import tempfile
 
-        # 生成测试 latent
-        import numpy as np, tempfile, os
-        tmp = tempfile.NamedTemporaryFile(suffix=".npz", delete=False)
-        latent = np.random.randn(1, 3, 64, 64).astype(np.float32)
-        np.savez(tmp.name, latent=latent)
+        tmp = tempfile.NamedTemporaryFile(suffix=".bin", delete=False)
+        tmp.write(b"\0" * (1 * 3 * 64 * 64 * 4))
         tmp.close()
+        tmp_path = Path(tmp.name)
 
-        env = dict(os.environ)
-        oqs_path = env.get("OQS_INSTALL_PATH", "")
-        if not oqs_path:
-            # 尝试父仓库 liboqs-dist
-            candidate = repo_root / "liboqs-dist"
-            if candidate.exists():
-                env["OQS_INSTALL_PATH"] = str(candidate)
-
-        cmd = [
-            env.get("PYTHON", env.get("COCKPIT_PYTHON", "python3")),
-            str(tcp_client),
-            "--host", host,
-            "--port", "9527",
-            "--input", tmp.name,
-            "--suite", "AES_256_GCM",
-        ]
+        cmd, env = build_local_crypto_client_command(
+            env_values,
+            host=host,
+            input_path=tmp_path,
+            client_script=tcp_client,
+        )
 
         try:
-            t0 = _time.monotonic()
-            proc = _sp.run(cmd, capture_output=True, text=True, timeout=30, env=env)
-            wall_ms = round((_time.monotonic() - t0) * 1000, 1)
+            t0 = time.monotonic()
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env)
+            wall_ms = round((time.monotonic() - t0) * 1000, 1)
             try:
-                os.unlink(tmp.name)
+                tmp_path.unlink()
             except OSError:
                 pass
 
@@ -1706,24 +1715,23 @@ class DashboardState:
             for line in stdout.splitlines():
                 if "握手完成" in line:
                     # 提取耗时
-                    import re
                     m = re.search(r"([\d.]+)\s*ms", line)
                     if m:
                         result["handshake_ms"] = float(m.group(1))
-                if "SHA256 匹配" in line or "✓" in line:
+                if "SHA256 匹配" in line or "对端 SHA256 匹配: 是" in line or "✓ 传输成功" in line:
                     result["sha256_match"] = True
 
             return result
 
-        except _sp.TimeoutExpired:
+        except subprocess.TimeoutExpired:
             try:
-                os.unlink(tmp.name)
+                tmp_path.unlink()
             except OSError:
                 pass
             return {"status": "error", "message": "timeout (30s)"}
         except Exception as exc:
             try:
-                os.unlink(tmp.name)
+                tmp_path.unlink()
             except OSError:
                 pass
             return {"status": "error", "message": str(exc)}
