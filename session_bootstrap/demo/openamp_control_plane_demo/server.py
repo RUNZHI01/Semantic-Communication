@@ -15,7 +15,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Any
 from urllib.parse import parse_qs, urlparse
-from urllib.request import urlopen, Request
+from urllib.request import build_opener, ProxyHandler, Request, urlopen
 from urllib.error import URLError
 
 from archive_replay import ArchiveSessionNotFoundError, list_archive_sessions, load_archive_session
@@ -66,6 +66,14 @@ from inference_runner import (
 
 
 STATIC_ROOT = Path(__file__).resolve().parent / "static"
+
+
+def fetch_json_direct(url: str, *, timeout: float) -> dict[str, Any]:
+    """Fetch JSON directly from the target without honoring host-wide HTTP proxies."""
+    req = Request(url, headers={"Accept": "application/json"})
+    opener = build_opener(ProxyHandler({}))
+    with opener.open(req, timeout=timeout) as resp:
+        return json.loads(resp.read())
 
 
 def parse_args() -> argparse.Namespace:
@@ -1555,9 +1563,7 @@ class DashboardState:
         url = f"http://{host}:{status_port}/status"
 
         try:
-            req = Request(url, headers={"Accept": "application/json"})
-            with urlopen(req, timeout=3) as resp:
-                data = json.loads(resp.read())
+            data = fetch_json_direct(url, timeout=3)
             data["enabled"] = True
             data["board_configured"] = True
             with self._lock:
@@ -1627,9 +1633,7 @@ class DashboardState:
 
         # 1) 检测 status 端口是否响应
         try:
-            req = Request(f"http://{host}:{status_port}/status", headers={"Accept": "application/json"})
-            with urlopen(req, timeout=2) as resp:
-                json.loads(resp.read())
+            fetch_json_direct(f"http://{host}:{status_port}/status", timeout=2)
             return  # 已经在运行
         except Exception:
             pass  # 没运行，继续启动

@@ -275,6 +275,62 @@ class DashboardStateTest(unittest.TestCase):
         self.assertTrue(snapshot["board"]["current_status"]["reachable"])
         self.assertEqual(cached_after_failure["requested_at"], success["requested_at"])
 
+    def test_get_crypto_status_fetches_board_status_without_proxy(self) -> None:
+        class FakeResponse:
+            def __init__(self, payload: bytes) -> None:
+                self._payload = payload
+
+            def __enter__(self) -> "FakeResponse":
+                return self
+
+            def __exit__(self, exc_type, exc, tb) -> None:
+                return None
+
+            def read(self) -> bytes:
+                return self._payload
+
+        class FakeOpener:
+            def __init__(self) -> None:
+                self.seen_request = None
+                self.seen_timeout = None
+
+            def open(self, request, *, timeout: float):
+                self.seen_request = request
+                self.seen_timeout = timeout
+                return FakeResponse(
+                    json.dumps(
+                        {
+                            "channel_state": "ready",
+                            "kem_backend": "tongsuo-ML-KEM-768",
+                            "cipher_suite": "aes-256-gcm",
+                        }
+                    ).encode("utf-8")
+                )
+
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        state._board_access = server.build_board_access_config(
+            {
+                "host": "100.121.87.73",
+                "user": "user",
+                "password": "demo-pass",
+                "port": "22",
+            },
+            fallback=state._board_access.with_env_overrides({"MLKEM_STATUS_PORT": "18080"}),
+        )
+        state._crypto_enabled = True
+        fake_opener = FakeOpener()
+
+        with patch("server.build_opener", return_value=fake_opener) as build_opener:
+            payload = state.get_crypto_status()
+
+        build_opener.assert_called_once()
+        self.assertEqual(fake_opener.seen_request.full_url, "http://100.121.87.73:18080/status")
+        self.assertEqual(fake_opener.seen_timeout, 3)
+        self.assertEqual(payload["channel_state"], "ready")
+        self.assertEqual(payload["kem_backend"], "tongsuo-ML-KEM-768")
+        self.assertEqual(payload["enabled"], True)
+        self.assertEqual(payload["board_configured"], True)
+
 
 class ServerMainTest(unittest.TestCase):
     def test_main_builds_server_and_serves_without_startup_probe(self) -> None:
