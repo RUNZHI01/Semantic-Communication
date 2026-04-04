@@ -119,7 +119,7 @@ export function CryptoStatusPanel() {
                   <div className={s.row}>
                     <span className={s.label}>SHA256 完整性</span>
                     <span className={data.last_sha256_match ? s.ok : s.fail}>
-                      {data.last_sha256_match ? '✓ 匹配' : '✗ 不匹配'}
+                      {data.last_sha256_match ? '[OK] 匹配' : '[FAIL] 不匹配'}
                     </span>
                   </div>
                 )}
@@ -140,7 +140,7 @@ export function CryptoStatusPanel() {
               onClick={handleTest}
               disabled={testing}
             >
-              {testing ? <span className={s.spinner} /> : '🔒 测试加密通道'}
+              {testing ? <span className={s.spinner} /> : '测试加密通道'}
             </button>
             {testResult && (
               <span className={testResult.ok ? s.ok : s.fail}>
