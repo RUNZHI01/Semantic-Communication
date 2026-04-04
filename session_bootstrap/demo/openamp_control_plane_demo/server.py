@@ -1583,10 +1583,58 @@ class DashboardState:
             return cold
 
     def set_crypto_toggle(self, enabled: bool) -> dict[str, Any]:
-        """设置 ML-KEM 开关状态"""
+        """设置 ML-KEM 开关状态
+
+        当 enabled=True 时，自动通过 SSH 检测板卡 tcp_server 是否在运行，
+        如果没有则自动启动（后台 nohup），这样用户不需要手动 SSH。
+        """
         with self._lock:
             self._crypto_enabled = enabled
+            board_access = self._board_access
+
+        if enabled and board_access and board_access.connection_ready:
+            self._ensure_board_tcp_server(board_access)
+
         return {"enabled": enabled}
+
+    def _ensure_board_tcp_server(self, board_access: BoardAccessConfig) -> None:
+        """通过 SSH 检测板卡 tcp_server 是否运行，如果没有则启动它。"""
+        import subprocess as _sp
+
+        host = board_access.host
+        user = board_access.user
+        password = board_access.password
+        ssh_port = board_access.port or "22"
+        status_port = 8080
+
+        # 1) 检测 status 端口是否响应
+        try:
+            req = Request(f"http://{host}:{status_port}/status", headers={"Accept": "application/json"})
+            with urlopen(req, timeout=2) as resp:
+                json.loads(resp.read())
+            return  # 已经在运行
+        except Exception:
+            pass  # 没运行，继续启动
+
+        # 2) SSH 到板卡启动 tcp_server
+        ssh_cmd = [
+            "sshpass", "-p", password,
+            "ssh", "-o", "StrictHostKeyChecking=no",
+            f"{user}@{host}", "-p", str(ssh_port),
+            "bash -lc 'source ~/anaconda3/bin/activate mlkem 2>/dev/null; "
+            "export LD_LIBRARY_PATH=/usr/local/tongsuo/lib:$LD_LIBRARY_PATH; "
+            "export TONGSUO_KEM_BRIDGE=/usr/local/tongsuo/lib/libtongsuo_kem_bridge.so; "
+            "nohup python ~/tcp_server.py "
+            "--host 0.0.0.0 --port 9527 --status-port 8080 --tvm --snr 10 "
+            "> /tmp/tcp_server.log 2>&1 &'",
+        ]
+
+        try:
+            proc = _sp.run(ssh_cmd, capture_output=True, text=True, timeout=15)
+            if proc.returncode != 0:
+                print(f"[ML-KEM auto-start] SSH failed: {proc.stderr.strip()}")
+        except Exception as exc:
+            print(f"[ML-KEM auto-start] error: {exc}")
 
     def run_crypto_test(self) -> dict[str, Any]:
         """通过 tcp_client.py 向板卡发送测试 latent，验证 ML-KEM 加密通道"""
