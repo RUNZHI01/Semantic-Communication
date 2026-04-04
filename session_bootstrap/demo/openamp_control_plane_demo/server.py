@@ -765,6 +765,7 @@ class DashboardState:
         self._event_spine = DemoEventSpine(event_archive_root)
         self._crypto_status_cache: dict[str, Any] | None = None
         self._crypto_status_cache_ts: float = 0.0
+        self._crypto_enabled: bool = False
 
         cached_probe = load_probe_output(probe_cache_path) if probe_cache_path else None
         if is_successful_probe(cached_probe):
@@ -1477,17 +1478,37 @@ class DashboardState:
         """从板卡 tcp_server 的 HTTP /status 端点获取 ML-KEM 通道状态。
 
         缓存 TTL = 1.5s，避免 2s 轮询时每次都请求板卡。
+        toggle OFF 时直接返回 disabled 状态。
         """
         import time as _time
-        now = _time.monotonic()
+
+        _disabled = {
+            "channel_state": "disabled",
+            "kem_backend": "-",
+            "cipher_suite": "-",
+            "handshake_ms": None,
+            "encrypt_ms": None,
+            "decrypt_ms": None,
+            "inference_ms": None,
+            "bytes_sent": 0,
+            "bytes_received": 0,
+            "last_sha256_match": None,
+            "session_count": 0,
+            "last_session_at": None,
+            "error": None,
+            "enabled": False,
+        }
+
         with self._lock:
+            if not self._crypto_enabled:
+                return _disabled
             cached = self._crypto_status_cache
             cache_ts = self._crypto_status_cache_ts
-            if cached is not None and (now - cache_ts) < 1.5:
-                return cached
+            if cached is not None and (_time.monotonic() - cache_ts) < 1.5:
+                return {**cached, "enabled": True}
             board_access = self._board_access
 
-        default_idle = {
+        default_idle: dict[str, Any] = {
             "channel_state": "idle",
             "kem_backend": "unknown",
             "cipher_suite": "unknown",
@@ -1501,6 +1522,7 @@ class DashboardState:
             "session_count": 0,
             "last_session_at": None,
             "error": None,
+            "enabled": True,
         }
 
         host = board_access.host if board_access else None
@@ -1515,6 +1537,7 @@ class DashboardState:
             req = Request(url, headers={"Accept": "application/json"})
             with urlopen(req, timeout=3) as resp:
                 data = json.loads(resp.read())
+            data["enabled"] = True
             with self._lock:
                 self._crypto_status_cache = data
                 self._crypto_status_cache_ts = _time.monotonic()
@@ -1525,6 +1548,101 @@ class DashboardState:
                 self._crypto_status_cache = default_idle
                 self._crypto_status_cache_ts = _time.monotonic()
             return default_idle
+
+    def set_crypto_toggle(self, enabled: bool) -> dict[str, Any]:
+        """设置 ML-KEM 开关状态"""
+        with self._lock:
+            self._crypto_enabled = enabled
+        return {"enabled": enabled}
+
+    def run_crypto_test(self) -> dict[str, Any]:
+        """通过 tcp_client.py 向板卡发送测试 latent，验证 ML-KEM 加密通道"""
+        import subprocess as _sp
+        import time as _time
+
+        with self._lock:
+            board_access = self._board_access
+            if not self._crypto_enabled:
+                return {"status": "error", "message": "ML-KEM not enabled"}
+
+        host = board_access.host if board_access else None
+        if not host:
+            return {"status": "error", "message": "board not configured"}
+
+        # 定位 tcp_client.py — 在父仓库 scripts/ 目录
+        repo_root = Path(__file__).resolve().parents[3]  # session_bootstrap/demo/.../ → repo root
+        tcp_client = repo_root / "scripts" / "tcp_client.py"
+        if not tcp_client.exists():
+            return {"status": "error", "message": f"tcp_client.py not found at {tcp_client}"}
+
+        # 生成测试 latent
+        import numpy as np, tempfile, os
+        tmp = tempfile.NamedTemporaryFile(suffix=".npz", delete=False)
+        latent = np.random.randn(1, 3, 64, 64).astype(np.float32)
+        np.savez(tmp.name, latent=latent)
+        tmp.close()
+
+        env = dict(os.environ)
+        oqs_path = env.get("OQS_INSTALL_PATH", "")
+        if not oqs_path:
+            # 尝试父仓库 liboqs-dist
+            candidate = repo_root / "liboqs-dist"
+            if candidate.exists():
+                env["OQS_INSTALL_PATH"] = str(candidate)
+
+        cmd = [
+            env.get("PYTHON", env.get("COCKPIT_PYTHON", "python3")),
+            str(tcp_client),
+            "--host", host,
+            "--port", "9527",
+            "--input", tmp.name,
+            "--suite", "AES_256_GCM",
+        ]
+
+        try:
+            t0 = _time.monotonic()
+            proc = _sp.run(cmd, capture_output=True, text=True, timeout=30, env=env)
+            wall_ms = round((_time.monotonic() - t0) * 1000, 1)
+            try:
+                os.unlink(tmp.name)
+            except OSError:
+                pass
+
+            if proc.returncode != 0:
+                return {
+                    "status": "error",
+                    "message": proc.stderr[-500:] if proc.stderr else "unknown error",
+                    "wall_ms": wall_ms,
+                }
+
+            # 解析 stdout 中关键指标
+            stdout = proc.stdout
+            result: dict[str, Any] = {"status": "ok", "wall_ms": wall_ms}
+
+            for line in stdout.splitlines():
+                if "握手完成" in line:
+                    # 提取耗时
+                    import re
+                    m = re.search(r"([\d.]+)\s*ms", line)
+                    if m:
+                        result["handshake_ms"] = float(m.group(1))
+                if "SHA256 匹配" in line or "✓" in line:
+                    result["sha256_match"] = True
+
+            return result
+
+        except _sp.TimeoutExpired:
+            try:
+                os.unlink(tmp.name)
+            except OSError:
+                pass
+            return {"status": "error", "message": "timeout (30s)"}
+        except Exception as exc:
+            try:
+                os.unlink(tmp.name)
+            except OSError:
+                pass
+            return {"status": "error", "message": str(exc)}
 
     def current_system_status(self) -> dict[str, Any]:
         with self._lock:
@@ -2725,6 +2843,15 @@ class DemoRequestHandler(SimpleHTTPRequestHandler):
         parsed = urlparse(self.path)
         body = self.read_json_body()
         if body is None:
+            return
+        if parsed.path == "/api/crypto-toggle":
+            enabled = bool(body.get("enabled", False))
+            payload = self.server.app_state.set_crypto_toggle(enabled)
+            self.respond_json(HTTPStatus.OK, {"status": "ok", **payload})
+            return
+        if parsed.path == "/api/crypto-test":
+            payload = self.server.app_state.run_crypto_test()
+            self.respond_json(HTTPStatus.OK, payload)
             return
         if parsed.path == "/api/session/board-access":
             try:
