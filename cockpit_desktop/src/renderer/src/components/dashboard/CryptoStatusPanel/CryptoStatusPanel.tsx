@@ -144,10 +144,6 @@ export function CryptoStatusPanel() {
 
   // 5) Toggle ON — normal display
   const st = STATE_LABEL[data.channel_state] ?? { label: data.channel_state, tone: 'neutral' }
-  const dotClass =
-    st.tone === 'ok' ? s.dotOk :
-    st.tone === 'warn' ? s.dotWarn :
-    st.tone === 'off' ? s.dotOff : s.dotNeutral
 
   return (
     <div className={s.card}>
