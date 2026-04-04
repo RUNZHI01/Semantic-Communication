@@ -33,6 +33,8 @@ export type CryptoStatusResponse = {
   error?: string
   /** Whether ML-KEM is enabled via toggle */
   enabled: boolean
+  /** Whether board credentials have been entered */
+  board_configured: boolean
 }
 
 export type CryptoTestResult = {
