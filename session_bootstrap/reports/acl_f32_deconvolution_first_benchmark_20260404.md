@@ -81,12 +81,47 @@ Even with the shape mismatch, the current first signal is:
 - ACL transpose2-like: clearly slower than TVM hotspot reference (`45.6 ms` vs `23.7 ms`)
 - ACL transpose_add6-like: numerically faster than TVM hotspot reference (`15.0 ms` vs `18.6 ms`), but because the output shape is `63` instead of `64`, this one is **not yet a fair conclusion**
 
+## API Boundary Confirmed After Follow-up Inspection
+
+A follow-up source inspection on the board confirmed that stock ACL `NEDeconvolutionLayer` does **not** expose an `output_padding`-style parameter for these cases.
+
+Relevant implementation points:
+
+- `arm_compute/core/Utils.h`
+- `src/core/Utils.cpp`
+- `arm_compute/runtime/NEON/functions/NEDeconvolutionLayer.h`
+- `src/runtime/NEON/functions/NEDeconvolutionLayer.cpp`
+
+The effective output-width/height formula is:
+
+```text
+(width_input - 1) * stride_x - (pad_left + pad_right) + kernel_x
+(height_input - 1) * stride_y - (pad_top + pad_bottom) + kernel_y
+```
+
+For our three hotspot-like cases with `stride=2`, `kernel=3`, `pad=1`, that means ACL naturally produces:
+
+- `64 -> 127`
+- `128 -> 255`
+- `32 -> 63`
+
+rather than TVM's `128 / 256 / 64`.
+
+Therefore the current fairness boundary is now explicit:
+
+1. **ACL build succeeded**
+2. **ACL F32 deconvolution benchmark succeeded**
+3. **Stock ACL deconvolution cannot exactly reproduce the TVM hotspot output geometry here without extra patching / semantic adaptation**
+
+So the current ACL numbers are valid as a **first runnable reference**, but not as a final apples-to-apples claim against TVM fused transpose hotspots.
+
 ## Next Step
 
-To make the ACL comparison defensible, the next step should be one of:
+Given the confirmed API boundary, the defensible next move is:
 
-1. patch the ACL F32 benchmark to reproduce the exact output geometry (`128/256/64`) if ACL API supports it, or
-2. normalize a fair compare target that accounts for ACL deconvolution semantics vs TVM fused op semantics.
+1. keep these ACL numbers as `first runnable reference`
+2. avoid over-claiming direct winner/loser for the `63/127/255`-mismatched case
+3. if needed later, implement a patched/custom ACL-side benchmark or a normalized comparison methodology instead of pretending stock `NEDeconvolutionLayer` is shape-identical to TVM
 
 ## Raw Console Output
 
