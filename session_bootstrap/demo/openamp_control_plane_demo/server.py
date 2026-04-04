@@ -1570,7 +1570,9 @@ class DashboardState:
             return {"status": "error", "message": "board not configured"}
 
         # 定位 tcp_client.py — 在父仓库 scripts/ 目录
-        repo_root = Path(__file__).resolve().parents[3]  # session_bootstrap/demo/.../ → repo root
+        # __file__ = Semantic-Communication/session_bootstrap/demo/openamp_control_plane_demo/server.py
+        # parents[4] = ICCompetition2026/
+        repo_root = Path(__file__).resolve().parents[4]
         tcp_client = repo_root / "scripts" / "tcp_client.py"
         if not tcp_client.exists():
             return {"status": "error", "message": f"tcp_client.py not found at {tcp_client}"}
