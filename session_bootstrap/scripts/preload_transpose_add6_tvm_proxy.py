@@ -21,7 +21,7 @@ if not so_path.is_file():
 lib = tvm.runtime.load_module(str(so_path))
 fn = lib[FUNC_NAME]
 
-@tvm.register_func(REG_NAME, override=True)
+@tvm.register_global_func(REG_NAME, override=True)
 def _transpose_add6_proxy(inp, weight, bias, out):
     fn(inp, weight, bias, out)
     return 0

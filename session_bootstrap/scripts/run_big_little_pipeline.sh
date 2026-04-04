@@ -397,6 +397,10 @@ SEED_EFFECTIVE="${SEED:-${BIG_LITTLE_SEED:-}}"
 OUTPUT_PREFIX="${BIG_LITTLE_OUTPUT_PREFIX:-big_little_pipeline}"
 REPORT_PREFIX="${BIG_LITTLE_REPORT_PREFIX:-big_little_pipeline}"
 BACKEND="${BIG_LITTLE_BACKEND:-processes}"
+: "${TVM_RUNTIME_PRELOAD_PY:=}"
+: "${TVM_TRANSPOSE_ADD6_PROXY_SO:=}"
+: "${TVM_TRANSPOSE_ADD6_PROXY_FUNC:=}"
+: "${TVM_TRANSPOSE_ADD6_PROXY_REG:=}"
 
 if [[ "$EXECUTION_MODE_EFFECTIVE" != "pipeline" && "$EXECUTION_MODE_EFFECTIVE" != "serial" ]]; then
   echo "ERROR: execution mode must be pipeline or serial (got: $EXECUTION_MODE_EFFECTIVE)." >&2
@@ -474,7 +478,9 @@ SH
       REMOTE_TVM_PYTHON REMOTE_INPUT_DIR REAL_OUTPUT_DIR REAL_SNR REAL_BATCH VARIANT \
       REAL_ARTIFACT_PATH REAL_EXPECTED_SHA256 REAL_EXTRA_PYTHONPATH BIG_CORES LITTLE_CORES \
       BACKEND ALLOW_MISSING_AFFINITY INPUT_QUEUE_SIZE OUTPUT_QUEUE_SIZE DRY_RUN MOCK_INFER_MS \
-      MAX_INPUTS_EFFECTIVE SEED_EFFECTIVE EXECUTION_MODE_EFFECTIVE; do
+      MAX_INPUTS_EFFECTIVE SEED_EFFECTIVE EXECUTION_MODE_EFFECTIVE \
+      TVM_RUNTIME_PRELOAD_PY TVM_TRANSPOSE_ADD6_PROXY_SO TVM_TRANSPOSE_ADD6_PROXY_FUNC \
+      TVM_TRANSPOSE_ADD6_PROXY_REG; do
       emit_shell_assignment "$var_name"
     done
     cat <<'SH'
@@ -499,6 +505,10 @@ mock_infer_ms="$MOCK_INFER_MS"
 max_inputs="$MAX_INPUTS_EFFECTIVE"
 seed="$SEED_EFFECTIVE"
 execution_mode="$EXECUTION_MODE_EFFECTIVE"
+preload_py="${TVM_RUNTIME_PRELOAD_PY:-}"
+proxy_so="${TVM_TRANSPOSE_ADD6_PROXY_SO:-}"
+proxy_func="${TVM_TRANSPOSE_ADD6_PROXY_FUNC:-}"
+proxy_reg="${TVM_TRANSPOSE_ADD6_PROXY_REG:-}"
 
 mkdir -p "$output_dir"
 rm -rf "$output_dir/reconstructions"
@@ -510,6 +520,18 @@ if [[ -n "$extra_pythonpath" ]]; then
   export REMOTE_TORCH_PYTHONPATH="${REMOTE_TORCH_PYTHONPATH:-$extra_pythonpath}"
 fi
 export PYTHONNOUSERSITE=1
+if [[ -n "$preload_py" ]]; then
+  export TVM_RUNTIME_PRELOAD_PY="$preload_py"
+fi
+if [[ -n "$proxy_so" ]]; then
+  export TVM_TRANSPOSE_ADD6_PROXY_SO="$proxy_so"
+fi
+if [[ -n "$proxy_func" ]]; then
+  export TVM_TRANSPOSE_ADD6_PROXY_FUNC="$proxy_func"
+fi
+if [[ -n "$proxy_reg" ]]; then
+  export TVM_TRANSPOSE_ADD6_PROXY_REG="$proxy_reg"
+fi
 
 run_remote_python() {
   local stdin_payload cmd arg rc=0

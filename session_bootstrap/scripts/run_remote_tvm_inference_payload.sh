@@ -261,14 +261,28 @@ PY
 
   if [[ "$REMOTE_MODE" == "ssh" ]]; then
     local remote_command
-    remote_command="$(build_remote_probe_command \
-      "INFERENCE_ENTRY=$INFERENCE_ENTRY_VALUE" \
-      "INFERENCE_WARMUP_RUNS=$INFERENCE_WARMUP_RUNS_VALUE" \
-      "INFERENCE_REPEAT=$INFERENCE_REPEAT_VALUE" \
-      "INFERENCE_DEVICE=$INFERENCE_DEVICE_VALUE" \
-      "INFERENCE_EXPECTED_SHA256=$INFERENCE_EXPECTED_SHA256_VALUE" \
-      "TUNE_INPUT_SHAPE=$TUNE_INPUT_SHAPE" \
-      "TUNE_INPUT_DTYPE=$TUNE_INPUT_DTYPE")"
+    remote_env_args=(
+      "INFERENCE_ENTRY=$INFERENCE_ENTRY_VALUE"
+      "INFERENCE_WARMUP_RUNS=$INFERENCE_WARMUP_RUNS_VALUE"
+      "INFERENCE_REPEAT=$INFERENCE_REPEAT_VALUE"
+      "INFERENCE_DEVICE=$INFERENCE_DEVICE_VALUE"
+      "INFERENCE_EXPECTED_SHA256=$INFERENCE_EXPECTED_SHA256_VALUE"
+      "TUNE_INPUT_SHAPE=$TUNE_INPUT_SHAPE"
+      "TUNE_INPUT_DTYPE=$TUNE_INPUT_DTYPE"
+    )
+    if [[ -n "${TVM_RUNTIME_PRELOAD_PY:-}" ]]; then
+      remote_env_args+=("TVM_RUNTIME_PRELOAD_PY=$TVM_RUNTIME_PRELOAD_PY")
+    fi
+    if [[ -n "${TVM_TRANSPOSE_ADD6_PROXY_SO:-}" ]]; then
+      remote_env_args+=("TVM_TRANSPOSE_ADD6_PROXY_SO=$TVM_TRANSPOSE_ADD6_PROXY_SO")
+    fi
+    if [[ -n "${TVM_TRANSPOSE_ADD6_PROXY_FUNC:-}" ]]; then
+      remote_env_args+=("TVM_TRANSPOSE_ADD6_PROXY_FUNC=$TVM_TRANSPOSE_ADD6_PROXY_FUNC")
+    fi
+    if [[ -n "${TVM_TRANSPOSE_ADD6_PROXY_REG:-}" ]]; then
+      remote_env_args+=("TVM_TRANSPOSE_ADD6_PROXY_REG=$TVM_TRANSPOSE_ADD6_PROXY_REG")
+    fi
+    remote_command="$(build_remote_probe_command "${remote_env_args[@]}")"
     set +e
     bash "$SCRIPT_DIR/ssh_with_password.sh" \
       --host "$REMOTE_HOST" \

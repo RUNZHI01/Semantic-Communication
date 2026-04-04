@@ -255,6 +255,11 @@ fi
 
 stage_current_artifact_from_local_source "${LOCAL_CURRENT_ARTIFACT_SOURCE:-}"
 
+: "${TVM_RUNTIME_PRELOAD_PY:=}"
+: "${TVM_TRANSPOSE_ADD6_PROXY_SO:=}"
+: "${TVM_TRANSPOSE_ADD6_PROXY_FUNC:=}"
+: "${TVM_TRANSPOSE_ADD6_PROXY_REG:=}"
+
 OUTPUT_PREFIX="${INFERENCE_REAL_OUTPUT_PREFIX:-${INFERENCE_OUTPUT_PREFIX:-inference_real_reconstruction}}"
 REAL_OUTPUT_DIR="$REMOTE_OUTPUT_BASE/${OUTPUT_PREFIX}_${VARIANT}"
 REAL_EXTRA_PYTHONPATH="${REMOTE_REAL_EXTRA_PYTHONPATH:-${REMOTE_TORCH_PYTHONPATH:-}}"
@@ -268,7 +273,7 @@ run_real_reconstruction() {
 #!/usr/bin/env bash
 set -euo pipefail
 SH
-    declare -p REMOTE_TVM_PYTHON REMOTE_INPUT_DIR REAL_OUTPUT_DIR REAL_SNR REAL_BATCH VARIANT REAL_ARTIFACT_PATH REAL_EXPECTED_SHA256 REAL_EXTRA_PYTHONPATH MAX_INPUTS SEED PROFILE_OPS PROFILE_SAMPLES
+    declare -p REMOTE_TVM_PYTHON REMOTE_INPUT_DIR REAL_OUTPUT_DIR REAL_SNR REAL_BATCH VARIANT REAL_ARTIFACT_PATH REAL_EXPECTED_SHA256 REAL_EXTRA_PYTHONPATH MAX_INPUTS SEED PROFILE_OPS PROFILE_SAMPLES TVM_RUNTIME_PRELOAD_PY TVM_TRANSPOSE_ADD6_PROXY_SO TVM_TRANSPOSE_ADD6_PROXY_FUNC TVM_TRANSPOSE_ADD6_PROXY_REG
     cat <<'SH'
 
 remote_python="$REMOTE_TVM_PYTHON"
@@ -284,6 +289,10 @@ max_inputs="$MAX_INPUTS"
 seed="$SEED"
 profile_ops="$PROFILE_OPS"
 profile_samples="$PROFILE_SAMPLES"
+preload_py="${TVM_RUNTIME_PRELOAD_PY:-}"
+proxy_so="${TVM_TRANSPOSE_ADD6_PROXY_SO:-}"
+proxy_func="${TVM_TRANSPOSE_ADD6_PROXY_FUNC:-}"
+proxy_reg="${TVM_TRANSPOSE_ADD6_PROXY_REG:-}"
 
 mkdir -p "$output_dir"
 rm -rf "$output_dir/reconstructions"
@@ -298,6 +307,18 @@ if [[ -n "$extra_pythonpath" ]]; then
   export REMOTE_TORCH_PYTHONPATH="${REMOTE_TORCH_PYTHONPATH:-$extra_pythonpath}"
 fi
 export PYTHONNOUSERSITE=1
+if [[ -n "$preload_py" ]]; then
+  export TVM_RUNTIME_PRELOAD_PY="$preload_py"
+fi
+if [[ -n "$proxy_so" ]]; then
+  export TVM_TRANSPOSE_ADD6_PROXY_SO="$proxy_so"
+fi
+if [[ -n "$proxy_func" ]]; then
+  export TVM_TRANSPOSE_ADD6_PROXY_FUNC="$proxy_func"
+fi
+if [[ -n "$proxy_reg" ]]; then
+  export TVM_TRANSPOSE_ADD6_PROXY_REG="$proxy_reg"
+fi
 
 run_remote_python() {
   local stdin_payload cmd arg rc=0

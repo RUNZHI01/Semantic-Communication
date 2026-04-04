@@ -9,6 +9,7 @@ import logging
 import multiprocessing as mp
 import os
 import queue
+import runpy
 import statistics
 import sys
 import threading
@@ -206,6 +207,15 @@ def runtime_tensor(array: np.ndarray, dev):
     if runtime_tensor_fn is None:
         raise AttributeError("module tvm.runtime has neither tensor nor ndarray.array")
     return runtime_tensor_fn(array, dev)
+
+
+def maybe_run_runtime_preload() -> str | None:
+    preload_py = os.environ.get("TVM_RUNTIME_PRELOAD_PY", "").strip()
+    if not preload_py:
+        return None
+    LOGGER.info("running runtime preload: %s", preload_py)
+    runpy.run_path(preload_py, run_name="__main__")
+    return preload_py
 
 
 def parse_cpu_list(raw: str) -> list[int]:
@@ -417,6 +427,7 @@ def inferencer_worker(
             from tvm import relax  # pylint: disable=import-error
 
             dev = tvm.cpu(0)
+            preload_py = maybe_run_runtime_preload()
             load_t0 = time.perf_counter()
             lib = tvm.runtime.load_module(str(artifact_path))
             load_t1 = time.perf_counter()
@@ -426,6 +437,8 @@ def inferencer_worker(
             tvm_version = tvm.__version__
             load_ms = (load_t1 - load_t0) * 1000.0
             vm_init_ms = (load_t2 - load_t1) * 1000.0
+        else:
+            preload_py = None
         run_samples_ms: list[float] = []
         processed = 0
         output_shape = None
@@ -465,6 +478,7 @@ def inferencer_worker(
                 "dry_run": dry_run,
                 "mock_infer_ms": mock_infer_ms if dry_run else None,
                 "tvm_version": tvm_version,
+                "runtime_preload_py": preload_py,
                 "load_ms": round(load_ms, 3),
                 "vm_init_ms": round(vm_init_ms, 3),
                 "processed_count": processed,
