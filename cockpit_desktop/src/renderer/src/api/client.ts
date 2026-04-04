@@ -16,6 +16,7 @@ import type {
   RunInferenceResponse,
   SystemStatusResponse,
 } from './types'
+import type { CryptoStatusResponse, CryptoTestResult } from './types/crypto'
 
 /** Vite dev server proxies /api → Python；生产直连本机（CORS 已开）。 */
 const runtimeBackendUrl = window.cockpit?.backendUrl?.replace(/\/+$/, '') ?? ''
@@ -146,4 +147,23 @@ export async function postBoardAccess(payload: BoardAccessPayload): Promise<{ st
 
 export async function postJobManifestGatePreview(variant = 'current'): Promise<GatePreviewResponse> {
   return postJson<GatePreviewResponse>('/api/job-manifest-gate/preview', { variant })
+}
+
+// ---------------------------------------------------------------------------
+// Crypto channel status (ML-KEM / AEAD)
+// ---------------------------------------------------------------------------
+
+export async function getCryptoStatus(): Promise<CryptoStatusResponse> {
+  const r = await fetch(`${API_PREFIX}/api/crypto-status`)
+  const d = await readJson<CryptoStatusResponse & { message?: string }>(r)
+  throwIfNotOk(r, d)
+  return d
+}
+
+export async function postCryptoToggle(enabled: boolean): Promise<{ status: string; enabled: boolean }> {
+  return postJson<{ status: string; enabled: boolean }>('/api/crypto-toggle', { enabled })
+}
+
+export async function postCryptoTest(): Promise<CryptoTestResult> {
+  return postJson<CryptoTestResult>('/api/crypto-test', {})
 }
