@@ -165,7 +165,6 @@ export function CryptoStatusPanel() {
       </div>
 
       <div className={s.row}>
-        <span className={`${s.dot} ${dotClass}`} />
         <span className={s.label}>通道状态</span>
         <span className={s.value}>{st.label}</span>
       </div>
