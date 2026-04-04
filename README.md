@@ -72,6 +72,7 @@
 | OpenAMP demo 最终交付快照（2026-03-17） | `session_bootstrap/reports/openamp_demo_live_delivery_snapshot_20260317.md` |
 | 启动集成 OpenAMP demo 软件 | `bash session_bootstrap/scripts/run_openamp_demo.sh` |
 | OpenAMP demo 软件说明 | `session_bootstrap/demo/openamp_control_plane_demo/README.md` |
+| ML-KEM / 后量子安全链路合入位置 | 见下方“ML-KEM 工作位置” |
 | 下一轮性能优化执行清单 | `session_bootstrap/runbooks/next_round_optimization_checklist.md` |
 | big.LITTLE 首次真机一键入口 | `bash session_bootstrap/scripts/run_big_little_first_real_attempt.sh` |
 | big.LITTLE 真机结论摘要（推荐入口） | `session_bootstrap/reports/big_little_real_run_summary_20260318.md` |
@@ -119,6 +120,74 @@
 - `session_bootstrap/reports/defense_talk_track_2min_20260320.md`
 - `session_bootstrap/reports/defense_demo_operator_card_20260320.md`
 - `session_bootstrap/reports/project_reframing_for_feiteng_cup_20260319.md`
+
+## ML-KEM 工作位置
+
+你朋友 `feat/ML-KEM` 分支的代码已经合入当前主线。现在这部分工作分成两层：
+
+- **主线集成层（本仓库内）**：负责 cockpit 面板、HTTP API、运行时适配、测试入口
+- **独立安全链路实现层（伴随仓库）**：负责 `mlkem_link`、`tcp_client.py`、`tcp_server.py` 等底层安全通信脚本
+
+### 1. 主线集成层：现在在本仓库哪些位置
+
+| 作用 | 位置 |
+|---|---|
+| ML-KEM 状态面板 UI | `cockpit_desktop/src/renderer/src/components/dashboard/CryptoStatusPanel/` |
+| ML-KEM 前端 API 类型 | `cockpit_desktop/src/renderer/src/api/types/crypto.ts` |
+| ML-KEM 前端请求入口 | `cockpit_desktop/src/renderer/src/api/client.ts` |
+| Dashboard 挂载点 | `cockpit_desktop/src/renderer/src/pages/DashboardPageMinimal.tsx` |
+| 后端 `/api/crypto-status` `/api/crypto-toggle` `/api/crypto-test` | `session_bootstrap/demo/openamp_control_plane_demo/server.py` |
+| 跨机器路径 / SSH / 环境适配层 | `session_bootstrap/demo/openamp_control_plane_demo/crypto_runtime.py` |
+| 主线侧可移植性测试 | `session_bootstrap/demo/openamp_control_plane_demo/tests/test_crypto_runtime.py` |
+
+### 2. 独立安全链路实现层：你朋友原始工作的主要位置
+
+当前主线默认按“同级伴随仓库”方式去找这部分代码；也就是说，若当前仓库目录旁边存在 `ICCompetition2026/`，主线会优先在那里查找 ML-KEM 底层脚本。
+
+你朋友原始工作的核心位置是：
+
+| 作用 | 位置 |
+|---|---|
+| ML-KEM 会话 / KEM / AEAD 实现 | `../ICCompetition2026/mlkem_link/` |
+| 上位机发送脚本 | `../ICCompetition2026/scripts/tcp_client.py` |
+| 板端接收脚本 | `../ICCompetition2026/scripts/tcp_server.py` |
+| 库级测试 | `../ICCompetition2026/mlkem_link/tests/test_session.py` |
+| FIT / 篡改 / 套件隔离测试 | `../ICCompetition2026/scripts/test_fit.py` |
+| 该仓库自身说明 | `../ICCompetition2026/README.md` |
+
+如果目录结构不是“两个仓库同级”，请显式设置：
+
+- `MLKEM_LOCAL_REPO_ROOT`
+- `MLKEM_CLIENT_SCRIPT`
+- `MLKEM_REMOTE_PROJECT_ROOT`
+- `MLKEM_REMOTE_SERVER_SCRIPT`
+- `MLKEM_REMOTE_STARTUP_CMD`
+
+更多环境变量说明见 `cockpit_desktop/README.md`。
+
+### 3. 当前主线对这部分工作的已知边界
+
+- 当前主线里的 `run_crypto_test()` 已经能调用外部 `tcp_client.py` 做真实链路测试。
+- 当前主线里的状态面板要求板端提供 HTTP `/status` 能力。
+- 你朋友当前的 `tcp_server.py` 还没有 `--status-port` / `/status`，所以“加密传输能跑”与“面板状态轮询能跑”目前仍是两件事。
+
+### 4. 已在本机验证过的相关测试
+
+在当前开发机上，下面这些入口已经实际跑通过：
+
+- `python3 -m unittest session_bootstrap.demo.openamp_control_plane_demo.tests.test_crypto_runtime`
+- `python3 -m unittest session_bootstrap.demo.openamp_control_plane_demo.tests.test_server`
+- `cd ../ICCompetition2026 && .venv/bin/python -m pytest mlkem_link/tests/test_session.py -q -rA`
+- `cd ../ICCompetition2026 && .venv/bin/python -m pytest scripts/test_fit.py -q -rA`
+
+如果你朋友回来继续接这部分，建议优先从：
+
+1. `session_bootstrap/demo/openamp_control_plane_demo/server.py`
+2. `session_bootstrap/demo/openamp_control_plane_demo/crypto_runtime.py`
+3. `../ICCompetition2026/scripts/tcp_server.py`
+4. `../ICCompetition2026/mlkem_link/`
+
+这四个入口往下看。
 
 ## 项目一句话
 
