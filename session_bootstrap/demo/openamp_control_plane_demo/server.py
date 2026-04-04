@@ -12,6 +12,8 @@ from pathlib import Path
 from threading import Lock
 from typing import Any
 from urllib.parse import parse_qs, urlparse
+from urllib.request import urlopen, Request
+from urllib.error import URLError
 
 from archive_replay import ArchiveSessionNotFoundError, list_archive_sessions, load_archive_session
 from board_access import BoardAccessConfig, build_board_access_config, build_demo_default_board_access
@@ -761,6 +763,8 @@ class DashboardState:
         self._link_director = default_link_director_state()
         self._aircraft_position = build_aircraft_position_snapshot()
         self._event_spine = DemoEventSpine(event_archive_root)
+        self._crypto_status_cache: dict[str, Any] | None = None
+        self._crypto_status_cache_ts: float = 0.0
 
         cached_probe = load_probe_output(probe_cache_path) if probe_cache_path else None
         if is_successful_probe(cached_probe):
@@ -1468,6 +1472,59 @@ class DashboardState:
             "checked_at": now_iso(),
             "gate": gate,
         }
+
+    def get_crypto_status(self) -> dict[str, Any]:
+        """从板卡 tcp_server 的 HTTP /status 端点获取 ML-KEM 通道状态。
+
+        缓存 TTL = 1.5s，避免 2s 轮询时每次都请求板卡。
+        """
+        import time as _time
+        now = _time.monotonic()
+        with self._lock:
+            cached = self._crypto_status_cache
+            cache_ts = self._crypto_status_cache_ts
+            if cached is not None and (now - cache_ts) < 1.5:
+                return cached
+            board_access = self._board_access
+
+        default_idle = {
+            "channel_state": "idle",
+            "kem_backend": "unknown",
+            "cipher_suite": "unknown",
+            "handshake_ms": None,
+            "encrypt_ms": None,
+            "decrypt_ms": None,
+            "inference_ms": None,
+            "bytes_sent": 0,
+            "bytes_received": 0,
+            "last_sha256_match": None,
+            "session_count": 0,
+            "last_session_at": None,
+            "error": None,
+        }
+
+        host = board_access.host if board_access else None
+        if not host:
+            default_idle["error"] = "board not configured"
+            return default_idle
+
+        status_port = int(board_access.env_values.get("MLKEM_STATUS_PORT", "8080")) if board_access.env_values else 8080
+        url = f"http://{host}:{status_port}/status"
+
+        try:
+            req = Request(url, headers={"Accept": "application/json"})
+            with urlopen(req, timeout=3) as resp:
+                data = json.loads(resp.read())
+            with self._lock:
+                self._crypto_status_cache = data
+                self._crypto_status_cache_ts = _time.monotonic()
+            return data
+        except (URLError, OSError, json.JSONDecodeError, TimeoutError) as exc:
+            default_idle["error"] = f"board not reachable: {exc}"
+            with self._lock:
+                self._crypto_status_cache = default_idle
+                self._crypto_status_cache_ts = _time.monotonic()
+            return default_idle
 
     def current_system_status(self) -> dict[str, Any]:
         with self._lock:
@@ -2637,6 +2694,9 @@ class DemoRequestHandler(SimpleHTTPRequestHandler):
             return
         if parsed.path == "/api/system-status":
             self.respond_json(HTTPStatus.OK, self.server.app_state.current_system_status())
+            return
+        if parsed.path == "/api/crypto-status":
+            self.respond_json(HTTPStatus.OK, self.server.app_state.get_crypto_status())
             return
         if parsed.path == "/api/health":
             self.respond_json(HTTPStatus.OK, {"status": "ok"})
