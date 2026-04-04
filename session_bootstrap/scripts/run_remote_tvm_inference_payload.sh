@@ -142,6 +142,7 @@ run_probe_python() {
 import hashlib
 import json
 import os
+import runpy
 import statistics
 import sys
 import time
@@ -208,6 +209,10 @@ report = {
     "artifact_sha256_expected": expected_sha256 or None,
     "artifact_sha256_match": None if not expected_sha256 else artifact_sha256 == expected_sha256,
 }
+
+preload_py = os.environ.get("TVM_RUNTIME_PRELOAD_PY", "").strip()
+if preload_py:
+    runpy.run_path(preload_py, run_name="__main__")
 
 load_t0 = time.perf_counter()
 lib = tvm.runtime.load_module(so_path)

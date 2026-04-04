@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import os
+import runpy
 import statistics
 import sys
 import time
@@ -637,6 +638,10 @@ def main():
         input_files = input_files[: args.max_inputs]
 
     dev = tvm.cpu(0)
+    preload_py = os.environ.get("TVM_RUNTIME_PRELOAD_PY", "").strip()
+    if preload_py:
+        LOGGER.info("运行时预加载脚本: %s", preload_py)
+        runpy.run_path(preload_py, run_name="__main__")
     load_t0 = time.perf_counter()
     lib = tvm.runtime.load_module(str(artifact_path))
     load_t1 = time.perf_counter()
