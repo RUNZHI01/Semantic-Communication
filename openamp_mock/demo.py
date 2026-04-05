@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Callable
 
 from .evidence import write_example_bundle
+from .crypto_guard import CryptoGuard
+from .crypto_transport import CryptoTransport
 from .guard import SafetyGuard
 from .orchestrator import Orchestrator
 from .protocol import (
@@ -72,8 +74,21 @@ SCENARIOS: dict[str, ScenarioSpec] = {
 
 
 class MockSession:
-    def __init__(self, trusted_sha256: str = FORMAL_TRUSTED_CURRENT_SHA) -> None:
-        self.transport = MockTransport()
+    def __init__(
+        self,
+        trusted_sha256: str = FORMAL_TRUSTED_CURRENT_SHA,
+        *,
+        use_crypto_transport: bool = False,
+        shared_secret: bytes = b"openamp-ctrl-plane-shared-secret-32",
+    ) -> None:
+        base_transport = MockTransport()
+        if use_crypto_transport:
+            self.transport = CryptoTransport(
+                base_transport,
+                CryptoGuard(shared_secret=shared_secret[:32]),
+            )
+        else:
+            self.transport = base_transport
         self.guard = SafetyGuard(trusted_sha256=trusted_sha256)
         self.orchestrator = Orchestrator()
         self.now_ms = 0
@@ -97,9 +112,9 @@ class MockSession:
         self.pump()
 
 
-def run_allow_scenario() -> tuple[MockSession, dict[str, object]]:
+def run_allow_scenario(*, use_crypto_transport: bool = False) -> tuple[MockSession, dict[str, object]]:
     spec = SCENARIOS["allow"]
-    session = MockSession()
+    session = MockSession(use_crypto_transport=use_crypto_transport)
     job = JobSpec(job_id=1001, expected_sha256=FORMAL_TRUSTED_CURRENT_SHA, flags="payload")
     session.orchestrator.submit_job(job, session.now_ms, session.transport)
     session.pump()
@@ -133,9 +148,9 @@ def run_allow_scenario() -> tuple[MockSession, dict[str, object]]:
     return session, _result_from_session(spec, session)
 
 
-def run_wrong_sha_deny_scenario() -> tuple[MockSession, dict[str, object]]:
+def run_wrong_sha_deny_scenario(*, use_crypto_transport: bool = False) -> tuple[MockSession, dict[str, object]]:
     spec = SCENARIOS["deny_sha"]
-    session = MockSession()
+    session = MockSession(use_crypto_transport=use_crypto_transport)
     job = JobSpec(
         job_id=1002,
         expected_sha256="deadbeef" * 8,
@@ -149,9 +164,9 @@ def run_wrong_sha_deny_scenario() -> tuple[MockSession, dict[str, object]]:
     return session, _result_from_session(spec, session)
 
 
-def run_input_contract_deny_scenario() -> tuple[MockSession, dict[str, object]]:
+def run_input_contract_deny_scenario(*, use_crypto_transport: bool = False) -> tuple[MockSession, dict[str, object]]:
     spec = SCENARIOS["deny_input"]
-    session = MockSession()
+    session = MockSession(use_crypto_transport=use_crypto_transport)
     job = JobSpec(
         job_id=1003,
         expected_sha256=FORMAL_TRUSTED_CURRENT_SHA,
@@ -165,9 +180,9 @@ def run_input_contract_deny_scenario() -> tuple[MockSession, dict[str, object]]:
     return session, _result_from_session(spec, session)
 
 
-def run_timeout_scenario() -> tuple[MockSession, dict[str, object]]:
+def run_timeout_scenario(*, use_crypto_transport: bool = False) -> tuple[MockSession, dict[str, object]]:
     spec = SCENARIOS["timeout"]
-    session = MockSession()
+    session = MockSession(use_crypto_transport=use_crypto_transport)
     job = JobSpec(job_id=1004, expected_sha256=FORMAL_TRUSTED_CURRENT_SHA, flags="payload")
     session.orchestrator.submit_job(job, session.now_ms, session.transport)
     session.pump()
@@ -193,12 +208,16 @@ def run_timeout_scenario() -> tuple[MockSession, dict[str, object]]:
     return session, _result_from_session(spec, session)
 
 
-def run_named_scenarios(names: list[str]) -> tuple[list[MockSession], list[dict[str, object]]]:
+def run_named_scenarios(
+    names: list[str],
+    *,
+    use_crypto_transport: bool = False,
+) -> tuple[list[MockSession], list[dict[str, object]]]:
     runners: dict[str, Callable[[], tuple[MockSession, dict[str, object]]]] = {
-        "allow": run_allow_scenario,
-        "deny_sha": run_wrong_sha_deny_scenario,
-        "deny_input": run_input_contract_deny_scenario,
-        "timeout": run_timeout_scenario,
+        "allow": lambda: run_allow_scenario(use_crypto_transport=use_crypto_transport),
+        "deny_sha": lambda: run_wrong_sha_deny_scenario(use_crypto_transport=use_crypto_transport),
+        "deny_input": lambda: run_input_contract_deny_scenario(use_crypto_transport=use_crypto_transport),
+        "timeout": lambda: run_timeout_scenario(use_crypto_transport=use_crypto_transport),
     }
     sessions: list[MockSession] = []
     results: list[dict[str, object]] = []
@@ -220,6 +239,8 @@ def _result_from_session(spec: ScenarioSpec, session: MockSession) -> dict[str, 
         raise RuntimeError("scenario finished without current job")
     passed = _scenario_passed(spec.name, session)
     status = session.orchestrator.last_status or {}
+    transport_stats = getattr(session.transport, "stats", None)
+    control_plane_encrypted = isinstance(transport_stats, dict)
     actual_result = (
         f"decision={decision}, orchestrator={session.orchestrator.state.value}, "
         f"guard={session.guard.state.value}, last_fault={fault_tag(last_fault)}"
@@ -248,6 +269,12 @@ def _result_from_session(spec: ScenarioSpec, session: MockSession) -> dict[str, 
         "guard_state_log": session.guard.state_log,
         "status_snapshot": status,
         "ctrl_log": session.transport.ctrl_log,
+        "control_plane_encrypted": control_plane_encrypted,
+        "control_plane_crypto_stats": dict(transport_stats) if control_plane_encrypted else {
+            "encrypt_tx": 0,
+            "decrypt_rx": 0,
+            "passthrough_rx": 0,
+        },
     }
 
 
@@ -291,10 +318,15 @@ def main() -> int:
         default=f"openamp_mock_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
         help="Logical run identifier for evidence files.",
     )
+    parser.add_argument(
+        "--crypto-transport",
+        action="store_true",
+        help="Wrap control-plane transport with ML-KEM-derived AEAD (demo-only).",
+    )
     args = parser.parse_args()
 
     scenario_names = list(SCENARIOS) if args.scenario == "all" else [args.scenario]
-    _, results = run_named_scenarios(scenario_names)
+    _, results = run_named_scenarios(scenario_names, use_crypto_transport=args.crypto_transport)
 
     evidence_files: dict[str, str] = {}
     if args.output_dir:

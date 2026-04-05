@@ -181,10 +181,55 @@ export function CryptoStatusPanel() {
           <span className={s.mono}>{data.handshake_ms.toFixed(1)} ms</span>
         </div>
       )}
+      {data.encrypt_ms != null && (
+        <div className={s.row}>
+          <span className={s.label}>加密发送</span>
+          <span className={s.mono}>{data.encrypt_ms.toFixed(1)} ms</span>
+        </div>
+      )}
+      {data.decrypt_ms != null && (
+        <div className={s.row}>
+          <span className={s.label}>解密接收</span>
+          <span className={s.mono}>{data.decrypt_ms.toFixed(1)} ms</span>
+        </div>
+      )}
       {data.inference_ms != null && (
         <div className={s.row}>
           <span className={s.label}>TVM 推理</span>
           <span className={s.mono}>{data.inference_ms.toFixed(1)} ms</span>
+        </div>
+      )}
+
+      {(data.bytes_sent != null || data.bytes_received != null) && (
+        <div className={s.row}>
+          <span className={s.label}>加密流量</span>
+          <span className={s.mono}>
+            ↑ {data.bytes_sent ?? 0} B / ↓ {data.bytes_received ?? 0} B
+          </span>
+        </div>
+      )}
+
+      {(data.control_guard_state || data.control_last_fault_code) && (
+        <div className={s.row}>
+          <span className={s.label}>控制面状态</span>
+          <span className={s.mono}>
+            guard={data.control_guard_state ?? 'UNKNOWN'} / fault={data.control_last_fault_code ?? 'UNKNOWN'}
+          </span>
+        </div>
+      )}
+
+      {(data.control_heartbeat_ok != null || data.control_total_fault_count != null) && (
+        <div className={s.row}>
+          <span className={s.label}>控制面计数</span>
+          <span className={s.mono}>
+            heartbeat_ok={data.control_heartbeat_ok ?? 0} / fault_total={data.control_total_fault_count ?? 0}
+          </span>
+        </div>
+      )}
+
+      {data.control_recover_attempted && data.control_recover_note && (
+        <div className={s.row}>
+          <span className={s.muted}>{data.control_recover_note}</span>
         </div>
       )}
 

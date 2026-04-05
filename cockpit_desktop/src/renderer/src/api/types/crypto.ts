@@ -35,6 +35,18 @@ export type CryptoStatusResponse = {
   enabled: boolean
   /** Whether board credentials have been entered */
   board_configured: boolean
+  /** Control-plane guard state snapshot from latest OpenAMP status */
+  control_guard_state?: string
+  /** Control-plane last fault snapshot */
+  control_last_fault_code?: string
+  /** Heartbeat acknowledgement counter from control status */
+  control_heartbeat_ok?: number
+  /** Total fault counter from control status */
+  control_total_fault_count?: number
+  /** Whether a soft recover was attempted before blocking */
+  control_recover_attempted?: boolean
+  /** Soft recover note for operator context */
+  control_recover_note?: string
 }
 
 export type CryptoTestResult = {

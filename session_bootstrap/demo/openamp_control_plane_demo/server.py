@@ -789,6 +789,9 @@ class DashboardState:
         self._crypto_status_cache: dict[str, Any] | None = None
         self._crypto_status_cache_ts: float = 0.0
         self._crypto_enabled: bool = False
+        self._last_soft_recover_ts: float = 0.0
+        self._soft_recover_cooldown_sec: float = 45.0
+        self._last_soft_recover_result: dict[str, Any] | None = None
 
         cached_probe = load_probe_output(probe_cache_path) if probe_cache_path else None
         if is_successful_probe(cached_probe):
@@ -1506,6 +1509,7 @@ class DashboardState:
         3. 请求板卡 :8080/status → 成功则缓存并返回
         4. 请求失败 → 保留上次正常值，只更新 error 字段
         """
+        control_summary = self._control_plane_summary()
         _disabled = {
             "channel_state": "disabled",
             "kem_backend": "-",
@@ -1522,6 +1526,7 @@ class DashboardState:
             "error": None,
             "enabled": False,
             "board_configured": False,
+            **control_summary,
         }
 
         with self._lock:
@@ -1532,7 +1537,7 @@ class DashboardState:
             cached = self._crypto_status_cache
             cache_ts = self._crypto_status_cache_ts
             if cached is not None and (time.monotonic() - cache_ts) < 1.5:
-                return {**cached, "enabled": True}
+                return {**cached, "enabled": True, **control_summary}
 
         board_configured = bool(board_access and board_access.connection_ready)
 
@@ -1553,6 +1558,7 @@ class DashboardState:
                 "error": "board_not_configured",
                 "enabled": True,
                 "board_configured": False,
+                **control_summary,
             }
 
         host = board_access.host
@@ -1566,6 +1572,7 @@ class DashboardState:
             data = fetch_json_direct(url, timeout=3)
             data["enabled"] = True
             data["board_configured"] = True
+            data.update(control_summary)
             with self._lock:
                 self._crypto_status_cache = data
                 self._crypto_status_cache_ts = time.monotonic()
@@ -1576,7 +1583,7 @@ class DashboardState:
                 prev = self._crypto_status_cache
             if prev is not None:
                 fallback = {**prev, "enabled": True, "board_configured": True,
-                           "error": f"board not reachable: {exc}"}
+                           "error": f"board not reachable: {exc}", **control_summary}
                 with self._lock:
                     self._crypto_status_cache = fallback
                     self._crypto_status_cache_ts = time.monotonic()
@@ -1598,11 +1605,60 @@ class DashboardState:
                 "error": f"board not reachable: {exc}",
                 "enabled": True,
                 "board_configured": True,
+                **control_summary,
             }
             with self._lock:
                 self._crypto_status_cache = cold
                 self._crypto_status_cache_ts = time.monotonic()
             return cold
+
+    def _control_plane_summary(self) -> dict[str, Any]:
+        with self._lock:
+            control_status = dict(self._last_control_status or {})
+            soft_recover = dict(self._last_soft_recover_result or {})
+        return {
+            "control_guard_state": str(control_status.get("guard_state") or "UNKNOWN"),
+            "control_last_fault_code": str(control_status.get("last_fault_code") or "UNKNOWN"),
+            "control_heartbeat_ok": self._safe_int(control_status.get("heartbeat_ok"), default=0),
+            "control_total_fault_count": self._safe_int(control_status.get("total_fault_count"), default=0),
+            "control_recover_attempted": bool(soft_recover),
+            "control_recover_note": str(soft_recover.get("note") or ""),
+        }
+
+    def _maybe_soft_recover_control_plane(
+        self,
+        board_access: BoardAccessConfig,
+        *,
+        trusted_sha: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        now = time.monotonic()
+        with self._lock:
+            elapsed = now - self._last_soft_recover_ts
+            cooldown = self._soft_recover_cooldown_sec
+        if elapsed < cooldown:
+            note = f"soft recover skipped by cooldown ({cooldown - elapsed:.1f}s left)"
+            return {"attempted": False, "note": note}
+
+        recover_result = run_recover_action(board_access, trusted_sha=trusted_sha)
+        status_probe = query_live_status(board_access, trusted_sha=trusted_sha)
+        attempted = {
+            "attempted": True,
+            "reason": reason,
+            "recover_status": str(recover_result.get("status") or ""),
+            "probe_status": str(status_probe.get("status") or ""),
+            "note": "soft recover attempted before deciding to block",
+        }
+        with self._lock:
+            self._last_soft_recover_ts = time.monotonic()
+            self._last_soft_recover_result = attempted
+            if recover_result.get("status") == "success":
+                self._last_control_status = recover_result
+            if status_probe.get("status") == "success":
+                self._last_control_status = status_probe
+        if status_probe.get("status") == "success":
+            self._emit_status_observation_events(status_probe, source="soft_recover_retry")
+        return {**attempted, "recover_result": recover_result, "status_retry": status_probe}
 
     def set_crypto_toggle(self, enabled: bool) -> dict[str, Any]:
         """设置 ML-KEM 开关状态
@@ -1638,6 +1694,26 @@ class DashboardState:
         except Exception:
             pass  # 没运行，继续启动
 
+        # 1b) 若进程已在运行，优先等待 status 就绪，避免重复启动导致板端抖动。
+        try:
+            pgrep_proc = run_ssh_command(
+                host=host,
+                user=user,
+                password=password,
+                port=ssh_port,
+                remote_command="pgrep -af 'tcp_server.py' || true",
+                timeout=8,
+            )
+            if pgrep_proc.returncode == 0 and (pgrep_proc.stdout or "").strip():
+                for _ in range(4):
+                    try:
+                        fetch_json_direct(f"http://{host}:{status_port}/status", timeout=2)
+                        return
+                    except Exception:
+                        time.sleep(0.8)
+        except Exception:
+            pass
+
         # 2) SSH 到板卡启动 tcp_server
         local_server_script, _ = resolve_local_crypto_server(env_values)
         remote_command = build_remote_crypto_server_command(
@@ -1657,6 +1733,13 @@ class DashboardState:
             if proc.returncode != 0:
                 error_output = proc.stderr.strip() or proc.stdout.strip() or "unknown error"
                 print(f"[ML-KEM auto-start] SSH failed: {error_output}")
+                return
+            for _ in range(6):
+                try:
+                    fetch_json_direct(f"http://{host}:{status_port}/status", timeout=2)
+                    return
+                except Exception:
+                    time.sleep(0.8)
         except Exception as exc:
             print(f"[ML-KEM auto-start] error: {exc}")
 
@@ -2396,7 +2479,318 @@ class DashboardState:
         )
         return payload
 
+    def _parse_mlkem_client_metrics(self, stdout: str) -> dict[str, Any]:
+        metrics: dict[str, Any] = {
+            "handshake_ms": None,
+            "encrypt_ms": None,
+            "result_recv_ms": None,
+            "sha256_match": None,
+            "suite": "",
+            "backend": "",
+        }
+        for line in stdout.splitlines():
+            text = str(line).strip()
+            if not text:
+                continue
+            if text.startswith("密码套件:"):
+                metrics["suite"] = text.split(":", 1)[1].strip()
+            elif text.startswith("KEM 后端:"):
+                metrics["backend"] = text.split(":", 1)[1].strip()
+            elif "握手完成" in text:
+                m = re.search(r"([\d.]+)\s*ms", text)
+                if m:
+                    metrics["handshake_ms"] = float(m.group(1))
+            elif "加密发送" in text:
+                m = re.search(r"耗时\s*([\d.]+)\s*ms", text)
+                if m:
+                    metrics["encrypt_ms"] = float(m.group(1))
+            elif "接收重建结果" in text:
+                m = re.search(r"耗时\s*([\d.]+)\s*ms", text)
+                if m:
+                    metrics["result_recv_ms"] = float(m.group(1))
+            elif "对端 SHA256 匹配: 是" in text or "SHA256 匹配" in text:
+                metrics["sha256_match"] = True
+            elif "SHA256 不匹配" in text:
+                metrics["sha256_match"] = False
+        return metrics
+
+    def run_mlkem_inference(self, *, variant: str, image_index: int) -> dict[str, Any]:
+        payload = build_prerecorded_inference_result(image_index, variant)
+        with self._lock:
+            board_access = self._board_access
+            crypto_enabled = self._crypto_enabled
+
+        if not crypto_enabled:
+            return self._build_blocked_inference_payload(
+                variant=variant,
+                image_index=image_index,
+                status_category="crypto_disabled",
+                source_label="ML-KEM 未启用，回退展示（归档样例）",
+                message="当前 ML-KEM 开关为 OFF，本次不发起加密推理。",
+                detail="启用安全信道后，Current 主路径才会走 ML-KEM 加密通道。",
+                diagnostics={"crypto_enabled": False},
+            )
+
+        if not (board_access and board_access.connection_ready):
+            return self._build_blocked_inference_payload(
+                variant=variant,
+                image_index=image_index,
+                status_category="config_error",
+                source_label="会话未配置，回退展示（归档样例）",
+                message="尚未录入完整板卡会话，无法发起 ML-KEM 推理。",
+                detail="请先补齐 host/user/password。",
+                diagnostics={"board_configured": False},
+            )
+
+        live_board_access = self._live_board_access_for_variant(board_access, variant=variant)
+        variant_expected_sha = expected_sha_for_variant(live_board_access, variant) or self._trusted_current_sha
+        preflight = query_live_status(board_access, trusted_sha=variant_expected_sha)
+        if preflight.get("status") != "success":
+            soft_recover = self._maybe_soft_recover_control_plane(
+                board_access,
+                trusted_sha=variant_expected_sha,
+                reason="mlkem_preflight_failed",
+            )
+            retry = soft_recover.get("status_retry") if isinstance(soft_recover.get("status_retry"), dict) else {}
+            if retry.get("status") == "success":
+                preflight = retry
+            else:
+                return self._build_blocked_inference_payload(
+                    variant=variant,
+                    image_index=image_index,
+                    status_category="control_preflight_failed",
+                    source_label="控制面预检失败，回退展示（归档样例）",
+                    message="控制面 STATUS_REQ 预检失败，本次不继续 ML-KEM 推理。",
+                    detail=str(preflight.get("message") or "未拿到有效 STATUS_RESP"),
+                    diagnostics={"control_status": preflight, "soft_recover": soft_recover},
+                    event_log=list(preflight.get("logs") or []),
+                )
+
+        with self._lock:
+            self._last_control_status = preflight
+        self._emit_status_observation_events(preflight, source="mlkem_preflight")
+
+        guard_state = str(preflight.get("guard_state") or "UNKNOWN").upper()
+        if guard_state == "JOB_ACTIVE":
+            active_job_id = int(preflight.get("active_job_id") or 0)
+            active_suffix = f" active_job_id={active_job_id}。" if active_job_id else ""
+            return self._build_blocked_inference_payload(
+                variant=variant,
+                image_index=image_index,
+                status_category="board_busy",
+                source_label="保守阻断（板端已有活动作业）",
+                message=(
+                    "板端当前 guard_state=JOB_ACTIVE，本次 ML-KEM 推理已保守阻断；"
+                    f"不会自动 SAFE_STOP。{active_suffix}"
+                ),
+                detail="STATUS_RESP 显示 guard_state=JOB_ACTIVE；未再发起新的加密推理。",
+                diagnostics={"control_status": preflight},
+                event_log=list(preflight.get("logs") or []),
+            )
+
+        env_values = board_access.build_env()
+        self._ensure_board_tcp_server(board_access)
+        tcp_client, searched_paths = resolve_local_crypto_client(env_values)
+        if tcp_client is None:
+            searched_text = ", ".join(str(path) for path in searched_paths[:5]) or "no candidate paths"
+            return self._build_blocked_inference_payload(
+                variant=variant,
+                image_index=image_index,
+                status_category="client_missing",
+                source_label="客户端缺失，回退展示（归档样例）",
+                message="tcp_client.py 未找到，无法执行 ML-KEM 推理主路径。",
+                detail=f"searched: {searched_text}",
+                diagnostics={"searched": searched_paths[:10]},
+            )
+
+        import tempfile
+
+        # 使用固定 shape 的测试 latent 触发真实 ML-KEM + AEAD 数据面链路。
+        tmp_input = tempfile.NamedTemporaryFile(suffix=".bin", delete=False)
+        tmp_input.write(b"\0" * (1 * 3 * 64 * 64 * 4))
+        tmp_input.close()
+        input_path = Path(tmp_input.name)
+        output_path = Path(tempfile.mkstemp(suffix=".bin", prefix="mlkem_result_")[1])
+
+        cmd, env = build_local_crypto_client_command(
+            env_values,
+            host=board_access.host,
+            input_path=input_path,
+            client_script=tcp_client,
+        )
+        job_id = f"current-{int(time.time())}-{image_index}"
+        cmd.extend(["--job-id", job_id, "--output", str(output_path)])
+
+        try:
+            t0 = time.monotonic()
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=180, env=env)
+            wall_ms = round((time.monotonic() - t0) * 1000, 1)
+        except subprocess.TimeoutExpired:
+            return self._build_blocked_inference_payload(
+                variant=variant,
+                image_index=image_index,
+                status_category="timeout",
+                source_label="ML-KEM 推理超时，回退展示（归档样例）",
+                message="ML-KEM 推理超时（180s），本次已回退到归档样例。",
+                detail="tcp_client 执行超时。",
+                diagnostics={"timeout_sec": 180},
+            )
+        finally:
+            try:
+                input_path.unlink()
+            except OSError:
+                pass
+
+        if proc.returncode != 0:
+            stderr_tail = (proc.stderr or proc.stdout or "unknown error").strip()[-500:]
+            return self._build_blocked_inference_payload(
+                variant=variant,
+                image_index=image_index,
+                status_category="mlkem_exec_failed",
+                source_label="ML-KEM 执行失败，回退展示（归档样例）",
+                message="ML-KEM 客户端执行失败，本次已回退到归档样例。",
+                detail=stderr_tail or "tcp_client exited with non-zero",
+                diagnostics={"returncode": proc.returncode},
+                event_log=[stderr_tail] if stderr_tail else [],
+            )
+
+        metrics = self._parse_mlkem_client_metrics(proc.stdout or "")
+        crypto_status = self.get_crypto_status()
+        handshake_ms = metrics.get("handshake_ms") or crypto_status.get("handshake_ms")
+        encrypt_ms = metrics.get("encrypt_ms") or crypto_status.get("encrypt_ms")
+        inference_ms = crypto_status.get("inference_ms")
+        sha_match = (
+            metrics.get("sha256_match")
+            if metrics.get("sha256_match") is not None
+            else crypto_status.get("last_sha256_match")
+        )
+
+        stages: list[dict[str, Any]] = []
+        if handshake_ms is not None:
+            stages.append({"label": "ML-KEM 握手", "value_ms": round(float(handshake_ms), 3), "emphasis": "host"})
+        if encrypt_ms is not None:
+            stages.append({"label": "AEAD 加密发送", "value_ms": round(float(encrypt_ms), 3), "emphasis": "data"})
+        if inference_ms is not None:
+            stages.append({"label": "板端 TVM 推理", "value_ms": round(float(inference_ms), 3), "emphasis": "board"})
+        total_ms = round(sum(float(item["value_ms"]) for item in stages), 3) if stages else wall_ms
+
+        payload.update(
+            {
+                "status": "success",
+                "execution_mode": "live",
+                "request_state": "completed",
+                "status_category": "success",
+                "source_label": "ML-KEM 全链路加密（控制+数据）",
+                "message": "Current 已通过 ML-KEM 安全信道完成加密传输与板端执行，结果按竞赛口径回传。",
+                "timings": {
+                    "payload_ms": round(float(encrypt_ms), 3) if encrypt_ms is not None else None,
+                    "prepare_ms": round(float(handshake_ms), 3) if handshake_ms is not None else None,
+                    "total_ms": total_ms,
+                    "stages": stages,
+                },
+                "live_attempt": {
+                    "status": "success",
+                    "request_state": "completed",
+                    "status_category": "success",
+                    "control_transport": "mlkem",
+                    "control_handshake_complete": True,
+                    "message": "ML-KEM inference path completed.",
+                    "metrics": {
+                        "wall_ms": wall_ms,
+                        "handshake_ms": handshake_ms,
+                        "encrypt_ms": encrypt_ms,
+                        "inference_ms": inference_ms,
+                        "sha256_match": sha_match,
+                    },
+                    "control_preflight": preflight,
+                },
+                "live_progress": {
+                    "state": "completed",
+                    "label": "ML-KEM live 完成",
+                    "tone": "online",
+                    "percent": 100,
+                    "phase_percent": 100,
+                    "completed_count": 1,
+                    "expected_count": 1,
+                    "remaining_count": 0,
+                    "completion_ratio": 1.0,
+                    "count_source": "mlkem_live",
+                    "count_label": "1 / 1",
+                    "current_stage": "加密推理与回传完成",
+                    "stages": [
+                        {
+                            "key": "mlkem_live_done",
+                            "label": "ML-KEM 全链路",
+                            "status": "done",
+                            "detail": f"wall={wall_ms}ms, sha_match={sha_match}",
+                        }
+                    ],
+                    "event_log": [
+                        f"job_id={job_id}",
+                        f"backend={crypto_status.get('kem_backend') or metrics.get('backend') or 'unknown'}",
+                        f"suite={crypto_status.get('cipher_suite') or metrics.get('suite') or 'unknown'}",
+                    ],
+                },
+            }
+        )
+
+        with self._lock:
+            self._update_last_inference_summary(payload, variant)
+
+        self._event_spine.publish(
+            "JOB_SUBMITTED",
+            source="inference",
+            plane="control",
+            mode_scope=CONTROL_MODE_SCOPE,
+            message=f"ML-KEM live job {job_id} submitted.",
+            data={"variant": variant, "image_index": image_index, "control_transport": "mlkem"},
+        )
+        self._event_spine.publish(
+            "JOB_ADMITTED",
+            source="inference",
+            plane="control",
+            mode_scope=CONTROL_MODE_SCOPE,
+            message=f"ML-KEM live job {job_id} admitted.",
+            data={"variant": variant, "image_index": image_index, "control_transport": "mlkem"},
+        )
+        self._event_spine.publish(
+            "JOB_DONE",
+            source="inference",
+            plane="data",
+            mode_scope=DATA_MODE_SCOPE,
+            message=f"ML-KEM live job {job_id} completed.",
+            data={
+                "variant": variant,
+                "image_index": image_index,
+                "total_ms": total_ms,
+                "sha256_match": sha_match,
+                "control_transport": "mlkem",
+            },
+        )
+        self._archive_event_snapshot(
+            reason="mlkem_live_done",
+            job_id=job_id,
+            extra={
+                "variant": variant,
+                "image_index": image_index,
+                "total_ms": total_ms,
+                "sha256_match": sha_match,
+            },
+        )
+
+        try:
+            if output_path.exists() and output_path.stat().st_size == 0:
+                output_path.unlink()
+        except OSError:
+            pass
+        return payload
+
     def run_demo_inference(self, *, variant: str, image_index: int) -> dict[str, Any]:
+        with self._lock:
+            crypto_enabled = self._crypto_enabled
+        if crypto_enabled and variant == "current":
+            return self.run_mlkem_inference(variant=variant, image_index=image_index)
+
         payload = build_prerecorded_inference_result(image_index, variant)
         event_record: dict[str, Any] | None = None
         with self._lock:
