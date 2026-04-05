@@ -1,181 +1,128 @@
-% 图 1.2 GAN-based JSCC 结构图（重绘加强版）
-% 基于 CICC0903540 技术文档 2.2 - 语义通信技术原理
 \documentclass[tikz,border=10pt]{standalone}
 
-% 强制全局样式与配色
-\usepackage{amssymb, amsmath}
+\usepackage{amsmath,amssymb}
 \usepackage{fontspec}
 \usepackage{xeCJK}
-\setCJKmainfont{SimHei}
+\IfFontExistsTF{SimHei}{\setCJKmainfont{SimHei}}{\setCJKmainfont{Noto Sans CJK SC}}
+\usepackage{xcolor}
 \usepackage{tikz}
-\usetikzlibrary{
-  arrows.meta, positioning, shapes.geometric, calc,
-  backgrounds, fit, decorations.pathreplacing, patterns
-}
+\usetikzlibrary{arrows.meta,backgrounds,calc,fit,positioning}
 
-% 低饱和度马卡龙配色（禁止使用纯色）
-\definecolor{mBlue}{HTML}{AEC6CF}
-\definecolor{mPink}{HTML}{FFD1DC}
-\definecolor{mGreen}{HTML}{B1D8B7}
-\definecolor{mPurple}{HTML}{B39EB5}
-\definecolor{mYellow}{HTML}{FDFD96}
-\definecolor{mGray}{HTML}{E5E4E2}
-\definecolor{mDark}{HTML}{4A4A4A}
+\definecolor{ink}{HTML}{18324A}
+\definecolor{muted}{HTML}{5F7286}
+\definecolor{linec}{HTML}{C9D8E6}
+\definecolor{bluefill}{HTML}{EFF6FF}
+\definecolor{blueedge}{HTML}{9FC2F1}
+\definecolor{greenfill}{HTML}{EFFAF4}
+\definecolor{greenedge}{HTML}{A8D7B6}
+\definecolor{purplefill}{HTML}{F5F1FC}
+\definecolor{purpleedge}{HTML}{CBB9E7}
+\definecolor{orangefill}{HTML}{FFF6ED}
+\definecolor{orangeedge}{HTML}{F2C892}
+\definecolor{grayfill}{HTML}{F8FBFD}
+\definecolor{grayedge}{HTML}{D8E2EC}
+\definecolor{pinkfill}{HTML}{FFF1F5}
+\definecolor{pinkedge}{HTML}{F0BFD0}
+\definecolor{badgeblue}{HTML}{2F6BFF}
+\definecolor{badgeorange}{HTML}{E17A21}
 
-% 全局 TikZ 样式
 \tikzset{
-  >=stealth,
-  thick,
-  draw=mDark,
-  % 基础节点样式
-  block/.style={
-    rectangle, rounded corners=3pt, draw=mDark, align=center,
-    font=\sffamily\small, minimum height=0.9cm, inner sep=5pt},
-  % 微观模块样式
-  micro/.style={
-    rectangle, rounded corners=2pt, draw=mDark!70, align=center,
-    font=\sffamily\tiny, minimum height=0.4cm, inner sep=3pt},
-  % 数学操作符节点
-  op/.style={
-    circle, draw=mDark, minimum size=0.45cm, inner sep=0,
-    font=\scriptsize, fill=mGray!60},
-  % 张量维度标注
-  ts/.style={font=\tiny\sffamily, color=mDark!80},
-  % 箭头样式
-  arr/.style={-{Stealth[length=4pt]}, thick, draw=mDark},
-  darr/.style={-{Stealth[length=4pt]}, thick, draw=mDark, dashed},
-  % 图例
-  legendbox/.style={
-    rectangle, draw=mDark!50, rounded corners=3pt,
-    fill=mGray!15, inner sep=5pt, font=\tiny\sffamily},
+  module/.style={
+    rectangle,
+    rounded corners=8pt,
+    draw=#1,
+    fill=#1!12,
+    minimum width=2.55cm,
+    minimum height=1.65cm,
+    text width=2.6cm,
+    align=center,
+    font=\sffamily\small\bfseries,
+    inner sep=6pt,
+  },
+  module/.default=blueedge,
+  body/.style={font=\sffamily\scriptsize, text=muted, align=center},
+  tag/.style={
+    rectangle,
+    rounded corners=10pt,
+    fill=#1,
+    inner sep=5pt,
+    text=white,
+    font=\sffamily\scriptsize\bfseries
+  },
+  tag/.default=badgeblue,
+  dataarrow/.style={-{Stealth[length=3.2mm]}, line width=0.95pt, draw=ink},
+  trainarrow/.style={-{Stealth[length=3.0mm]}, line width=0.85pt, draw=muted, dashed},
+  info/.style={font=\sffamily\tiny, text=muted, align=center},
 }
 
 \begin{document}
-\begin{tikzpicture}[
-  node distance=0.7cm and 1.2cm,
-]
-  % ========== 主数据流（发送端 → 信道 → 接收端）==========
-  % 输入图像
-  \node[block, fill=mGray!50, minimum width=1.5cm] (img) {$\mathbf{x}$\\{\tiny 输入}};
+\begin{tikzpicture}[node distance=1.25cm and 1.25cm]
 
-  % Encoder（带微观结构拆解）
-  \node[block, fill=mBlue!40, right=1.2cm of img, minimum width=2cm] (enc)
-    {Encoder\\{\tiny 语义特征提取}};
+\node[tag] (deploytag) at (0,0) {部署主链};
+\node[module=grayedge, fill=grayfill, below=1.0cm of deploytag, text width=2.2cm] (input) {输入图像\\[-1pt]\normalsize$\mathbf{x}$};
+\node[module=blueedge, fill=bluefill, right=1.45cm of input] (enc) {Encoder};
+\node[module=blueedge, fill=bluefill, right=1.15cm of enc] (power) {功率控制};
+\node[module=greenedge, fill=greenfill, right=1.15cm of power] (channel) {AWGN 信道};
+\node[module=purpleedge, fill=purplefill, right=1.15cm of channel] (gen) {Generator};
+\node[module=grayedge, fill=grayfill, right=1.45cm of gen, text width=2.2cm] (output) {重建图像\\[-1pt]\normalsize$\hat{\mathbf{x}}$};
 
-  % 功率控制
-  \node[block, fill=mBlue!40, right=1.2cm of enc, minimum width=1.8cm] (pwr)
-    {功率控制\\{\tiny Power Ctrl}};
+\node[body, below=0.22cm of input] {原始 RGB 图像};
+\node[body, below=0.22cm of enc] {语义特征提取};
+\node[body, below=0.22cm of power] {归一化与发射功率匹配};
+\node[body, below=0.22cm of channel] {弱网噪声扰动};
+\node[body, below=0.22cm of gen] {图像重建};
+\node[body, below=0.22cm of output] {飞腾端部署输出};
 
-  % AWGN 信道
-  \node[block, fill=mGreen!50, right=1.2cm of pwr, minimum width=1.8cm] (awgn)
-    {AWGN\\{\tiny 加性高斯白噪声}};
+\draw[dataarrow] (input) -- (enc)
+  node[midway, above=2pt, info] {$1\times3\times256\times256$};
+\draw[dataarrow] (enc) -- (power)
+  node[midway, above=2pt, info] {$\mathbf{y}\in\mathbb{R}^{1\times32\times32\times32}$};
+\draw[dataarrow] (power) -- (channel)
+  node[midway, above=2pt, info] {$\sqrt{P}\mathbf{y}$};
+\draw[dataarrow] (channel) -- (gen)
+  node[midway, above=2pt, info] {$\hat{\mathbf{y}}=\sqrt{P}\mathbf{y}+\mathbf{n}$};
+\draw[dataarrow] (gen) -- (output)
+  node[midway, above=2pt, info] {$1\times3\times256\times256$};
 
-  % Generator（带微观结构拆解）
-  \node[block, fill=mPurple!40, right=1.2cm of awgn, minimum width=2cm] (gen)
-    {Generator\\{\tiny 图像重建}};
+\node[tag=badgeorange, below=3.1cm of power] (traintag) {仅训练阶段启用};
 
-  % 输出图像
-  \node[block, fill=mGray!50, right=1.2cm of gen, minimum width=1.5cm] (out)
-    {$\hat{\mathbf{x}}$\\{\tiny 重建}};
+\node[module=pinkedge, fill=pinkfill, below=1.55cm of traintag, text width=2.7cm] (disc) {Discriminator};
+\node[module=grayedge, fill=grayfill, left=4.05cm of disc, text width=2.35cm] (real) {真实图像\\$\mathbf{x}$};
+\node[module=greenedge, fill=greenfill, above left=0.95cm and 1.85cm of disc, text width=2.45cm] (cond) {条件输入\\$\hat{\mathbf{y}}$};
+\node[module=grayedge, fill=grayfill, below left=0.95cm and 1.85cm of disc, text width=2.45cm] (fake) {重建图像\\$\hat{\mathbf{x}}$};
+\node[module=orangeedge, fill=orangefill, right=3.45cm of disc, text width=3.1cm] (loss) {对抗损失 +\\感知损失 + MSE};
 
-  % ========== 主流程连线 + 张量维度标注 ==========
-  \draw[arr] (img) -- (enc)
-    node[pos=0.5, above=3pt, ts] {$1{\times}3{\times}256{\times}256$}
-    node[pos=0.5, below=3pt, ts] {RGB 原始图像};
+\node[body, below=0.22cm of real] {只在训练数据路径中可见};
+\node[body, below=0.22cm of cond] {信道输出作为条件输入};
+\node[body, below=0.22cm of fake] {由 Generator 产生};
+\node[body, below=0.22cm of disc] {判别真实/重建一致性};
+\node[body, below=0.22cm of loss] {$L_t=\lambda L_G+\alpha L_{MSE}+\beta L_{LPIPS}$};
 
-  \draw[arr] (enc) -- (pwr)
-    node[pos=0.5, above=3pt, ts] {$\mathbf{y} \in \mathbb{R}^{1{\times}32{\times}32{\times}32}$}
-    node[pos=0.5, below=3pt, ts] {语义特征向量};
+\draw[trainarrow] (real.east) -- (disc.west);
+\draw[trainarrow] (cond.east) -- (disc.north west);
+\draw[trainarrow] (fake.east) -- (disc.south west);
+\draw[trainarrow] (disc) -- (loss);
 
-  \draw[arr] (pwr) -- (awgn)
-    node[pos=0.5, above=3pt, ts] {$\sqrt{P}\mathbf{y}$};
+\draw[trainarrow] (input.south) |- ([yshift=4pt]real.north);
+\draw[trainarrow] (channel.south) |- ([yshift=4pt]cond.north);
+\draw[trainarrow] (gen.south) |- ([yshift=4pt]fake.north);
 
-  \draw[arr] (awgn) -- (gen)
-    node[pos=0.5, above=3pt, ts] {$\hat{\mathbf{y}} = \sqrt{P}\mathbf{y} + \mathbf{n}$}
-    node[pos=0.5, below=3pt, ts] {受噪声污染的特征};
+\begin{scope}[on background layer]
+  \node[
+    fit=(deploytag)(input)(enc)(power)(channel)(gen)(output),
+    fill=bluefill,
+    draw=linec,
+    rounded corners=14pt,
+    inner sep=18pt
+  ] {};
+  \node[
+    fit=(traintag)(real)(cond)(fake)(disc)(loss),
+    fill=orangefill,
+    draw=linec,
+    rounded corners=14pt,
+    inner sep=18pt
+  ] {};
+\end{scope}
 
-  \draw[arr] (gen) -- (out)
-    node[pos=0.5, above=3pt, ts] {$1{\times}3{\times}256{\times}256$}
-    node[pos=0.5, below=3pt, ts] {重建图像};
-
-  % ========== Discriminator（仅训练阶段使用，用虚线）==========
-  \node[block, fill=mPink!40, below=1.8cm of awgn, dashed, minimum width=2.2cm] (disc)
-    {Discriminator\\{\tiny 判别器（仅训练）}};
-
-  % 从真实图像 x 到判别器
-  \draw[darr] (img.south) -- ++(0,-0.4) -| (disc.west)
-    node[pos=0.25, left=2pt, ts] {$\mathbf{x}$};
-
-  % 从重建图像 x_hat 到判别器
-  \draw[darr] (out.south) -- ++(0,-0.4) -| (disc.east)
-    node[pos=0.25, right=2pt, ts] {$\hat{\mathbf{x}}$};
-
-  % 从信道输出 y_hat 到判别器（条件输入）
-  \draw[darr] (awgn.south) -- (disc.north)
-    node[pos=0.5, right=2pt, ts] {$\hat{\mathbf{y}}$\\{\tiny 条件}};
-
-  % 判别器输出
-  \node[below=0.4cm of disc, ts] {$D(\mathbf{x}, \hat{\mathbf{y}}) \in [0,1]$};
-
-  % ========== Encoder 微观结构拆解 ==========
-  \node[micro, fill=mBlue!30, below=1.0cm of enc, xshift=-1.2cm] (e1) {Conv};
-  \node[micro, fill=mBlue!30, right=0.15cm of e1] (e2) {BatchNorm};
-  \node[micro, fill=mBlue!30, right=0.15cm of e2] (e3) {ReLU};
-  \node[micro, fill=mBlue!25, right=0.2cm of e3, minimum width=1.2cm] (e4) {ResBlock$\times$2};
-
-  \draw[arr, -, thick] (e1) -- (e2) -- (e3) -- (e4);
-  \draw[arr, dashed, mDark!60] (enc.south) |- (e2.north);
-
-  \node[ts, below=0.15cm of e1, anchor=north] {$3{\to}64$};
-  \node[ts, below=0.15cm of e4, anchor=north] {$256{\to}32$};
-
-  % ========== Generator 微观结构拆解 ==========
-  \node[micro, fill=mPurple!30, below=1.0cm of gen, xshift=-1.2cm] (g1) {Conv};
-  \node[micro, fill=mPurple!30, right=0.15cm of g1] (g2) {BatchNorm};
-  \node[micro, fill=mPurple!30, right=0.15cm of g2] (g3) {ReLU};
-  \node[micro, fill=mPurple!25, right=0.2cm of g3, minimum width=1.2cm] (g4) {ResBlock$\times$5};
-
-  \draw[arr, -, thick] (g1) -- (g2) -- (g3) -- (g4);
-  \draw[arr, dashed, mDark!60] (gen.south) |- (g2.north);
-
-  \node[ts, below=0.15cm of g1, anchor=north] {$32{\to}256$};
-  \node[ts, below=0.15cm of g4, anchor=north] {$256{\to}3$};
-
-  % ========== 层次化表达：背景分组 ==========
-  \begin{scope}[on background layer]
-    % 发送端
-    \node[fit=(img)(enc)(pwr)(e1)(e4),
-      fill=mBlue!12, draw=mDark!40, dashed,
-      rounded corners=5pt, inner sep=8pt] {};
-    \node[above=0.3cm of enc, font=\sffamily\footnotesize\bfseries, color=mDark]
-      {发送端（编码器）};
-
-    % 接收端
-    \node[fit=(gen)(out)(g1)(g4),
-      fill=mPurple!12, draw=mDark!40, dashed,
-      rounded corners=5pt, inner sep=8pt] {};
-    \node[above=0.3cm of gen, font=\sffamily\footnotesize\bfseries, color=mDark]
-      {接收端（解码器）};
-  \end{scope}
-
-  % ========== 信息密度拉满：损失函数标注 ==========
-  \node[legendbox, anchor=north west] at ([xshift=5pt, yshift=-5pt]current bounding box.north west)
-    [align=left, text width=4.5cm] {
-    \textbf{训练损失函数}\\[2pt]
-    $L_t = \lambda L_G + \alpha L_{\text{MSE}} + \beta L_{\text{LPIPS}}$\\[1pt]
-    $L_G = -\mathbb{E}[\log D(G(\hat{\mathbf{y}}), \hat{\mathbf{y}})]$\\[1pt]
-    $L_D = -\mathbb{E}[\log D(\mathbf{x}, \mathbf{y})] - \mathbb{E}[\log(1 - D(\hat{\mathbf{x}}, \hat{\mathbf{y}}))]$
-  };
-
-  % ========== 图例（右下角）==========
-  \node[legendbox, anchor=south east] at ([xshift=-5pt, yshift=5pt]current bounding box.south east)
-    [align=left, text width=4.2cm] {
-    \textbf{图例}\\[1pt]
-    \colorbox{mBlue!40}{\rule{0.16cm}{0.12cm}\hspace{0.05cm}} 编码端 \quad
-    \colorbox{mPurple!40}{\rule{0.16cm}{0.12cm}\hspace{0.05cm}} 解码端 \quad
-    \colorbox{mGreen!50}{\rule{0.16cm}{0.12cm}\hspace{0.05cm}} 信道\\[1pt]
-    实线：推理路径 \quad 虚线：训练路径\\[1pt]
-    SNR = $10\log_{10}\frac{\|\mathbf{y}\|^2}{\sigma^2}$ (dB)
-  };
 \end{tikzpicture}
 \end{document}
