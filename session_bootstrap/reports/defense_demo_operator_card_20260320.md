@@ -48,6 +48,16 @@
 ## 备份窗口
 
 - 主窗口 1：`session_bootstrap/reports/defense_talk_track_2min_20260320.md`
+- 主窗口 1b：`session_bootstrap/reports/defense_talk_track_3min_20260405.md`
+- 主窗口 1c：`session_bootstrap/reports/defense_ppt_pages_1_5_cn_20260405.md`
+- 主窗口 1d：`session_bootstrap/reports/defense_judge_qa_10_cn_20260405.md`
+- 主窗口 1e：`session_bootstrap/reports/defense_talk_track_1min_20260405.md`
+- 主窗口 1f：`session_bootstrap/reports/defense_interrupt_rescue_card_30s_20260405.md`
+- 主窗口 1g：`session_bootstrap/reports/defense_stress_qa_mock_5rounds_20260405.md`
+- 主窗口 1h：`session_bootstrap/reports/defense_rehearsal_checklist_20260405.md`
+- 主窗口 1i：`session_bootstrap/reports/defense_day_onepage_index_20260405.md`
+- 主窗口 1j：`session_bootstrap/reports/defense_materials_bundle_readme_20260405.md`
+- 主窗口 1k：`session_bootstrap/reports/defense_dual_role_coordination_card_20260405.md`
 - 主窗口 2：`session_bootstrap/reports/award_rescue_metric_truth_table_20260319.md`
 - 主窗口 3：`session_bootstrap/reports/openamp_demo_live_dualpath_status_20260317.md`
 - 主窗口 4：`session_bootstrap/reports/openamp_control_plane_evidence_package_20260315/summary_report.md`

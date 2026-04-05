@@ -1,0 +1,16 @@
+{
+  "resume_id": "019d58db-b9e8-7a71-b100-28a1c7adf1f7",
+  "last_success": {
+    "run_id": "019d58db-b9e8-7a71-b100-28a1c7adf1f7",
+    "submit_status": "ok",
+    "submitted_at": "1775376360",
+    "anchor_fingerprint": "f550fb40b9cf29dad9eae99886f6f9526f1478e1",
+    "tail_fingerprint": "f1bacd98163442833460f74ff9a8ded29d540175",
+    "latest_visible": {
+      "role": "assistant",
+      "text": "继续补了“主讲 + 操作员”协同用的版本。 我新增了 [defense_dual_role_coordination_card_20260405.md](/home/tianxing/tvm_metaschedule_execution_project/session_bootstrap/reports/defense_dual_role_coordination_card_20260405.md)，把双人配合拆成了可执行动作：开场前 `30` 秒谁确认什么、`5` 页标准流程里谁说谁切、评委追问时主讲怎么答、操作员该开哪个证据，以及两人都卡住时的兜底规则。operator card 也同步接上了，在 [defense_demo_operator_card_20260320.md](/home/tianxing/tvm_metaschedule_execution_project/session_bootstrap/reports/defense_demo_operator_card_20260320.md) 里新增了 `主窗口 1k`。 这轮还是只动本地材料，板卡没动。现在连双人协同口径也已经补齐了。",
+      "timestamp": "2026-04-05T08:07:00.498Z"
+    },
+    "unchanged_tail_skips": 0
+  }
+}
