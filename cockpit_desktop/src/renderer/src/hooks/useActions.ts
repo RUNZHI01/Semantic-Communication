@@ -8,6 +8,7 @@ import {
   postLinkDirectorProfile,
   postBoardAccess,
   postJobManifestGatePreview,
+  postRunInferenceBatch,
 } from '../api/client'
 import { useAppStore } from '../stores/appStore'
 
@@ -83,6 +84,14 @@ export function useGatePreview() {
   const inv = useInvalidateOnSuccess()
   return useMutation({
     mutationFn: (variant: string) => postJobManifestGatePreview(variant),
+    onSuccess: inv,
+  })
+}
+
+export function useRunInferenceBatch() {
+  const inv = useInvalidateOnSuccess()
+  return useMutation({
+    mutationFn: ({ count }: { count?: number } = {}) => postRunInferenceBatch(count ?? 300),
     onSuccess: inv,
   })
 }

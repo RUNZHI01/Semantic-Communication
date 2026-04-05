@@ -160,100 +160,140 @@ export function CryptoStatusPanel() {
         </button>
       </div>
 
-      <div className={s.row}>
+      <div className={s.rowGrid}>
         <span className={s.label}>通道状态</span>
         <span className={s.value}>{st.label}</span>
-      </div>
 
-      <div className={s.row}>
         <span className={s.label}>KEM 后端</span>
         <span className={s.mono}>{data.kem_backend}</span>
-      </div>
 
-      <div className={s.row}>
         <span className={s.label}>密码套件</span>
         <span className={s.mono}>{data.cipher_suite}</span>
-      </div>
 
-      {data.handshake_ms != null && (
-        <div className={s.row}>
+        {data.handshake_ms != null && <>
           <span className={s.label}>握手耗时</span>
           <span className={s.mono}>{data.handshake_ms.toFixed(1)} ms</span>
-        </div>
-      )}
-      {data.encrypt_ms != null && (
-        <div className={s.row}>
+        </>}
+        {data.encrypt_ms != null && <>
           <span className={s.label}>加密发送</span>
           <span className={s.mono}>{data.encrypt_ms.toFixed(1)} ms</span>
-        </div>
-      )}
-      {data.decrypt_ms != null && (
-        <div className={s.row}>
+        </>}
+        {data.decrypt_ms != null && <>
           <span className={s.label}>解密接收</span>
           <span className={s.mono}>{data.decrypt_ms.toFixed(1)} ms</span>
-        </div>
-      )}
-      {data.inference_ms != null && (
-        <div className={s.row}>
+        </>}
+        {data.inference_ms != null && <>
           <span className={s.label}>TVM 推理</span>
           <span className={s.mono}>{data.inference_ms.toFixed(1)} ms</span>
-        </div>
-      )}
+        </>}
 
-      {(data.bytes_sent != null || data.bytes_received != null) && (
-        <div className={s.row}>
+        {(data.bytes_sent != null || data.bytes_received != null) && <>
           <span className={s.label}>加密流量</span>
-          <span className={s.mono}>
-            ↑ {data.bytes_sent ?? 0} B / ↓ {data.bytes_received ?? 0} B
-          </span>
-        </div>
-      )}
+          <span className={s.mono}>↑{data.bytes_sent ?? 0}B / ↓{data.bytes_received ?? 0}B</span>
+        </>}
 
-      {(data.control_guard_state || data.control_last_fault_code) && (
-        <div className={s.row}>
-          <span className={s.label}>控制面状态</span>
+        {(data.control_guard_state || data.control_last_fault_code) && <>
+          <span className={s.label}>控制面</span>
           <span className={s.mono}>
-            guard={data.control_guard_state ?? 'UNKNOWN'} / fault={data.control_last_fault_code ?? 'UNKNOWN'}
+            {data.control_guard_state ?? 'UNKNOWN'} / {data.control_last_fault_code ?? 'UNKNOWN'}
           </span>
-        </div>
-      )}
+        </>}
 
-      {(data.control_heartbeat_ok != null || data.control_total_fault_count != null) && (
-        <div className={s.row}>
-          <span className={s.label}>控制面计数</span>
+        {(data.control_heartbeat_ok != null || data.control_total_fault_count != null) && <>
+          <span className={s.label}>HB / 故障</span>
+          <span className={s.mono}>{data.control_heartbeat_ok ?? 0} / {data.control_total_fault_count ?? 0}</span>
+        </>}
+
+        {(data.control_job_req_count != null
+          || data.control_job_admit_count != null
+          || data.control_job_reject_count != null) && <>
+          <span className={s.label}>JOB</span>
           <span className={s.mono}>
-            heartbeat_ok={data.control_heartbeat_ok ?? 0} / fault_total={data.control_total_fault_count ?? 0}
+            REQ={data.control_job_req_count ?? 0} ALLOW={data.control_job_admit_count ?? 0} DENY={data.control_job_reject_count ?? 0}
           </span>
-        </div>
-      )}
+        </>}
 
-      {data.control_recover_attempted && data.control_recover_note && (
-        <div className={s.row}>
+        {(data.control_heartbeat_event_count != null
+          || data.control_heartbeat_lost_count != null
+          || data.control_safe_stop_triggered_count != null
+          || data.control_safe_stop_cleared_count != null) && <>
+          <span className={s.label}>事件</span>
+          <span className={s.mono}>
+            HB={data.control_heartbeat_event_count ?? 0}(lost={data.control_heartbeat_lost_count ?? 0}) STOP={data.control_safe_stop_triggered_count ?? 0}→{data.control_safe_stop_cleared_count ?? 0}
+          </span>
+        </>}
+
+        {data.control_recover_attempted && data.control_recover_note && <>
+          <span className={s.label}>恢复</span>
           <span className={s.muted}>{data.control_recover_note}</span>
-        </div>
-      )}
+        </>}
 
-      {data.last_sha256_match != null && (
-        <div className={s.row}>
-          <span className={s.label}>SHA256 完整性</span>
+        {data.last_sha256_match != null && <>
+          <span className={s.label}>SHA256</span>
           <span className={data.last_sha256_match ? s.ok : s.fail}>
-            {data.last_sha256_match ? '[OK] 匹配' : '[FAIL] 不匹配'}
+            {data.last_sha256_match ? '✓ 匹配' : '✗ 不匹配'}
           </span>
-        </div>
-      )}
+        </>}
 
-      {data.session_count != null && data.session_count > 0 && (
-        <div className={s.row}>
+        {data.session_count != null && data.session_count > 0 && <>
           <span className={s.label}>累计会话</span>
           <span className={s.mono}>{data.session_count}</span>
-        </div>
-      )}
+        </>}
 
-      {data.error && (
-        <div className={s.row}>
+        {data.error && <>
+          <span className={s.label}>错误</span>
           <span className={s.muted}>{data.error}</span>
-        </div>
-      )}
+        </>}
+
+        {data.batch_status === 'running' && <>
+          <span className={s.label}>批量推理</span>
+          <span className={s.mono}>{data.batch_completed ?? 0} / {data.batch_total ?? '?'} 运行中...</span>
+        </>}
+      </div>
+
+      {/* Batch benchmark results */}
+      {data.batch_status === 'done' && data.batch_benchmark && (() => {
+        const bm = data.batch_benchmark
+        const rows: { label: string; key: keyof typeof bm }[] = [
+          { label: '握手', key: 'handshake_ms' },
+          { label: '加密', key: 'encrypt_ms' },
+          { label: '解密', key: 'decrypt_ms' },
+          { label: '推理', key: 'inference_ms' },
+          { label: '总计', key: 'total_ms' },
+        ]
+        const validRows = rows.filter(r => bm[r.key] != null)
+        if (validRows.length === 0) return null
+        return (
+          <div className={s.benchSection}>
+            <div className={s.benchTitle}>
+              批量 Benchmark ({bm.total_ms?.n ?? data.batch_completed ?? '?'} 张)
+            </div>
+            <table className={s.benchTable}>
+              <thead>
+                <tr>
+                  <th>阶段</th>
+                  <th>均值</th>
+                  <th>中位</th>
+                  <th>p95</th>
+                </tr>
+              </thead>
+              <tbody>
+                {validRows.map(({ label, key }) => {
+                  const m = bm[key]!
+                  return (
+                    <tr key={key}>
+                      <td>{label}</td>
+                      <td>{m.mean_ms} ms</td>
+                      <td>{m.median_ms} ms</td>
+                      <td>{m.p95_ms != null ? `${m.p95_ms} ms` : '-'}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )
+      })()}
 
       <div className={s.testSection}>
         <button

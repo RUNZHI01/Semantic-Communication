@@ -16,6 +16,8 @@ interface ActionToolbarProps {
   faultPending: boolean;
   onRecover: () => void;
   recoverPending: boolean;
+  onRunBatch: () => void;
+  batchPending: boolean;
 }
 
 export function ActionToolbar({
@@ -31,6 +33,8 @@ export function ActionToolbar({
   faultPending,
   onRecover,
   recoverPending,
+  onRunBatch,
+  batchPending,
 }: ActionToolbarProps) {
   const gate = system.data?.job_manifest_gate;
   const gateAllow = gate?.verdict === 'allow';
@@ -77,6 +81,19 @@ export function ActionToolbar({
           aria-label="运行推理 baseline 版本"
         >
           推理 (baseline)
+        </Button>
+      </ScaleOnHover>
+
+      <ScaleOnHover>
+        <Button
+          size="small"
+          loading={batchPending}
+          disabled={!gateAllow || !!activeJobId || batchPending}
+          onClick={onRunBatch}
+          icon={<Icons.Play size={14} aria-hidden="true" />}
+          aria-label="批量加密推理 300 张"
+        >
+          批量推理 (300)
         </Button>
       </ScaleOnHover>
 

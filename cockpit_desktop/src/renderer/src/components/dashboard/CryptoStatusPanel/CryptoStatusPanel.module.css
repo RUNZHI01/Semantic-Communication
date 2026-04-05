@@ -29,17 +29,27 @@
 
 /* Rows */
 .row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  display: contents; /* participate in grid */
   font-size: 12px;
   line-height: 1.4;
 }
 
 .label {
   color: var(--color-text-tertiary);
-  min-width: 72px;
   font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Two-column grid that wraps all .row children */
+.rowGrid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 8px;
+  row-gap: 3px;
+  align-items: baseline;
+  font-size: 12px;
 }
 
 .value {
@@ -236,3 +246,40 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* Batch benchmark section */
+.benchSection {
+  padding-top: 6px;
+  border-top: 1px solid var(--color-border-light);
+  margin-top: 2px;
+}
+
+.benchTitle {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  margin-bottom: 4px;
+}
+
+.benchTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  font-family: var(--font-family-mono);
+  font-feature-settings: 'tnum' 1;
+}
+
+.benchTable th {
+  text-align: left;
+  color: var(--color-text-muted);
+  font-weight: 500;
+  padding: 1px 4px 1px 0;
+  white-space: nowrap;
+}
+
+.benchTable td {
+  color: var(--color-text-secondary);
+  padding: 1px 4px 1px 0;
+  white-space: nowrap;
+}
+
