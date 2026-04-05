@@ -759,6 +759,28 @@ def default_link_director_state() -> dict[str, Any]:
     }
 
 
+def _compute_benchmark(samples: dict[str, list[float]]) -> dict[str, Any]:
+    """从样本列表计算 min/max/mean/median，用于 batch benchmark 汇总。"""
+    import statistics
+
+    result: dict[str, Any] = {}
+    for key, values in samples.items():
+        if not values:
+            result[key] = None
+            continue
+        sorted_vals = sorted(values)
+        n = len(sorted_vals)
+        result[key] = {
+            "n": n,
+            "min_ms": round(sorted_vals[0], 2),
+            "max_ms": round(sorted_vals[-1], 2),
+            "mean_ms": round(statistics.mean(sorted_vals), 2),
+            "median_ms": round(statistics.median(sorted_vals), 2),
+            "p95_ms": round(sorted_vals[int(n * 0.95)], 2) if n >= 20 else None,
+        }
+    return result
+
+
 class DashboardState:
     def __init__(
         self,
@@ -792,6 +814,8 @@ class DashboardState:
         self._last_soft_recover_ts: float = 0.0
         self._soft_recover_cooldown_sec: float = 45.0
         self._last_soft_recover_result: dict[str, Any] | None = None
+        # ── 批量推理状态 ──
+        self._batch_state: dict[str, Any] | None = None
 
         cached_probe = load_probe_output(probe_cache_path) if probe_cache_path else None
         if is_successful_probe(cached_probe):
@@ -815,6 +839,16 @@ class DashboardState:
         config = build_board_access_config(payload, fallback=fallback)
         with self._lock:
             self._board_access = config
+            crypto_enabled = self._crypto_enabled
+        # 密码录入后立即在后台尝试启动板端 tcp_server，无需等待 toggle ON 或首次推理
+        if config.connection_ready:
+            import threading
+            threading.Thread(
+                target=self._ensure_board_tcp_server,
+                args=(config,),
+                daemon=True,
+                name="tcp-server-autostart",
+            ).start()
         return config.to_public_dict()
 
     def _merged_aircraft_position_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1533,11 +1567,24 @@ class DashboardState:
             board_access = self._board_access
             if not self._crypto_enabled:
                 bc = bool(board_access and board_access.connection_ready)
-                return {**_disabled, "board_configured": bc}
+                return {**_disabled, "board_configured": bc, "batch_benchmark": None}
             cached = self._crypto_status_cache
             cache_ts = self._crypto_status_cache_ts
             if cached is not None and (time.monotonic() - cache_ts) < 1.5:
-                return {**cached, "enabled": True, **control_summary}
+                batch = self._batch_state
+                bm = batch.get("benchmark") if batch else None
+                bs = batch.get("status") if batch else None
+                bc_completed = batch.get("completed", 0) if batch else 0
+                bc_total = batch.get("total", 0) if batch else 0
+                return {
+                    **cached,
+                    "enabled": True,
+                    **control_summary,
+                    "batch_benchmark": bm,
+                    "batch_status": bs,
+                    "batch_completed": bc_completed,
+                    "batch_total": bc_total,
+                }
 
         board_configured = bool(board_access and board_access.connection_ready)
 
@@ -1558,6 +1605,10 @@ class DashboardState:
                 "error": "board_not_configured",
                 "enabled": True,
                 "board_configured": False,
+                "batch_benchmark": None,
+                "batch_status": None,
+                "batch_completed": 0,
+                "batch_total": 0,
                 **control_summary,
             }
 
@@ -1576,14 +1627,29 @@ class DashboardState:
             with self._lock:
                 self._crypto_status_cache = data
                 self._crypto_status_cache_ts = time.monotonic()
+                batch = self._batch_state
+            data["batch_benchmark"] = batch.get("benchmark") if batch else None
+            data["batch_status"] = batch.get("status") if batch else None
+            data["batch_completed"] = batch.get("completed", 0) if batch else 0
+            data["batch_total"] = batch.get("total", 0) if batch else 0
             return data
         except (URLError, OSError, json.JSONDecodeError, TimeoutError) as exc:
             # 保留上次正常值，只更新 error
             with self._lock:
                 prev = self._crypto_status_cache
+                batch = self._batch_state
             if prev is not None:
-                fallback = {**prev, "enabled": True, "board_configured": True,
-                           "error": f"board not reachable: {exc}", **control_summary}
+                fallback = {
+                    **prev,
+                    "enabled": True,
+                    "board_configured": True,
+                    "error": f"board not reachable: {exc}",
+                    "batch_benchmark": batch.get("benchmark") if batch else None,
+                    "batch_status": batch.get("status") if batch else None,
+                    "batch_completed": batch.get("completed", 0) if batch else 0,
+                    "batch_total": batch.get("total", 0) if batch else 0,
+                    **control_summary,
+                }
                 with self._lock:
                     self._crypto_status_cache = fallback
                     self._crypto_status_cache_ts = time.monotonic()
@@ -1605,6 +1671,10 @@ class DashboardState:
                 "error": f"board not reachable: {exc}",
                 "enabled": True,
                 "board_configured": True,
+                "batch_benchmark": None,
+                "batch_status": None,
+                "batch_completed": 0,
+                "batch_total": 0,
                 **control_summary,
             }
             with self._lock:
@@ -1616,11 +1686,28 @@ class DashboardState:
         with self._lock:
             control_status = dict(self._last_control_status or {})
             soft_recover = dict(self._last_soft_recover_result or {})
+        event_summary = self._event_spine.summary(limit=1)
+        aggregate = event_summary.get("aggregate") if isinstance(event_summary, dict) else {}
+        event_counters = aggregate.get("event_counters") if isinstance(aggregate, dict) else {}
+        if not isinstance(event_counters, dict):
+            event_counters = {}
+
+        heartbeat_ok_events = self._safe_int(event_counters.get("HEARTBEAT_OK"), default=0)
+        heartbeat_lost_events = self._safe_int(event_counters.get("HEARTBEAT_LOST"), default=0)
+        safe_stop_triggered_events = self._safe_int(event_counters.get("SAFE_STOP_TRIGGERED"), default=0)
+        safe_stop_cleared_events = self._safe_int(event_counters.get("SAFE_STOP_CLEARED"), default=0)
         return {
             "control_guard_state": str(control_status.get("guard_state") or "UNKNOWN"),
             "control_last_fault_code": str(control_status.get("last_fault_code") or "UNKNOWN"),
             "control_heartbeat_ok": self._safe_int(control_status.get("heartbeat_ok"), default=0),
             "control_total_fault_count": self._safe_int(control_status.get("total_fault_count"), default=0),
+            "control_job_req_count": self._safe_int(event_counters.get("JOB_SUBMITTED"), default=0),
+            "control_job_admit_count": self._safe_int(event_counters.get("JOB_ADMITTED"), default=0),
+            "control_job_reject_count": self._safe_int(event_counters.get("JOB_REJECTED"), default=0),
+            "control_heartbeat_event_count": heartbeat_ok_events + heartbeat_lost_events,
+            "control_heartbeat_lost_count": heartbeat_lost_events,
+            "control_safe_stop_triggered_count": safe_stop_triggered_events,
+            "control_safe_stop_cleared_count": safe_stop_cleared_events,
             "control_recover_attempted": bool(soft_recover),
             "control_recover_note": str(soft_recover.get("note") or ""),
         }
@@ -1671,7 +1758,13 @@ class DashboardState:
             board_access = self._board_access
 
         if enabled and board_access and board_access.connection_ready:
-            self._ensure_board_tcp_server(board_access)
+            import threading
+            threading.Thread(
+                target=self._ensure_board_tcp_server,
+                args=(board_access,),
+                daemon=True,
+                name="tcp-server-toggle-start",
+            ).start()
 
         return {"enabled": enabled}
 
@@ -1687,14 +1780,27 @@ class DashboardState:
             DEFAULT_STATUS_PORT,
         )
 
-        # 1) 检测 status 端口是否响应
+        # 1) 检测 status 端口是否响应，并验证密码套件是否匹配
+        expected_suite = first_config_value(env_values, keys=SUITE_KEYS, default=DEFAULT_CIPHER_SUITE).lower().replace("_", "-")
+        # AES_256_GCM → aes-256-gcm, SM4_GCM → sm4-gcm
         try:
-            fetch_json_direct(f"http://{host}:{status_port}/status", timeout=2)
-            return  # 已经在运行
+            status = fetch_json_direct(f"http://{host}:{status_port}/status", timeout=2)
+            running_suite = str(status.get("cipher_suite") or "").lower()
+            if running_suite and running_suite == expected_suite:
+                return  # 已在运行且套件匹配
+            if running_suite and running_suite != expected_suite:
+                print(f"[ML-KEM auto-start] 套件不匹配 (running={running_suite}, expected={expected_suite})，重启板端 tcp_server")
+                # kill 旧进程
+                run_ssh_command(
+                    host=host, user=user, password=password, port=ssh_port,
+                    remote_command="pkill -f 'tcp_server.py' || true",
+                    timeout=8,
+                )
+                import time as _time; _time.sleep(1)
         except Exception:
             pass  # 没运行，继续启动
 
-        # 1b) 若进程已在运行，优先等待 status 就绪，避免重复启动导致板端抖动。
+        # 1b) 若进程已在运行但 status 不通，等一下再试
         try:
             pgrep_proc = run_ssh_command(
                 host=host,
@@ -1728,7 +1834,7 @@ class DashboardState:
                 password=password,
                 port=ssh_port,
                 remote_command=remote_command,
-                timeout=15,
+                timeout=30,
             )
             if proc.returncode != 0:
                 error_output = proc.stderr.strip() or proc.stdout.strip() or "unknown error"
@@ -2458,7 +2564,7 @@ class DashboardState:
         diagnostics: dict[str, Any],
         event_log: list[str] | None = None,
     ) -> dict[str, Any]:
-        payload = build_prerecorded_inference_result(image_index, variant)
+        payload = self._build_prerecorded_payload_safe(image_index=image_index, variant=variant)
         payload.update(
             {
                 "status": "fallback",
@@ -2479,10 +2585,29 @@ class DashboardState:
         )
         return payload
 
+    def _build_prerecorded_payload_safe(self, *, image_index: int, variant: str) -> dict[str, Any]:
+        """Return a prerecorded payload template, tolerating out-of-range indices.
+
+        Batch live runs can request many indices (e.g. 0..299), while prerecorded
+        assets are a smaller fixed subset. For live path accounting, we keep the
+        requested index and reuse a stable template when index is out of range.
+        """
+        try:
+            payload = build_prerecorded_inference_result(image_index, variant)
+        except IndexError:
+            payload = build_prerecorded_inference_result(0, variant)
+            payload["message"] = (
+                f"image_index={image_index} 超出预录样例范围，已复用 index=0 模板承载本次 live 结果。"
+            )
+        payload["image_index"] = image_index
+        return payload
+
     def _parse_mlkem_client_metrics(self, stdout: str) -> dict[str, Any]:
         metrics: dict[str, Any] = {
             "handshake_ms": None,
             "encrypt_ms": None,
+            "decrypt_ms": None,
+            "inference_ms": None,
             "result_recv_ms": None,
             "sha256_match": None,
             "suite": "",
@@ -2508,14 +2633,107 @@ class DashboardState:
                 m = re.search(r"耗时\s*([\d.]+)\s*ms", text)
                 if m:
                     metrics["result_recv_ms"] = float(m.group(1))
+                    metrics["decrypt_ms"] = metrics["result_recv_ms"]
+            elif "TVM 推理耗时" in text:
+                m = re.search(r"([\d.]+)\s*ms", text)
+                if m:
+                    metrics["inference_ms"] = float(m.group(1))
             elif "对端 SHA256 匹配: 是" in text or "SHA256 匹配" in text:
                 metrics["sha256_match"] = True
             elif "SHA256 不匹配" in text:
                 metrics["sha256_match"] = False
         return metrics
 
-    def run_mlkem_inference(self, *, variant: str, image_index: int) -> dict[str, Any]:
-        payload = build_prerecorded_inference_result(image_index, variant)
+    # ── 批量推理 ──────────────────────────────────────────────────────────────
+
+    def get_batch_state(self) -> dict[str, Any]:
+        with self._lock:
+            state = self._batch_state
+        if state is None:
+            return {"status": "idle"}
+        return dict(state)
+
+    def start_batch_inference(self, *, count: int = 300, allow_preflight_degraded: bool = True) -> dict[str, Any]:
+        """在后台线程启动批量 ML-KEM 加密推理，返回 batch_job_id。"""
+        import threading
+
+        with self._lock:
+            existing = self._batch_state
+            if existing and existing.get("status") == "running":
+                return {"status": "already_running", "batch_job_id": existing.get("batch_job_id")}
+            batch_job_id = f"batch-{int(time.time())}-{count}"
+            self._batch_state = {
+                "status": "running",
+                "batch_job_id": batch_job_id,
+                "total": count,
+                "completed": 0,
+                "success": 0,
+                "fallback": 0,
+                "sha_match": 0,
+                "started_at": time.time(),
+                "finished_at": None,
+                # 各阶段计时样本列表（仅 live success 时记录）
+                "_samples": {
+                    "handshake_ms": [],
+                    "encrypt_ms": [],
+                    "decrypt_ms": [],
+                    "inference_ms": [],
+                    "total_ms": [],
+                },
+                "benchmark": None,
+            }
+
+        def _worker() -> None:
+            for i in range(count):
+                result = self.run_mlkem_inference(
+                    variant="current",
+                    image_index=i,
+                    allow_preflight_degraded=allow_preflight_degraded,
+                )
+                with self._lock:
+                    state = self._batch_state
+                    if state is None or state.get("status") != "running":
+                        break
+                    state["completed"] += 1
+                    is_live = result.get("execution_mode") == "live" and result.get("status") == "success"
+                    if is_live:
+                        state["success"] += 1
+                    else:
+                        state["fallback"] += 1
+                    if result.get("live_attempt", {}).get("metrics", {}).get("sha256_match"):
+                        state["sha_match"] += 1
+                    if is_live:
+                        m = result.get("live_attempt", {}).get("metrics", {})
+                        t = result.get("timings", {})
+                        samples = state["_samples"]
+                        for key in ("handshake_ms", "encrypt_ms", "decrypt_ms", "inference_ms"):
+                            v = m.get(key)
+                            if v is not None:
+                                samples[key].append(float(v))
+                        total = t.get("total_ms")
+                        if total is not None:
+                            samples["total_ms"].append(float(total))
+
+            with self._lock:
+                state = self._batch_state
+                if state is None:
+                    return
+                state["status"] = "done"
+                state["finished_at"] = time.time()
+                state["benchmark"] = _compute_benchmark(state["_samples"])
+
+        thread = threading.Thread(target=_worker, daemon=True)
+        thread.start()
+        return {"status": "started", "batch_job_id": batch_job_id, "total": count}
+
+    def run_mlkem_inference(
+        self,
+        *,
+        variant: str,
+        image_index: int,
+        allow_preflight_degraded: bool = False,
+    ) -> dict[str, Any]:
+        payload = self._build_prerecorded_payload_safe(image_index=image_index, variant=variant)
         with self._lock:
             board_access = self._board_access
             crypto_enabled = self._crypto_enabled
@@ -2555,16 +2773,28 @@ class DashboardState:
             if retry.get("status") == "success":
                 preflight = retry
             else:
-                return self._build_blocked_inference_payload(
-                    variant=variant,
-                    image_index=image_index,
-                    status_category="control_preflight_failed",
-                    source_label="控制面预检失败，回退展示（归档样例）",
-                    message="控制面 STATUS_REQ 预检失败，本次不继续 ML-KEM 推理。",
-                    detail=str(preflight.get("message") or "未拿到有效 STATUS_RESP"),
-                    diagnostics={"control_status": preflight, "soft_recover": soft_recover},
-                    event_log=list(preflight.get("logs") or []),
-                )
+                if allow_preflight_degraded:
+                    preflight = {
+                        "status": "degraded",
+                        "message": str(preflight.get("message") or "control preflight timeout"),
+                        "logs": list(preflight.get("logs") or []),
+                        "guard_state": "UNKNOWN",
+                        "last_fault_code": "UNKNOWN",
+                        "heartbeat_ok": 0,
+                        "total_fault_count": 0,
+                        "status_category": "control_preflight_degraded",
+                    }
+                else:
+                    return self._build_blocked_inference_payload(
+                        variant=variant,
+                        image_index=image_index,
+                        status_category="control_preflight_failed",
+                        source_label="控制面预检失败，回退展示（归档样例）",
+                        message="控制面 STATUS_REQ 预检失败，本次不继续 ML-KEM 推理。",
+                        detail=str(preflight.get("message") or "未拿到有效 STATUS_RESP"),
+                        diagnostics={"control_status": preflight, "soft_recover": soft_recover},
+                        event_log=list(preflight.get("logs") or []),
+                    )
 
         with self._lock:
             self._last_control_status = preflight
@@ -2643,6 +2873,7 @@ class DashboardState:
 
         if proc.returncode != 0:
             stderr_tail = (proc.stderr or proc.stdout or "unknown error").strip()[-500:]
+            print(f"[ML-KEM] tcp_client failed rc={proc.returncode}: {stderr_tail[:300]}")
             return self._build_blocked_inference_payload(
                 variant=variant,
                 image_index=image_index,
@@ -2785,13 +3016,23 @@ class DashboardState:
             pass
         return payload
 
-    def run_demo_inference(self, *, variant: str, image_index: int) -> dict[str, Any]:
+    def run_demo_inference(
+        self,
+        *,
+        variant: str,
+        image_index: int,
+        allow_preflight_degraded: bool = False,
+    ) -> dict[str, Any]:
         with self._lock:
             crypto_enabled = self._crypto_enabled
         if crypto_enabled and variant == "current":
-            return self.run_mlkem_inference(variant=variant, image_index=image_index)
+            return self.run_mlkem_inference(
+                variant=variant,
+                image_index=image_index,
+                allow_preflight_degraded=allow_preflight_degraded,
+            )
 
-        payload = build_prerecorded_inference_result(image_index, variant)
+        payload = self._build_prerecorded_payload_safe(image_index=image_index, variant=variant)
         event_record: dict[str, Any] | None = None
         with self._lock:
             board_access = self._board_access
@@ -3325,6 +3566,9 @@ class DemoRequestHandler(SimpleHTTPRequestHandler):
         if parsed.path == "/docs":
             self.respond_doc_view(parsed.query)
             return
+        if parsed.path == "/api/batch-state":
+            self.respond_json(HTTPStatus.OK, self.server.app_state.get_batch_state())
+            return
         if parsed.path == "/":
             self.path = "/index.html"
         super().do_GET()
@@ -3379,12 +3623,27 @@ class DemoRequestHandler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/run-inference":
             image_index = self.coerce_int(body.get("image_index"), default=0)
             variant = str(body.get("mode") or "current").strip().lower() or "current"
-            payload = self.server.app_state.run_demo_inference(variant=variant, image_index=image_index)
+            allow_preflight_degraded = bool(body.get("allow_preflight_degraded", True))
+            payload = self.server.app_state.run_demo_inference(
+                variant=variant,
+                image_index=image_index,
+                allow_preflight_degraded=allow_preflight_degraded,
+            )
             self.respond_json(HTTPStatus.OK, payload)
             return
         if parsed.path == "/api/run-baseline":
             image_index = self.coerce_int(body.get("image_index"), default=0)
             payload = self.server.app_state.run_demo_inference(variant="baseline", image_index=image_index)
+            self.respond_json(HTTPStatus.OK, payload)
+            return
+        if parsed.path == "/api/run-inference-batch":
+            count = self.coerce_int(body.get("count"), default=300)
+            count = max(1, min(count, 1000))
+            allow_degraded = bool(body.get("allow_preflight_degraded", True))
+            payload = self.server.app_state.start_batch_inference(
+                count=count,
+                allow_preflight_degraded=allow_degraded,
+            )
             self.respond_json(HTTPStatus.OK, payload)
             return
         if parsed.path == "/api/inject-fault":

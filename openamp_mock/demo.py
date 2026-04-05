@@ -21,6 +21,12 @@ from .protocol import (
 )
 from .transport import MockTransport
 
+try:
+    from mlkem_link.crypto import CipherSuite as _CipherSuite
+    _DEFAULT_SUITE = _CipherSuite.SM4_GCM
+except ImportError:
+    _DEFAULT_SUITE = None
+
 
 @dataclass(frozen=True)
 class ScenarioSpec:
@@ -80,12 +86,17 @@ class MockSession:
         *,
         use_crypto_transport: bool = False,
         shared_secret: bytes = b"openamp-ctrl-plane-shared-secret-32",
+        suite=None,
     ) -> None:
         base_transport = MockTransport()
         if use_crypto_transport:
+            resolved_suite = suite if suite is not None else _DEFAULT_SUITE
+            guard_kwargs: dict = {"shared_secret": shared_secret[:32]}
+            if resolved_suite is not None:
+                guard_kwargs["suite"] = resolved_suite
             self.transport = CryptoTransport(
                 base_transport,
-                CryptoGuard(shared_secret=shared_secret[:32]),
+                CryptoGuard(**guard_kwargs),
             )
         else:
             self.transport = base_transport

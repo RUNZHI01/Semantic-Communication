@@ -22,8 +22,8 @@
     "port": "22",
     "reachable": true,
     "executed_from": "main assistant exec on lenovo host",
-    "remote_project_root": "/tmp/openamp_wrong_sha_fit/project",
-    "remote_output_dir": "/tmp/openamp_wrong_sha_fit/project/session_bootstrap/reports/openamp_wrong_sha_fit_20260315_012403",
+    "remote_project_root": "/home/user/tvm_metaschedule_execution_project",
+    "remote_output_dir": "/home/user/tvm_metaschedule_execution_project/session_bootstrap/reports/openamp_wrong_sha_fit_20260315_012403",
     "rpmsg_ctrl": "/dev/rpmsg_ctrl0",
     "rpmsg_dev": "/dev/rpmsg0",
     "remote_runner_marker_absent": true
