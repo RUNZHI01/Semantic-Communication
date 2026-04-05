@@ -1,141 +1,148 @@
-% 图 4.3 TVM 优化逻辑流程图（重绘加强版）
-% 基于 CICC0903540 技术文档 4.2.1 与 4.2.3 - baseline 到 current 演进
 \documentclass[tikz,border=10pt]{standalone}
 
-% 强制全局样式与配色
-\usepackage{amssymb, amsmath}
+\usepackage{amsmath,amssymb}
 \usepackage{fontspec}
 \usepackage{xeCJK}
-\setCJKmainfont{SimHei}
+\IfFontExistsTF{SimHei}{\setCJKmainfont{SimHei}}{\setCJKmainfont{Noto Sans CJK SC}}
+\usepackage{xcolor}
 \usepackage{tikz}
-\usetikzlibrary{
-  arrows.meta, positioning, shapes.geometric, calc,
-  backgrounds, fit, decorations.pathreplacing, patterns
-}
+\usetikzlibrary{arrows.meta,backgrounds,fit,positioning}
 
-% 低饱和度马卡龙配色
-\definecolor{mBlue}{HTML}{AEC6CF}
-\definecolor{mPink}{HTML}{FFD1DC}
-\definecolor{mGreen}{HTML}{B1D8B7}
-\definecolor{mPurple}{HTML}{B39EB5}
-\definecolor{mYellow}{HTML}{FDFD96}
-\definecolor{mGray}{HTML}{E5E4E2}
-\definecolor{mDark}{HTML}{4A4A4A}
+\definecolor{ink}{HTML}{18324A}
+\definecolor{muted}{HTML}{5F7286}
+\definecolor{linec}{HTML}{C9D8E6}
+\definecolor{panel}{HTML}{F8FBFD}
+\definecolor{bluefill}{HTML}{EFF6FF}
+\definecolor{blueedge}{HTML}{9FC2F1}
+\definecolor{greenfill}{HTML}{EFFAF4}
+\definecolor{greenedge}{HTML}{A8D7B6}
+\definecolor{purplefill}{HTML}{F5F1FC}
+\definecolor{purpleedge}{HTML}{CBB9E7}
+\definecolor{orangefill}{HTML}{FFF6ED}
+\definecolor{orangeedge}{HTML}{F2C892}
+\definecolor{tealfill}{HTML}{EEF9F8}
+\definecolor{tealedge}{HTML}{9FD9CF}
+\definecolor{badgeblue}{HTML}{2F6BFF}
+\definecolor{badgegreen}{HTML}{1B9E77}
+\definecolor{badgeorange}{HTML}{E17A21}
+\definecolor{badgepurple}{HTML}{6A4C93}
 
-% 全局 TikZ 样式
 \tikzset{
-  >=stealth,
-  thick,
-  draw=mDark,
-  stage/.style={
-    rectangle, rounded corners=3pt, draw=mDark, align=center,
-    font=\sffamily\scriptsize, minimum height=0.7cm, inner sep=5pt,
-    minimum width=2.2cm},
-  ts/.style={font=\tiny\sffamily, color=mDark!80},
-  arr/.style={-{Stealth[length=4pt]}, thick, draw=mDark},
-  legendbox/.style={
-    rectangle, draw=mDark!50, rounded corners=3pt,
-    fill=mGray!15, inner sep=5pt, font=\tiny\sffamily},
+  stepbox/.style={
+    rectangle,
+    rounded corners=9pt,
+    draw=linec,
+    fill=panel,
+    minimum width=13.7cm,
+    minimum height=1.85cm,
+    text width=13.1cm,
+    inner sep=7pt,
+    align=left,
+    font=\sffamily\small
+  },
+  stagepill/.style={
+    rectangle,
+    rounded corners=9pt,
+    fill=#1,
+    inner sep=5pt,
+    text=white,
+    font=\sffamily\scriptsize\bfseries
+  },
+  stagepill/.default=badgeblue,
+  idbubble/.style={
+    circle,
+    fill=#1,
+    minimum size=0.95cm,
+    text=white,
+    font=\sffamily\small\bfseries,
+    inner sep=0pt
+  },
+  idbubble/.default=badgeblue,
+  steptext/.style={font=\sffamily\small\bfseries, text=ink, align=left},
+  note/.style={font=\sffamily\scriptsize, text=muted, align=left},
+  resultchip/.style={
+    rectangle,
+    rounded corners=8pt,
+    fill=#1,
+    inner sep=5pt,
+    text=white,
+    font=\sffamily\tiny\bfseries,
+    align=center
+  },
+  resultchip/.default=badgegreen,
+  link/.style={-{Stealth[length=3.4mm]}, line width=0.95pt, draw=muted},
 }
 
 \begin{document}
-\begin{tikzpicture}[
-  node distance=0.7cm and 0.8cm,
-]
-  % ========== 五层演进路径 ==========
-  % Layer 1: 运行时兼容
-  \node[font=\sffamily\scriptsize\bfseries, color=mDark] (l1) {1. 运行时};
-  \node[stage, fill=mPink!40, right=0.3cm of l1] (b1) {compat runtime};
-  \node[arr, right=0.8cm of b1] (a1) {};
-  \node[stage, fill=mGreen!40, right=0.8cm of b1] (c1) {safe runtime};
+\begin{tikzpicture}[node distance=0.8cm]
 
-  \node[ts, below=0.2cm of b1, text width=2.2cm, align=center] {TVM 0.x\\旧版依赖};
-  \node[ts, below=0.2cm of c1, text width=2.2cm, align=center] {TVM 0.24\\隔离 torch};
+\node[stagepill] (title) at (0,0) {TVM 主线证据链};
+\node[note, text width=13.3cm, below=0.55cm of title] (subtitle)
+{图中只保留真正决定主线结果的五个阶段：先解决“能不能跑”，再收敛目标与调优预算，最后回到真实重建与热点算子整合。};
 
-  % Layer 2: Target 收敛
-  \node[font=\sffamily\scriptsize\bfseries, color=mDark, below=1.0cm of l1] (l2) {2. Target};
-  \node[stage, fill=mPink!40, right=0.3cm of l2] (b2) {generic + neon};
-  \node[arr, right=0.8cm of b2] (a2) {};
-  \node[stage, fill=mGreen!40, right=0.8cm of b2] (c2) {cortex-a72};
+\node[idbubble=badgeblue, below=1.0cm of subtitle, xshift=-6.9cm] (n1) {1};
+\node[stepbox, right=0.55cm of n1] (s1) {};
+\node[stagepill=badgeblue, anchor=north west] at ([xshift=0.28cm,yshift=-0.28cm]s1.north west) {安全运行时重建};
+\node[steptext, anchor=north west] at ([xshift=0.32cm,yshift=-0.92cm]s1.north west)
+{剥离旧依赖并恢复 TVM 0.24 safe runtime，解除飞腾端加载阶段的 SIGILL / 兼容性阻塞。};
+\node[resultchip=badgeblue, anchor=north east] at ([xshift=-0.32cm,yshift=-0.32cm]s1.north east) {运行时可稳定加载};
 
-  \node[ts, below=0.2cm of b2, text width=2.2cm, align=center] {保守配置\\2502 ms};
-  \node[ts, below=0.2cm of c2, text width=2.2cm, align=center] {微架构适配\\2481 ms};
+\node[idbubble=badgepurple, below=1.08cm of n1] (n2) {2};
+\node[stepbox, right=0.55cm of n2] (s2) {};
+\node[stagepill=badgepurple, anchor=north west] at ([xshift=0.28cm,yshift=-0.28cm]s2.north west) {目标收敛};
+\node[steptext, anchor=north west] at ([xshift=0.32cm,yshift=-0.92cm]s2.north west)
+{把 target 从 generic 路线收敛到 \texttt{cortex-a72 + neon}，确保 artifact 与飞腾微架构一致。};
+\node[resultchip=badgepurple, anchor=north east] at ([xshift=-0.32cm,yshift=-0.32cm]s2.north east) {generic $\rightarrow$ A72};
 
-  % Layer 3: 调优策略
-  \node[font=\sffamily\scriptsize\bfseries, color=mDark, below=1.0cm of l2] (l3) {3. 调优};
-  \node[stage, fill=mPink!40, right=0.3cm of l3] (b3) {rebuild-only};
-  \node[arr, right=0.8cm of b3] (a3) {};
-  \node[stage, fill=mGreen!40, right=0.8cm of b3] (c3) {增量调优};
+\node[idbubble=badgegreen, below=1.08cm of n2] (n3) {3};
+\node[stepbox, right=0.55cm of n3] (s3) {};
+\node[stagepill=badgegreen, anchor=north west] at ([xshift=0.28cm,yshift=-0.28cm]s3.north west) {增量调优};
+\node[steptext, anchor=north west] at ([xshift=0.32cm,yshift=-0.92cm]s3.north west)
+{先用 rebuild-only / payload-only 缩小搜索面，再把 500 次 trial 集中投入真实瓶颈。};
+\node[resultchip=badgegreen, anchor=north east] at ([xshift=-0.32cm,yshift=-0.32cm]s3.north east) {payload 152.8 ms};
 
-  \node[ts, below=0.2cm of b3, text width=2.2cm, align=center] {复用历史DB\\2479 ms};
-  \node[ts, below=0.2cm of c3, text width=2.2cm, align=center] {500 trials\\152 ms};
+\node[idbubble=badgeorange, below=1.08cm of n3] (n4) {4};
+\node[stepbox, right=0.55cm of n4] (s4) {};
+\node[stagepill=badgeorange, anchor=north west] at ([xshift=0.28cm,yshift=-0.28cm]s4.north west) {真实重建评测};
+\node[steptext, anchor=north west] at ([xshift=0.32cm,yshift=-0.92cm]s4.north west)
+{回到 300 张图像的 latent$\rightarrow$PNG 端到端链路，确认收益不是只存在于 micro benchmark。};
+\node[resultchip=badgeorange, anchor=north east] at ([xshift=-0.32cm,yshift=-0.32cm]s4.north east) {端到端 230.3 ms};
 
-  % Layer 4: 评测口径
-  \node[font=\sffamily\scriptsize\bfseries, color=mDark, below=1.0cm of l3] (l4) {4. 评测};
-  \node[stage, fill=mPink!40, right=0.3cm of l4] (b4) {payload only};
-  \node[arr, right=0.8cm of b4] (a4) {};
-  \node[stage, fill=mGreen!40, right=0.8cm of b4] (c4) {真实重建};
+\node[idbubble=badgeblue, below=1.08cm of n4] (n5) {5};
+\node[stepbox, right=0.55cm of n5] (s5) {};
+\node[stagepill=badgeblue, anchor=north west] at ([xshift=0.28cm,yshift=-0.28cm]s5.north west) {Profiling 与手写算子整合};
+\node[steptext, anchor=north west] at ([xshift=0.32cm,yshift=-0.92cm]s5.north west)
+{按热点证据链保留正收益 lane，并与 big.LITTLE 流水线结果一起回收为系统主线。};
+\node[resultchip=badgegreen, anchor=north east] at ([xshift=-0.32cm,yshift=-0.32cm]s5.north east) {流水线 134.6 ms};
 
-  \node[ts, below=0.2cm of b4, text width=2.2cm, align=center] {VM init\\+ main()};
-  \node[ts, below=0.2cm of c4, text width=2.2cm, align=center] {latent $\to$ PNG\\300 张};
+\draw[link] (n1.south) -- (n2.north);
+\draw[link] (n2.south) -- (n3.north);
+\draw[link] (n3.south) -- (n4.north);
+\draw[link] (n4.south) -- (n5.north);
 
-  % Layer 5: 实验治理
-  \node[font=\sffamily\scriptsize\bfseries, color=mDark, below=1.0cm of l4] (l5) {5. 治理};
-  \node[stage, fill=mPink!40, right=0.3cm of l5] (b5) {人工确认};
-  \node[arr, right=0.8cm of b5] (a5) {};
-  \node[stage, fill=mGreen!40, right=0.8cm of b5] (c5) {SHA guard};
+\node[
+  rectangle,
+  rounded corners=9pt,
+  draw=linec,
+  fill=bluefill,
+  text width=14.7cm,
+  inner sep=8pt,
+  align=left,
+  font=\sffamily\scriptsize,
+  text=muted,
+  below=0.9cm of s5
+] (footer)
+{读图方式：这张图只讲 TVM 主线如何一步步收敛到正式结果，不再把 baseline/current、性能口径和演示模式说明压在同一张流程图里。};
 
-  \node[ts, below=0.2cm of b5, text width=2.2cm, align=center] {默认未变化\\假设};
-  \node[ts, below=0.2cm of c5, text width=2.2cm, align=center] {1946b08e...\\验证};
+\begin{scope}[on background layer]
+  \node[
+    fit=(title)(subtitle)(n1)(s1)(n2)(s2)(n3)(s3)(n4)(s4)(n5)(s5)(footer),
+    fill=panel,
+    draw=linec,
+    rounded corners=12pt,
+    inner sep=16pt
+  ] {};
+\end{scope}
 
-  % ========== 连线 ==========
-  \draw[arr] (b1) -- (c1);
-  \draw[arr] (b2) -- (c2);
-  \draw[arr] (b3) -- (c3);
-  \draw[arr] (b4) -- (c4);
-  \draw[arr] (b5) -- (c5);
-
-  % ========== 顶部：baseline → current 标注 ==========
-  \draw[decorate, decoration={brace, amplitude=4pt, raise=3pt}, thick, draw=mDark]
-    (b1.north west) -- (c5.south east)
-    node[midway, above=40pt, xshift=15pt, font=\sffamily\small\bfseries, color=mDark]
-    {baseline $\rightarrow$ current 演进路径};
-
-  % ========== 层次化表达：背景分组 ==========
-  \begin{scope}[on background layer]
-    % baseline 列
-    \node[fit=(b1)(b2)(b3)(b4)(b5),
-      fill=mPink!15, draw=mDark!40, dashed,
-      rounded corners=5pt, inner sep=10pt] {};
-
-    % current 列
-    \node[fit=(c1)(c2)(c3)(c4)(c5),
-      fill=mGreen!15, draw=mDark!40, dashed,
-      rounded corners=5pt, inner sep=10pt] {};
-  \end{scope}
-
-  \node[above=0.3cm of b1, font=\sffamily\footnotesize\bfseries, color=mDark] {Baseline};
-  \node[above=0.3cm of c1, font=\sffamily\footnotesize\bfseries, color=mDark] {Current};
-
-  % ========== 信息密度拉满：性能收益归因 ==========
-  \node[legendbox, anchor=north west] at ([xshift=5pt, yshift=-5pt]current bounding box.north west)
-    [align=left, text width=5.5cm] {
-    \textbf{Current 性能收益归因}\\[2pt]
-    • 运行时：解除 SIGILL 阻塞，可稳定加载\\
-    • Target：cortex-a72 + neon，性能提升 0.85\%\\
-    • 调优：增量搜索，速度提升 16.272$\times$\\
-    • 评测：端到端重建，覆盖真实系统开销\\
-    • 治理：SHA 守护，确保 artifact 可追溯
-  };
-
-  % ========== 图例（右下角）==========
-  \node[legendbox, anchor=south east] at ([xshift=-5pt, yshift=5pt]current bounding box.south east)
-    [align=left, text width=5.0cm] {
-    \textbf{图例}\\[1pt]
-    \colorbox{mPink!40}{\rule{0.16cm}{0.12cm}\hspace{0.05cm}} Baseline（早期版本）\\
-    \colorbox{mGreen!40}{\rule{0.16cm}{0.12cm}\hspace{0.05cm}} Current（最新版本）\\[1pt]
-    最终结论：端到端提升 86.02\%\\
-    （1830.3 ms/image $\to$ 255.931 ms/image）
-  };
 \end{tikzpicture}
 \end{document}

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from textwrap import fill
 
 import fitz
 import matplotlib
@@ -15,7 +16,7 @@ import matplotlib.patches as patches
 import numpy as np
 import seaborn as sns
 import scienceplots  # noqa: F401
-from PIL import Image, ImageFilter, ImageOps
+from PIL import Image, ImageColor, ImageDraw, ImageFilter, ImageFont, ImageOps
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -37,23 +38,18 @@ PDF_ASSETS = [
         scale=3.0,
     ),
     PdfAsset(
-        source=TIKZ_DIR / "fig_gan_jscc_CLEAN.pdf",
+        source=TIKZ_DIR / "fig_gan_jscc_enhanced.pdf",
         target=FIG_DIR / "paper_fig_gan_jscc_cn_20260405.png",
         scale=3.0,
     ),
     PdfAsset(
-        source=TIKZ_DIR / "fig_system_workflow_enhanced.pdf",
-        target=FIG_DIR / "paper_fig_demo_workflow_cn_20260405.png",
+        source=TIKZ_DIR / "fig_openamp_state_machine_enhanced.pdf",
+        target=FIG_DIR / "paper_fig_openamp_state_machine_cn_20260405.png",
         scale=3.0,
     ),
     PdfAsset(
         source=TIKZ_DIR / "fig_tvm_opt_flow_enhanced.pdf",
         target=FIG_DIR / "paper_fig_tvm_opt_flow_cn_20260405.png",
-        scale=3.0,
-    ),
-    PdfAsset(
-        source=TIKZ_DIR / "fig_mnn_arch_enhanced.pdf",
-        target=FIG_DIR / "paper_fig_mnn_arch_cn_20260405.png",
         scale=3.0,
     ),
 ]
@@ -265,6 +261,171 @@ def ensure_dir(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
 
 
+def load_pil_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    candidates: list[Path] = []
+    if bold:
+        candidates.extend(
+            [
+                Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc"),
+                Path("/usr/share/fonts/opentype/noto/NotoSerifCJK-Bold.ttc"),
+                Path("/home/tianxing/.local/share/fonts/windows/simhei.ttf"),
+            ]
+        )
+    candidates.extend(
+        [
+            Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+            Path("/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc"),
+            Path("/home/tianxing/.local/share/fonts/windows/simhei.ttf"),
+            Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+        ]
+    )
+    for candidate in candidates:
+        if candidate.is_file():
+            return ImageFont.truetype(str(candidate), size)
+    return ImageFont.load_default()
+
+
+def wrap_mixed_text(text: str, max_units: int) -> str:
+    lines: list[str] = []
+    for raw in text.split("\n"):
+        if not raw:
+            lines.append("")
+            continue
+        current = ""
+        current_units = 0
+        for ch in raw:
+            units = 1 if (ch.isascii() and ch not in "MW@#%") else 2
+            if current and current_units + units > max_units:
+                lines.append(current.rstrip())
+                current = ch
+                current_units = units
+            else:
+                current += ch
+                current_units += units
+        if current:
+            lines.append(current.rstrip())
+    return "\n".join(lines)
+
+
+def pil_text_size(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont, spacing: int = 6) -> tuple[int, int]:
+    bbox = draw.multiline_textbbox((0, 0), text, font=font, spacing=spacing)
+    return bbox[2] - bbox[0], bbox[3] - bbox[1]
+
+
+def pil_shadow(canvas: Image.Image, box: tuple[int, int, int, int], radius: int = 28, alpha: int = 48, y_shift: int = 14) -> None:
+    x0, y0, x1, y1 = box
+    layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
+    ld = ImageDraw.Draw(layer)
+    ld.rounded_rectangle((x0, y0 + y_shift, x1, y1 + y_shift), radius=radius, fill=(15, 31, 49, alpha))
+    layer = layer.filter(ImageFilter.GaussianBlur(20))
+    canvas.alpha_composite(layer)
+
+
+def pil_panel(
+    canvas: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    box: tuple[int, int, int, int],
+    *,
+    fill: str = "#FFFFFF",
+    outline: str = "#D4DEEA",
+    radius: int = 30,
+    width: int = 2,
+    shadow: bool = True,
+) -> None:
+    if shadow:
+        pil_shadow(canvas, box, radius=radius)
+    draw.rounded_rectangle(box, radius=radius, fill=fill, outline=outline, width=width)
+
+
+def pil_badge(
+    draw: ImageDraw.ImageDraw,
+    x: int,
+    y: int,
+    text: str,
+    fill: str,
+    *,
+    font: ImageFont.ImageFont,
+    text_fill: str = "#FFFFFF",
+    pad_x: int = 18,
+    pad_y: int = 10,
+) -> tuple[int, int, int, int]:
+    left, top, right, bottom = draw.textbbox((0, 0), text, font=font)
+    box = (x, y, x + (right - left) + pad_x * 2, y + (bottom - top) + pad_y * 2)
+    draw.rounded_rectangle(box, radius=(box[3] - box[1]) // 2, fill=fill)
+    draw.text((x + pad_x, y + pad_y - 2), text, fill=text_fill, font=font)
+    return box
+
+
+def pil_arrow(draw: ImageDraw.ImageDraw, start: tuple[int, int], end: tuple[int, int], color: str, width: int = 6) -> None:
+    draw.line([start, end], fill=color, width=width)
+    dx = end[0] - start[0]
+    dy = end[1] - start[1]
+    length = max((dx * dx + dy * dy) ** 0.5, 1.0)
+    ux, uy = dx / length, dy / length
+    px, py = -uy, ux
+    head = 18
+    wing = 10
+    p1 = (end[0], end[1])
+    p2 = (int(end[0] - ux * head + px * wing), int(end[1] - uy * head + py * wing))
+    p3 = (int(end[0] - ux * head - px * wing), int(end[1] - uy * head - py * wing))
+    draw.polygon([p1, p2, p3], fill=color)
+
+
+def pil_poly_arrow(draw: ImageDraw.ImageDraw, points: list[tuple[int, int]], color: str, width: int = 6) -> None:
+    if len(points) < 2:
+        return
+    draw.line(points, fill=color, width=width)
+    pil_arrow(draw, points[-2], points[-1], color, width=width)
+
+
+def pil_dashed_line(
+    draw: ImageDraw.ImageDraw,
+    start: tuple[int, int],
+    end: tuple[int, int],
+    color: str,
+    *,
+    dash: int = 20,
+    gap: int = 12,
+    width: int = 3,
+) -> None:
+    x0, y0 = start
+    x1, y1 = end
+    total = ((x1 - x0) ** 2 + (y1 - y0) ** 2) ** 0.5
+    if total == 0:
+        return
+    dx = (x1 - x0) / total
+    dy = (y1 - y0) / total
+    drawn = 0.0
+    while drawn < total:
+        seg = min(dash, total - drawn)
+        sx = x0 + dx * drawn
+        sy = y0 + dy * drawn
+        ex = x0 + dx * (drawn + seg)
+        ey = y0 + dy * (drawn + seg)
+        draw.line((sx, sy, ex, ey), fill=color, width=width)
+        drawn += dash + gap
+
+
+def pil_header(
+    draw: ImageDraw.ImageDraw,
+    *,
+    x: int,
+    y: int,
+    title: str,
+    subtitle: str,
+    title_font: ImageFont.ImageFont,
+    subtitle_font: ImageFont.ImageFont,
+    subtitle_width: int = 86,
+) -> int:
+    draw.text((x, y), title, fill="#173A5E", font=title_font)
+    _, title_h = pil_text_size(draw, title, title_font)
+    wrapped = wrap_mixed_text(subtitle, subtitle_width)
+    subtitle_y = y + title_h + 18
+    draw.multiline_text((x, subtitle_y), wrapped, fill="#5B6D80", font=subtitle_font, spacing=10)
+    _, subtitle_h = pil_text_size(draw, wrapped, subtitle_font, spacing=10)
+    return subtitle_y + subtitle_h
+
+
 def render_pdf(asset: PdfAsset) -> None:
     ensure_dir(asset.target)
     doc = fitz.open(asset.source)
@@ -356,6 +517,208 @@ def add_arrow(
     )
 
 
+def render_gan_jscc(target: Path) -> None:
+    ensure_dir(target)
+    canvas = Image.new("RGBA", (2200, 1200), "#F5F8FC")
+    draw = ImageDraw.Draw(canvas)
+    f_title = load_pil_font(52, bold=True)
+    f_sub = load_pil_font(28)
+    f_section = load_pil_font(30, bold=True)
+    f_block = load_pil_font(30, bold=True)
+    f_text = load_pil_font(24)
+    f_small = load_pil_font(22)
+    header_bottom = pil_header(
+        draw,
+        x=86,
+        y=54,
+        title="GAN-based JSCC 系统结构图",
+        subtitle="上层只保留部署阶段真正使用的编码-信道-生成主链；训练期才启用的 Discriminator 与损失函数被单独下沉到第二层，避免压住主路径。",
+        title_font=f_title,
+        subtitle_font=f_sub,
+    )
+
+    top_box = (80, header_bottom + 44, 2120, 630)
+    train_box = (80, 710, 2120, 1080)
+    pil_panel(canvas, draw, top_box, fill="#F8FBFF", outline="#D3E2F1", radius=34)
+    pil_panel(canvas, draw, train_box, fill="#FFF9F4", outline="#F0D8BC", radius=34)
+    pil_badge(draw, 110, top_box[1] + 22, "部署主链", "#2C6BFF", font=load_pil_font(22, bold=True))
+    pil_badge(draw, 110, train_box[1] + 22, "训练期附加模块", "#E17A21", font=load_pil_font(22, bold=True))
+    draw.text((128, top_box[1] + 84), "发送端", fill="#173A5E", font=f_section)
+    draw.text((1752, top_box[1] + 84), "接收端", fill="#173A5E", font=f_section)
+
+    blocks = [
+        ((180, 360, 470, 500), "#EAF4FF", "#BFD6F4", "Encoder", "输入图像 x -> latent y"),
+        ((560, 360, 850, 500), "#EDF6FF", "#C6D9EE", "功率控制", "归一化并匹配发送功率"),
+        ((950, 360, 1240, 500), "#F0FAF3", "#BFDCC7", "AWGN", "弱网信道噪声 n"),
+        ((1340, 360, 1650, 500), "#F5F0FA", "#D5C8E6", "Generator", "y_hat -> 重建图像"),
+        ((1760, 360, 2040, 500), "#FFFFFF", "#BFCBDA", "x_hat", "部署阶段输出"),
+    ]
+    for box, fill_color, outline_color, title, detail in blocks:
+        pil_panel(canvas, draw, box, fill=fill_color, outline=outline_color, radius=28, shadow=False)
+        draw.text((box[0] + 34, box[1] + 34), title, fill="#13263A", font=f_block)
+        wrapped = wrap_mixed_text(detail, 18)
+        draw.multiline_text((box[0] + 34, box[1] + 84), wrapped, fill="#5B6D80", font=f_text, spacing=8)
+
+    pil_arrow(draw, (470, 430), (560, 430), "#4F647A")
+    pil_arrow(draw, (850, 430), (950, 430), "#4F647A")
+    pil_arrow(draw, (1240, 430), (1340, 430), "#4F647A")
+    pil_arrow(draw, (1650, 430), (1760, 430), "#4F647A")
+    pil_badge(draw, 492, 384, "y ∈ R^{1×32³}", "#335C81", font=load_pil_font(18, bold=True), pad_x=12, pad_y=6)
+    pil_badge(draw, 890, 384, "√P·y", "#1F7A8C", font=load_pil_font(18, bold=True), pad_x=12, pad_y=6)
+    pil_badge(draw, 1276, 384, "y_hat = √P·y + n", "#1B9E77", font=load_pil_font(18, bold=True), pad_x=12, pad_y=6)
+    pil_badge(draw, 1686, 384, "1×3×256×256", "#6A4C93", font=load_pil_font(18, bold=True), pad_x=12, pad_y=6)
+
+    draw.text((206, 548), "Conv -> BN -> ReLU -> Res×2", fill="#5B6D80", font=f_small)
+    draw.text((1368, 548), "Deconv -> BN -> ReLU -> Res×2", fill="#5B6D80", font=f_small)
+
+    loss_box = (126, 800, 720, 1010)
+    disc_box = (930, 820, 1280, 980)
+    train_note_box = (1470, 800, 2044, 1010)
+    pil_panel(canvas, draw, loss_box, fill="#FFFFFF", outline="#D6E0EA", radius=28, shadow=False)
+    pil_panel(canvas, draw, disc_box, fill="#FFF1F4", outline="#F0C7D0", radius=28, shadow=False)
+    pil_panel(canvas, draw, train_note_box, fill="#FFFFFF", outline="#D6E0EA", radius=28, shadow=False)
+    draw.text((158, 840), "训练损失", fill="#173A5E", font=f_block)
+    loss_text = wrap_mixed_text("L_t = λ_G + α·L_MSE + β·L_LPIPS\nL_G / L_D 只在训练期参与对抗学习。", 28)
+    draw.multiline_text((158, 894), loss_text, fill="#5B6D80", font=f_text, spacing=8)
+    draw.text((992, 866), "Discriminator", fill="#13263A", font=f_block)
+    draw.text((992, 918), "接收 ground truth x\n与重建 x_hat 做对抗判别", fill="#5B6D80", font=f_text, spacing=8)
+    draw.text((1504, 840), "部署说明", fill="#173A5E", font=f_block)
+    deploy_note = wrap_mixed_text("部署阶段只保留 Encoder / AWGN 模拟 / Generator 主链；Discriminator 与损失项不会进入飞腾端运行时。", 30)
+    draw.multiline_text((1504, 894), deploy_note, fill="#5B6D80", font=f_text, spacing=8)
+
+    pil_poly_arrow(draw, [(188, 500), (188, 760), (930, 760), (930, 870)], "#B48A43", width=5)
+    pil_poly_arrow(draw, [(1900, 500), (1900, 760), (1280, 760), (1280, 870)], "#D04F6B", width=5)
+    pil_badge(draw, 404, 734, "ground truth x", "#B48A43", font=load_pil_font(18, bold=True), pad_x=12, pad_y=6)
+    pil_badge(draw, 1508, 734, "reconstructed x_hat", "#D04F6B", font=load_pil_font(18, bold=True), pad_x=12, pad_y=6)
+
+    footer = (80, 1110, 2120, 1168)
+    draw.rounded_rectangle(footer, radius=22, fill="#EAF2F8", outline="#D3DFEA", width=2)
+    footer_text = "读图方式：上层只看部署主链，下层只看训练附加模块。这样能同时解释 GAN-based JSCC 的来源与飞腾端实际部署边界。"
+    draw.text((112, 1126), footer_text, fill="#42586E", font=f_small)
+    canvas.convert("RGB").save(target)
+
+
+def render_tvm_opt_flow(target: Path) -> None:
+    ensure_dir(target)
+    canvas = Image.new("RGBA", (2100, 1460), "#F5F8FC")
+    draw = ImageDraw.Draw(canvas)
+    f_title = load_pil_font(52, bold=True)
+    f_sub = load_pil_font(28)
+    f_stage = load_pil_font(30, bold=True)
+    f_text = load_pil_font(24)
+    f_small = load_pil_font(22)
+    header_bottom = pil_header(
+        draw,
+        x=86,
+        y=54,
+        title="TVM 编译优化流程图",
+        subtitle="按“能不能跑 -> 跑在哪个 target -> 如何缩短时间 -> 如何归因验证”的顺序重排，避免把 baseline/current、流程节点和结论说明压在同一层。",
+        title_font=f_title,
+        subtitle_font=f_sub,
+    )
+
+    stage_specs = [
+        ("1", "运行时重建", "剥离 torch 依赖，恢复 safe runtime 的最小可执行链路。", "结果：current 路线可加载"),
+        ("2", "target 收敛", "将目标收敛到 cortex-a72 + neon，并确认 artifact 可在飞腾派稳定运行。", "结果：从 generic 迁到 A72"),
+        ("3", "增量调优", "以 rebuild-only / payload-only 为过渡口径，逐步把调优预算押到真实瓶颈上。", "结果：500 trials 收敛到 152 ms"),
+        ("4", "真实重建评测", "回到 300 张图像的真实端到端链路，确认收益不是只存在于 micro benchmark。", "结果：端到端 230.3 ms/image"),
+        ("5", "Profiling 与手写算子", "按热点算子证据链补手写 TIR/NEON，保留正收益 lane，放弃负收益方向。", "结果：big.LITTLE 134.6 ms/image"),
+    ]
+    accent = ["#335C81", "#6A4C93", "#1B9E77", "#1F7A8C", "#D95F02"]
+    top_y = header_bottom + 54
+    box_h = 170
+    gap = 34
+    for idx, ((num, title, body, outcome), color) in enumerate(zip(stage_specs, accent)):
+        y0 = top_y + idx * (box_h + gap)
+        box = (180, y0, 1980, y0 + box_h)
+        pil_panel(canvas, draw, box, fill="#FFFFFF", outline="#D4DEEA", radius=30)
+        circle = (104, y0 + 38, 158, y0 + 92)
+        draw.ellipse(circle, fill=color, outline="#FFFFFF", width=4)
+        draw.text((121, y0 + 49), num, fill="#FFFFFF", font=load_pil_font(24, bold=True))
+        pil_badge(draw, 220, y0 + 24, title, color, font=load_pil_font(22, bold=True), pad_x=16, pad_y=8)
+        draw.text((220, y0 + 86), wrap_mixed_text(body, 58), fill="#173A5E", font=f_stage)
+        note_box = (1320, y0 + 34, 1928, y0 + 134)
+        draw.rounded_rectangle(note_box, radius=24, fill="#F7FAFD", outline="#D6E0EA", width=2)
+        draw.text((1350, y0 + 58), "关键收口", fill=color, font=load_pil_font(22, bold=True))
+        draw.multiline_text((1350, y0 + 92), wrap_mixed_text(outcome, 24), fill="#5B6D80", font=f_text, spacing=8)
+        if idx < len(stage_specs) - 1:
+            pil_arrow(draw, (1060, y0 + box_h), (1060, y0 + box_h + gap - 6), "#B8C7D6", width=5)
+
+    footer = (86, 1360, 2010, 1420)
+    draw.rounded_rectangle(footer, radius=22, fill="#EAF2F8", outline="#D3DFEA", width=2)
+    footer_text = "这张图只讲主线证据链，不再把旧 baseline/current 两条路线压成同一层流程图。"
+    draw.text((118, 1377), footer_text, fill="#42586E", font=f_small)
+    canvas.convert("RGB").save(target)
+
+
+def render_mnn_arch(target: Path) -> None:
+    ensure_dir(target)
+    canvas = Image.new("RGBA", (2200, 1280), "#F5F8FC")
+    draw = ImageDraw.Draw(canvas)
+    f_title = load_pil_font(50, bold=True)
+    f_sub = load_pil_font(28)
+    f_block = load_pil_font(30, bold=True)
+    f_text = load_pil_font(24)
+    f_small = load_pil_font(21)
+    header_bottom = pil_header(
+        draw,
+        x=86,
+        y=54,
+        title="MNN 架构示意图",
+        subtitle="主执行链只保留“模型导入 -> 解析优化 -> Interpreter/Session -> Backend”；动态尺寸、搜索和 NEON 则下沉到能力层，避免所有模块挤在同一平面。",
+        title_font=f_title,
+        subtitle_font=f_sub,
+    )
+
+    main_band = (80, header_bottom + 42, 2120, 640)
+    capability_band = (80, 720, 2120, 1130)
+    pil_panel(canvas, draw, main_band, fill="#F8FBFF", outline="#D3E2F1", radius=34)
+    pil_panel(canvas, draw, capability_band, fill="#FFF9F4", outline="#F0D8BC", radius=34)
+    pil_badge(draw, 112, main_band[1] + 22, "主执行链", "#2C6BFF", font=load_pil_font(22, bold=True))
+    pil_badge(draw, 112, capability_band[1] + 22, "优化与部署能力", "#E17A21", font=load_pil_font(22, bold=True))
+
+    op_box = (122, 282, 640, 520)
+    pil_panel(canvas, draw, op_box, fill="#FFFFFF", outline="#D6E0EA", radius=28, shadow=False)
+    draw.text((154, 318), "算子分类与预处理", fill="#173A5E", font=f_block)
+    op_text = wrap_mixed_text("原子算子 61 / 转换算子 45 / 复合算子 16 / 控制流 2\n几何计算次数 O(1954) -> O(1055)，约减少 46%。", 34)
+    draw.multiline_text((154, 372), op_text, fill="#5B6D80", font=f_text, spacing=8)
+
+    chain_blocks = [
+        ((760, 300, 1050, 460), "#EFF6FF", "#CFE0FF", "Model Import", "TensorFlow / TFLite / Caffe / ONNX"),
+        ((1120, 300, 1410, 460), "#F0F7FF", "#D3E2F1", "Frontend", "格式解析与图级预处理"),
+        ((1480, 300, 1770, 460), "#F5F0FA", "#D8CDE8", "Interpreter", "图调度与 Session 管理"),
+        ((1840, 300, 2110, 460), "#F0FAF3", "#C7DFCF", "Backend", "CPU / GPU / NPU 执行后端"),
+    ]
+    for box, fill_color, outline_color, title, detail in chain_blocks:
+        pil_panel(canvas, draw, box, fill=fill_color, outline=outline_color, radius=28, shadow=False)
+        draw.text((box[0] + 26, box[1] + 32), title, fill="#13263A", font=f_block)
+        draw.multiline_text((box[0] + 26, box[1] + 88), wrap_mixed_text(detail, 22), fill="#5B6D80", font=f_text, spacing=8)
+    pil_arrow(draw, (1050, 380), (1120, 380), "#5B6D80")
+    pil_arrow(draw, (1410, 380), (1480, 380), "#5B6D80")
+    pil_arrow(draw, (1770, 380), (1840, 380), "#5B6D80")
+
+    capability_blocks = [
+        ((150, 820, 590, 980), "#F3FBF7", "#C7DFCF", "动态尺寸路径", "resizeTensor + resizeSession\n支持 B×3×H×W"),
+        ((660, 820, 1100, 980), "#FFFCEF", "#EFD999", "Session 复用", "bucketed shape reuse\n减少频繁重建"),
+        ((1170, 820, 1610, 980), "#F8F4FF", "#D6C8F0", "半自动搜索", "对解释器/线程/precision 做 sweep"),
+        ((1680, 820, 2060, 980), "#FFF3F4", "#E7C8D1", "NEON / 汇编", "仅保留有正收益的 lane"),
+    ]
+    for box, fill_color, outline_color, title, detail in capability_blocks:
+        pil_panel(canvas, draw, box, fill=fill_color, outline=outline_color, radius=28, shadow=False)
+        draw.text((box[0] + 26, box[1] + 28), title, fill="#173A5E", font=f_block)
+        draw.multiline_text((box[0] + 26, box[1] + 84), wrap_mixed_text(detail, 22), fill="#5B6D80", font=f_text, spacing=8)
+    pil_poly_arrow(draw, [(1620, 460), (1620, 700), (370, 700), (370, 820)], "#1B9E77", width=5)
+    pil_poly_arrow(draw, [(1620, 460), (1620, 700), (880, 700), (880, 820)], "#C4A640", width=5)
+    pil_poly_arrow(draw, [(1620, 460), (1620, 700), (1390, 700), (1390, 820)], "#7C63BE", width=5)
+    pil_poly_arrow(draw, [(1910, 460), (1910, 700), (1870, 700), (1870, 820)], "#C65A74", width=5)
+
+    footer = (80, 1160, 2120, 1220)
+    draw.rounded_rectangle(footer, radius=22, fill="#EAF2F8", outline="#D3DFEA", width=2)
+    footer_text = "读图方式：上层回答 MNN 如何执行，下层回答它为什么适合动态尺寸与运行时扫参。"
+    draw.text((114, 1177), footer_text, fill="#42586E", font=f_small)
+    canvas.convert("RGB").save(target)
+
+
 def render_openamp_state_machine(target: Path) -> None:
     apply_plot_style()
     ensure_dir(target)
@@ -409,107 +772,69 @@ def render_openamp_state_machine(target: Path) -> None:
 
 
 def render_control_message_sequence(target: Path) -> None:
-    apply_plot_style()
     ensure_dir(target)
-    fig, ax = plt.subplots(figsize=(12.0, 6.8), dpi=220)
-    ax.set_xlim(0, 1)
-    ax.set_ylim(0, 1)
-    ax.axis("off")
+    canvas = Image.new("RGBA", (2360, 1320), "#F5F8FC")
+    draw = ImageDraw.Draw(canvas)
+    f_title = load_pil_font(52, bold=True)
+    f_sub = load_pil_font(28)
+    f_lane = load_pil_font(28, bold=True)
+    f_text = load_pil_font(24)
+    f_small = load_pil_font(22)
+    header_bottom = pil_header(
+        draw,
+        x=86,
+        y=54,
+        title="控制协议与消息时序",
+        subtitle="用 4 条泳道把“谁发起、经过哪条轻载通道、谁裁决、最后观测到什么”拆开，避免把多组消息和条件说明压在同一根线上。",
+        title_font=f_title,
+        subtitle_font=f_sub,
+    )
 
-    left_x, right_x = 0.26, 0.74
-    top_y, bottom_y = 0.76, 0.12
+    lane_x = [360, 930, 1500, 2070]
+    lane_titles = ["Linux 主核", "OpenAMP 控制通道", "RTOS 从核", "可观测结果"]
+    lane_colors = ["#335C81", "#6A4C93", "#1B9E77", "#D95F02"]
+    top_y = header_bottom + 106
+    bottom_y = 1118
+    main_box = (120, top_y - 72, 2240, 1136)
+    pil_panel(canvas, draw, main_box, fill="#FFFFFF", outline="#D8E2EC", radius=34)
+    for x, title, color in zip(lane_x, lane_titles, lane_colors):
+        badge = pil_badge(draw, x - 118, top_y - 54, title, color, font=load_pil_font(22, bold=True), pad_x=18, pad_y=8)
+        draw.rounded_rectangle((badge[0] - 12, badge[1] - 10, badge[2] + 12, badge[3] + 10), radius=26, outline="#E3EBF3", width=2)
+        pil_dashed_line(draw, (x, top_y), (x, bottom_y), "#B8C7D6", dash=18, gap=12, width=3)
 
-    ax.text(left_x, 0.82, "Linux 主核 / Runner", ha="center", va="center", fontsize=15.5, fontproperties=FONT_PROP, color="#173A5E", weight="bold")
-    ax.text(right_x, 0.82, "RTOS / Bare Metal 从核", ha="center", va="center", fontsize=15.5, fontproperties=FONT_PROP, color="#173A5E", weight="bold")
-    ax.plot([left_x, left_x], [top_y, bottom_y], color="#AAB8C4", linewidth=2.0, linestyle="--")
-    ax.plot([right_x, right_x], [top_y, bottom_y], color="#AAB8C4", linewidth=2.0, linestyle="--")
-
-    steps = [
-        (0.78, left_x, right_x, "STATUS_REQ", "#335C81"),
-        (0.72, right_x, left_x, "STATUS_RESP\nREADY / last_fault_code", "#335C81"),
-        (0.62, left_x, right_x, "JOB_REQ\nartifact_hash + param_digest", "#6A4C93"),
-        (0.56, right_x, left_x, "JOB_ACK(ALLOW / DENY)", "#6A4C93"),
-        (0.44, left_x, right_x, "HEARTBEAT (周期上报)", "#1B9E77"),
-        (0.36, left_x, right_x, "JOB_DONE(success)", "#1B9E77"),
-        (0.24, left_x, right_x, "SAFE_STOP\n或 heartbeat timeout", "#D95F02"),
-        (0.18, right_x, left_x, "STATUS_RESP\nSAFE_STOP / FAULT 可观测", "#D95F02"),
+    section_specs = [
+        ("状态查询", "#335C81", 360, ("STATUS_REQ", "RPMsg 查询", "STATUS_RESP", "READY / last_fault_code")),
+        ("作业准入", "#6A4C93", 520, ("JOB_REQ", "artifact_hash +\nparam_digest", "JOB_ACK", "ALLOW / DENY")),
+        ("运行监护", "#1B9E77", 680, ("HEARTBEAT", "周期上报", "RUNNING", "继续执行 / 监护")),
+        ("结束收敛", "#D95F02", 840, ("SAFE_STOP / JOB_DONE", "SAFE_STOP 或\ntimeout", "SAFE_STOP / FAULT", "可观测收敛态")),
     ]
+    section_x = 146
+    for label, color, y, row in section_specs:
+        pil_badge(draw, section_x, y - 36, label, color, font=load_pil_font(20, bold=True), pad_x=14, pad_y=6)
+        box_width = 270
+        for idx, text in enumerate(row):
+            x_center = lane_x[idx]
+            box = (x_center - box_width // 2, y - 50, x_center + box_width // 2, y + 50)
+            fill_color = "#FFFFFF" if idx < 3 else "#F8FBFD"
+            outline_color = color if idx == 0 else "#D6E0EA"
+            pil_panel(canvas, draw, box, fill=fill_color, outline=outline_color, radius=24, shadow=False)
+            wrapped = wrap_mixed_text(text, 18)
+            tw, th = pil_text_size(draw, wrapped, f_text, spacing=8)
+            draw.multiline_text((x_center - tw / 2, y - th / 2), wrapped, fill="#173A5E" if idx < 3 else color, font=f_text, spacing=8)
+        for idx in range(3):
+            pil_arrow(draw, (lane_x[idx] + box_width // 2, y), (lane_x[idx + 1] - box_width // 2, y), color, width=5)
 
-    for y, x0, x1, label, color in steps:
-        arrow = patches.FancyArrowPatch(
-            (x0, y),
-            (x1, y),
-            arrowstyle="-|>",
-            mutation_scale=16,
-            linewidth=2.2,
-            color=color,
-        )
-        ax.add_patch(arrow)
-        ax.text(
-            0.5,
-            y + 0.025,
-            label,
-            ha="center",
-            va="center",
-            fontsize=12.0,
-            fontproperties=FONT_PROP,
-            color=color,
-            bbox=dict(boxstyle="round,pad=0.24", facecolor="#FFFFFF", edgecolor="none", alpha=0.94),
-        )
+    note_left = (168, 982, 1128, 1066)
+    note_right = (1234, 982, 2194, 1066)
+    draw.rounded_rectangle(note_left, radius=22, fill="#EEF8F4", outline="#CFE5DA", width=2)
+    draw.rounded_rectangle(note_right, radius=22, fill="#FFF4ED", outline="#F0D6C3", width=2)
+    draw.text((178, 1002), "ALLOW 后才进入推理执行与 heartbeat 监护。", fill="#1B9E77", font=f_small)
+    draw.text((1266, 1002), "若 heartbeat 丢失，则控制面转入 SAFE_STOP / FAULT 并保留最后一次 fault_code。", fill="#D95F02", font=f_small)
 
-    ax.text(
-        left_x,
-        0.50,
-        "ALLOW 后进入\n推理执行 + 监护",
-        ha="center",
-        va="center",
-        fontsize=11.5,
-        fontproperties=FONT_PROP,
-        color="#1B9E77",
-        bbox=dict(boxstyle="round,pad=0.28", facecolor="#F0F8F3", edgecolor="#1B9E77", linewidth=1.0),
-    )
-    ax.text(
-        right_x,
-        0.30,
-        "若 heartbeat 丢失\n则转入 SAFE_STOP/FAULT",
-        ha="center",
-        va="center",
-        fontsize=11.3,
-        fontproperties=FONT_PROP,
-        color="#D95F02",
-        bbox=dict(boxstyle="round,pad=0.28", facecolor="#FFF4ED", edgecolor="#D95F02", linewidth=1.0),
-    )
-    ax.text(
-        0.03,
-        0.965,
-        "控制协议与消息时序",
-        fontsize=20,
-        fontproperties=FONT_PROP,
-        weight="bold",
-        color="#173A5E",
-        va="top",
-    )
-    ax.text(
-        0.03,
-        0.89,
-        "STATUS_REQ/JOB_REQ/HEARTBEAT/SAFE_STOP/JOB_DONE 五类消息在 Linux 主核与 RTOS 从核之间形成可观测闭环。",
-        fontsize=11.6,
-        fontproperties=FONT_PROP,
-        color="#5B6D80",
-        va="top",
-    )
-    ax.text(
-        0.03,
-        0.06,
-        "说明：大体量图像数据不经过该通道；控制面只传输作业状态、校验信息与故障码，从而保持轻载和可审计。",
-        fontsize=11.2,
-        fontproperties=FONT_PROP,
-        color="#5B6D80",
-        va="bottom",
-    )
-    fig.tight_layout(pad=1.0)
-    fig.savefig(target, bbox_inches="tight")
-    plt.close(fig)
+    footer = (120, 1170, 2240, 1236)
+    draw.rounded_rectangle(footer, radius=22, fill="#EAF2F8", outline="#D3DFEA", width=2)
+    draw.text((154, 1188), "说明：大体量图像数据不经过该通道；控制面只传作业状态、校验摘要与故障码，因此可保持轻载和可审计。", fill="#42586E", font=f_small)
+    canvas.convert("RGB").save(target)
 
 
 def render_project_timeline(target: Path) -> None:
@@ -816,85 +1141,55 @@ def render_tvm_result_summary(target: Path) -> None:
 
 def render_evidence_bundle_map(target: Path) -> None:
     ensure_dir(target)
-    from PIL import ImageDraw, ImageFont
-
-    canvas_w, canvas_h = 2300, 1360
-    bg = Image.new("RGB", (canvas_w, canvas_h), "#F5F8FC")
-    draw = ImageDraw.Draw(bg)
-
-    def load_font_local(size: int, bold: bool = False):
-        candidates = [
-            Path("/home/tianxing/.local/share/fonts/windows/simhei.ttf"),
-            Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
-            Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
-        ]
-        for p in candidates:
-            if p.is_file():
-                return ImageFont.truetype(str(p), size)
-        return ImageFont.load_default()
-
-    f_title = load_font_local(56, bold=True)
-    f_sub = load_font_local(24)
-    f_center = load_font_local(34, bold=True)
-    f_card_title = load_font_local(28, bold=True)
-    f_card_body = load_font_local(22)
-    f_badge = load_font_local(23, bold=True)
-
-    for y in range(190):
-        alpha = int(255 * (1 - y / 190) * 0.15)
-        band = Image.new("RGBA", (canvas_w, 1), (24, 65, 118, alpha))
-        bg.paste(band, (0, y), band)
-
+    canvas = Image.new("RGBA", (2300, 1360), "#F5F8FC")
+    draw = ImageDraw.Draw(canvas)
+    f_title = load_pil_font(56, bold=True)
+    f_sub = load_pil_font(24)
+    f_center = load_pil_font(34, bold=True)
+    f_card_title = load_pil_font(28, bold=True)
+    f_card_body = load_pil_font(20)
+    f_badge = load_pil_font(23, bold=True)
     draw.text((86, 46), "答辩证据包结构图", fill="#173A5E", font=f_title)
-    draw.text(
-        (86, 118),
-        "把最重要的面向评审材料按“总判定、live 状态、安全验证、性能质量、演示话术”五类组织，避免现场翻日志找文件。",
-        fill="#5B6D80",
-        font=f_sub,
-    )
+    draw.text((86, 118), "将面向评审的材料按“总判定、live 状态、安全验证、性能质量、演示与话术”五类组织，并通过中心枢纽统一进入。", fill="#5B6D80", font=f_sub)
 
-    center_box = (860, 470, 1440, 710)
-    draw.rounded_rectangle(center_box, radius=38, fill="#0F2035", outline="#1F3A5A", width=2)
-    draw.text((950, 525), "Judge-facing", fill="#86C5FF", font=f_badge)
-    draw.text((950, 570), "Evidence Bundle", fill="#FFFFFF", font=f_center)
-    draw.text((950, 628), "文档优先 / 证据驱动 /\n操作员在环", fill="#DCE7F3", font=f_sub, spacing=10)
+    center_box = (930, 480, 1370, 820)
+    pil_panel(canvas, draw, center_box, fill="#13263F", outline="#1F3A5A", radius=42)
+    draw.text((1038, 560), "Evidence Bundle", fill="#FFFFFF", font=f_center)
+    draw.text((1008, 628), "Judge-facing 入口", fill="#86C5FF", font=f_badge)
+    draw.multiline_text((1016, 680), "文档优先 / 证据驱动 /\n操作员在环", fill="#DCE7F3", font=f_sub, spacing=10)
 
-    card_positions = [
-        (120, 250),
-        (1580, 250),
-        (120, 860),
-        (860, 860),
-        (1580, 860),
-    ]
+    left_cards = [(130, 250), (130, 620), (130, 990)]
+    right_cards = [(1610, 360), (1610, 850)]
+    positions = left_cards + right_cards
+    for card, (x, y) in zip(EVIDENCE_BUNDLE_CARDS, positions):
+        box = (x, y, x + 560, y + 240)
+        pil_panel(canvas, draw, box, fill="#FFFFFF", outline="#D4DEEA", radius=28)
+        pil_badge(draw, x + 26, y + 22, "证据入口", card["color"], font=f_badge, pad_x=16, pad_y=8)
+        draw.text((x + 26, y + 98), card["title"], fill="#173A5E", font=f_card_title)
+        cursor_y = y + 144
+        for line in card["lines"]:
+            wrapped = wrap_mixed_text(line, 26)
+            draw.multiline_text((x + 26, cursor_y), wrapped, fill="#5B6D80", font=f_card_body, spacing=5)
+            _, text_h = pil_text_size(draw, wrapped, f_card_body, spacing=5)
+            cursor_y += text_h + 8
 
-    for (card, (x, y)) in zip(EVIDENCE_BUNDLE_CARDS, card_positions):
-        w, h = 560, 280
-        shadow = Image.new("RGBA", (w + 28, h + 28), (0, 0, 0, 0))
-        sd = ImageDraw.Draw(shadow)
-        sd.rounded_rectangle((14, 14, w + 14, h + 14), radius=28, fill=(12, 23, 38, 54))
-        shadow = shadow.filter(ImageFilter.GaussianBlur(12))
-        bg.paste(shadow, (x - 8, y - 4), shadow)
+        if x < center_box[0]:
+            anchor_x = box[2]
+            trunk_x = 790
+            draw.line((anchor_x, y + 110, trunk_x, y + 110), fill="#B7C7D8", width=5)
+            draw.line((trunk_x, y + 110, trunk_x, 650), fill="#B7C7D8", width=5)
+            pil_arrow(draw, (trunk_x, 650), (center_box[0], 650), "#B7C7D8", width=5)
+        else:
+            anchor_x = box[0]
+            trunk_x = 1510
+            draw.line((anchor_x, y + 110, trunk_x, y + 110), fill="#B7C7D8", width=5)
+            draw.line((trunk_x, y + 110, trunk_x, 650), fill="#B7C7D8", width=5)
+            pil_arrow(draw, (trunk_x, 650), (center_box[2], 650), "#B7C7D8", width=5)
 
-        card_img = Image.new("RGB", (w, h), "#FFFFFF")
-        cd = ImageDraw.Draw(card_img)
-        cd.rounded_rectangle((0, 0, w - 1, h - 1), radius=28, fill="#FFFFFF", outline="#D4DEEA", width=2)
-        cd.rounded_rectangle((24, 22, 196, 68), radius=22, fill=card["color"])
-        cd.text((48, 34), "证据入口", fill="#FFFFFF", font=f_badge)
-        cd.text((24, 102), card["title"], fill="#173A5E", font=f_card_title)
-        for idx, line in enumerate(card["lines"]):
-            cd.text((24, 154 + idx * 34), line, fill="#5B6D80", font=f_card_body)
-        bg.paste(card_img, (x, y))
-
-        cx = x + w / 2
-        cy = y + (0 if y > center_box[1] else h)
-        target_x = (center_box[0] + center_box[2]) / 2
-        target_y = center_box[1] if y > center_box[1] else center_box[3]
-        draw.line((cx, cy, target_x, target_y), fill="#B7C7D8", width=5)
-
-    footer_y = 1240
-    draw.rounded_rectangle((86, footer_y - 10, canvas_w - 86, canvas_h - 54), radius=24, fill="#EAF2F8", outline="#D3DFEA", width=2)
-    draw.text((116, footer_y + 4), "用途：评委追问时先选卡片，再打开对应文档；不把现场临时排障当作正式证据。", fill="#42586E", font=f_sub)
-    bg.save(target)
+    footer = (86, 1240, 2214, 1304)
+    draw.rounded_rectangle(footer, radius=24, fill="#EAF2F8", outline="#D3DFEA", width=2)
+    draw.text((116, 1258), "用途：评委追问时先选证据卡，再进入对应文档；连接线只表达“进入中心枢纽”，不再穿过正文。", fill="#42586E", font=f_sub)
+    canvas.convert("RGB").save(target)
 
 
 def render_framework_positioning(target: Path) -> None:
@@ -1182,64 +1477,32 @@ def render_perf_quality_tradeoff(target: Path) -> None:
 
 
 def render_semantic_vs_traditional(target: Path) -> None:
-    apply_plot_style()
     ensure_dir(target)
-
-    fig, ax = plt.subplots(figsize=(12.6, 6.3), dpi=220)
-    ax.set_xlim(0, 1)
-    ax.set_ylim(0, 1)
-    ax.axis("off")
-
-    fig.suptitle("传统压缩与语义通信的弱网对比", fontproperties=FONT_PROP, fontsize=21, color="#173A5E", y=0.985)
-    fig.text(
-        0.08,
-        0.92,
-        "图中同时强调“传什么”和“弱网下会怎样”：传统方案传像素信息，语义通信传 latent 语义特征。",
-        ha="left",
-        va="center",
-        fontsize=11.9,
-        fontproperties=FONT_PROP,
-        color="#5B6D80",
+    canvas = Image.new("RGBA", (2200, 1280), "#F5F8FC")
+    draw = ImageDraw.Draw(canvas)
+    f_title = load_pil_font(56, bold=True)
+    f_sub = load_pil_font(28)
+    f_block = load_pil_font(34, bold=True)
+    f_text = load_pil_font(24)
+    f_small = load_pil_font(22)
+    header_bottom = pil_header(
+        draw,
+        x=86,
+        y=50,
+        title="传统压缩与语义通信的弱网对比",
+        subtitle="这张图同时回答“传什么”和“在极端弱网下会怎样”。主对照区只保留两栏结论；大小对照被独立下沉到底部，不再与正文挤在同一块。",
+        title_font=f_title,
+        subtitle_font=f_sub,
     )
 
-    left = patches.FancyBboxPatch(
-        (0.05, 0.30),
-        0.38,
-        0.50,
-        boxstyle="round,pad=0.018,rounding_size=0.03",
-        facecolor="#FFF9F2",
-        edgecolor="#F2C38B",
-        linewidth=1.2,
-    )
-    right = patches.FancyBboxPatch(
-        (0.57, 0.30),
-        0.38,
-        0.50,
-        boxstyle="round,pad=0.018,rounding_size=0.03",
-        facecolor="#F3FBF7",
-        edgecolor="#9BCBB3",
-        linewidth=1.2,
-    )
-    ax.add_patch(left)
-    ax.add_patch(right)
-
-    def add_header(x: float, y: float, text: str, color: str) -> None:
-        chip = patches.FancyBboxPatch(
-            (x, y),
-            0.18,
-            0.07,
-            boxstyle="round,pad=0.01,rounding_size=0.03",
-            facecolor=color,
-            edgecolor="none",
-        )
-        ax.add_patch(chip)
-        ax.text(x + 0.09, y + 0.035, text, ha="center", va="center", fontsize=11.4, fontproperties=FONT_PROP, color="white", weight="bold")
-
-    add_header(0.08, 0.75, "传统压缩", "#D95F02")
-    add_header(0.60, 0.75, "语义通信", "#1B9E77")
-
-    ax.text(0.08, 0.68, "传输对象：像素级信息", ha="left", va="center", fontsize=16, fontproperties=FONT_PROP, color="#173A5E", weight="bold")
-    ax.text(0.60, 0.68, "传输对象：latent 语义特征", ha="left", va="center", fontsize=16, fontproperties=FONT_PROP, color="#173A5E", weight="bold")
+    left_box = (120, header_bottom + 54, 980, 760)
+    right_box = (1220, header_bottom + 54, 2080, 760)
+    pil_panel(canvas, draw, left_box, fill="#FFF9F2", outline="#F2C38B", radius=34)
+    pil_panel(canvas, draw, right_box, fill="#F3FBF7", outline="#9BCBB3", radius=34)
+    pil_badge(draw, 180, left_box[1] + 24, "传统压缩", "#D95F02", font=load_pil_font(24, bold=True))
+    pil_badge(draw, 1280, right_box[1] + 24, "语义通信", "#1B9E77", font=load_pil_font(24, bold=True))
+    draw.text((182, left_box[1] + 106), "传输对象：像素级信息", fill="#173A5E", font=f_block)
+    draw.text((1282, right_box[1] + 106), "传输对象：latent 语义特征", fill="#173A5E", font=f_block)
 
     left_lines = [
         "JPEG / H.265 仍围绕像素保真展开",
@@ -1252,187 +1515,86 @@ def render_semantic_vs_traditional(target: Path) -> None:
         "文献[6]：SNR=1 dB 时 GAN-based JSCC 仍可达 29 dB+",
     ]
     for idx, line in enumerate(left_lines):
-        ax.text(0.09, 0.60 - idx * 0.10, f"- {line}", ha="left", va="center", fontsize=11.5, fontproperties=FONT_PROP, color="#5B6D80")
+        draw.text((196, left_box[1] + 206 + idx * 106), f"- {line}", fill="#5B6D80", font=f_text)
     for idx, line in enumerate(right_lines):
-        ax.text(0.61, 0.60 - idx * 0.10, f"- {line}", ha="left", va="center", fontsize=11.5, fontproperties=FONT_PROP, color="#5B6D80")
+        draw.text((1296, right_box[1] + 206 + idx * 106), f"- {line}", fill="#5B6D80", font=f_text)
 
-    arrow = patches.FancyArrowPatch(
-        (0.45, 0.56),
-        (0.55, 0.56),
-        arrowstyle="simple",
-        mutation_scale=28,
-        linewidth=0,
-        color="#A9B8C8",
-        alpha=0.9,
-    )
-    ax.add_patch(arrow)
-    ax.text(0.50, 0.61, "弱网巡检场景", ha="center", va="center", fontsize=12.0, fontproperties=FONT_PROP, color="#173A5E", weight="bold")
-    ax.text(0.50, 0.52, "更关注“能否传回有效语义”", ha="center", va="center", fontsize=10.6, fontproperties=FONT_PROP, color="#5B6D80")
+    pil_badge(draw, 1020, 420, "弱网巡检场景", "#879AAF", font=load_pil_font(20, bold=True), pad_x=16, pad_y=6)
+    pil_arrow(draw, (1000, 520), (1200, 520), "#A9B8C8", width=10)
+    draw.text((1030, 568), "更关注“能否传回有效语义”", fill="#5B6D80", font=f_small)
 
-    ax.text(0.08, 0.22, "本系统输入与 latent 大小对照", ha="left", va="center", fontsize=13.6, fontproperties=FONT_PROP, color="#173A5E", weight="bold")
-    ax.text(0.08, 0.16, "256×256 RGB 原图", ha="left", va="center", fontsize=11.4, fontproperties=FONT_PROP, color="#5B6D80")
-    ax.text(0.08, 0.11, "Encoder latent", ha="left", va="center", fontsize=11.4, fontproperties=FONT_PROP, color="#5B6D80")
-
-    base_x = 0.28
-    max_w = 0.48
-    raw_w = max_w
-    latent_w = max_w * (128.0 / 192.0)
-    raw_bar = patches.FancyBboxPatch((base_x, 0.145), raw_w, 0.035, boxstyle="round,pad=0.005,rounding_size=0.015", facecolor="#DADFE6", edgecolor="none")
-    latent_bar = patches.FancyBboxPatch((base_x, 0.095), latent_w, 0.035, boxstyle="round,pad=0.005,rounding_size=0.015", facecolor="#1B9E77", edgecolor="none")
-    ax.add_patch(raw_bar)
-    ax.add_patch(latent_bar)
-    ax.text(base_x + raw_w - 0.01, 0.162, "≈192 KB", ha="right", va="center", fontsize=10.8, fontproperties=FONT_PROP, color="#173A5E", weight="bold")
-    ax.text(base_x + latent_w - 0.01, 0.112, "≈128 KB", ha="right", va="center", fontsize=10.8, fontproperties=FONT_PROP, color="white", weight="bold")
-
-    ax.text(
-        0.08,
-        0.04,
-        "注：大小对照来自本系统 256×256 RGB 输入与 32×32×32 latent（FP32）；弱网鲁棒性结论引自文献[6]，用于说明语义通信在极端弱网中的工程优势。",
-        ha="left",
-        va="center",
-        fontsize=9.9,
-        fontproperties=FONT_PROP,
-        color="#5B6D80",
-    )
-
-    fig.savefig(target, bbox_inches="tight")
-    plt.close(fig)
+    compare_box = (120, 860, 2080, 1130)
+    pil_panel(canvas, draw, compare_box, fill="#FFFFFF", outline="#D4DEEA", radius=30)
+    draw.text((164, 900), "本系统输入与 latent 大小对照", fill="#173A5E", font=f_block)
+    draw.text((164, 982), "256×256 RGB 原图", fill="#5B6D80", font=f_text)
+    draw.text((164, 1052), "Encoder latent", fill="#5B6D80", font=f_text)
+    raw_bar = (520, 974, 1570, 1024)
+    latent_bar = (520, 1044, 1220, 1094)
+    draw.rounded_rectangle(raw_bar, radius=24, fill="#DADFE6")
+    draw.rounded_rectangle(latent_bar, radius=24, fill="#1B9E77")
+    draw.text((1500, 982), "≈192 KB", fill="#173A5E", font=load_pil_font(24, bold=True))
+    draw.text((1028, 1052), "≈128 KB", fill="#FFFFFF", font=load_pil_font(24, bold=True))
+    footer_text = "注：大小对照来自本系统 256×256 RGB 输入与 32×32×32 latent（FP32）；弱网鲁棒性结论引自文献[6]。"
+    draw.text((164, 1110), footer_text, fill="#5B6D80", font=f_small)
+    canvas.convert("RGB").save(target)
 
 
 def render_system_closure_overview(target: Path) -> None:
-    apply_plot_style()
     ensure_dir(target)
-
-    fig, ax = plt.subplots(figsize=(12.8, 7.0), dpi=220)
-    ax.set_xlim(0, 1)
-    ax.set_ylim(0, 1)
-    ax.axis("off")
-
-    fig.suptitle("弱网安全语义回传系统闭环总览图", fontproperties=FONT_PROP, fontsize=22, color="#173A5E", y=0.985)
-    fig.text(
-        0.08,
-        0.925,
-        "把数据面、控制面、性能主口径和答辩证据压成同一页，方便评审快速理解“传得回、跑得快、用得稳”的闭环。",
-        ha="left",
-        va="center",
-        fontsize=12.0,
-        fontproperties=FONT_PROP,
-        color="#5B6D80",
+    canvas = Image.new("RGBA", (2200, 1320), "#F5F8FC")
+    draw = ImageDraw.Draw(canvas)
+    f_title = load_pil_font(56, bold=True)
+    f_sub = load_pil_font(28)
+    f_section = load_pil_font(32, bold=True)
+    f_text = load_pil_font(24)
+    f_small = load_pil_font(22)
+    header_bottom = pil_header(
+        draw,
+        x=86,
+        y=48,
+        title="弱网安全语义回传系统闭环总览图",
+        subtitle="这张总览图改成三层：上层讲输入链路，中层拆数据面与控制面，下层落到性能结果与答辩入口。连接只表达关系，不再穿正文。",
+        title_font=f_title,
+        subtitle_font=f_sub,
     )
 
-    center = patches.FancyBboxPatch(
-        (0.34, 0.38),
-        0.32,
-        0.24,
-        boxstyle="round,pad=0.02,rounding_size=0.04",
-        facecolor="#13263F",
-        edgecolor="none",
-    )
-    ax.add_patch(center)
-    ax.text(0.50, 0.56, "系统闭环", ha="center", va="center", fontsize=18.5, fontproperties=FONT_PROP, color="white", weight="bold")
-    ax.text(0.50, 0.49, "传得回 / 跑得快 / 用得稳", ha="center", va="center", fontsize=13.5, fontproperties=FONT_PROP, color="#D8E6F3")
-    ax.text(0.50, 0.42, "数据面 + 控制面 + 证据驱动", ha="center", va="center", fontsize=11.0, fontproperties=FONT_PROP, color="#A9B8C8")
+    top_box = (120, header_bottom + 42, 2080, 330)
+    mid_left = (120, 390, 1040, 760)
+    mid_right = (1160, 390, 2080, 760)
+    bottom_left = (120, 840, 1040, 1140)
+    bottom_right = (1160, 840, 2080, 1140)
+    for box in (top_box, mid_left, mid_right, bottom_left, bottom_right):
+        pil_panel(canvas, draw, box, fill="#FFFFFF", outline="#D4DEEA", radius=32)
 
-    def add_card(x: float, y: float, w: float, h: float, title: str, color: str, lines: list[str]) -> tuple[float, float]:
-        rect = patches.FancyBboxPatch(
-            (x, y),
-            w,
-            h,
-            boxstyle="round,pad=0.018,rounding_size=0.03",
-            facecolor="white",
-            edgecolor="#D4DFEA",
-            linewidth=1.2,
-        )
-        ax.add_patch(rect)
-        tag = patches.FancyBboxPatch(
-            (x + 0.02, y + h - 0.07),
-            0.14,
-            0.055,
-            boxstyle="round,pad=0.01,rounding_size=0.03",
-            facecolor=color,
-            edgecolor="none",
-        )
-        ax.add_patch(tag)
-        ax.text(x + 0.09, y + h - 0.043, "模块", ha="center", va="center", fontsize=10.3, fontproperties=FONT_PROP, color="white", weight="bold")
-        ax.text(x + 0.02, y + h - 0.11, title, ha="left", va="top", fontsize=15.0, fontproperties=FONT_PROP, color="#173A5E", weight="bold")
-        for idx, line in enumerate(lines):
-            ax.text(x + 0.02, y + h - 0.20 - idx * 0.065, line, ha="left", va="top", fontsize=10.8, fontproperties=FONT_PROP, color="#5B6D80")
-        return (x + w / 2.0, y + h / 2.0)
+    pil_badge(draw, 156, top_box[1] + 22, "输入链路", "#335C81", font=load_pil_font(22, bold=True))
+    draw.text((168, top_box[1] + 92), "Host 图像输入 -> Encoder -> latent -> 飞腾 Linux 主核", fill="#173A5E", font=f_section)
+    draw.text((168, top_box[1] + 156), "这条链路回答“传得回”：先压成紧凑语义特征，再在端侧完成重建。", fill="#5B6D80", font=f_text)
+    pil_arrow(draw, (680, top_box[3]), (680, mid_left[1]), "#335C81", width=5)
+    pil_arrow(draw, (1520, top_box[3]), (1520, mid_right[1]), "#335C81", width=5)
 
-    add_card(
-        0.05,
-        0.64,
-        0.25,
-        0.21,
-        "数据面",
-        "#1B9E77",
-        [
-            "Host Encoder -> latent -> 飞腾 Linux 主核",
-            "TVM 固定形状 / MNN 动态尺寸双引擎",
-            "300 / 300 真机重建与 PNG 落盘",
-        ],
-    )
-    add_card(
-        0.70,
-        0.64,
-        0.25,
-        0.21,
-        "控制面",
-        "#D95F02",
-        [
-            "RTOS 从核 + OpenAMP 五类消息",
-            "READY/CHECKING/RUNNING/SAFE_STOP/FAULT",
-            "3 项 FIT 真机通过，SAFE_STOP 可观测收敛",
-        ],
-    )
-    add_card(
-        0.05,
-        0.12,
-        0.25,
-        0.23,
-        "性能结论",
-        "#2D6A4F",
-        [
-            "TVM direct 230.3 ms/image",
-            "big.LITTLE 134.6 ms/image / +56.1%",
-            "MNN dynamic 327.3 ms/image",
-        ],
-    )
-    add_card(
-        0.70,
-        0.12,
-        0.25,
-        0.23,
-        "答辩入口",
-        "#335C81",
-        [
-            "dashboard + evidence bundle + compare drawer",
-            "面向评审的五类材料入口",
-            "操作员在环，不靠现场翻日志",
-        ],
-    )
+    pil_badge(draw, 156, mid_left[1] + 22, "数据面", "#1B9E77", font=load_pil_font(22, bold=True))
+    draw.text((168, mid_left[1] + 92), "TVM 固定形状 / MNN 动态尺寸双引擎", fill="#173A5E", font=f_section)
+    draw.multiline_text((168, mid_left[1] + 158), "300 / 300 真机重建与 PNG 落盘\n固定形状看 TVM 主线，混合尺寸看 MNN 旁路", fill="#5B6D80", font=f_text, spacing=10)
 
-    connectors = [
-        ((0.30, 0.74), (0.34, 0.56)),
-        ((0.70, 0.74), (0.66, 0.56)),
-        ((0.30, 0.24), (0.34, 0.44)),
-        ((0.70, 0.24), (0.66, 0.44)),
-    ]
-    for start, end in connectors:
-        arrow = patches.FancyArrowPatch(
-            start,
-            end,
-            arrowstyle="-|>",
-            mutation_scale=18,
-            linewidth=1.8,
-            color="#B7C7D8",
-        )
-        ax.add_patch(arrow)
+    pil_badge(draw, 1196, mid_right[1] + 22, "控制面", "#D95F02", font=load_pil_font(22, bold=True))
+    draw.text((1208, mid_right[1] + 92), "RTOS 从核 + OpenAMP 五类消息", fill="#173A5E", font=f_section)
+    draw.multiline_text((1208, mid_right[1] + 158), "READY / CHECKING / RUNNING / SAFE_STOP / FAULT\n3 项 FIT 真机通过，SAFE_STOP 可观测收敛", fill="#5B6D80", font=f_text, spacing=10)
 
-    ax.text(0.08, 0.05, "结论：弱网语义回传不只是一个更快的模型，而是一套可运行、可控制、可证明的系统。", ha="left", va="center", fontsize=11.6, fontproperties=FONT_PROP, color="#173A5E")
+    pil_arrow(draw, (580, mid_left[3]), (580, bottom_left[1]), "#1B9E77", width=5)
+    pil_arrow(draw, (1620, mid_right[3]), (1620, bottom_right[1]), "#D95F02", width=5)
 
-    fig.savefig(target, bbox_inches="tight")
-    plt.close(fig)
+    pil_badge(draw, 156, bottom_left[1] + 22, "性能结果", "#2D6A4F", font=load_pil_font(22, bold=True))
+    draw.text((168, bottom_left[1] + 92), "TVM direct 230.3 ms/image", fill="#173A5E", font=f_section)
+    draw.multiline_text((168, bottom_left[1] + 156), "big.LITTLE 134.6 ms/image / +56.1%\nMNN dynamic 327.3 ms/image", fill="#5B6D80", font=f_text, spacing=10)
+
+    pil_badge(draw, 1196, bottom_right[1] + 22, "答辩入口", "#1F7A8C", font=load_pil_font(22, bold=True))
+    draw.text((1208, bottom_right[1] + 92), "dashboard + evidence bundle + compare drawer", fill="#173A5E", font=load_pil_font(29, bold=True))
+    draw.multiline_text((1208, bottom_right[1] + 156), "面向评审的五类材料入口\n操作员在环，不靠现场翻日志", fill="#5B6D80", font=f_text, spacing=10)
+
+    footer = (86, 1210, 2110, 1272)
+    draw.rounded_rectangle(footer, radius=22, fill="#13263F", outline="#1F3A5A", width=2)
+    draw.text((118, 1228), "结论：弱网语义回传不是单点 benchmark，而是一套数据面、控制面、证据入口都闭环的系统。", fill="#FFFFFF", font=f_small)
+    canvas.convert("RGB").save(target)
 
 
 def render_cover_summary(target: Path) -> None:
@@ -1679,34 +1841,22 @@ def main() -> None:
     for asset in PDF_ASSETS:
         render_pdf(asset)
     render_project_timeline(FIG_DIR / "paper_fig_project_timeline_cn_20260405.png")
-    render_openamp_state_machine(FIG_DIR / "paper_fig_openamp_state_machine_cn_20260405.png")
     render_control_message_sequence(FIG_DIR / "paper_fig_control_message_sequence_cn_20260405.png")
-    render_mnn_benchmark(FIG_DIR / "paper_fig_mnn_benchmark_cn_20260405.png")
-    render_performance_ladder(FIG_DIR / "paper_fig_performance_ladder_cn_20260405.png")
-    render_tvm_result_summary(FIG_DIR / "paper_fig_tvm_result_summary_cn_20260405.png")
+    render_mnn_arch(FIG_DIR / "paper_fig_mnn_arch_cn_20260405.png")
     render_evidence_bundle_map(FIG_DIR / "paper_fig_evidence_bundle_cn_20260405.png")
-    render_framework_positioning(FIG_DIR / "paper_fig_framework_positioning_cn_20260405.png")
-    render_perf_quality_tradeoff(FIG_DIR / "paper_fig_perf_quality_tradeoff_cn_20260405.png")
     render_semantic_vs_traditional(FIG_DIR / "paper_fig_semantic_vs_traditional_cn_20260405.png")
     render_system_closure_overview(FIG_DIR / "paper_fig_system_closure_overview_cn_20260405.png")
     render_cover_summary(FIG_DIR / "paper_fig_cover_summary_cn_20260405.png")
-    render_snr_curve(FIG_DIR / "paper_fig_snr_robustness_cn_20260405.png")
     render_reconstruction_grid(FIG_DIR / "paper_fig_reconstruction_gallery_cn_20260405.png")
     for asset in PDF_ASSETS:
         print(asset.target)
     print(FIG_DIR / "paper_fig_project_timeline_cn_20260405.png")
-    print(FIG_DIR / "paper_fig_openamp_state_machine_cn_20260405.png")
     print(FIG_DIR / "paper_fig_control_message_sequence_cn_20260405.png")
-    print(FIG_DIR / "paper_fig_mnn_benchmark_cn_20260405.png")
-    print(FIG_DIR / "paper_fig_performance_ladder_cn_20260405.png")
-    print(FIG_DIR / "paper_fig_tvm_result_summary_cn_20260405.png")
+    print(FIG_DIR / "paper_fig_mnn_arch_cn_20260405.png")
     print(FIG_DIR / "paper_fig_evidence_bundle_cn_20260405.png")
-    print(FIG_DIR / "paper_fig_framework_positioning_cn_20260405.png")
-    print(FIG_DIR / "paper_fig_perf_quality_tradeoff_cn_20260405.png")
     print(FIG_DIR / "paper_fig_semantic_vs_traditional_cn_20260405.png")
     print(FIG_DIR / "paper_fig_system_closure_overview_cn_20260405.png")
     print(FIG_DIR / "paper_fig_cover_summary_cn_20260405.png")
-    print(FIG_DIR / "paper_fig_snr_robustness_cn_20260405.png")
     print(FIG_DIR / "paper_fig_reconstruction_gallery_cn_20260405.png")
 
 

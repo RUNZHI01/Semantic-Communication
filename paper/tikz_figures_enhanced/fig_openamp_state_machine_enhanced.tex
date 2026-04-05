@@ -1,0 +1,124 @@
+\documentclass[tikz,border=10pt]{standalone}
+
+\usepackage{amsmath,amssymb}
+\usepackage{fontspec}
+\usepackage{xeCJK}
+\IfFontExistsTF{SimHei}{\setCJKmainfont{SimHei}}{\setCJKmainfont{Noto Sans CJK SC}}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,backgrounds,calc,fit,positioning}
+
+\definecolor{ink}{HTML}{18324A}
+\definecolor{muted}{HTML}{5F7286}
+\definecolor{linec}{HTML}{CBD8E5}
+\definecolor{cyanfill}{HTML}{EEF9FB}
+\definecolor{cyanedge}{HTML}{6AB7C9}
+\definecolor{purplefill}{HTML}{F4F1FB}
+\definecolor{purpleedge}{HTML}{BDA8DE}
+\definecolor{greenfill}{HTML}{EFFAF4}
+\definecolor{greenedge}{HTML}{A8D7B6}
+\definecolor{orangefill}{HTML}{FFF6ED}
+\definecolor{orangeedge}{HTML}{F2C892}
+\definecolor{redfill}{HTML}{FFF1F4}
+\definecolor{rededge}{HTML}{E8A7B7}
+\definecolor{badgecyan}{HTML}{1F7A8C}
+\definecolor{badgepurple}{HTML}{6A4C93}
+\definecolor{badgegreen}{HTML}{1B9E77}
+\definecolor{badgeorange}{HTML}{D97925}
+\definecolor{badgered}{HTML}{C94B59}
+
+\tikzset{
+  statebox/.style={
+    rectangle,
+    rounded corners=10pt,
+    draw=#1,
+    fill=#1!12,
+    minimum width=3.2cm,
+    minimum height=1.8cm,
+    text width=3.2cm,
+    align=center,
+    font=\sffamily\small\bfseries,
+    inner sep=7pt
+  },
+  statebox/.default=cyanedge,
+  statedesc/.style={font=\sffamily\scriptsize, text=muted, align=center},
+  flow/.style={-{Stealth[length=3.4mm]}, line width=0.95pt, draw=ink},
+  obsline/.style={line width=0.8pt, draw=muted, dashed},
+  labelbox/.style={
+    fill=white,
+    rounded corners=7pt,
+    inner sep=3.5pt,
+    font=\sffamily\tiny,
+    text=ink
+  },
+}
+
+\begin{document}
+\begin{tikzpicture}[node distance=1.55cm and 2.1cm]
+
+\node[
+  rectangle,
+  rounded corners=10pt,
+  fill=cyanfill,
+  inner sep=6pt,
+  text=badgecyan,
+  font=\sffamily\scriptsize\bfseries
+] (title) at (0,0) {OpenAMP 控制状态机};
+\node[statedesc, text width=12.4cm, below=0.55cm of title] (subtitle)
+{五个核心状态用于约束 JOB\_REQ、JOB\_ACK、HEARTBEAT、SAFE\_STOP 与 JOB\_DONE 的合法转移；STATUS\_REQ/RESP 只承担观测职责，不参与主状态推进。};
+
+\node[statebox=cyanedge, fill=cyanfill, below=1.1cm of subtitle] (ready) {READY};
+\node[statedesc, below=0.1cm of ready] {空闲待命\\可接受 JOB\_REQ};
+
+\node[statebox=purpleedge, fill=purplefill, right=2.05cm of ready] (checking) {CHECKING};
+\node[statedesc, below=0.1cm of checking] {工件与参数校验};
+
+\node[statebox=greenedge, fill=greenfill, right=2.05cm of checking] (running) {RUNNING};
+\node[statedesc, below=0.1cm of running] {执行中 / 心跳监护激活};
+
+\node[statebox=rededge, fill=redfill, below=2.55cm of checking] (fault) {FAULT};
+\node[statedesc, below=0.1cm of fault] {故障信息保留\\仅供查询};
+
+\node[statebox=orangeedge, fill=orangefill, below=2.55cm of running] (safestop) {SAFE\_STOP};
+\node[statedesc, below=0.1cm of safestop] {安全停机与收敛};
+
+\draw[flow] (ready) -- (checking)
+  node[midway, above=4pt, labelbox] {JOB\_REQ};
+\draw[flow] (checking) -- (running)
+  node[midway, above=4pt, labelbox] {JOB\_ACK(ALLOW)};
+\draw[flow] (checking.west) to[out=215,in=325] node[midway, below=6pt, labelbox] {JOB\_ACK(DENY)} (ready.south east);
+\draw[flow] (running.east) to[out=35,in=145] node[midway, above=6pt, labelbox] {JOB\_DONE(success)} (ready.east);
+\draw[flow] (running) -- (safestop)
+  node[midway, right=6pt, labelbox] {SAFE\_STOP / heartbeat timeout};
+\draw[flow] (safestop.west) to[out=190,in=350] node[midway, below=8pt, labelbox] {故障记录落盘后恢复 READY} (ready.south);
+
+\draw[obsline] (safestop.west) -- (fault.east)
+  node[midway, above=4pt, labelbox] {last\_fault\_code 可观测};
+
+\node[
+  rectangle,
+  rounded corners=10pt,
+  draw=linec,
+  fill=white,
+  text width=11.4cm,
+  align=left,
+  inner sep=9pt,
+  font=\sffamily\scriptsize,
+  text=muted,
+  below=1.45cm of fault.south east,
+  xshift=2.7cm
+] (observe)
+{\textbf{STATUS\_REQ / STATUS\_RESP 观测带。} Linux 主核可主动查询 guard\_state、active\_job\_id、heartbeat\_ok、last\_fault\_code 与 total\_fault\_count；该查询不推动状态迁移，因此被单独放到图下方说明。};
+
+\begin{scope}[on background layer]
+  \node[
+    fit=(title)(subtitle)(ready)(checking)(running)(fault)(safestop)(observe),
+    fill=cyanfill!40,
+    draw=linec,
+    rounded corners=12pt,
+    inner sep=18pt
+  ] {};
+\end{scope}
+
+\end{tikzpicture}
+\end{document}
