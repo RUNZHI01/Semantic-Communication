@@ -28,6 +28,7 @@ export function DashboardPageMinimal() {
   const inferenceProgress = useInferenceProgressPoll()
 
   const activeJobId = useAppStore((s) => s.activeJobId)
+  const lastCompletedInference = useAppStore((s) => s.lastCompletedInference)
   const chinaTheater = useAppStore((s) => s.chinaTheater)
   const setChinaTheater = useAppStore((s) => s.setChinaTheater)
   const [boardPassword, setBoardPassword] = useState('')
@@ -120,9 +121,16 @@ export function DashboardPageMinimal() {
     ? ((baselineMs - payloadMs) / baselineMs * 100)
     : null
 
-  const progress = inferenceProgress?.data?.live_progress?.completed_count ?? 0
+  const progress = inferenceProgress?.data?.live_progress?.completed_count
+    ?? lastCompletedInference?.live_progress?.completed_count
+    ?? 0
   const totalImages = 300
   const isRunning = inferenceProgress?.data?.request_state === 'running'
+  const currentStage = inferenceProgress?.data?.live_progress?.current_stage
+    ?? lastCompletedInference?.live_progress?.current_stage
+    ?? '等待触发'
+  const progressTone = inferenceProgress?.data?.live_progress?.tone
+    ?? lastCompletedInference?.live_progress?.tone
   const boardOnline = status?.live?.board_online ?? false
 
   return (
@@ -164,7 +172,7 @@ export function DashboardPageMinimal() {
                   </div>
                   <div className={s.progressBadge}>
                     {isRunning && <span className={s.pulseDot} />}
-                    {isRunning ? '运行中' : '等待触发'}
+                    {isRunning ? '运行中' : progress > 0 ? '已完成' : '等待触发'}
                   </div>
                 </div>
 
@@ -181,7 +189,7 @@ export function DashboardPageMinimal() {
                 </div>
 
                 <div className={s.progressMeta}>
-                  当前阶段：{inferenceProgress?.data?.live_progress?.current_stage ?? '等待触发'}
+                  当前阶段：{currentStage}
                 </div>
 
                 {isRunning && logs.length > 0 && (
@@ -293,30 +301,32 @@ export function DashboardPageMinimal() {
               {/* Result Comparison — uses flex:1 to fill remaining space */}
               <div className={`${s.resultCard} ${speedup != null && speedup > 0 ? s.cardSuccessGlow : ''}`}>
                 <div className={s.sectionTitle}>推理结果对比</div>
-                {payloadMs != null && baselineMs != null ? (
+                {payloadMs != null ? (
                   <>
                     <div className={s.comparisonShowcase}>
-                      <div className={s.barRow}>
-                        <div className={s.barLabel}>Baseline</div>
-                        <div className={s.barTrack}>
-                          <div className={s.barFillBaseline} style={{ width: '100%' }} />
+                      {baselineMs != null && (
+                        <div className={s.barRow}>
+                          <div className={s.barLabel}>Baseline</div>
+                          <div className={s.barTrack}>
+                            <div className={s.barFillBaseline} style={{ width: '100%' }} />
+                          </div>
+                          <div className={s.barValue}>
+                            <CountUp end={baselineMs} decimals={1} duration={400} /> ms
+                          </div>
                         </div>
-                        <div className={s.barValue}>
-                          <CountUp end={baselineMs} decimals={1} duration={400} /> ms
-                        </div>
-                      </div>
+                      )}
                       <div className={s.barRow}>
                         <div className={s.barLabel}>Current</div>
                         <div className={s.barTrack}>
                           <div
                             className={s.barFillCurrent}
-                            style={{ width: `${Math.min((payloadMs / (baselineMs || 1)) * 100, 100)}%` }}
+                            style={{ width: `${Math.min((payloadMs / (baselineMs || payloadMs || 1)) * 100, 100)}%` }}
                           />
                         </div>
                         <div className={s.barValueHighlight}>
                           <span><CountUp end={payloadMs} decimals={1} duration={400} /> ms</span>
                           {speedup != null && (
-                            <span className={s.trendBadge} style={{ 
+                            <span className={s.trendBadge} style={{
                               background: speedup >= 0 ? 'var(--color-success-container)' : 'var(--color-error-container)',
                               color: speedup >= 0 ? 'var(--color-success)' : 'var(--color-error)'
                             }}>

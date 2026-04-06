@@ -62,6 +62,7 @@ from inference_runner import (
     describe_demo_admission,
     describe_demo_variant_support,
     expected_sha_for_variant,
+    generate_live_job_id,
     launch_remote_reconstruction_job,
     load_signed_manifest_summary,
 )
@@ -2836,186 +2837,246 @@ class DashboardState:
             )
 
         import tempfile
+        from threading import Thread
 
-        # 使用 TVM 模型期望的 shape (1, 32, 32, 32) 触发真实 ML-KEM + AEAD 数据面链路。
-        tmp_input = tempfile.NamedTemporaryFile(suffix=".bin", delete=False)
-        tmp_input.write(b"\0" * (1 * 32 * 32 * 32 * 4))
-        tmp_input.close()
-        input_path = Path(tmp_input.name)
-        output_path = Path(tempfile.mkstemp(suffix=".bin", prefix="mlkem_result_")[1])
+        # ── 构建 ML-KEM 后台 job（和 SSH 路径一样：返回 running，后台推进） ──
+        mlkem_job_id = generate_live_job_id()
+        max_inputs = DEFAULT_MAX_INPUTS
 
-        cmd, env = build_local_crypto_client_command(
-            env_values,
-            host=board_access.host,
-            input_path=input_path,
-            client_script=tcp_client,
-        )
-        job_id = f"current-{int(time.time())}-{image_index}"
-        cmd.extend(["--job-id", job_id, "--output", str(output_path)])
+        class _MlkemJob:
+            """模拟 LiveRemoteReconstructionJob：后台线程逐张 ML-KEM 推理，前端轮询进度。"""
+            def __init__(self_self, jid: str, max_n: int, board: Any, env_vals: dict,
+                         client_script: str, variant_name: str, img_idx: int,
+                         preflight_data: dict, app_state: Any):
+                self_self.job_id = jid
+                self_self._max = max_n
+                self_self._board = board
+                self_self._env_vals = env_vals
+                self_self._client = client_script
+                self_self._variant = variant_name
+                self_self._img_idx = img_idx
+                self_self._preflight = preflight_data
+                self_self._app = app_state
+                self_self._lock = Lock()
+                self_self._completed = 0
+                self_self._final_snapshot: dict[str, Any] | None = None
+                self_self._stages_summary: list[dict[str, Any]] = []
+                self_self._total_ms = 0.0
+                self_self._sha_match: bool | None = None
+                self_self._error: str | None = None
 
-        try:
-            t0 = time.monotonic()
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=180, env=env)
-            wall_ms = round((time.monotonic() - t0) * 1000, 1)
-        except subprocess.TimeoutExpired:
-            return self._build_blocked_inference_payload(
-                variant=variant,
-                image_index=image_index,
-                status_category="timeout",
-                source_label="ML-KEM 推理超时，回退展示（归档样例）",
-                message="ML-KEM 推理超时（180s），本次已回退到归档样例。",
-                detail="tcp_client 执行超时。",
-                diagnostics={"timeout_sec": 180},
-            )
-        finally:
-            try:
-                input_path.unlink()
-            except OSError:
-                pass
-
-        if proc.returncode != 0:
-            stderr_tail = (proc.stderr or proc.stdout or "unknown error").strip()[-500:]
-            print(f"[ML-KEM] tcp_client failed rc={proc.returncode}: {stderr_tail[:300]}")
-            return self._build_blocked_inference_payload(
-                variant=variant,
-                image_index=image_index,
-                status_category="mlkem_exec_failed",
-                source_label="ML-KEM 执行失败，回退展示（归档样例）",
-                message="ML-KEM 客户端执行失败，本次已回退到归档样例。",
-                detail=stderr_tail or "tcp_client exited with non-zero",
-                diagnostics={"returncode": proc.returncode},
-                event_log=[stderr_tail] if stderr_tail else [],
-            )
-
-        metrics = self._parse_mlkem_client_metrics(proc.stdout or "")
-        crypto_status = self.get_crypto_status()
-        handshake_ms = metrics.get("handshake_ms") or crypto_status.get("handshake_ms")
-        encrypt_ms = metrics.get("encrypt_ms") or crypto_status.get("encrypt_ms")
-        inference_ms = crypto_status.get("inference_ms")
-        sha_match = (
-            metrics.get("sha256_match")
-            if metrics.get("sha256_match") is not None
-            else crypto_status.get("last_sha256_match")
-        )
-
-        stages: list[dict[str, Any]] = []
-        if handshake_ms is not None:
-            stages.append({"label": "ML-KEM 握手", "value_ms": round(float(handshake_ms), 3), "emphasis": "host"})
-        if encrypt_ms is not None:
-            stages.append({"label": "AEAD 加密发送", "value_ms": round(float(encrypt_ms), 3), "emphasis": "data"})
-        if inference_ms is not None:
-            stages.append({"label": "板端 TVM 推理", "value_ms": round(float(inference_ms), 3), "emphasis": "board"})
-        total_ms = round(sum(float(item["value_ms"]) for item in stages), 3) if stages else wall_ms
-
-        payload.update(
-            {
-                "status": "success",
-                "execution_mode": "live",
-                "request_state": "completed",
-                "status_category": "success",
-                "source_label": "ML-KEM 全链路加密（控制+数据）",
-                "message": "Current 已通过 ML-KEM 安全信道完成加密传输与板端执行，结果按竞赛口径回传。",
-                "timings": {
-                    "payload_ms": round(float(encrypt_ms), 3) if encrypt_ms is not None else None,
-                    "prepare_ms": round(float(handshake_ms), 3) if handshake_ms is not None else None,
-                    "total_ms": total_ms,
-                    "stages": stages,
-                },
-                "live_attempt": {
-                    "status": "success",
-                    "request_state": "completed",
-                    "status_category": "success",
+            def snapshot(self_self) -> dict:
+                with self_self._lock:
+                    if self_self._final_snapshot is not None:
+                        return dict(self_self._final_snapshot)
+                completed = self_self._completed
+                pct = int(round(completed / self_self._max * 100)) if self_self._max > 0 else 0
+                return {
+                    "status": "running",
+                    "request_state": "running",
+                    "status_category": "running",
+                    "execution_mode": "live",
+                    "variant": self_self._variant,
+                    "message": "ML-KEM 安全信道在线推进中…",
                     "control_transport": "mlkem",
                     "control_handshake_complete": True,
-                    "message": "ML-KEM inference path completed.",
-                    "metrics": {
-                        "wall_ms": wall_ms,
-                        "handshake_ms": handshake_ms,
-                        "encrypt_ms": encrypt_ms,
-                        "inference_ms": inference_ms,
-                        "sha256_match": sha_match,
+                    "runner_summary": {"processed_count": completed, "input_count": self_self._max, "max_inputs": self_self._max},
+                    "wrapper_summary": {},
+                    "diagnostics": {"control_preflight": self_self._preflight},
+                    "progress": {
+                        "state": "running",
+                        "label": "ML-KEM 加密推理中",
+                        "tone": "online",
+                        "percent": pct,
+                        "phase_percent": pct,
+                        "completed_count": completed,
+                        "expected_count": self_self._max,
+                        "remaining_count": self_self._max - completed,
+                        "completion_ratio": round(completed / self_self._max, 4) if self_self._max > 0 else 0.0,
+                        "count_source": "mlkem_live",
+                        "count_label": f"{completed} / {self_self._max}",
+                        "current_stage": f"ML-KEM 加密推理 {completed}/{self_self._max}",
+                        "stages": [{"key": "mlkem_live", "label": "ML-KEM 全链路", "status": "current",
+                                     "detail": f"已完成 {completed}/{self_self._max}"}],
+                        "event_log": [],
                     },
-                    "control_preflight": preflight,
-                },
-                "live_progress": {
-                    "state": "completed",
-                    "label": "ML-KEM live 完成",
-                    "tone": "online",
-                    "percent": 100,
-                    "phase_percent": 100,
-                    "completed_count": 1,
-                    "expected_count": 1,
-                    "remaining_count": 0,
-                    "completion_ratio": 1.0,
-                    "count_source": "mlkem_live",
-                    "count_label": "1 / 1",
-                    "current_stage": "加密推理与回传完成",
-                    "stages": [
-                        {
-                            "key": "mlkem_live_done",
-                            "label": "ML-KEM 全链路",
-                            "status": "done",
-                            "detail": f"wall={wall_ms}ms, sha_match={sha_match}",
+                    "artifacts": [],
+                }
+
+            def start(self_self) -> None:
+                Thread(target=self_self._run_loop, daemon=True).start()
+
+            def _run_loop(self_self) -> None:
+                tmp_in = tempfile.NamedTemporaryFile(suffix=".bin", delete=False)
+                tmp_in.write(b"\0" * (1 * 32 * 32 * 32 * 4))
+                tmp_in.close()
+                input_path = Path(tmp_in.name)
+                try:
+                    cmd, env = build_local_crypto_client_command(
+                        self_self._env_vals, host=self_self._board.host,
+                        input_path=input_path, client_script=self_self._client,
+                    )
+                    cmd.extend(["--job-id", self_self.job_id])
+                    all_stages: list[dict[str, Any]] = []
+                    total_wall = 0.0
+                    last_sha: bool | None = None
+                    for idx in range(self_self._max):
+                        out_path = Path(tempfile.mkstemp(suffix=".bin", prefix="mlkem_result_")[1])
+                        run_cmd = list(cmd) + ["--output", str(out_path)]
+                        t0 = time.monotonic()
+                        try:
+                            proc = subprocess.run(run_cmd, capture_output=True, text=True, timeout=180, env=env)
+                        except subprocess.TimeoutExpired:
+                            with self_self._lock:
+                                self_self._error = f"第 {idx+1} 张超时"
+                            break
+                        wall = (time.monotonic() - t0) * 1000
+                        total_wall += wall
+                        try:
+                            out_path.unlink(missing_ok=True)
+                        except OSError:
+                            pass
+                        if proc.returncode != 0:
+                            stderr = (proc.stderr or proc.stdout or "").strip()[-200:]
+                            with self_self._lock:
+                                self_self._error = f"第 {idx+1} 张失败: {stderr}"
+                            print(f"[ML-KEM] image {idx} failed rc={proc.returncode}: {stderr[:150]}")
+                            break
+                        with self_self._lock:
+                            self_self._completed = idx + 1
+                            self_self._total_ms = total_wall
+                            ms = _MlkemJob._parse_stdout(proc.stdout or "")
+                            if ms.get("stages"):
+                                all_stages = ms["stages"]
+                            if ms.get("sha_match") is not None:
+                                last_sha = ms["sha_match"]
+                    # 写 final snapshot
+                    with self_self._lock:
+                        self_self._stages_summary = all_stages
+                        self_self._sha_match = last_sha
+                        is_ok = self_self._completed == self_self._max and self_self._error is None
+                        self_self._final_snapshot = {
+                            "status": "success" if is_ok else "fallback",
+                            "request_state": "completed",
+                            "status_category": "success" if is_ok else "fallback",
+                            "execution_mode": "live" if is_ok else "fallback",
+                            "variant": self_self._variant,
+                            "message": (
+                                "Current 已通过 ML-KEM 安全信道完成 300 张加密传输与板端执行。"
+                                if is_ok
+                                else f"ML-KEM 推理中断（已完成 {self_self._completed}/{self_self._max}），已回退。"
+                            ),
+                            "control_transport": "mlkem",
+                            "control_handshake_complete": True,
+                            "runner_summary": {
+                                "processed_count": self_self._completed,
+                                "input_count": self_self._max,
+                                "max_inputs": self_self._max,
+                                "total_ms": round(total_wall, 3),
+                            },
+                            "wrapper_summary": {
+                                "total_ms": round(total_wall, 3),
+                                "sha_match": last_sha,
+                            },
+                            "diagnostics": {"control_preflight": self_self._preflight},
+                            "progress": {
+                                "state": "completed" if is_ok else "fallback",
+                                "label": "ML-KEM 加密推理完成" if is_ok else "ML-KEM 推理中断",
+                                "tone": "online" if is_ok else "degraded",
+                                "percent": 100 if is_ok else int(round(self_self._completed / self_self._max * 100)),
+                                "phase_percent": 100,
+                                "completed_count": self_self._completed,
+                                "expected_count": self_self._max,
+                                "remaining_count": self_self._max - self_self._completed,
+                                "completion_ratio": round(self_self._completed / self_self._max, 4) if self_self._max > 0 else 0.0,
+                                "count_source": "mlkem_live",
+                                "count_label": f"{self_self._completed} / {self_self._max}",
+                                "current_stage": "加密推理完成" if is_ok else "推理中断",
+                                "stages": [{"key": "mlkem_live_done", "label": "ML-KEM 全链路", "status": "done" if is_ok else "error",
+                                             "detail": f"wall={round(total_wall, 1)}ms, sha_match={last_sha}"}],
+                                "event_log": [] if is_ok else [f"error: {self_self._error}"],
+                            },
+                            "artifacts": [],
                         }
-                    ],
-                    "event_log": [
-                        f"job_id={job_id}",
-                        f"backend={crypto_status.get('kem_backend') or metrics.get('backend') or 'unknown'}",
-                        f"suite={crypto_status.get('cipher_suite') or metrics.get('suite') or 'unknown'}",
-                    ],
-                },
-            }
+                        # 推送事件
+                        self_self._app._event_spine.publish("JOB_DONE", source="inference", plane="data",
+                            mode_scope=DATA_MODE_SCOPE,
+                            message=f"ML-KEM live job {self_self.job_id} completed.",
+                            data={"variant": self_self._variant, "image_index": self_self._img_idx,
+                                  "total_ms": round(total_wall, 3), "sha256_match": last_sha,
+                                  "control_transport": "mlkem"})
+                        self_self._app._archive_event_snapshot(
+                            reason="mlkem_live_done", job_id=self_self.job_id,
+                            extra={"variant": self_self._variant, "completed": self_self._completed,
+                                  "total_ms": round(total_wall, 3)})
+                finally:
+                    try:
+                        input_path.unlink()
+                    except OSError:
+                        pass
+
+            @staticmethod
+            def _parse_stdout(stdout: str) -> dict[str, Any]:
+                metrics: dict[str, Any] = {}
+                for line in stdout.splitlines():
+                    text = line.strip()
+                    if "握手完成" in text:
+                        m = re.search(r"([\d.]+)\s*ms", text)
+                        if m:
+                            metrics.setdefault("stages", []).append(
+                                {"label": "ML-KEM 握手", "value_ms": round(float(m.group(1)), 3), "emphasis": "host"})
+                    elif "加密发送" in text:
+                        m = re.search(r"([\d.]+)\s*ms", text)
+                        if m:
+                            metrics.setdefault("stages", []).append(
+                                {"label": "AEAD 加密发送", "value_ms": round(float(m.group(1)), 3), "emphasis": "data"})
+                    elif "TVM 推理" in text or "解密结果" in text:
+                        m = re.search(r"([\d.]+)\s*ms", text)
+                        if m:
+                            metrics.setdefault("stages", []).append(
+                                {"label": "板端 TVM 推理", "value_ms": round(float(m.group(1)), 3), "emphasis": "board"})
+                    elif "SHA256 匹配" in text or "sha256" in text.lower():
+                        if "不匹配" not in text and "mismatch" not in text.lower():
+                            metrics["sha_match"] = True
+                return metrics
+
+        mlkem_job = _MlkemJob(
+            jid=mlkem_job_id, max_n=max_inputs, board=board_access,
+            env_vals=env_values, client_script=tcp_client, variant_name=variant,
+            img_idx=image_index, preflight_data=preflight, app_state=self,
         )
 
+        # 初始 "running" snapshot → 通过 _build_inference_response 生成 payload
+        running_snapshot = mlkem_job.snapshot()
+        record = {
+            "job": mlkem_job,
+            "job_id": mlkem_job_id,
+            "variant": variant,
+            "image_index": image_index,
+            "last_snapshot": dict(running_snapshot),
+        }
         with self._lock:
-            self._update_last_inference_summary(payload, variant)
+            self._inference_jobs[mlkem_job_id] = record
+
+        payload = self._build_inference_response(record, running_snapshot)
+        payload["source_label"] = "ML-KEM 全链路加密（控制+数据）"
+
+        # 启动后台推理线程
+        mlkem_job.start()
 
         self._event_spine.publish(
-            "JOB_SUBMITTED",
-            source="inference",
-            plane="control",
+            "JOB_SUBMITTED", source="inference", plane="control",
             mode_scope=CONTROL_MODE_SCOPE,
-            message=f"ML-KEM live job {job_id} submitted.",
+            message=f"ML-KEM live job {mlkem_job_id} submitted (300 images).",
             data={"variant": variant, "image_index": image_index, "control_transport": "mlkem"},
         )
         self._event_spine.publish(
-            "JOB_ADMITTED",
-            source="inference",
-            plane="control",
+            "JOB_ADMITTED", source="inference", plane="control",
             mode_scope=CONTROL_MODE_SCOPE,
-            message=f"ML-KEM live job {job_id} admitted.",
+            message=f"ML-KEM live job {mlkem_job_id} admitted.",
             data={"variant": variant, "image_index": image_index, "control_transport": "mlkem"},
         )
-        self._event_spine.publish(
-            "JOB_DONE",
-            source="inference",
-            plane="data",
-            mode_scope=DATA_MODE_SCOPE,
-            message=f"ML-KEM live job {job_id} completed.",
-            data={
-                "variant": variant,
-                "image_index": image_index,
-                "total_ms": total_ms,
-                "sha256_match": sha_match,
-                "control_transport": "mlkem",
-            },
-        )
-        self._archive_event_snapshot(
-            reason="mlkem_live_done",
-            job_id=job_id,
-            extra={
-                "variant": variant,
-                "image_index": image_index,
-                "total_ms": total_ms,
-                "sha256_match": sha_match,
-            },
-        )
 
-        try:
-            if output_path.exists() and output_path.stat().st_size == 0:
-                output_path.unlink()
-        except OSError:
-            pass
         return payload
 
     def run_demo_inference(
