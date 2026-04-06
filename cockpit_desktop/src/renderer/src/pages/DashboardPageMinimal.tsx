@@ -129,8 +129,6 @@ export function DashboardPageMinimal() {
   const currentStage = inferenceProgress?.data?.live_progress?.current_stage
     ?? lastCompletedInference?.live_progress?.current_stage
     ?? '等待触发'
-  const progressTone = inferenceProgress?.data?.live_progress?.tone
-    ?? lastCompletedInference?.live_progress?.tone
   const boardOnline = status?.live?.board_online ?? false
 
   return (
