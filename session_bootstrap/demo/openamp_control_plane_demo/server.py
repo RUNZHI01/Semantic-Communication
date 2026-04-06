@@ -22,9 +22,11 @@ from archive_replay import ArchiveSessionNotFoundError, list_archive_sessions, l
 from board_access import BoardAccessConfig, build_board_access_config, build_demo_default_board_access
 from board_probe import DEFAULT_LIVE_PROBE_OUTPUT, is_successful_probe, load_probe_output, run_live_probe, write_probe_output
 from crypto_runtime import (
+    DEFAULT_CIPHER_SUITE,
     DEFAULT_CRYPTO_PORT,
     DEFAULT_STATUS_PORT,
     STATUS_PORT_KEYS,
+    SUITE_KEYS,
     build_local_crypto_client_command,
     build_remote_crypto_server_command,
     first_config_value,
@@ -1874,7 +1876,7 @@ class DashboardState:
         import tempfile
 
         tmp = tempfile.NamedTemporaryFile(suffix=".bin", delete=False)
-        tmp.write(b"\0" * (1 * 3 * 64 * 64 * 4))
+        tmp.write(b"\0" * (1 * 32 * 32 * 32 * 4))
         tmp.close()
         tmp_path = Path(tmp.name)
 
@@ -2835,9 +2837,9 @@ class DashboardState:
 
         import tempfile
 
-        # 使用固定 shape 的测试 latent 触发真实 ML-KEM + AEAD 数据面链路。
+        # 使用 TVM 模型期望的 shape (1, 32, 32, 32) 触发真实 ML-KEM + AEAD 数据面链路。
         tmp_input = tempfile.NamedTemporaryFile(suffix=".bin", delete=False)
-        tmp_input.write(b"\0" * (1 * 3 * 64 * 64 * 4))
+        tmp_input.write(b"\0" * (1 * 32 * 32 * 32 * 4))
         tmp_input.close()
         input_path = Path(tmp_input.name)
         output_path = Path(tempfile.mkstemp(suffix=".bin", prefix="mlkem_result_")[1])
@@ -3578,87 +3580,98 @@ class DemoRequestHandler(SimpleHTTPRequestHandler):
         body = self.read_json_body()
         if body is None:
             return
-        if parsed.path == "/api/crypto-toggle":
-            enabled = bool(body.get("enabled", False))
-            payload = self.server.app_state.set_crypto_toggle(enabled)
-            self.respond_json(HTTPStatus.OK, {"status": "ok", **payload})
-            return
-        if parsed.path == "/api/crypto-test":
-            payload = self.server.app_state.run_crypto_test()
-            self.respond_json(HTTPStatus.OK, payload)
-            return
-        if parsed.path == "/api/session/board-access":
+        try:
+            if parsed.path == "/api/crypto-toggle":
+                enabled = bool(body.get("enabled", False))
+                payload = self.server.app_state.set_crypto_toggle(enabled)
+                self.respond_json(HTTPStatus.OK, {"status": "ok", **payload})
+                return
+            if parsed.path == "/api/crypto-test":
+                payload = self.server.app_state.run_crypto_test()
+                self.respond_json(HTTPStatus.OK, payload)
+                return
+            if parsed.path == "/api/session/board-access":
+                try:
+                    payload = self.server.app_state.set_board_access(body)
+                except ValueError as exc:
+                    self.respond_json(HTTPStatus.BAD_REQUEST, {"status": "error", "message": str(exc)})
+                    return
+                self.respond_json(HTTPStatus.OK, {"status": "ok", "board_access": payload})
+                return
+            if parsed.path == "/api/link-director/profile":
+                try:
+                    payload = self.server.app_state.set_link_director_profile(body)
+                except ValueError as exc:
+                    self.respond_json(HTTPStatus.BAD_REQUEST, {"status": "error", "message": str(exc)})
+                    return
+                self.respond_json(HTTPStatus.OK, payload)
+                return
+            if parsed.path == "/api/aircraft-position":
+                payload = self.server.app_state.set_aircraft_position(body)
+                self.respond_json(HTTPStatus.OK, payload)
+                return
+            if parsed.path == "/api/probe-board":
+                payload = self.server.app_state.refresh_live_probe()
+                self.respond_json(HTTPStatus.OK, payload)
+                return
+            if parsed.path == "/api/job-manifest-gate/preview":
+                try:
+                    variant = self.coerce_variant(body.get("variant"), default="current")
+                except ValueError as exc:
+                    self.respond_json(HTTPStatus.BAD_REQUEST, {"status": "error", "message": str(exc)})
+                    return
+                payload = self.server.app_state.preview_job_manifest_gate(variant=variant)
+                self.respond_json(HTTPStatus.OK, payload)
+                return
+            if parsed.path == "/api/run-inference":
+                image_index = self.coerce_int(body.get("image_index"), default=0)
+                variant = str(body.get("mode") or "current").strip().lower() or "current"
+                allow_preflight_degraded = bool(body.get("allow_preflight_degraded", True))
+                payload = self.server.app_state.run_demo_inference(
+                    variant=variant,
+                    image_index=image_index,
+                    allow_preflight_degraded=allow_preflight_degraded,
+                )
+                self.respond_json(HTTPStatus.OK, payload)
+                return
+            if parsed.path == "/api/run-baseline":
+                image_index = self.coerce_int(body.get("image_index"), default=0)
+                payload = self.server.app_state.run_demo_inference(variant="baseline", image_index=image_index)
+                self.respond_json(HTTPStatus.OK, payload)
+                return
+            if parsed.path == "/api/run-inference-batch":
+                count = self.coerce_int(body.get("count"), default=300)
+                count = max(1, min(count, 1000))
+                allow_degraded = bool(body.get("allow_preflight_degraded", True))
+                payload = self.server.app_state.start_batch_inference(
+                    count=count,
+                    allow_preflight_degraded=allow_degraded,
+                )
+                self.respond_json(HTTPStatus.OK, payload)
+                return
+            if parsed.path == "/api/inject-fault":
+                fault_type = str(body.get("fault_type") or "").strip()
+                if fault_type not in {"wrong_sha", "illegal_param", "heartbeat_timeout"}:
+                    self.respond_json(HTTPStatus.BAD_REQUEST, {"status": "error", "message": "unsupported fault_type"})
+                    return
+                payload = self.server.app_state.run_fault_demo(fault_type)
+                self.respond_json(HTTPStatus.OK, payload)
+                return
+            if parsed.path == "/api/recover":
+                payload = self.server.app_state.recover_fault()
+                self.respond_json(HTTPStatus.OK, payload)
+                return
+            self.send_error(HTTPStatus.NOT_FOUND)
+        except Exception as exc:
+            import traceback
+            traceback.print_exc()
             try:
-                payload = self.server.app_state.set_board_access(body)
-            except ValueError as exc:
-                self.respond_json(HTTPStatus.BAD_REQUEST, {"status": "error", "message": str(exc)})
-                return
-            self.respond_json(HTTPStatus.OK, {"status": "ok", "board_access": payload})
-            return
-        if parsed.path == "/api/link-director/profile":
-            try:
-                payload = self.server.app_state.set_link_director_profile(body)
-            except ValueError as exc:
-                self.respond_json(HTTPStatus.BAD_REQUEST, {"status": "error", "message": str(exc)})
-                return
-            self.respond_json(HTTPStatus.OK, payload)
-            return
-        if parsed.path == "/api/aircraft-position":
-            payload = self.server.app_state.set_aircraft_position(body)
-            self.respond_json(HTTPStatus.OK, payload)
-            return
-        if parsed.path == "/api/probe-board":
-            payload = self.server.app_state.refresh_live_probe()
-            self.respond_json(HTTPStatus.OK, payload)
-            return
-        if parsed.path == "/api/job-manifest-gate/preview":
-            try:
-                variant = self.coerce_variant(body.get("variant"), default="current")
-            except ValueError as exc:
-                self.respond_json(HTTPStatus.BAD_REQUEST, {"status": "error", "message": str(exc)})
-                return
-            payload = self.server.app_state.preview_job_manifest_gate(variant=variant)
-            self.respond_json(HTTPStatus.OK, payload)
-            return
-        if parsed.path == "/api/run-inference":
-            image_index = self.coerce_int(body.get("image_index"), default=0)
-            variant = str(body.get("mode") or "current").strip().lower() or "current"
-            allow_preflight_degraded = bool(body.get("allow_preflight_degraded", True))
-            payload = self.server.app_state.run_demo_inference(
-                variant=variant,
-                image_index=image_index,
-                allow_preflight_degraded=allow_preflight_degraded,
-            )
-            self.respond_json(HTTPStatus.OK, payload)
-            return
-        if parsed.path == "/api/run-baseline":
-            image_index = self.coerce_int(body.get("image_index"), default=0)
-            payload = self.server.app_state.run_demo_inference(variant="baseline", image_index=image_index)
-            self.respond_json(HTTPStatus.OK, payload)
-            return
-        if parsed.path == "/api/run-inference-batch":
-            count = self.coerce_int(body.get("count"), default=300)
-            count = max(1, min(count, 1000))
-            allow_degraded = bool(body.get("allow_preflight_degraded", True))
-            payload = self.server.app_state.start_batch_inference(
-                count=count,
-                allow_preflight_degraded=allow_degraded,
-            )
-            self.respond_json(HTTPStatus.OK, payload)
-            return
-        if parsed.path == "/api/inject-fault":
-            fault_type = str(body.get("fault_type") or "").strip()
-            if fault_type not in {"wrong_sha", "illegal_param", "heartbeat_timeout"}:
-                self.respond_json(HTTPStatus.BAD_REQUEST, {"status": "error", "message": "unsupported fault_type"})
-                return
-            payload = self.server.app_state.run_fault_demo(fault_type)
-            self.respond_json(HTTPStatus.OK, payload)
-            return
-        if parsed.path == "/api/recover":
-            payload = self.server.app_state.recover_fault()
-            self.respond_json(HTTPStatus.OK, payload)
-            return
-        self.send_error(HTTPStatus.NOT_FOUND)
+                self.respond_json(HTTPStatus.INTERNAL_SERVER_ERROR, {
+                    "status": "error",
+                    "message": f"{type(exc).__name__}: {exc}",
+                })
+            except Exception:
+                pass
 
     def end_headers(self) -> None:
         self.send_header("Cache-Control", "no-store")
