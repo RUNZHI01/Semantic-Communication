@@ -38,6 +38,7 @@ class MessageType(IntEnum):
     SIGNED_ADMISSION_SIGNATURE = 0x0E
     SIGNED_ADMISSION_COMMIT = 0x0F
     SIGNED_ADMISSION_ACK = 0x10
+    ENCRYPTED_CTRL = 0x20
 
 
 class Decision(IntEnum):

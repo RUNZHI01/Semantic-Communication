@@ -69,6 +69,8 @@ class DemoEventSpineTest(unittest.TestCase):
 
         self.assertEqual(summary["aggregate"]["jobs"]["submitted_count"], 1)
         self.assertEqual(summary["aggregate"]["jobs"]["rejected_count"], 1)
+        self.assertEqual(summary["aggregate"]["event_counters"]["JOB_SUBMITTED"], 1)
+        self.assertEqual(summary["aggregate"]["event_counters"]["JOB_REJECTED"], 1)
         self.assertEqual(
             [item["type"] for item in summary["recent_events"][:2]],
             ["JOB_REJECTED", "JOB_SUBMITTED"],

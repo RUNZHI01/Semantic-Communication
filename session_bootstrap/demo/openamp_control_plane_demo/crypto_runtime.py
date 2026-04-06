@@ -17,7 +17,7 @@ DEFAULT_CRYPTO_PORT = 9527
 DEFAULT_STATUS_PORT = 8080
 DEFAULT_OUTPUT_DIR = "/tmp/mlkem_recv"
 DEFAULT_LOG_PATH = "/tmp/tcp_server.log"
-DEFAULT_CIPHER_SUITE = "AES_256_GCM"
+DEFAULT_CIPHER_SUITE = "SM4_GCM"
 
 LOCAL_REPO_ROOT_KEYS = ("MLKEM_LOCAL_REPO_ROOT", "MLKEM_REPO_ROOT", "COCKPIT_REPO_ROOT")
 LOCAL_SCRIPT_ROOT_KEYS = ("MLKEM_SCRIPT_ROOT",)
@@ -34,7 +34,7 @@ REMOTE_CONDA_ENV_KEYS = ("MLKEM_REMOTE_CONDA_ENV",)
 REMOTE_LD_LIBRARY_KEYS = ("MLKEM_REMOTE_LD_LIBRARY_PATH",)
 REMOTE_TONGSUO_BRIDGE_KEYS = ("MLKEM_REMOTE_TONGSUO_KEM_BRIDGE",)
 REMOTE_PRELUDE_KEYS = ("MLKEM_REMOTE_PRELUDE", "MLKEM_REMOTE_EXTRA_ENV")
-REMOTE_PYTHON_KEYS = ("MLKEM_REMOTE_PYTHON", "REMOTE_TVM_PYTHON")
+REMOTE_PYTHON_KEYS = ("MLKEM_REMOTE_PYTHON",)
 REMOTE_ARTIFACT_KEYS = ("REMOTE_CURRENT_ARTIFACT",)
 REMOTE_TVM_PYTHON_KEYS = ("REMOTE_TVM_PYTHON",)
 REMOTE_TVM_ENABLE_KEYS = ("MLKEM_ENABLE_TVM", "MLKEM_REMOTE_ENABLE_TVM")
@@ -308,7 +308,10 @@ def build_remote_crypto_server_command(
     if explicit_command:
         return explicit_command
 
-    remote_python = first_config_value(env_values, keys=REMOTE_PYTHON_KEYS, default="python3")
+    remote_python = first_config_value(
+        env_values, keys=REMOTE_PYTHON_KEYS,
+        default="/home/user/anaconda3/envs/mlkem/bin/python",
+    )
     remote_server_script = _derive_remote_server_script(env_values, local_server_script=local_server_script)
     suite = first_config_value(env_values, keys=SUITE_KEYS, default=DEFAULT_CIPHER_SUITE)
     output_dir = first_config_value(env_values, keys=REMOTE_OUTPUT_DIR_KEYS, default=DEFAULT_OUTPUT_DIR)
@@ -331,6 +334,8 @@ def build_remote_crypto_server_command(
     ]
     if status_port_raw:
         server_argv.extend(["--status-port", str(parse_int_config(status_port_raw, DEFAULT_STATUS_PORT))])
+    else:
+        server_argv.extend(["--status-port", str(DEFAULT_STATUS_PORT)])
     if enable_tvm:
         server_argv.append("--tvm")
         remote_tvm_python = first_config_value(env_values, keys=REMOTE_TVM_PYTHON_KEYS)
@@ -343,10 +348,12 @@ def build_remote_crypto_server_command(
         server_argv.extend(["--snr", snr])
 
     command_steps: list[str] = []
+    # 仅在 remote_python 不是绝对路径时才需要 conda activate（绝对路径已自带环境，无需激活）
+    remote_python_is_abs = remote_python.startswith("/")
     activate_command = first_config_value(env_values, keys=REMOTE_ACTIVATE_KEYS)
-    if activate_command:
+    if activate_command and not remote_python_is_abs:
         command_steps.append(activate_command)
-    else:
+    elif not remote_python_is_abs:
         conda_env = first_config_value(env_values, keys=REMOTE_CONDA_ENV_KEYS)
         conda_sh = first_config_value(env_values, keys=REMOTE_CONDA_SH_KEYS)
         if conda_env and conda_sh:
@@ -375,8 +382,8 @@ def build_remote_crypto_server_command(
         command_steps.append(remote_prelude)
 
     server_command = " ".join(shlex.quote(str(arg)) for arg in server_argv)
-    command_steps.append(f"nohup {server_command} > {shlex.quote(log_path)} 2>&1 &")
-    return f"bash -lc {shlex.quote('; '.join(command_steps))}"
+    command_steps.append(f"nohup {server_command} </dev/null >> {shlex.quote(log_path)} 2>&1 &")
+    return f"bash -c {shlex.quote('; '.join(command_steps))}"
 
 
 def run_ssh_command(

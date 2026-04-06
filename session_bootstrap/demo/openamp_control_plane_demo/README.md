@@ -193,6 +193,55 @@ bash ./session_bootstrap/scripts/run_openamp_demo_probe_once.sh \
 
 The helper stays honest about snapshot freshness. If the capture still says `保存的只读 SSH 探板` and the summary says the result comes from a saved record, treat that as saved-probe replay rather than claiming a fresh startup probe succeeded.
 
+If you want a non-interactive, one-shot ML-KEM live closure (startup -> board session -> crypto ON -> current inference -> summary capture), use:
+
+```bash
+bash ./session_bootstrap/scripts/run_openamp_demo_mlkem_once.sh --prompt-password
+```
+
+Default behavior:
+
+- binds a temporary demo backend on `127.0.0.1:18089`
+- injects board session (`host/user/password/port`) via `/api/session/board-access`
+- enables ML-KEM toggle via `/api/crypto-toggle`
+- triggers one `current` launch via `/api/run-inference`
+- if backend returns `running`, polls `/api/inference-progress` until completion
+- captures `/api/crypto-status`, `/api/system-status`, `/api/event-spine`
+- writes artifacts under `session_bootstrap/tmp/openamp_demo_mlkem_once_<timestamp>/`
+
+By default, the helper exits non-zero if the final inference is not `status=success`, `status_category=success`, and `execution_mode=live`. For rehearsal mode where fallback is acceptable, add `--allow-fallback`.
+
+For full-batch verification (e.g. all 300 images through ML-KEM live path), use:
+
+```bash
+bash ./session_bootstrap/scripts/run_openamp_demo_mlkem_batch.sh --prompt-password --count 300
+```
+
+Batch helper behavior:
+
+- launches the demo backend once, reuses the same board session and crypto toggle
+- iterates `image_index` in `[start_index, start_index + count)`
+- records per-item results to `batch_results.jsonl`
+- writes aggregate `batch_summary.json` and top-level `summary.json`
+- exits non-zero by default if not all items are `status=success`, `status_category=success`, `execution_mode=live`
+
+If OpenAMP control STATUS preflight becomes unstable during long runs but you still need to finish data-plane encryption evidence collection on the same day, you can enable:
+
+```bash
+--allow-control-preflight-degraded
+```
+
+This keeps ML-KEM data-plane execution running when control preflight times out. Keep this mode explicitly marked as an operator override in evidence notes.
+
+Example with explicit output dir:
+
+```bash
+bash ./session_bootstrap/scripts/run_openamp_demo_mlkem_batch.sh \
+  --prompt-password \
+  --count 300 \
+  --output-dir ./session_bootstrap/tmp/openamp_demo_mlkem_batch_full300
+```
+
 Direct checker usage still works when needed:
 
 ```bash

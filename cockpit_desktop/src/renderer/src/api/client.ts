@@ -16,7 +16,7 @@ import type {
   RunInferenceResponse,
   SystemStatusResponse,
 } from './types'
-import type { CryptoStatusResponse, CryptoTestResult } from './types/crypto'
+import type { BatchInferenceResponse, BatchStateResponse, CryptoStatusResponse, CryptoTestResult } from './types/crypto'
 
 /** Vite dev server proxies /api → Python；生产直连本机（CORS 已开）。 */
 const runtimeBackendUrl = window.cockpit?.backendUrl?.replace(/\/+$/, '') ?? ''
@@ -166,4 +166,15 @@ export async function postCryptoToggle(enabled: boolean): Promise<{ status: stri
 
 export async function postCryptoTest(): Promise<CryptoTestResult> {
   return postJson<CryptoTestResult>('/api/crypto-test', {})
+}
+
+export async function postRunInferenceBatch(count = 300): Promise<BatchInferenceResponse> {
+  return postJson<BatchInferenceResponse>('/api/run-inference-batch', { count, allow_preflight_degraded: true })
+}
+
+export async function getBatchState(): Promise<BatchStateResponse> {
+  const r = await fetch(`${API_PREFIX}/api/batch-state`)
+  const d = await readJson<BatchStateResponse & { message?: string }>(r)
+  throwIfNotOk(r, d)
+  return d
 }

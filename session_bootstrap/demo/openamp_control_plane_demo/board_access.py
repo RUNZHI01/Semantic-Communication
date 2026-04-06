@@ -650,6 +650,9 @@ def build_demo_default_board_access(
         value = str(inference_env_values.get(key) or "").strip()
         if value and not str(startup_env_values.get(key) or "").strip():
             startup_env_values[key] = value
+    if not str(startup_env_values.get("MLKEM_REMOTE_PYTHON") or "").strip():
+        # Prefer the board-side conda mlkem runtime for ML-KEM control/data plane helpers.
+        startup_env_values["MLKEM_REMOTE_PYTHON"] = "/home/user/anaconda3/envs/mlkem/bin/python"
     remote_project_root = discover_validated_openamp_remote_project_root()
     if (
         remote_project_root

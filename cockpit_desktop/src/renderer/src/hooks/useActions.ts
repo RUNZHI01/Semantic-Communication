@@ -8,6 +8,7 @@ import {
   postLinkDirectorProfile,
   postBoardAccess,
   postJobManifestGatePreview,
+  postRunInferenceBatch,
 } from '../api/client'
 import { useAppStore } from '../stores/appStore'
 
@@ -28,11 +29,16 @@ export function useProbeBoard() {
 export function useRunInference() {
   const inv = useInvalidateOnSuccess()
   const setActiveJobId = useAppStore((s) => s.setActiveJobId)
+  const setLastCompletedInference = useAppStore((s) => s.setLastCompletedInference)
   return useMutation({
     mutationFn: ({ imageIndex, variant }: { imageIndex?: number; variant?: string }) =>
       postRunInference(imageIndex, variant),
     onSuccess: (data) => {
       inv()
+      // ML-KEM 同步完成时 request_state=completed，直接持久化结果
+      if (data.request_state === 'completed') {
+        setLastCompletedInference(data)
+      }
       if (data.job_id) setActiveJobId(data.job_id)
     },
   })
@@ -83,6 +89,14 @@ export function useGatePreview() {
   const inv = useInvalidateOnSuccess()
   return useMutation({
     mutationFn: (variant: string) => postJobManifestGatePreview(variant),
+    onSuccess: inv,
+  })
+}
+
+export function useRunInferenceBatch() {
+  const inv = useInvalidateOnSuccess()
+  return useMutation({
+    mutationFn: ({ count }: { count?: number } = {}) => postRunInferenceBatch(count ?? 300),
     onSuccess: inv,
   })
 }

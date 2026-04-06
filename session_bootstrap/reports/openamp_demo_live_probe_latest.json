@@ -1,23 +1,28 @@
 {
-  "requested_at": "2026-04-04T19:21:42+0800",
+  "requested_at": "2026-04-06T21:51:11+0800",
   "reachable": true,
   "status": "success",
   "status_category": "success",
-  "summary": "Phytium-Pi reachable; remoteproc0=offline; 0 rpmsg device(s); firmware ef14bc26c4f6.",
+  "summary": "Phytium-Pi reachable; remoteproc0=running; 2 rpmsg device(s); firmware ef14bc26c4f6.",
   "error": "",
   "details": {
-    "captured_at": "2026-04-04T19:21:46+0800",
+    "captured_at": "2026-04-06T21:51:13+0800",
     "hostname": "Phytium-Pi",
     "whoami": "user",
     "remoteproc": [
       {
         "name": "remoteproc0",
-        "state": "offline",
+        "state": "running",
         "firmware": "openamp_core0.elf"
       }
     ],
-    "rpmsg_devices": [],
-    "rpmsg_channels": [],
+    "rpmsg_devices": [
+      "/dev/rpmsg0",
+      "/dev/rpmsg_ctrl0"
+    ],
+    "rpmsg_channels": [
+      "rpmsg-openamp-demo-channel"
+    ],
     "firmware": {
       "path": "/lib/firmware/openamp_core0.elf",
       "exists": true,

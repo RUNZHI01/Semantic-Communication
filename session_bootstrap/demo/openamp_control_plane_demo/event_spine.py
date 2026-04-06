@@ -121,6 +121,7 @@ class EventStateStore:
             "event_count": 0,
             "last_event_at": "",
             "last_event_type": "",
+            "event_counters": {event_type: 0 for event_type in EVENT_TYPES},
             "link_profile": {
                 "selected_profile_id": "normal",
                 "selected_profile_label": "正常链路",
@@ -176,6 +177,9 @@ class EventStateStore:
         self._aggregate["event_count"] += 1
         self._aggregate["last_event_at"] = timestamp
         self._aggregate["last_event_type"] = event_type
+        counters = self._aggregate.get("event_counters")
+        if isinstance(counters, dict):
+            counters[event_type] = int(counters.get(event_type, 0)) + 1
 
         job_record: dict[str, Any] | None = None
         if job_id:

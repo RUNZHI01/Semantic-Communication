@@ -11,6 +11,7 @@ import {
   useInjectFault,
   useRecover,
   useSwitchLinkProfile,
+  useRunInferenceBatch,
 } from '../hooks/useActions';
 import { FlightPanel } from '../components/dashboard/FlightPanel';
 import { SidebarPanel } from '../components/dashboard/SidebarPanel';
@@ -39,6 +40,7 @@ export function DashboardPage() {
   const faultMut = useInjectFault();
   const recoverMut = useRecover();
   const linkMut = useSwitchLinkProfile();
+  const batchMut = useRunInferenceBatch();
 
   const handleRunInference = useMemo(
     () => () => inferenceMut.mutate({ imageIndex: 0, variant: 'current' }),
@@ -111,6 +113,8 @@ export function DashboardPage() {
           faultPending={faultMut.isPending}
           onRecover={() => recoverMut.mutate()}
           recoverPending={recoverMut.isPending}
+          onRunBatch={() => batchMut.mutate({})}
+          batchPending={batchMut.isPending}
         />
       </div>
     </PageTransition>

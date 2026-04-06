@@ -22,9 +22,11 @@ from archive_replay import ArchiveSessionNotFoundError, list_archive_sessions, l
 from board_access import BoardAccessConfig, build_board_access_config, build_demo_default_board_access
 from board_probe import DEFAULT_LIVE_PROBE_OUTPUT, is_successful_probe, load_probe_output, run_live_probe, write_probe_output
 from crypto_runtime import (
+    DEFAULT_CIPHER_SUITE,
     DEFAULT_CRYPTO_PORT,
     DEFAULT_STATUS_PORT,
     STATUS_PORT_KEYS,
+    SUITE_KEYS,
     build_local_crypto_client_command,
     build_remote_crypto_server_command,
     first_config_value,
@@ -60,6 +62,7 @@ from inference_runner import (
     describe_demo_admission,
     describe_demo_variant_support,
     expected_sha_for_variant,
+    generate_live_job_id,
     launch_remote_reconstruction_job,
     load_signed_manifest_summary,
 )
@@ -759,6 +762,28 @@ def default_link_director_state() -> dict[str, Any]:
     }
 
 
+def _compute_benchmark(samples: dict[str, list[float]]) -> dict[str, Any]:
+    """从样本列表计算 min/max/mean/median，用于 batch benchmark 汇总。"""
+    import statistics
+
+    result: dict[str, Any] = {}
+    for key, values in samples.items():
+        if not values:
+            result[key] = None
+            continue
+        sorted_vals = sorted(values)
+        n = len(sorted_vals)
+        result[key] = {
+            "n": n,
+            "min_ms": round(sorted_vals[0], 2),
+            "max_ms": round(sorted_vals[-1], 2),
+            "mean_ms": round(statistics.mean(sorted_vals), 2),
+            "median_ms": round(statistics.median(sorted_vals), 2),
+            "p95_ms": round(sorted_vals[int(n * 0.95)], 2) if n >= 20 else None,
+        }
+    return result
+
+
 class DashboardState:
     def __init__(
         self,
@@ -789,6 +814,11 @@ class DashboardState:
         self._crypto_status_cache: dict[str, Any] | None = None
         self._crypto_status_cache_ts: float = 0.0
         self._crypto_enabled: bool = False
+        self._last_soft_recover_ts: float = 0.0
+        self._soft_recover_cooldown_sec: float = 45.0
+        self._last_soft_recover_result: dict[str, Any] | None = None
+        # ── 批量推理状态 ──
+        self._batch_state: dict[str, Any] | None = None
 
         cached_probe = load_probe_output(probe_cache_path) if probe_cache_path else None
         if is_successful_probe(cached_probe):
@@ -812,6 +842,16 @@ class DashboardState:
         config = build_board_access_config(payload, fallback=fallback)
         with self._lock:
             self._board_access = config
+            crypto_enabled = self._crypto_enabled
+        # 密码录入后立即在后台尝试启动板端 tcp_server，无需等待 toggle ON 或首次推理
+        if config.connection_ready:
+            import threading
+            threading.Thread(
+                target=self._ensure_board_tcp_server,
+                args=(config,),
+                daemon=True,
+                name="tcp-server-autostart",
+            ).start()
         return config.to_public_dict()
 
     def _merged_aircraft_position_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1506,6 +1546,7 @@ class DashboardState:
         3. 请求板卡 :8080/status → 成功则缓存并返回
         4. 请求失败 → 保留上次正常值，只更新 error 字段
         """
+        control_summary = self._control_plane_summary()
         _disabled = {
             "channel_state": "disabled",
             "kem_backend": "-",
@@ -1522,17 +1563,31 @@ class DashboardState:
             "error": None,
             "enabled": False,
             "board_configured": False,
+            **control_summary,
         }
 
         with self._lock:
             board_access = self._board_access
             if not self._crypto_enabled:
                 bc = bool(board_access and board_access.connection_ready)
-                return {**_disabled, "board_configured": bc}
+                return {**_disabled, "board_configured": bc, "batch_benchmark": None}
             cached = self._crypto_status_cache
             cache_ts = self._crypto_status_cache_ts
             if cached is not None and (time.monotonic() - cache_ts) < 1.5:
-                return {**cached, "enabled": True}
+                batch = self._batch_state
+                bm = batch.get("benchmark") if batch else None
+                bs = batch.get("status") if batch else None
+                bc_completed = batch.get("completed", 0) if batch else 0
+                bc_total = batch.get("total", 0) if batch else 0
+                return {
+                    **cached,
+                    "enabled": True,
+                    **control_summary,
+                    "batch_benchmark": bm,
+                    "batch_status": bs,
+                    "batch_completed": bc_completed,
+                    "batch_total": bc_total,
+                }
 
         board_configured = bool(board_access and board_access.connection_ready)
 
@@ -1553,6 +1608,11 @@ class DashboardState:
                 "error": "board_not_configured",
                 "enabled": True,
                 "board_configured": False,
+                "batch_benchmark": None,
+                "batch_status": None,
+                "batch_completed": 0,
+                "batch_total": 0,
+                **control_summary,
             }
 
         host = board_access.host
@@ -1566,17 +1626,33 @@ class DashboardState:
             data = fetch_json_direct(url, timeout=3)
             data["enabled"] = True
             data["board_configured"] = True
+            data.update(control_summary)
             with self._lock:
                 self._crypto_status_cache = data
                 self._crypto_status_cache_ts = time.monotonic()
+                batch = self._batch_state
+            data["batch_benchmark"] = batch.get("benchmark") if batch else None
+            data["batch_status"] = batch.get("status") if batch else None
+            data["batch_completed"] = batch.get("completed", 0) if batch else 0
+            data["batch_total"] = batch.get("total", 0) if batch else 0
             return data
         except (URLError, OSError, json.JSONDecodeError, TimeoutError) as exc:
             # 保留上次正常值，只更新 error
             with self._lock:
                 prev = self._crypto_status_cache
+                batch = self._batch_state
             if prev is not None:
-                fallback = {**prev, "enabled": True, "board_configured": True,
-                           "error": f"board not reachable: {exc}"}
+                fallback = {
+                    **prev,
+                    "enabled": True,
+                    "board_configured": True,
+                    "error": f"board not reachable: {exc}",
+                    "batch_benchmark": batch.get("benchmark") if batch else None,
+                    "batch_status": batch.get("status") if batch else None,
+                    "batch_completed": batch.get("completed", 0) if batch else 0,
+                    "batch_total": batch.get("total", 0) if batch else 0,
+                    **control_summary,
+                }
                 with self._lock:
                     self._crypto_status_cache = fallback
                     self._crypto_status_cache_ts = time.monotonic()
@@ -1598,11 +1674,81 @@ class DashboardState:
                 "error": f"board not reachable: {exc}",
                 "enabled": True,
                 "board_configured": True,
+                "batch_benchmark": None,
+                "batch_status": None,
+                "batch_completed": 0,
+                "batch_total": 0,
+                **control_summary,
             }
             with self._lock:
                 self._crypto_status_cache = cold
                 self._crypto_status_cache_ts = time.monotonic()
             return cold
+
+    def _control_plane_summary(self) -> dict[str, Any]:
+        with self._lock:
+            control_status = dict(self._last_control_status or {})
+            soft_recover = dict(self._last_soft_recover_result or {})
+        event_summary = self._event_spine.summary(limit=1)
+        aggregate = event_summary.get("aggregate") if isinstance(event_summary, dict) else {}
+        event_counters = aggregate.get("event_counters") if isinstance(aggregate, dict) else {}
+        if not isinstance(event_counters, dict):
+            event_counters = {}
+
+        heartbeat_ok_events = self._safe_int(event_counters.get("HEARTBEAT_OK"), default=0)
+        heartbeat_lost_events = self._safe_int(event_counters.get("HEARTBEAT_LOST"), default=0)
+        safe_stop_triggered_events = self._safe_int(event_counters.get("SAFE_STOP_TRIGGERED"), default=0)
+        safe_stop_cleared_events = self._safe_int(event_counters.get("SAFE_STOP_CLEARED"), default=0)
+        return {
+            "control_guard_state": str(control_status.get("guard_state") or "UNKNOWN"),
+            "control_last_fault_code": str(control_status.get("last_fault_code") or "UNKNOWN"),
+            "control_heartbeat_ok": self._safe_int(control_status.get("heartbeat_ok"), default=0),
+            "control_total_fault_count": self._safe_int(control_status.get("total_fault_count"), default=0),
+            "control_job_req_count": self._safe_int(event_counters.get("JOB_SUBMITTED"), default=0),
+            "control_job_admit_count": self._safe_int(event_counters.get("JOB_ADMITTED"), default=0),
+            "control_job_reject_count": self._safe_int(event_counters.get("JOB_REJECTED"), default=0),
+            "control_heartbeat_event_count": heartbeat_ok_events + heartbeat_lost_events,
+            "control_heartbeat_lost_count": heartbeat_lost_events,
+            "control_safe_stop_triggered_count": safe_stop_triggered_events,
+            "control_safe_stop_cleared_count": safe_stop_cleared_events,
+            "control_recover_attempted": bool(soft_recover),
+            "control_recover_note": str(soft_recover.get("note") or ""),
+        }
+
+    def _maybe_soft_recover_control_plane(
+        self,
+        board_access: BoardAccessConfig,
+        *,
+        trusted_sha: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        now = time.monotonic()
+        with self._lock:
+            elapsed = now - self._last_soft_recover_ts
+            cooldown = self._soft_recover_cooldown_sec
+        if elapsed < cooldown:
+            note = f"soft recover skipped by cooldown ({cooldown - elapsed:.1f}s left)"
+            return {"attempted": False, "note": note}
+
+        recover_result = run_recover_action(board_access, trusted_sha=trusted_sha)
+        status_probe = query_live_status(board_access, trusted_sha=trusted_sha)
+        attempted = {
+            "attempted": True,
+            "reason": reason,
+            "recover_status": str(recover_result.get("status") or ""),
+            "probe_status": str(status_probe.get("status") or ""),
+            "note": "soft recover attempted before deciding to block",
+        }
+        with self._lock:
+            self._last_soft_recover_ts = time.monotonic()
+            self._last_soft_recover_result = attempted
+            if recover_result.get("status") == "success":
+                self._last_control_status = recover_result
+            if status_probe.get("status") == "success":
+                self._last_control_status = status_probe
+        if status_probe.get("status") == "success":
+            self._emit_status_observation_events(status_probe, source="soft_recover_retry")
+        return {**attempted, "recover_result": recover_result, "status_retry": status_probe}
 
     def set_crypto_toggle(self, enabled: bool) -> dict[str, Any]:
         """设置 ML-KEM 开关状态
@@ -1615,7 +1761,13 @@ class DashboardState:
             board_access = self._board_access
 
         if enabled and board_access and board_access.connection_ready:
-            self._ensure_board_tcp_server(board_access)
+            import threading
+            threading.Thread(
+                target=self._ensure_board_tcp_server,
+                args=(board_access,),
+                daemon=True,
+                name="tcp-server-toggle-start",
+            ).start()
 
         return {"enabled": enabled}
 
@@ -1631,12 +1783,45 @@ class DashboardState:
             DEFAULT_STATUS_PORT,
         )
 
-        # 1) 检测 status 端口是否响应
+        # 1) 检测 status 端口是否响应，并验证密码套件是否匹配
+        expected_suite = first_config_value(env_values, keys=SUITE_KEYS, default=DEFAULT_CIPHER_SUITE).lower().replace("_", "-")
+        # AES_256_GCM → aes-256-gcm, SM4_GCM → sm4-gcm
         try:
-            fetch_json_direct(f"http://{host}:{status_port}/status", timeout=2)
-            return  # 已经在运行
+            status = fetch_json_direct(f"http://{host}:{status_port}/status", timeout=2)
+            running_suite = str(status.get("cipher_suite") or "").lower()
+            if running_suite and running_suite == expected_suite:
+                return  # 已在运行且套件匹配
+            if running_suite and running_suite != expected_suite:
+                print(f"[ML-KEM auto-start] 套件不匹配 (running={running_suite}, expected={expected_suite})，重启板端 tcp_server")
+                # kill 旧进程
+                run_ssh_command(
+                    host=host, user=user, password=password, port=ssh_port,
+                    remote_command="pkill -f 'tcp_server.py' || true",
+                    timeout=8,
+                )
+                import time as _time; _time.sleep(1)
         except Exception:
             pass  # 没运行，继续启动
+
+        # 1b) 若进程已在运行但 status 不通，等一下再试
+        try:
+            pgrep_proc = run_ssh_command(
+                host=host,
+                user=user,
+                password=password,
+                port=ssh_port,
+                remote_command="pgrep -af 'tcp_server.py' || true",
+                timeout=8,
+            )
+            if pgrep_proc.returncode == 0 and (pgrep_proc.stdout or "").strip():
+                for _ in range(4):
+                    try:
+                        fetch_json_direct(f"http://{host}:{status_port}/status", timeout=2)
+                        return
+                    except Exception:
+                        time.sleep(0.8)
+        except Exception:
+            pass
 
         # 2) SSH 到板卡启动 tcp_server
         local_server_script, _ = resolve_local_crypto_server(env_values)
@@ -1652,11 +1837,18 @@ class DashboardState:
                 password=password,
                 port=ssh_port,
                 remote_command=remote_command,
-                timeout=15,
+                timeout=30,
             )
             if proc.returncode != 0:
                 error_output = proc.stderr.strip() or proc.stdout.strip() or "unknown error"
                 print(f"[ML-KEM auto-start] SSH failed: {error_output}")
+                return
+            for _ in range(6):
+                try:
+                    fetch_json_direct(f"http://{host}:{status_port}/status", timeout=2)
+                    return
+                except Exception:
+                    time.sleep(0.8)
         except Exception as exc:
             print(f"[ML-KEM auto-start] error: {exc}")
 
@@ -1685,7 +1877,7 @@ class DashboardState:
         import tempfile
 
         tmp = tempfile.NamedTemporaryFile(suffix=".bin", delete=False)
-        tmp.write(b"\0" * (1 * 3 * 64 * 64 * 4))
+        tmp.write(b"\0" * (1 * 32 * 32 * 32 * 4))
         tmp.close()
         tmp_path = Path(tmp.name)
 
@@ -2375,7 +2567,7 @@ class DashboardState:
         diagnostics: dict[str, Any],
         event_log: list[str] | None = None,
     ) -> dict[str, Any]:
-        payload = build_prerecorded_inference_result(image_index, variant)
+        payload = self._build_prerecorded_payload_safe(image_index=image_index, variant=variant)
         payload.update(
             {
                 "status": "fallback",
@@ -2396,8 +2588,514 @@ class DashboardState:
         )
         return payload
 
-    def run_demo_inference(self, *, variant: str, image_index: int) -> dict[str, Any]:
-        payload = build_prerecorded_inference_result(image_index, variant)
+    def _build_prerecorded_payload_safe(self, *, image_index: int, variant: str) -> dict[str, Any]:
+        """Return a prerecorded payload template, tolerating out-of-range indices.
+
+        Batch live runs can request many indices (e.g. 0..299), while prerecorded
+        assets are a smaller fixed subset. For live path accounting, we keep the
+        requested index and reuse a stable template when index is out of range.
+        """
+        try:
+            payload = build_prerecorded_inference_result(image_index, variant)
+        except IndexError:
+            payload = build_prerecorded_inference_result(0, variant)
+            payload["message"] = (
+                f"image_index={image_index} 超出预录样例范围，已复用 index=0 模板承载本次 live 结果。"
+            )
+        payload["image_index"] = image_index
+        return payload
+
+    def _parse_mlkem_client_metrics(self, stdout: str) -> dict[str, Any]:
+        metrics: dict[str, Any] = {
+            "handshake_ms": None,
+            "encrypt_ms": None,
+            "decrypt_ms": None,
+            "inference_ms": None,
+            "result_recv_ms": None,
+            "sha256_match": None,
+            "suite": "",
+            "backend": "",
+        }
+        for line in stdout.splitlines():
+            text = str(line).strip()
+            if not text:
+                continue
+            if text.startswith("密码套件:"):
+                metrics["suite"] = text.split(":", 1)[1].strip()
+            elif text.startswith("KEM 后端:"):
+                metrics["backend"] = text.split(":", 1)[1].strip()
+            elif "握手完成" in text:
+                m = re.search(r"([\d.]+)\s*ms", text)
+                if m:
+                    metrics["handshake_ms"] = float(m.group(1))
+            elif "加密发送" in text:
+                m = re.search(r"耗时\s*([\d.]+)\s*ms", text)
+                if m:
+                    metrics["encrypt_ms"] = float(m.group(1))
+            elif "接收重建结果" in text:
+                m = re.search(r"耗时\s*([\d.]+)\s*ms", text)
+                if m:
+                    metrics["result_recv_ms"] = float(m.group(1))
+                    metrics["decrypt_ms"] = metrics["result_recv_ms"]
+            elif "TVM 推理耗时" in text:
+                m = re.search(r"([\d.]+)\s*ms", text)
+                if m:
+                    metrics["inference_ms"] = float(m.group(1))
+            elif "对端 SHA256 匹配: 是" in text or "SHA256 匹配" in text:
+                metrics["sha256_match"] = True
+            elif "SHA256 不匹配" in text:
+                metrics["sha256_match"] = False
+        return metrics
+
+    # ── 批量推理 ──────────────────────────────────────────────────────────────
+
+    def get_batch_state(self) -> dict[str, Any]:
+        with self._lock:
+            state = self._batch_state
+        if state is None:
+            return {"status": "idle"}
+        return dict(state)
+
+    def start_batch_inference(self, *, count: int = 300, allow_preflight_degraded: bool = True) -> dict[str, Any]:
+        """在后台线程启动批量 ML-KEM 加密推理，返回 batch_job_id。"""
+        import threading
+
+        with self._lock:
+            existing = self._batch_state
+            if existing and existing.get("status") == "running":
+                return {"status": "already_running", "batch_job_id": existing.get("batch_job_id")}
+            batch_job_id = f"batch-{int(time.time())}-{count}"
+            self._batch_state = {
+                "status": "running",
+                "batch_job_id": batch_job_id,
+                "total": count,
+                "completed": 0,
+                "success": 0,
+                "fallback": 0,
+                "sha_match": 0,
+                "started_at": time.time(),
+                "finished_at": None,
+                # 各阶段计时样本列表（仅 live success 时记录）
+                "_samples": {
+                    "handshake_ms": [],
+                    "encrypt_ms": [],
+                    "decrypt_ms": [],
+                    "inference_ms": [],
+                    "total_ms": [],
+                },
+                "benchmark": None,
+            }
+
+        def _worker() -> None:
+            for i in range(count):
+                result = self.run_mlkem_inference(
+                    variant="current",
+                    image_index=i,
+                    allow_preflight_degraded=allow_preflight_degraded,
+                )
+                with self._lock:
+                    state = self._batch_state
+                    if state is None or state.get("status") != "running":
+                        break
+                    state["completed"] += 1
+                    is_live = result.get("execution_mode") == "live" and result.get("status") == "success"
+                    if is_live:
+                        state["success"] += 1
+                    else:
+                        state["fallback"] += 1
+                    if result.get("live_attempt", {}).get("metrics", {}).get("sha256_match"):
+                        state["sha_match"] += 1
+                    if is_live:
+                        m = result.get("live_attempt", {}).get("metrics", {})
+                        t = result.get("timings", {})
+                        samples = state["_samples"]
+                        for key in ("handshake_ms", "encrypt_ms", "decrypt_ms", "inference_ms"):
+                            v = m.get(key)
+                            if v is not None:
+                                samples[key].append(float(v))
+                        total = t.get("total_ms")
+                        if total is not None:
+                            samples["total_ms"].append(float(total))
+
+            with self._lock:
+                state = self._batch_state
+                if state is None:
+                    return
+                state["status"] = "done"
+                state["finished_at"] = time.time()
+                state["benchmark"] = _compute_benchmark(state["_samples"])
+
+        thread = threading.Thread(target=_worker, daemon=True)
+        thread.start()
+        return {"status": "started", "batch_job_id": batch_job_id, "total": count}
+
+    def run_mlkem_inference(
+        self,
+        *,
+        variant: str,
+        image_index: int,
+        allow_preflight_degraded: bool = False,
+    ) -> dict[str, Any]:
+        payload = self._build_prerecorded_payload_safe(image_index=image_index, variant=variant)
+        with self._lock:
+            board_access = self._board_access
+            crypto_enabled = self._crypto_enabled
+
+        if not crypto_enabled:
+            return self._build_blocked_inference_payload(
+                variant=variant,
+                image_index=image_index,
+                status_category="crypto_disabled",
+                source_label="ML-KEM 未启用，回退展示（归档样例）",
+                message="当前 ML-KEM 开关为 OFF，本次不发起加密推理。",
+                detail="启用安全信道后，Current 主路径才会走 ML-KEM 加密通道。",
+                diagnostics={"crypto_enabled": False},
+            )
+
+        if not (board_access and board_access.connection_ready):
+            return self._build_blocked_inference_payload(
+                variant=variant,
+                image_index=image_index,
+                status_category="config_error",
+                source_label="会话未配置，回退展示（归档样例）",
+                message="尚未录入完整板卡会话，无法发起 ML-KEM 推理。",
+                detail="请先补齐 host/user/password。",
+                diagnostics={"board_configured": False},
+            )
+
+        live_board_access = self._live_board_access_for_variant(board_access, variant=variant)
+        variant_expected_sha = expected_sha_for_variant(live_board_access, variant) or self._trusted_current_sha
+        preflight = query_live_status(board_access, trusted_sha=variant_expected_sha)
+        if preflight.get("status") != "success":
+            soft_recover = self._maybe_soft_recover_control_plane(
+                board_access,
+                trusted_sha=variant_expected_sha,
+                reason="mlkem_preflight_failed",
+            )
+            retry = soft_recover.get("status_retry") if isinstance(soft_recover.get("status_retry"), dict) else {}
+            if retry.get("status") == "success":
+                preflight = retry
+            else:
+                if allow_preflight_degraded:
+                    preflight = {
+                        "status": "degraded",
+                        "message": str(preflight.get("message") or "control preflight timeout"),
+                        "logs": list(preflight.get("logs") or []),
+                        "guard_state": "UNKNOWN",
+                        "last_fault_code": "UNKNOWN",
+                        "heartbeat_ok": 0,
+                        "total_fault_count": 0,
+                        "status_category": "control_preflight_degraded",
+                    }
+                else:
+                    return self._build_blocked_inference_payload(
+                        variant=variant,
+                        image_index=image_index,
+                        status_category="control_preflight_failed",
+                        source_label="控制面预检失败，回退展示（归档样例）",
+                        message="控制面 STATUS_REQ 预检失败，本次不继续 ML-KEM 推理。",
+                        detail=str(preflight.get("message") or "未拿到有效 STATUS_RESP"),
+                        diagnostics={"control_status": preflight, "soft_recover": soft_recover},
+                        event_log=list(preflight.get("logs") or []),
+                    )
+
+        with self._lock:
+            self._last_control_status = preflight
+        self._emit_status_observation_events(preflight, source="mlkem_preflight")
+
+        guard_state = str(preflight.get("guard_state") or "UNKNOWN").upper()
+        if guard_state == "JOB_ACTIVE":
+            active_job_id = int(preflight.get("active_job_id") or 0)
+            active_suffix = f" active_job_id={active_job_id}。" if active_job_id else ""
+            return self._build_blocked_inference_payload(
+                variant=variant,
+                image_index=image_index,
+                status_category="board_busy",
+                source_label="保守阻断（板端已有活动作业）",
+                message=(
+                    "板端当前 guard_state=JOB_ACTIVE，本次 ML-KEM 推理已保守阻断；"
+                    f"不会自动 SAFE_STOP。{active_suffix}"
+                ),
+                detail="STATUS_RESP 显示 guard_state=JOB_ACTIVE；未再发起新的加密推理。",
+                diagnostics={"control_status": preflight},
+                event_log=list(preflight.get("logs") or []),
+            )
+
+        env_values = board_access.build_env()
+        self._ensure_board_tcp_server(board_access)
+        tcp_client, searched_paths = resolve_local_crypto_client(env_values)
+        if tcp_client is None:
+            searched_text = ", ".join(str(path) for path in searched_paths[:5]) or "no candidate paths"
+            return self._build_blocked_inference_payload(
+                variant=variant,
+                image_index=image_index,
+                status_category="client_missing",
+                source_label="客户端缺失，回退展示（归档样例）",
+                message="tcp_client.py 未找到，无法执行 ML-KEM 推理主路径。",
+                detail=f"searched: {searched_text}",
+                diagnostics={"searched": searched_paths[:10]},
+            )
+
+        import tempfile
+        from threading import Thread
+
+        # ── 构建 ML-KEM 后台 job（和 SSH 路径一样：返回 running，后台推进） ──
+        mlkem_job_id = generate_live_job_id()
+        max_inputs = DEFAULT_MAX_INPUTS
+
+        class _MlkemJob:
+            """模拟 LiveRemoteReconstructionJob：后台线程逐张 ML-KEM 推理，前端轮询进度。"""
+            def __init__(self_self, jid: str, max_n: int, board: Any, env_vals: dict,
+                         client_script: str, variant_name: str, img_idx: int,
+                         preflight_data: dict, app_state: Any):
+                self_self.job_id = jid
+                self_self._max = max_n
+                self_self._board = board
+                self_self._env_vals = env_vals
+                self_self._client = client_script
+                self_self._variant = variant_name
+                self_self._img_idx = img_idx
+                self_self._preflight = preflight_data
+                self_self._app = app_state
+                self_self._lock = Lock()
+                self_self._completed = 0
+                self_self._final_snapshot: dict[str, Any] | None = None
+                self_self._stages_summary: list[dict[str, Any]] = []
+                self_self._total_ms = 0.0
+                self_self._sha_match: bool | None = None
+                self_self._error: str | None = None
+
+            def snapshot(self_self) -> dict:
+                with self_self._lock:
+                    if self_self._final_snapshot is not None:
+                        return dict(self_self._final_snapshot)
+                completed = self_self._completed
+                pct = int(round(completed / self_self._max * 100)) if self_self._max > 0 else 0
+                return {
+                    "status": "running",
+                    "request_state": "running",
+                    "status_category": "running",
+                    "execution_mode": "live",
+                    "variant": self_self._variant,
+                    "message": "ML-KEM 安全信道在线推进中…",
+                    "control_transport": "mlkem",
+                    "control_handshake_complete": True,
+                    "runner_summary": {"processed_count": completed, "input_count": self_self._max, "max_inputs": self_self._max},
+                    "wrapper_summary": {},
+                    "diagnostics": {"control_preflight": self_self._preflight},
+                    "progress": {
+                        "state": "running",
+                        "label": "ML-KEM 加密推理中",
+                        "tone": "online",
+                        "percent": pct,
+                        "phase_percent": pct,
+                        "completed_count": completed,
+                        "expected_count": self_self._max,
+                        "remaining_count": self_self._max - completed,
+                        "completion_ratio": round(completed / self_self._max, 4) if self_self._max > 0 else 0.0,
+                        "count_source": "mlkem_live",
+                        "count_label": f"{completed} / {self_self._max}",
+                        "current_stage": f"ML-KEM 加密推理 {completed}/{self_self._max}",
+                        "stages": [{"key": "mlkem_live", "label": "ML-KEM 全链路", "status": "current",
+                                     "detail": f"已完成 {completed}/{self_self._max}"}],
+                        "event_log": [],
+                    },
+                    "artifacts": [],
+                }
+
+            def start(self_self) -> None:
+                Thread(target=self_self._run_loop, daemon=True).start()
+
+            def _run_loop(self_self) -> None:
+                tmp_in = tempfile.NamedTemporaryFile(suffix=".bin", delete=False)
+                tmp_in.write(b"\0" * (1 * 32 * 32 * 32 * 4))
+                tmp_in.close()
+                input_path = Path(tmp_in.name)
+                try:
+                    cmd, env = build_local_crypto_client_command(
+                        self_self._env_vals, host=self_self._board.host,
+                        input_path=input_path, client_script=self_self._client,
+                    )
+                    cmd.extend(["--job-id", self_self.job_id])
+                    all_stages: list[dict[str, Any]] = []
+                    total_wall = 0.0
+                    last_sha: bool | None = None
+                    for idx in range(self_self._max):
+                        out_path = Path(tempfile.mkstemp(suffix=".bin", prefix="mlkem_result_")[1])
+                        run_cmd = list(cmd) + ["--output", str(out_path)]
+                        t0 = time.monotonic()
+                        try:
+                            proc = subprocess.run(run_cmd, capture_output=True, text=True, timeout=180, env=env)
+                        except subprocess.TimeoutExpired:
+                            with self_self._lock:
+                                self_self._error = f"第 {idx+1} 张超时"
+                            break
+                        wall = (time.monotonic() - t0) * 1000
+                        total_wall += wall
+                        try:
+                            out_path.unlink(missing_ok=True)
+                        except OSError:
+                            pass
+                        if proc.returncode != 0:
+                            stderr = (proc.stderr or proc.stdout or "").strip()[-200:]
+                            with self_self._lock:
+                                self_self._error = f"第 {idx+1} 张失败: {stderr}"
+                            print(f"[ML-KEM] image {idx} failed rc={proc.returncode}: {stderr[:150]}")
+                            break
+                        with self_self._lock:
+                            self_self._completed = idx + 1
+                            self_self._total_ms = total_wall
+                            ms = _MlkemJob._parse_stdout(proc.stdout or "")
+                            if ms.get("stages"):
+                                all_stages = ms["stages"]
+                            if ms.get("sha_match") is not None:
+                                last_sha = ms["sha_match"]
+                    # 写 final snapshot
+                    with self_self._lock:
+                        self_self._stages_summary = all_stages
+                        self_self._sha_match = last_sha
+                        is_ok = self_self._completed == self_self._max and self_self._error is None
+                        self_self._final_snapshot = {
+                            "status": "success" if is_ok else "fallback",
+                            "request_state": "completed",
+                            "status_category": "success" if is_ok else "fallback",
+                            "execution_mode": "live" if is_ok else "fallback",
+                            "variant": self_self._variant,
+                            "message": (
+                                "Current 已通过 ML-KEM 安全信道完成 300 张加密传输与板端执行。"
+                                if is_ok
+                                else f"ML-KEM 推理中断（已完成 {self_self._completed}/{self_self._max}），已回退。"
+                            ),
+                            "control_transport": "mlkem",
+                            "control_handshake_complete": True,
+                            "runner_summary": {
+                                "processed_count": self_self._completed,
+                                "input_count": self_self._max,
+                                "max_inputs": self_self._max,
+                                "total_ms": round(total_wall, 3),
+                            },
+                            "wrapper_summary": {
+                                "total_ms": round(total_wall, 3),
+                                "sha_match": last_sha,
+                            },
+                            "diagnostics": {"control_preflight": self_self._preflight},
+                            "progress": {
+                                "state": "completed" if is_ok else "fallback",
+                                "label": "ML-KEM 加密推理完成" if is_ok else "ML-KEM 推理中断",
+                                "tone": "online" if is_ok else "degraded",
+                                "percent": 100 if is_ok else int(round(self_self._completed / self_self._max * 100)),
+                                "phase_percent": 100,
+                                "completed_count": self_self._completed,
+                                "expected_count": self_self._max,
+                                "remaining_count": self_self._max - self_self._completed,
+                                "completion_ratio": round(self_self._completed / self_self._max, 4) if self_self._max > 0 else 0.0,
+                                "count_source": "mlkem_live",
+                                "count_label": f"{self_self._completed} / {self_self._max}",
+                                "current_stage": "加密推理完成" if is_ok else "推理中断",
+                                "stages": [{"key": "mlkem_live_done", "label": "ML-KEM 全链路", "status": "done" if is_ok else "error",
+                                             "detail": f"wall={round(total_wall, 1)}ms, sha_match={last_sha}"}],
+                                "event_log": [] if is_ok else [f"error: {self_self._error}"],
+                            },
+                            "artifacts": [],
+                        }
+                        # 推送事件
+                        self_self._app._event_spine.publish("JOB_DONE", source="inference", plane="data",
+                            mode_scope=DATA_MODE_SCOPE,
+                            message=f"ML-KEM live job {self_self.job_id} completed.",
+                            data={"variant": self_self._variant, "image_index": self_self._img_idx,
+                                  "total_ms": round(total_wall, 3), "sha256_match": last_sha,
+                                  "control_transport": "mlkem"})
+                        self_self._app._archive_event_snapshot(
+                            reason="mlkem_live_done", job_id=self_self.job_id,
+                            extra={"variant": self_self._variant, "completed": self_self._completed,
+                                  "total_ms": round(total_wall, 3)})
+                finally:
+                    try:
+                        input_path.unlink()
+                    except OSError:
+                        pass
+
+            @staticmethod
+            def _parse_stdout(stdout: str) -> dict[str, Any]:
+                metrics: dict[str, Any] = {}
+                for line in stdout.splitlines():
+                    text = line.strip()
+                    if "握手完成" in text:
+                        m = re.search(r"([\d.]+)\s*ms", text)
+                        if m:
+                            metrics.setdefault("stages", []).append(
+                                {"label": "ML-KEM 握手", "value_ms": round(float(m.group(1)), 3), "emphasis": "host"})
+                    elif "加密发送" in text:
+                        m = re.search(r"([\d.]+)\s*ms", text)
+                        if m:
+                            metrics.setdefault("stages", []).append(
+                                {"label": "AEAD 加密发送", "value_ms": round(float(m.group(1)), 3), "emphasis": "data"})
+                    elif "TVM 推理" in text or "解密结果" in text:
+                        m = re.search(r"([\d.]+)\s*ms", text)
+                        if m:
+                            metrics.setdefault("stages", []).append(
+                                {"label": "板端 TVM 推理", "value_ms": round(float(m.group(1)), 3), "emphasis": "board"})
+                    elif "SHA256 匹配" in text or "sha256" in text.lower():
+                        if "不匹配" not in text and "mismatch" not in text.lower():
+                            metrics["sha_match"] = True
+                return metrics
+
+        mlkem_job = _MlkemJob(
+            jid=mlkem_job_id, max_n=max_inputs, board=board_access,
+            env_vals=env_values, client_script=tcp_client, variant_name=variant,
+            img_idx=image_index, preflight_data=preflight, app_state=self,
+        )
+
+        # 初始 "running" snapshot → 通过 _build_inference_response 生成 payload
+        running_snapshot = mlkem_job.snapshot()
+        record = {
+            "job": mlkem_job,
+            "job_id": mlkem_job_id,
+            "variant": variant,
+            "image_index": image_index,
+            "last_snapshot": dict(running_snapshot),
+        }
+        with self._lock:
+            self._inference_jobs[mlkem_job_id] = record
+
+        payload = self._build_inference_response(record, running_snapshot)
+        payload["source_label"] = "ML-KEM 全链路加密（控制+数据）"
+
+        # 启动后台推理线程
+        mlkem_job.start()
+
+        self._event_spine.publish(
+            "JOB_SUBMITTED", source="inference", plane="control",
+            mode_scope=CONTROL_MODE_SCOPE,
+            message=f"ML-KEM live job {mlkem_job_id} submitted (300 images).",
+            data={"variant": variant, "image_index": image_index, "control_transport": "mlkem"},
+        )
+        self._event_spine.publish(
+            "JOB_ADMITTED", source="inference", plane="control",
+            mode_scope=CONTROL_MODE_SCOPE,
+            message=f"ML-KEM live job {mlkem_job_id} admitted.",
+            data={"variant": variant, "image_index": image_index, "control_transport": "mlkem"},
+        )
+
+        return payload
+
+    def run_demo_inference(
+        self,
+        *,
+        variant: str,
+        image_index: int,
+        allow_preflight_degraded: bool = False,
+    ) -> dict[str, Any]:
+        with self._lock:
+            crypto_enabled = self._crypto_enabled
+        if crypto_enabled and variant == "current":
+            return self.run_mlkem_inference(
+                variant=variant,
+                image_index=image_index,
+                allow_preflight_degraded=allow_preflight_degraded,
+            )
+
+        payload = self._build_prerecorded_payload_safe(image_index=image_index, variant=variant)
         event_record: dict[str, Any] | None = None
         with self._lock:
             board_access = self._board_access
@@ -2931,6 +3629,9 @@ class DemoRequestHandler(SimpleHTTPRequestHandler):
         if parsed.path == "/docs":
             self.respond_doc_view(parsed.query)
             return
+        if parsed.path == "/api/batch-state":
+            self.respond_json(HTTPStatus.OK, self.server.app_state.get_batch_state())
+            return
         if parsed.path == "/":
             self.path = "/index.html"
         super().do_GET()
@@ -2940,72 +3641,98 @@ class DemoRequestHandler(SimpleHTTPRequestHandler):
         body = self.read_json_body()
         if body is None:
             return
-        if parsed.path == "/api/crypto-toggle":
-            enabled = bool(body.get("enabled", False))
-            payload = self.server.app_state.set_crypto_toggle(enabled)
-            self.respond_json(HTTPStatus.OK, {"status": "ok", **payload})
-            return
-        if parsed.path == "/api/crypto-test":
-            payload = self.server.app_state.run_crypto_test()
-            self.respond_json(HTTPStatus.OK, payload)
-            return
-        if parsed.path == "/api/session/board-access":
+        try:
+            if parsed.path == "/api/crypto-toggle":
+                enabled = bool(body.get("enabled", False))
+                payload = self.server.app_state.set_crypto_toggle(enabled)
+                self.respond_json(HTTPStatus.OK, {"status": "ok", **payload})
+                return
+            if parsed.path == "/api/crypto-test":
+                payload = self.server.app_state.run_crypto_test()
+                self.respond_json(HTTPStatus.OK, payload)
+                return
+            if parsed.path == "/api/session/board-access":
+                try:
+                    payload = self.server.app_state.set_board_access(body)
+                except ValueError as exc:
+                    self.respond_json(HTTPStatus.BAD_REQUEST, {"status": "error", "message": str(exc)})
+                    return
+                self.respond_json(HTTPStatus.OK, {"status": "ok", "board_access": payload})
+                return
+            if parsed.path == "/api/link-director/profile":
+                try:
+                    payload = self.server.app_state.set_link_director_profile(body)
+                except ValueError as exc:
+                    self.respond_json(HTTPStatus.BAD_REQUEST, {"status": "error", "message": str(exc)})
+                    return
+                self.respond_json(HTTPStatus.OK, payload)
+                return
+            if parsed.path == "/api/aircraft-position":
+                payload = self.server.app_state.set_aircraft_position(body)
+                self.respond_json(HTTPStatus.OK, payload)
+                return
+            if parsed.path == "/api/probe-board":
+                payload = self.server.app_state.refresh_live_probe()
+                self.respond_json(HTTPStatus.OK, payload)
+                return
+            if parsed.path == "/api/job-manifest-gate/preview":
+                try:
+                    variant = self.coerce_variant(body.get("variant"), default="current")
+                except ValueError as exc:
+                    self.respond_json(HTTPStatus.BAD_REQUEST, {"status": "error", "message": str(exc)})
+                    return
+                payload = self.server.app_state.preview_job_manifest_gate(variant=variant)
+                self.respond_json(HTTPStatus.OK, payload)
+                return
+            if parsed.path == "/api/run-inference":
+                image_index = self.coerce_int(body.get("image_index"), default=0)
+                variant = str(body.get("mode") or "current").strip().lower() or "current"
+                allow_preflight_degraded = bool(body.get("allow_preflight_degraded", True))
+                payload = self.server.app_state.run_demo_inference(
+                    variant=variant,
+                    image_index=image_index,
+                    allow_preflight_degraded=allow_preflight_degraded,
+                )
+                self.respond_json(HTTPStatus.OK, payload)
+                return
+            if parsed.path == "/api/run-baseline":
+                image_index = self.coerce_int(body.get("image_index"), default=0)
+                payload = self.server.app_state.run_demo_inference(variant="baseline", image_index=image_index)
+                self.respond_json(HTTPStatus.OK, payload)
+                return
+            if parsed.path == "/api/run-inference-batch":
+                count = self.coerce_int(body.get("count"), default=300)
+                count = max(1, min(count, 1000))
+                allow_degraded = bool(body.get("allow_preflight_degraded", True))
+                payload = self.server.app_state.start_batch_inference(
+                    count=count,
+                    allow_preflight_degraded=allow_degraded,
+                )
+                self.respond_json(HTTPStatus.OK, payload)
+                return
+            if parsed.path == "/api/inject-fault":
+                fault_type = str(body.get("fault_type") or "").strip()
+                if fault_type not in {"wrong_sha", "illegal_param", "heartbeat_timeout"}:
+                    self.respond_json(HTTPStatus.BAD_REQUEST, {"status": "error", "message": "unsupported fault_type"})
+                    return
+                payload = self.server.app_state.run_fault_demo(fault_type)
+                self.respond_json(HTTPStatus.OK, payload)
+                return
+            if parsed.path == "/api/recover":
+                payload = self.server.app_state.recover_fault()
+                self.respond_json(HTTPStatus.OK, payload)
+                return
+            self.send_error(HTTPStatus.NOT_FOUND)
+        except Exception as exc:
+            import traceback
+            traceback.print_exc()
             try:
-                payload = self.server.app_state.set_board_access(body)
-            except ValueError as exc:
-                self.respond_json(HTTPStatus.BAD_REQUEST, {"status": "error", "message": str(exc)})
-                return
-            self.respond_json(HTTPStatus.OK, {"status": "ok", "board_access": payload})
-            return
-        if parsed.path == "/api/link-director/profile":
-            try:
-                payload = self.server.app_state.set_link_director_profile(body)
-            except ValueError as exc:
-                self.respond_json(HTTPStatus.BAD_REQUEST, {"status": "error", "message": str(exc)})
-                return
-            self.respond_json(HTTPStatus.OK, payload)
-            return
-        if parsed.path == "/api/aircraft-position":
-            payload = self.server.app_state.set_aircraft_position(body)
-            self.respond_json(HTTPStatus.OK, payload)
-            return
-        if parsed.path == "/api/probe-board":
-            payload = self.server.app_state.refresh_live_probe()
-            self.respond_json(HTTPStatus.OK, payload)
-            return
-        if parsed.path == "/api/job-manifest-gate/preview":
-            try:
-                variant = self.coerce_variant(body.get("variant"), default="current")
-            except ValueError as exc:
-                self.respond_json(HTTPStatus.BAD_REQUEST, {"status": "error", "message": str(exc)})
-                return
-            payload = self.server.app_state.preview_job_manifest_gate(variant=variant)
-            self.respond_json(HTTPStatus.OK, payload)
-            return
-        if parsed.path == "/api/run-inference":
-            image_index = self.coerce_int(body.get("image_index"), default=0)
-            variant = str(body.get("mode") or "current").strip().lower() or "current"
-            payload = self.server.app_state.run_demo_inference(variant=variant, image_index=image_index)
-            self.respond_json(HTTPStatus.OK, payload)
-            return
-        if parsed.path == "/api/run-baseline":
-            image_index = self.coerce_int(body.get("image_index"), default=0)
-            payload = self.server.app_state.run_demo_inference(variant="baseline", image_index=image_index)
-            self.respond_json(HTTPStatus.OK, payload)
-            return
-        if parsed.path == "/api/inject-fault":
-            fault_type = str(body.get("fault_type") or "").strip()
-            if fault_type not in {"wrong_sha", "illegal_param", "heartbeat_timeout"}:
-                self.respond_json(HTTPStatus.BAD_REQUEST, {"status": "error", "message": "unsupported fault_type"})
-                return
-            payload = self.server.app_state.run_fault_demo(fault_type)
-            self.respond_json(HTTPStatus.OK, payload)
-            return
-        if parsed.path == "/api/recover":
-            payload = self.server.app_state.recover_fault()
-            self.respond_json(HTTPStatus.OK, payload)
-            return
-        self.send_error(HTTPStatus.NOT_FOUND)
+                self.respond_json(HTTPStatus.INTERNAL_SERVER_ERROR, {
+                    "status": "error",
+                    "message": f"{type(exc).__name__}: {exc}",
+                })
+            except Exception:
+                pass
 
     def end_headers(self) -> None:
         self.send_header("Cache-Control", "no-store")
