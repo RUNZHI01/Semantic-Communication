@@ -88,6 +88,29 @@ frozen:
 This is still a local-only, diagnostic-only edit surface. It is not hook-facing
 and it is not performance evidence by itself.
 
+## Current follow-up candidates
+
+Later checked-in follow-ups keep the same post-db scheduled swap seam and only
+change the working-copy TIR they point at:
+
+- `fused_conv2d_transpose1_add9_scheduled_form_candidate_v7.py`:
+  current board-proven transpose1 baseline, remote median `156.785 ms`
+- `fused_conv2d_transpose1_add9_scheduled_form_candidate_v9.py`:
+  failed local proof branch that tried to carry the seam by rewriting shared
+  `data_pad` rows in place
+- `fused_conv2d_transpose1_add9_scheduled_form_candidate_v10.py`:
+  current local-proof follow-up that keeps the winning `v7` locality family but
+  routes the second `h_1` stripe through a disjoint consumer-facing current
+  buffer instead of shared `data_pad` writeback; the first full local proof on
+  `2026-04-06` still failed exactness against `v7`, so this branch is not ready
+  for board benchmarking
+
+The corresponding checked-in working-copy files are:
+
+- `fused_conv2d_transpose1_add9_scheduled_form_candidate_v7_working_copy_tir.py`
+- `fused_conv2d_transpose1_add9_scheduled_form_candidate_v9_working_copy_tir.py`
+- `fused_conv2d_transpose1_add9_scheduled_form_candidate_v10_working_copy_tir.py`
+
 ## Hook-facing candidate path
 
 The existing `rpc_tune.py` handwritten hook can point at `./session_bootstrap/handwritten/fused_conv2d_transpose1_add9/fused_conv2d_transpose1_add9_manual_candidate.py`

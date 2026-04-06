@@ -42,11 +42,44 @@ TARGET_STR = '{"kind":"llvm","mtriple":"aarch64-linux-gnu","mcpu":"cortex-a72","
 
 HANDWRITTEN = PROJECT_ROOT / "session_bootstrap/handwritten"
 
-CANDIDATES = {
+ALL_CANDIDATES = {
     "fused_variance3_add10_tir_sqrt3": HANDWRITTEN / "fused_variance3_add10_tir_sqrt3" / "fused_variance3_add10_tir_sqrt3_scheduled_form_candidate_v1_working_copy_tir.py",
     "fused_variance1_add3_tir_sqrt1": HANDWRITTEN / "fused_variance1_add3_tir_sqrt1" / "fused_variance1_add3_tir_sqrt1_scheduled_form_candidate_v1_working_copy_tir.py",
     "fused_mean4_subtract4_divide4_multiply4_add14_relu3": HANDWRITTEN / "fused_mean4_subtract4_divide4_multiply4_add14_relu3" / "fused_mean4_subtract4_divide4_multiply4_add14_relu3_scheduled_form_candidate_v4_working_copy_tir.py",
 }
+
+CANDIDATE_PRESETS = {
+    # Historical three-op probe that includes the dropped variance1 branch.
+    "legacy_three_op": [
+        "fused_variance3_add10_tir_sqrt3",
+        "fused_variance1_add3_tir_sqrt1",
+        "fused_mean4_subtract4_divide4_multiply4_add14_relu3",
+    ],
+    # This matches the repo's checked handwritten final route from the Opus report:
+    # keep variance3 scope-fix + mean4 fused loop, drop variance1.
+    "opus_final_v3_mean4": [
+        "fused_variance3_add10_tir_sqrt3",
+        "fused_mean4_subtract4_divide4_multiply4_add14_relu3",
+    ],
+}
+
+
+def resolve_candidate_override(raw: str) -> tuple[str, Path]:
+    if "=" not in raw:
+        raise argparse.ArgumentTypeError(
+            "candidate override must be formatted as operator_name=path/to/tir.py"
+        )
+    operator_name, raw_path = raw.split("=", 1)
+    operator_name = operator_name.strip()
+    raw_path = raw_path.strip()
+    if not operator_name or not raw_path:
+        raise argparse.ArgumentTypeError(
+            "candidate override must include both operator name and path"
+        )
+    path = Path(raw_path)
+    if not path.is_absolute():
+        path = (PROJECT_ROOT / path).resolve()
+    return operator_name, path
 
 
 def file_sha256(path: Path) -> str:
@@ -75,8 +108,31 @@ def load_tir_module(tir_path: Path, operator_name: str):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output-dir", type=Path, default=None)
+    parser.add_argument(
+        "--preset",
+        choices=sorted(CANDIDATE_PRESETS),
+        default="legacy_three_op",
+        help="Select which handwritten operator bundle to integrate.",
+    )
+    parser.add_argument(
+        "--candidate-override",
+        action="append",
+        default=[],
+        metavar="OPERATOR=PATH",
+        help=(
+            "Temporarily override a preset candidate TIR path without changing "
+            "the checked-in default bundle."
+        ),
+    )
     parser.add_argument("--skip-build", action="store_true")
     args = parser.parse_args()
+
+    overrides: dict[str, Path] = {}
+    for raw in args.candidate_override:
+        operator_name, path = resolve_candidate_override(raw)
+        if operator_name not in ALL_CANDIDATES:
+            raise SystemExit(f"ERROR: unknown candidate override operator: {operator_name}")
+        overrides[operator_name] = path
 
     # Safety check
     assert TRUSTED_CURRENT_SO.exists(), f"Trusted Current not found"
@@ -110,8 +166,12 @@ def main():
     mod = preprocess_for_meta_schedule(mod)
 
     # Replace PrimFuncs
+    selected_names = CANDIDATE_PRESETS[args.preset]
+    candidates = {
+        name: overrides.get(name, ALL_CANDIDATES[name]) for name in selected_names
+    }
     replaced = []
-    for op_name, tir_path in CANDIDATES.items():
+    for op_name, tir_path in candidates.items():
         if not tir_path.exists():
             print(f"  SKIP {op_name}: file not found")
             continue
@@ -142,7 +202,7 @@ def main():
         except Exception as e:
             print(f"  ERROR {op_name}: {e}")
 
-    print(f"✓ Replaced {len(replaced)}/{len(CANDIDATES)}: {replaced}")
+    print(f"✓ Replaced {len(replaced)}/{len(candidates)}: {replaced}")
 
     if args.skip_build:
         print("SKIP_BUILD requested, exiting")
@@ -187,8 +247,10 @@ def main():
         "artifact_size": size,
         "trusted_current_sha256": TRUSTED_CURRENT_SHA,
         "trusted_current_verified": True,
+        "preset": args.preset,
+        "candidate_overrides": {name: str(path) for name, path in overrides.items()},
         "replaced_operators": replaced,
-        "skipped_operators": [op for op in CANDIDATES if op not in replaced],
+        "skipped_operators": [op for op in candidates if op not in replaced],
         "next_steps": [
             "1. Upload .so to board",
             "2. Run correctness check (300 images, max_abs_diff < 1e-3)",

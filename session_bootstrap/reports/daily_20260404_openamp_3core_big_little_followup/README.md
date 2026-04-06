@@ -164,11 +164,12 @@
 - `Trusted Current` 虽然 serial median 不是三者里最低，但它在 big.LITTLE pipeline 下拿到最大的吞吐 uplift（`44.102%`），最终 pipeline `ms/image` 反而成为三者最佳。
 - ACL integration line 也拿到了明确正 uplift（`34.705%`），说明它不是“进不了流水线”的坏线；但当前端到端 pipeline 结果仍慢于另外两条。
 
-## 五、当前口径
+## 五、当晚口径（`2026-04-04` 快照）
 
-- 当前已经证实的是：三核 OpenAMP demo mode 会明显改写三条线在 current-only 口径下的相对差距；但一旦切到 big.LITTLE pipeline，trusted current 仍然是当前最佳整体 reference。
-- 当前更准确的结论不是“另外两条线没价值”，而是：`Handwritten final` 与 ACL line 都能在目标板态下稳定进入 pipeline，并拿到约 `35%` 的吞吐提升，但 uplift 仍低于 trusted current 的 `44.102%`。
-- 因此接下来的优化重点，不应再是“证明它们能不能跑 pipeline”，而是解释为什么另外两条线在 pipeline 下的 uplift 少了大约 `8.6~9.4` 个百分点。
+- 就 `2026-04-04` 当晚这轮 compare 而言，三核 OpenAMP demo mode 会明显改写三条线在 current-only 口径下的相对差距；当晚切到 big.LITTLE pipeline 后，trusted current 仍然是当时的最佳整体 reference。
+- 当晚更准确的结论不是“另外两条线没价值”，而是：`Handwritten final` 与 ACL line 都能在目标板态下稳定进入 pipeline，并拿到约 `35%` 的吞吐提升，但 uplift 仍低于 trusted current 的 `44.102%`。
+- 这也是为什么当晚的后续重点会转向“解释为什么另外两条线在 pipeline 下的 uplift 少了大约 `8.6~9.4` 个百分点”。
+- 后续 `2026-04-06` 的 handwritten `mean4 v7` follow-up 已继续把这一结论往前推进；最新 same-day 三线口径见本文档第九节。
 
 ## 六、相关工件
 
@@ -210,3 +211,28 @@
 对应渲染脚本：
 
 - `session_bootstrap/scripts/render_paper_figures_cn_v2_20260404.py`
+
+## 九、2026-04-06 跟进：same-day 三线 big.LITTLE compare
+
+这轮 follow-up 不再跨天引用 `2026-04-04` 的 trusted current / ACL compare，而是把
+三条 active line 在同一天同板态下全部补齐：
+
+| Line | Compare Run | Artifact SHA | Serial reconstruction median (ms/image) | big.LITTLE pipeline total wall / 300 (ms/image) | Pipeline run median (ms) | Throughput uplift |
+|---|---|---|---:|---:|---:|---:|
+| `Handwritten mean4 v7 line` | `big_little_compare_20260406_191650` | `bf255cd4...edecb` | `345.609` | `249.393` | `240.885` | `38.706%` |
+| `Trusted Current` | `big_little_compare_20260406_192859` | `6f236b07...6dc1` | `347.341` | `257.388` | `248.851` | `34.569%` |
+| `ACL integration line` | `big_little_compare_20260406_193231` | `602371c2...edba` | `352.158` | `262.922` | `250.790` | `33.814%` |
+
+这轮给出的最重要信息是：
+
+- 这次已经不是“`v7` 只对历史 handwritten final 更好”，而是同日同板态下直接打赢另外两条项目级 comparison line。
+- `mean4 v7` handwritten line 在 same-day compare 下同时拿到三项最优：最低 serial reconstruction、最低 pipeline endpoint、最高 uplift ratio。
+- 相对 trusted current，`v7` 领先 `-1.732 ms/image` serial、`-7.995 ms/image` pipeline、`+4.137` 个百分点 uplift。
+- 相对 ACL line，`v7` 领先 `-6.549 ms/image` serial、`-13.530 ms/image` pipeline、`+4.892` 个百分点 uplift。
+
+对应工件：
+
+- `session_bootstrap/reports/daily_20260404_openamp_3core_big_little_followup/big_little_compare_20260406_191650.md`
+- `session_bootstrap/reports/daily_20260404_openamp_3core_big_little_followup/big_little_compare_20260406_192859.md`
+- `session_bootstrap/reports/daily_20260404_openamp_3core_big_little_followup/big_little_compare_20260406_193231.md`
+- `session_bootstrap/reports/handwritten_mean4_v7_vs_trusted_current_acl_big_little_compare_20260406_1935.md`

@@ -86,7 +86,7 @@ class Module:
             for k2, k3 in T.grid(T.int64(256), T.int64(256)):
                 with T.sblock("fused_compute"):
                     v_ax0, v_ax1, v_ax2, v_ax3, v_k2, v_k3 = T.axis.remap(
-                        "SSSSRR", [ax0, ax1, ax2, ax3, k2, k3]
+                        "SSSSSS", [ax0, ax1, ax2, ax3, k2, k3]
                     )
                     T.reads(
                         lv335[v_ax0, v_ax1, v_k2, v_k3],

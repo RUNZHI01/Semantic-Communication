@@ -7,6 +7,24 @@ MetaSchedule context intact locally.
 It intentionally starts at the post-db scheduled reference seed and does not
 introduce a separate raw pre-compile hook lane yet.
 
+## Current Status
+
+- historical checked-in board-proven best remains `v18 = 158.347 ms`:
+  `session_bootstrap/reports/variance4_v18_remote_benchmark_20260403_0239.md`
+- `v22` and `v24` are exact-preserving local branches that collapse back to the
+  `v21` artifact, so they stay classified as artifact-identical negative
+  evidence:
+  `session_bootstrap/reports/variance4_v22_local_status_20260406.md`,
+  `session_bootstrap/reports/variance4_v24_local_status_20260406.md`
+- `v23` is still exact-preserving and artifact-distinct locally, but a real
+  board run on `2026-04-06` with `3` online cores did not show a stable win
+  over same-day `v18` controls, so `v23` should not be promoted:
+  `session_bootstrap/reports/variance4_v23_remote_benchmark_20260406_1344.md`
+- current practical interpretation:
+  the `v18` handoff family is still the winning lane, but the specific
+  `v23` buffer-flattening branch should now be treated as board-tested negative
+  evidence rather than the next promotion candidate
+
 ## Files
 
 - `fused_variance4_add13_tir_sqrt4_post_db_scheduled_reference_seed_tir.py`: checked-in post-db scheduled reference seed recovered from the frozen best-staging DB.
@@ -71,6 +89,18 @@ introduce a separate raw pre-compile hook lane yet.
 - `fused_variance4_add13_tir_sqrt4_scheduled_form_candidate_v19_working_copy_tir.py`: performance-oriented exactness-aware follow-up that starts from the checked-in board-proven `v18` state, keeps the centered-value `T_subtract_local` reuse intact, and tightens the normalized-mean handoff itself to a one-element per-channel local scalar reused across the full inner loop.
 - `scheduled_form_candidate_v19_working_copy_manifest.json`: manifest for the versioned `v19` working copy.
 - `fused_variance4_add13_tir_sqrt4_scheduled_form_candidate_v19.py`: local-only candidate wrapper for the `v19` working copy.
+- `fused_variance4_add13_tir_sqrt4_scheduled_form_candidate_v21_working_copy_tir.py`: exactness-aware follow-up that retries the `v19` scalar normalized-mean handoff while restoring `T_multiply_red` to `scope="local"` so the mean-handoff idea is isolated from the earlier reduction-storage regression.
+- `scheduled_form_candidate_v21_working_copy_manifest.json`: manifest for the versioned `v21` working copy.
+- `fused_variance4_add13_tir_sqrt4_scheduled_form_candidate_v21.py`: local-only candidate wrapper for the `v21` working copy.
+- `fused_variance4_add13_tir_sqrt4_scheduled_form_candidate_v22_working_copy_tir.py`: exactness-aware follow-up that keeps the original `v18` mean-handoff shape and centered-value reuse intact but retimes the second phase so each per-channel mean is produced and then consumed through the full inner reduction before advancing.
+- `scheduled_form_candidate_v22_working_copy_manifest.json`: manifest for the versioned `v22` working copy.
+- `fused_variance4_add13_tir_sqrt4_scheduled_form_candidate_v22.py`: local-only candidate wrapper for the `v22` working copy.
+- `fused_variance4_add13_tir_sqrt4_scheduled_form_candidate_v23_working_copy_tir.py`: exactness-aware follow-up that keeps the `v18` handoff family intact but flattens the tiny 12-channel internal buffers from `(1, 12, 1, 1)` to `(12,)` so the indexing change is more codegen-visible.
+- `scheduled_form_candidate_v23_working_copy_manifest.json`: manifest for the versioned `v23` working copy.
+- `fused_variance4_add13_tir_sqrt4_scheduled_form_candidate_v23.py`: local-only candidate wrapper for the `v23` working copy.
+- `fused_variance4_add13_tir_sqrt4_scheduled_form_candidate_v24_working_copy_tir.py`: exactness-aware follow-up that starts from the scalar-mean `v21` branch and flattens the tiny reduction buffers `lv335_red` / `T_multiply_red` from `(1, 12, 1, 1)` to `(12,)`.
+- `scheduled_form_candidate_v24_working_copy_manifest.json`: manifest for the versioned `v24` working copy.
+- `fused_variance4_add13_tir_sqrt4_scheduled_form_candidate_v24.py`: local-only candidate wrapper for the `v24` working copy.
 
 ## Refresh / Build
 

@@ -1,0 +1,16 @@
+{
+  "resume_id": "019d5ebf-0f91-7803-a748-8d1743171e4b",
+  "last_success": {
+    "run_id": "019d5ebf-0f91-7803-a748-8d1743171e4b",
+    "submit_status": "ok",
+    "submitted_at": "1775415842",
+    "anchor_fingerprint": "1df3ff77849b225fa958d0d16b9089e5d5494c4c",
+    "tail_fingerprint": "c64992a0235254b77b38d4eaf45224dabea4e29f",
+    "latest_visible": {
+      "role": "assistant",
+      "text": "继续推进了两步。先把飞腾派接入信息又翻了一遍，包括仓库内外的 `phytium` env、`~/.ssh/config` 和历史 host，没找到新的跳板或替代地址；当前执行环境到 `100.121.87.73:22` 仍然是超时，所以这轮还是拿不到新的板级 payload。 算子这边我继续沿 `variance4` lane 做了 `v24`，把 `v21` 的 scalar-mean 分支和 `v23` 的 12 通道 tiny-buffer 收紧组合起来，代码在 [fused_variance4_add13_tir_sqrt4_scheduled_form_candidate_v24_working_copy_tir.py](/home/tianxing/tvm_metaschedule_execution_project/session_bootstrap/handwritten/fused_variance4_add13_tir_sqrt4/fused_variance4_add13_tir_sqrt4_scheduled_form_candidate_v24_working_copy_tir.py) 和 [fused_variance4_add13_tir_sqrt4_scheduled_form_candidate_v24.py](/home/tianxing/tvm_metaschedule_execution_project/session_bootstrap/handwritten/fused_variance4_add13_tir_sqrt4/fused_variance4_add13_tir_sqrt4_scheduled_form_candidate_v24.py)。本地验证是干净的：focused tests `4/4 OK`，reference compare `exact_equal=true / max_abs_diff=0.0`，post-db swap/build/export 成功；但导出的 artifact 又收敛回 `v21` 的同一 SHA `a60e0f5a40985d220e55c3ad541998767769d29725af377d339682927020e279`。所以 `v24` 是新的负证据，不是新候选。当前状态更清楚了：`v22` 和 `v24` 都会 collapse 到 `v21` artifact，`v23` 仍然是这条 lane 里唯一新的 distinct local candidate，artifact SHA `2b1a05b9326c3695b8a546d7d4b403728c11694bf633a9b6a938a72bcd11f720`；而 `v18 = 158.347 ms` 仍是 board-proven best。文档已经更新到 [variance4_v24_local_status_20260406.md](/home/tianxing/tvm_metaschedule_execution_project/session_bootstrap/reports/variance4_v24_local_status_20260406.md)、[README.md](/home/tianxing/tvm_metaschedule_execution_project/session_bootstrap/handwritten/fused_variance4_add13_tir_sqrt4/README.md) 和 [PROGRESS_LOG.md](/home/tianxing/tvm_metaschedule_execution_project/session_bootstrap/PROGRESS_LOG.md)。",
+      "timestamp": "2026-04-05T19:10:42.298Z"
+    },
+    "unchanged_tail_skips": 0
+  }
+}

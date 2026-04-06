@@ -464,6 +464,131 @@ print(f"{session_path}\t{cwd}")
 PY
 }
 
+inspect_resume_target() {
+  CODEX_HOME_DIR="$CODEX_HOME_DIR" RESUME_ID="$RESUME_ID" WORKDIR="$WORKDIR" python3 - <<'PY'
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+
+
+def text_of(message: dict) -> str:
+    content = message.get("content")
+    parts: list[str] = []
+    if isinstance(content, str):
+        parts.append(content)
+    elif isinstance(content, list):
+        for item in content:
+            if not isinstance(item, dict):
+                continue
+            text = item.get("text")
+            if isinstance(text, str) and text.strip():
+                parts.append(text)
+    return " ".join(" ".join(part.split()) for part in parts if part and part.strip())
+
+
+def compact(text: str, limit: int = 120) -> str:
+    normalized = " ".join(text.split()).replace("\t", " ")
+    if len(normalized) <= limit:
+        return normalized
+    return normalized[: limit - 1].rstrip() + "…"
+
+
+root = Path(os.environ["CODEX_HOME_DIR"]) / "sessions"
+resume_id = os.environ["RESUME_ID"]
+workdir = os.environ["WORKDIR"]
+if not root.is_dir():
+    raise SystemExit(1)
+
+target = None
+latest_same_cwd = None
+
+for path in root.rglob("*.jsonl"):
+    try:
+        stat = path.stat()
+    except OSError:
+        continue
+
+    session_id = ""
+    session_cwd = ""
+    message_count = 0
+    last_user = ""
+
+    try:
+        with path.open("r", encoding="utf-8", errors="ignore") as fh:
+            for raw_line in fh:
+                try:
+                    obj = json.loads(raw_line)
+                except Exception:
+                    continue
+                if obj.get("type") == "session_meta":
+                    payload = obj.get("payload")
+                    if isinstance(payload, dict):
+                        session_id = str(payload.get("id") or session_id)
+                        session_cwd = str(payload.get("cwd") or session_cwd)
+                    continue
+                if obj.get("type") != "response_item":
+                    continue
+                payload = obj.get("payload")
+                if not isinstance(payload, dict) or payload.get("type") != "message":
+                    continue
+                message_count += 1
+                if payload.get("role") == "user":
+                    text = text_of(payload)
+                    if text:
+                        last_user = compact(text)
+    except OSError:
+        continue
+
+    record = (
+        int(stat.st_mtime),
+        str(path),
+        session_id,
+        session_cwd,
+        message_count,
+        last_user,
+    )
+
+    if session_id == resume_id and (
+        target is None or (record[0], record[1]) > (target[0], target[1])
+    ):
+        target = record
+
+    if session_cwd == workdir and (
+        latest_same_cwd is None
+        or (record[0], record[1]) > (latest_same_cwd[0], latest_same_cwd[1])
+    ):
+        latest_same_cwd = record
+
+if target is None:
+    raise SystemExit(1)
+
+values = [
+    str(target[0]),
+    target[1],
+    target[2],
+    target[3],
+    str(target[4]),
+    target[5],
+]
+if latest_same_cwd is None:
+    values.extend(["", "", "", "", "", ""])
+else:
+    values.extend(
+        [
+            str(latest_same_cwd[0]),
+            latest_same_cwd[1],
+            latest_same_cwd[2],
+            latest_same_cwd[3],
+            str(latest_same_cwd[4]),
+            latest_same_cwd[5],
+        ]
+    )
+print("\t".join(values))
+PY
+}
+
 SESSION_SLUG="$(sanitize_slug "$RESUME_ID")"
 if (( LOG_FILE_EXPLICIT == 0 )); then
   LOG_FILE="$SESSION_DIR/logs/codex_continue_${SESSION_SLUG}.log"
@@ -495,6 +620,32 @@ fi
 if [[ ! -d "$WORKDIR" ]]; then
   echo "ERROR: resolved workdir does not exist: $WORKDIR" >&2
   exit 1
+fi
+
+RESUME_TARGET_INFO="$(inspect_resume_target 2>/dev/null || true)"
+RESUME_TARGET_MTIME=""
+RESUME_TARGET_PATH=""
+RESUME_TARGET_MESSAGE_COUNT=""
+RESUME_TARGET_LAST_USER=""
+LATEST_WORKDIR_SESSION_MTIME=""
+LATEST_WORKDIR_SESSION_PATH=""
+LATEST_WORKDIR_SESSION_ID=""
+LATEST_WORKDIR_SESSION_MESSAGE_COUNT=""
+LATEST_WORKDIR_SESSION_LAST_USER=""
+if [[ -n "$RESUME_TARGET_INFO" ]]; then
+  IFS=$'\t' read -r \
+    RESUME_TARGET_MTIME \
+    RESUME_TARGET_PATH \
+    _resume_target_id \
+    _resume_target_cwd \
+    RESUME_TARGET_MESSAGE_COUNT \
+    RESUME_TARGET_LAST_USER \
+    LATEST_WORKDIR_SESSION_MTIME \
+    LATEST_WORKDIR_SESSION_PATH \
+    LATEST_WORKDIR_SESSION_ID \
+    _latest_workdir_cwd \
+    LATEST_WORKDIR_SESSION_MESSAGE_COUNT \
+    LATEST_WORKDIR_SESSION_LAST_USER <<<"$RESUME_TARGET_INFO"
 fi
 
 INTERVAL_SEC=$((INTERVAL_MINUTES * 60))
@@ -1514,6 +1665,33 @@ log_block "started" \
   "$(kv_line schedule_mode "$SCHEDULE_MODE")" \
   "$(kv_line wait_timeout "$(format_wait_timeout)")" \
   "$(kv_line base_msg "$MESSAGE")"
+
+if [[ -n "$LATEST_WORKDIR_SESSION_ID" && "$LATEST_WORKDIR_SESSION_ID" != "$RESUME_ID" ]]; then
+  log_block "warning" \
+    "$(kv_line resume_id "$RESUME_ID")" \
+    "$(kv_line status "target session is not the newest session for this workspace")" \
+    "target_file : ${RESUME_TARGET_PATH:-${SESSION_FILE:-unknown}}" \
+    "target_msgs : ${RESUME_TARGET_MESSAGE_COUNT:-unknown}" \
+    "target_user : ${RESUME_TARGET_LAST_USER:-n/a}" \
+    "latest_id   : $LATEST_WORKDIR_SESSION_ID" \
+    "latest_file : ${LATEST_WORKDIR_SESSION_PATH:-unknown}" \
+    "latest_at   : $(format_ts "$LATEST_WORKDIR_SESSION_MTIME")" \
+    "latest_msgs : ${LATEST_WORKDIR_SESSION_MESSAGE_COUNT:-unknown}" \
+    "latest_user : ${LATEST_WORKDIR_SESSION_LAST_USER:-n/a}" \
+    "tip         : if you meant the current workspace conversation, use --resume-id $LATEST_WORKDIR_SESSION_ID"
+fi
+
+if [[ "$MESSAGE_MODE" == "plain" && "$MESSAGE" == "$DEFAULT_MESSAGE" ]]; then
+  if [[ "$RESUME_TARGET_MESSAGE_COUNT" =~ ^[0-9]+$ ]] && (( RESUME_TARGET_MESSAGE_COUNT <= 10 )); then
+    log_block "warning" \
+      "$(kv_line resume_id "$RESUME_ID")" \
+      "$(kv_line status "target session has very little recorded history; plain '继续' may appear ineffective")" \
+      "target_file : ${RESUME_TARGET_PATH:-${SESSION_FILE:-unknown}}" \
+      "target_msgs : ${RESUME_TARGET_MESSAGE_COUNT:-unknown}" \
+      "target_user : ${RESUME_TARGET_LAST_USER:-n/a}" \
+      "tip         : use a richer working session id, or switch to --message-mode anchored"
+  fi
+fi
 
 while true; do
   sleep_until "$NEXT_FIRE_TS"
