@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+import io
+import json
 import os
-from pathlib import Path
-import shlex
-import shutil
-import stat
+import queue
+import select
 import subprocess
 import sys
+import threading
+import time
+from pathlib import Path
+from shlex import quote as shlex_quote
+import shutil
+import stat
 import tempfile
 from typing import Mapping, Sequence
 
@@ -274,6 +280,207 @@ def build_local_crypto_client_command(
         suite,
     ]
     return command, env
+
+
+def build_local_crypto_daemon_command(
+    env_values: Mapping[str, str] | None,
+    *,
+    host: str,
+    client_script: Path,
+) -> tuple[list[str], dict[str, str]]:
+    """构建 tcp_client.py --daemon 模式的启动命令
+
+    daemon 模式下不需要 --input / --count / --json-summary，
+    这些参数通过 stdin JSON 指令按需传入。
+    """
+    python_command = first_config_value(env_values, keys=LOCAL_PYTHON_KEYS, default=sys.executable or "python3")
+    suite = first_config_value(env_values, keys=SUITE_KEYS, default=DEFAULT_CIPHER_SUITE)
+    crypto_port = parse_int_config(
+        first_config_value(env_values, keys=REMOTE_PORT_KEYS),
+        DEFAULT_CRYPTO_PORT,
+    )
+
+    env = dict(os.environ)
+    oqs_install = first_config_value(env_values, keys=OQS_INSTALL_KEYS)
+    if oqs_install:
+        env["OQS_INSTALL_PATH"] = oqs_install
+    else:
+        detected_oqs_root, _ = resolve_local_oqs_install(env_values, extra_roots=(client_script.parent.parent,))
+        if detected_oqs_root is not None:
+            env["OQS_INSTALL_PATH"] = str(detected_oqs_root)
+
+    command = [
+        python_command,
+        str(client_script),
+        "--host", host,
+        "--port", str(crypto_port),
+        "--suite", suite,
+        "--daemon",
+    ]
+    return command, env
+
+
+class MlkemSessionManager:
+    """管理持久化的 tcp_client.py --daemon 子进程
+
+    一次启动 → 一次握手 → N 张图片复用同一 ML-KEM session。
+    通过 stdin/stdout JSON 协议通信。
+
+    Usage:
+        mgr = MlkemSessionManager(env_values, host, client_script)
+        mgr.ensure_alive()
+        result = mgr.send_image("/tmp/latent.bin", "job-001")
+        mgr.close()
+    """
+
+    def __init__(
+        self,
+        env_values: Mapping[str, str] | None,
+        host: str,
+        client_script: Path,
+        *,
+        startup_timeout: float = 30.0,
+        io_timeout: float = 120.0,
+    ) -> None:
+        self._env_values = env_values
+        self._host = host
+        self._client_script = client_script
+        self._startup_timeout = startup_timeout
+        self._io_timeout = io_timeout
+        self._lock = threading.Lock()
+        self._proc: subprocess.Popen[str] | None = None
+        self._handshake_ms: float = 0.0
+        self._images_sent: int = 0
+        self._alive: bool = False
+
+    @property
+    def is_alive(self) -> bool:
+        return self._alive and self._proc is not None and self._proc.poll() is None
+
+    def ensure_alive(self) -> None:
+        """启动 daemon（如未运行）"""
+        with self._lock:
+            if self.is_alive:
+                return
+            self._start_daemon()
+
+    def _start_daemon(self) -> None:
+        """启动 daemon 子进程，等待 'ready' 响应"""
+        cmd, env = build_local_crypto_daemon_command(
+            self._env_values, host=self._host, client_script=self._client_script)
+        env["PYTHONUNBUFFERED"] = "1"
+
+        print(f"[MlkemSessionManager] 启动 daemon: {' '.join(cmd[:6])}...")
+        self._proc = subprocess.Popen(
+            cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, text=True, env=env, bufsize=1)
+        assert self._proc.stdin is not None
+        assert self._proc.stdout is not None
+
+        try:
+            ready_line = self._read_line(timeout=self._startup_timeout)
+            ready = json.loads(ready_line)
+            if ready.get("status") != "ready":
+                raise RuntimeError(f"daemon 未就绪: {ready}")
+            self._handshake_ms = ready.get("handshake_ms", 0.0)
+            self._images_sent = 0
+            self._alive = True
+            print(f"[MlkemSessionManager] daemon 就绪 "
+                  f"(握手={self._handshake_ms:.0f}ms)")
+        except Exception as e:
+            self._kill_proc()
+            raise RuntimeError(f"daemon 启动失败: {e}") from e
+
+    def send_image(self, input_path: str | Path, job_id: str) -> dict:
+        """通过 daemon 发送单张图片
+
+        Returns:
+            响应 dict（含 status, sha256_match, total_ms 等）
+        Raises:
+            RuntimeError: daemon 不可用
+        """
+        with self._lock:
+            if not self.is_alive:
+                raise RuntimeError("daemon 未运行")
+            self._stdin_write(json.dumps({
+                "action": "send", "input": str(input_path), "job_id": job_id,
+            }))
+            response_line = self._read_line(timeout=self._io_timeout)
+            response = json.loads(response_line)
+            if response.get("status") == "ok":
+                self._images_sent += 1
+            return response
+
+    def ping(self) -> dict:
+        """检查 daemon 健康状态"""
+        with self._lock:
+            if not self.is_alive:
+                raise RuntimeError("daemon 未运行")
+            self._stdin_write(json.dumps({"action": "ping"}))
+            response_line = self._read_line(timeout=self._io_timeout)
+            return json.loads(response_line)
+
+    def close(self) -> None:
+        """优雅关闭 daemon"""
+        with self._lock:
+            if not self.is_alive:
+                return
+            try:
+                self._stdin_write(json.dumps({"action": "quit"}))
+                self._proc.wait(timeout=5.0)
+            except Exception:
+                self._kill_proc()
+            finally:
+                self._alive = False
+                print(f"[MlkemSessionManager] 已关闭 "
+                      f"(已发送 {self._images_sent} 张)")
+
+    def _stdin_write(self, data: str) -> None:
+        assert self._proc is not None and self._proc.stdin is not None
+        self._proc.stdin.write(data + "\n")
+        self._proc.stdin.flush()
+
+    def _read_line(self, timeout: float) -> str:
+        """从 daemon stdout 读取一行，带超时（O-2: select 替代线程 spawn）
+
+        注意：必须用 os.read() 直接读 fd，绕过 TextIOWrapper 的内部缓冲区。
+        BufferedReader 首次 read() 会预读整个 fd，导致后续 select 看不到数据。
+        """
+        assert self._proc is not None and self._proc.stdout is not None
+        fd = self._proc.stdout.fileno()
+        deadline = time.monotonic() + timeout
+        buf: list[bytes] = []
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                self._alive = False
+                raise TimeoutError(f"daemon 读取超时 ({timeout}s)")
+            ready, _, _ = select.select([fd], [], [], min(remaining, 0.5))
+            if not ready:
+                continue
+            raw = os.read(fd, 1)
+            if not raw:
+                self._alive = False
+                raise RuntimeError("daemon stdout 已关闭")
+            if raw == b'\n':
+                return b''.join(buf).decode('utf-8')
+            buf.append(raw)
+
+    def _kill_proc(self) -> None:
+        if self._proc is not None:
+            try:
+                self._proc.kill()
+                self._proc.wait(timeout=5)
+            except Exception:
+                pass
+            self._proc = None
+        self._alive = False
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass
 
 
 def _derive_remote_server_script(

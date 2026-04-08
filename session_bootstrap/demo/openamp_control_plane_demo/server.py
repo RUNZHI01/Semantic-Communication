@@ -27,6 +27,7 @@ from crypto_runtime import (
     DEFAULT_STATUS_PORT,
     STATUS_PORT_KEYS,
     SUITE_KEYS,
+    MlkemSessionManager,
     build_local_crypto_client_command,
     build_remote_crypto_server_command,
     first_config_value,
@@ -819,6 +820,8 @@ class DashboardState:
         self._last_soft_recover_result: dict[str, Any] | None = None
         # ── 批量推理状态 ──
         self._batch_state: dict[str, Any] | None = None
+        # ── ML-KEM 持久化会话 ──
+        self._mlkem_session_mgr: MlkemSessionManager | None = None
 
         cached_probe = load_probe_output(probe_cache_path) if probe_cache_path else None
         if is_successful_probe(cached_probe):
@@ -1039,6 +1042,32 @@ class DashboardState:
             live_probe = self._last_live_probe
             aircraft_position = self._aircraft_position
         return build_snapshot(live_probe=live_probe, aircraft_position=aircraft_position)
+
+    def _get_mlkem_session_manager(
+        self, board_access: "BoardAccessConfig", env_values: dict,
+    ) -> MlkemSessionManager | None:
+        """获取或创建持久化 ML-KEM 会话管理器
+
+        如果 host 发生变化会关闭旧管理器。
+        找不到 tcp_client.py 时返回 None（回退到子进程模式）。
+        """
+        with self._lock:
+            if self._mlkem_session_mgr is not None:
+                if self._mlkem_session_mgr._host == board_access.host:
+                    return self._mlkem_session_mgr
+                else:
+                    self._mlkem_session_mgr.close()
+                    self._mlkem_session_mgr = None
+
+        tcp_client, _ = resolve_local_crypto_client(env_values)
+        if tcp_client is None:
+            return None
+
+        mgr = MlkemSessionManager(
+            env_values, host=board_access.host, client_script=tcp_client)
+        with self._lock:
+            self._mlkem_session_mgr = mgr
+        return mgr
 
     def _idle_active_inference_summary(self) -> dict[str, Any]:
         return {
@@ -1888,6 +1917,26 @@ class DashboardState:
             client_script=tcp_client,
         )
 
+        # ── 尝试 daemon 模式（复用已有 session，省握手开销）──
+        mgr = self._get_mlkem_session_manager(board_access, env_values)
+        if mgr is not None:
+            try:
+                mgr.ensure_alive()
+                t0 = time.monotonic()
+                daemon_result = mgr.send_image(str(tmp_path), "crypto_test")
+                wall_ms = round((time.monotonic() - t0) * 1000, 1)
+                tmp_path.unlink()
+                return {
+                    "status": "ok" if daemon_result.get("status") == "ok" else "error",
+                    "wall_ms": wall_ms,
+                    "handshake_ms": round(mgr._handshake_ms, 1),
+                    "sha256_match": daemon_result.get("sha256_match", False),
+                    "transport_mode": "daemon",
+                }
+            except Exception:
+                pass  # 回退到子进程模式
+
+        # ── 子进程模式（原有逻辑）──
         try:
             t0 = time.monotonic()
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env)
@@ -2763,41 +2812,63 @@ class DashboardState:
                 diagnostics={"board_configured": False},
             )
 
-        live_board_access = self._live_board_access_for_variant(board_access, variant=variant)
-        variant_expected_sha = expected_sha_for_variant(live_board_access, variant) or self._trusted_current_sha
-        preflight = query_live_status(board_access, trusted_sha=variant_expected_sha)
-        if preflight.get("status") != "success":
-            soft_recover = self._maybe_soft_recover_control_plane(
-                board_access,
-                trusted_sha=variant_expected_sha,
-                reason="mlkem_preflight_failed",
-            )
-            retry = soft_recover.get("status_retry") if isinstance(soft_recover.get("status_retry"), dict) else {}
-            if retry.get("status") == "success":
-                preflight = retry
-            else:
-                if allow_preflight_degraded:
-                    preflight = {
-                        "status": "degraded",
-                        "message": str(preflight.get("message") or "control preflight timeout"),
-                        "logs": list(preflight.get("logs") or []),
-                        "guard_state": "UNKNOWN",
-                        "last_fault_code": "UNKNOWN",
-                        "heartbeat_ok": 0,
-                        "total_fault_count": 0,
-                        "status_category": "control_preflight_degraded",
-                    }
+        # ── Preflight：daemon 存活时跳过 SSH 查询（O-1 优化） ──
+        env_values = board_access.build_env()
+        mgr_early = self._get_mlkem_session_manager(board_access, env_values)
+        daemon_alive = mgr_early is not None and mgr_early.is_alive
+
+        if daemon_alive:
+            # daemon 已与板端建立 ML-KEM 会话，板卡 TCP 通道畅通，无需 SSH 预检
+            with self._lock:
+                preflight = self._last_control_status
+            if not preflight or preflight.get("status") not in ("success", "degraded"):
+                preflight = {
+                    "status": "degraded",
+                    "message": "daemon 存活，跳过 SSH preflight",
+                    "logs": [],
+                    "guard_state": "UNKNOWN",
+                    "last_fault_code": "NONE",
+                    "heartbeat_ok": 1,
+                    "total_fault_count": 0,
+                    "status_category": "daemon_skip_preflight",
+                }
+        else:
+            # daemon 未启动，走完整 SSH + RPMsg 预检
+            live_board_access = self._live_board_access_for_variant(board_access, variant=variant)
+            variant_expected_sha = expected_sha_for_variant(live_board_access, variant) or self._trusted_current_sha
+            preflight = query_live_status(board_access, trusted_sha=variant_expected_sha)
+            if preflight.get("status") != "success":
+                soft_recover = self._maybe_soft_recover_control_plane(
+                    board_access,
+                    trusted_sha=variant_expected_sha,
+                    reason="mlkem_preflight_failed",
+                )
+                retry = soft_recover.get("status_retry") if isinstance(soft_recover.get("status_retry"), dict) else {}
+                if retry.get("status") == "success":
+                    preflight = retry
                 else:
-                    return self._build_blocked_inference_payload(
-                        variant=variant,
-                        image_index=image_index,
-                        status_category="control_preflight_failed",
-                        source_label="控制面预检失败，回退展示（归档样例）",
-                        message="控制面 STATUS_REQ 预检失败，本次不继续 ML-KEM 推理。",
-                        detail=str(preflight.get("message") or "未拿到有效 STATUS_RESP"),
-                        diagnostics={"control_status": preflight, "soft_recover": soft_recover},
-                        event_log=list(preflight.get("logs") or []),
-                    )
+                    if allow_preflight_degraded:
+                        preflight = {
+                            "status": "degraded",
+                            "message": str(preflight.get("message") or "control preflight timeout"),
+                            "logs": list(preflight.get("logs") or []),
+                            "guard_state": "UNKNOWN",
+                            "last_fault_code": "UNKNOWN",
+                            "heartbeat_ok": 0,
+                            "total_fault_count": 0,
+                            "status_category": "control_preflight_degraded",
+                        }
+                    else:
+                        return self._build_blocked_inference_payload(
+                            variant=variant,
+                            image_index=image_index,
+                            status_category="control_preflight_failed",
+                            source_label="控制面预检失败，回退展示（归档样例）",
+                            message="控制面 STATUS_REQ 预检失败，本次不继续 ML-KEM 推理。",
+                            detail=str(preflight.get("message") or "未拿到有效 STATUS_RESP"),
+                            diagnostics={"control_status": preflight, "soft_recover": soft_recover},
+                            event_log=list(preflight.get("logs") or []),
+                        )
 
         with self._lock:
             self._last_control_status = preflight
@@ -2821,9 +2892,14 @@ class DashboardState:
                 event_log=list(preflight.get("logs") or []),
             )
 
-        env_values = board_access.build_env()
+        # env_values 已在上方 O-1 优化块中提前获取
         self._ensure_board_tcp_server(board_access)
-        tcp_client, searched_paths = resolve_local_crypto_client(env_values)
+        # O-3: 复用 mgr_early 的 client_script，避免重复文件系统搜索
+        if mgr_early is not None:
+            tcp_client = mgr_early._client_script
+            searched_paths = [tcp_client]
+        else:
+            tcp_client, searched_paths = resolve_local_crypto_client(env_values)
         if tcp_client is None:
             searched_text = ", ".join(str(path) for path in searched_paths[:5]) or "no candidate paths"
             return self._build_blocked_inference_payload(
@@ -2847,7 +2923,8 @@ class DashboardState:
             """模拟 LiveRemoteReconstructionJob：后台线程逐张 ML-KEM 推理，前端轮询进度。"""
             def __init__(self_self, jid: str, max_n: int, board: Any, env_vals: dict,
                          client_script: str, variant_name: str, img_idx: int,
-                         preflight_data: dict, app_state: Any):
+                         preflight_data: dict, app_state: Any,
+                         session_mgr: "MlkemSessionManager | None" = None):
                 self_self.job_id = jid
                 self_self._max = max_n
                 self_self._board = board
@@ -2857,6 +2934,7 @@ class DashboardState:
                 self_self._img_idx = img_idx
                 self_self._preflight = preflight_data
                 self_self._app = app_state
+                self_self._session_mgr = session_mgr
                 self_self._lock = Lock()
                 self_self._completed = 0
                 self_self._final_snapshot: dict[str, Any] | None = None
@@ -2912,108 +2990,248 @@ class DashboardState:
                 tmp_in.close()
                 input_path = Path(tmp_in.name)
                 try:
-                    cmd, env = build_local_crypto_client_command(
-                        self_self._env_vals, host=self_self._board.host,
-                        input_path=input_path, client_script=self_self._client,
-                    )
-                    cmd.extend(["--job-id", self_self.job_id])
-                    all_stages: list[dict[str, Any]] = []
-                    total_wall = 0.0
-                    last_sha: bool | None = None
-                    for idx in range(self_self._max):
-                        out_path = Path(tempfile.mkstemp(suffix=".bin", prefix="mlkem_result_")[1])
-                        run_cmd = list(cmd) + ["--output", str(out_path)]
-                        t0 = time.monotonic()
-                        try:
-                            proc = subprocess.run(run_cmd, capture_output=True, text=True, timeout=180, env=env)
-                        except subprocess.TimeoutExpired:
-                            with self_self._lock:
-                                self_self._error = f"第 {idx+1} 张超时"
-                            break
-                        wall = (time.monotonic() - t0) * 1000
-                        total_wall += wall
-                        try:
-                            out_path.unlink(missing_ok=True)
-                        except OSError:
-                            pass
-                        if proc.returncode != 0:
-                            stderr = (proc.stderr or proc.stdout or "").strip()[-200:]
-                            with self_self._lock:
-                                self_self._error = f"第 {idx+1} 张失败: {stderr}"
-                            print(f"[ML-KEM] image {idx} failed rc={proc.returncode}: {stderr[:150]}")
-                            break
-                        with self_self._lock:
-                            self_self._completed = idx + 1
-                            self_self._total_ms = total_wall
-                            ms = _MlkemJob._parse_stdout(proc.stdout or "")
-                            if ms.get("stages"):
-                                all_stages = ms["stages"]
-                            if ms.get("sha_match") is not None:
-                                last_sha = ms["sha_match"]
-                    # 写 final snapshot
-                    with self_self._lock:
-                        self_self._stages_summary = all_stages
-                        self_self._sha_match = last_sha
-                        is_ok = self_self._completed == self_self._max and self_self._error is None
-                        self_self._final_snapshot = {
-                            "status": "success" if is_ok else "fallback",
-                            "request_state": "completed",
-                            "status_category": "success" if is_ok else "fallback",
-                            "execution_mode": "live" if is_ok else "fallback",
-                            "variant": self_self._variant,
-                            "message": (
-                                "Current 已通过 ML-KEM 安全信道完成 300 张加密传输与板端执行。"
-                                if is_ok
-                                else f"ML-KEM 推理中断（已完成 {self_self._completed}/{self_self._max}），已回退。"
-                            ),
-                            "control_transport": "mlkem",
-                            "control_handshake_complete": True,
-                            "runner_summary": {
-                                "processed_count": self_self._completed,
-                                "input_count": self_self._max,
-                                "max_inputs": self_self._max,
-                                "total_ms": round(total_wall, 3),
-                            },
-                            "wrapper_summary": {
-                                "total_ms": round(total_wall, 3),
-                                "sha_match": last_sha,
-                            },
-                            "diagnostics": {"control_preflight": self_self._preflight},
-                            "progress": {
-                                "state": "completed" if is_ok else "fallback",
-                                "label": "ML-KEM 加密推理完成" if is_ok else "ML-KEM 推理中断",
-                                "tone": "online" if is_ok else "degraded",
-                                "percent": 100 if is_ok else int(round(self_self._completed / self_self._max * 100)),
-                                "phase_percent": 100,
-                                "completed_count": self_self._completed,
-                                "expected_count": self_self._max,
-                                "remaining_count": self_self._max - self_self._completed,
-                                "completion_ratio": round(self_self._completed / self_self._max, 4) if self_self._max > 0 else 0.0,
-                                "count_source": "mlkem_live",
-                                "count_label": f"{self_self._completed} / {self_self._max}",
-                                "current_stage": "加密推理完成" if is_ok else "推理中断",
-                                "stages": [{"key": "mlkem_live_done", "label": "ML-KEM 全链路", "status": "done" if is_ok else "error",
-                                             "detail": f"wall={round(total_wall, 1)}ms, sha_match={last_sha}"}],
-                                "event_log": [] if is_ok else [f"error: {self_self._error}"],
-                            },
-                            "artifacts": [],
-                        }
-                        # 推送事件
-                        self_self._app._event_spine.publish("JOB_DONE", source="inference", plane="data",
-                            mode_scope=DATA_MODE_SCOPE,
-                            message=f"ML-KEM live job {self_self.job_id} completed.",
-                            data={"variant": self_self._variant, "image_index": self_self._img_idx,
-                                  "total_ms": round(total_wall, 3), "sha256_match": last_sha,
-                                  "control_transport": "mlkem"})
-                        self_self._app._archive_event_snapshot(
-                            reason="mlkem_live_done", job_id=self_self.job_id,
-                            extra={"variant": self_self._variant, "completed": self_self._completed,
-                                  "total_ms": round(total_wall, 3)})
+                    if self_self._session_mgr is not None:
+                        self_self._run_loop_daemon(input_path)
+                    else:
+                        self_self._run_loop_subprocess(input_path)
                 finally:
                     try:
                         input_path.unlink()
                     except OSError:
                         pass
+
+            def _run_loop_daemon(self_self, input_path: Path) -> None:
+                """通过持久化 daemon 发送图片（一次握手 N 张复用）"""
+                mgr = self_self._session_mgr
+                assert mgr is not None
+
+                try:
+                    mgr.ensure_alive()
+                except Exception as e:
+                    print(f"[ML-KEM _run_loop] daemon 启动失败, 回退子进程: {e}")
+                    self_self._run_loop_subprocess(input_path)
+                    return
+
+                t0 = time.monotonic()
+                for i in range(self_self._max):
+                    job_id = f"{self_self.job_id}_{i:04d}"
+                    try:
+                        result = mgr.send_image(str(input_path), job_id)
+                    except Exception as e:
+                        print(f"[ML-KEM _run_loop] daemon 错误 (第 {i} 张): {e}")
+                        # 回退：剩余图片用子进程
+                        remaining = self_self._max - i
+                        if remaining > 0:
+                            self_self._run_loop_subprocess(input_path, remaining=remaining)
+                        return
+
+                    if result.get("status") == "ok":
+                        with self_self._lock:
+                            self_self._completed += 1
+                            self_self._total_ms = (time.monotonic() - t0) * 1000
+                    else:
+                        print(f"[ML-KEM _run_loop] 第 {i} 张失败: {result}")
+                        with self_self._lock:
+                            self_self._error = f"第 {i} 张失败: {result.get('message', '')}"
+
+                total_wall = (time.monotonic() - t0) * 1000
+                with self_self._lock:
+                    self_self._sha_match = (self_self._completed == self_self._max)
+                    is_ok = self_self._completed == self_self._max and self_self._error is None
+                    per_image_ms = total_wall / max(self_self._max, 1)
+                    self_self._final_snapshot = {
+                        "status": "success" if is_ok else "fallback",
+                        "request_state": "completed",
+                        "status_category": "success" if is_ok else "fallback",
+                        "execution_mode": "live" if is_ok else "fallback",
+                        "variant": self_self._variant,
+                        "message": (
+                            "Current 已通过 ML-KEM 安全信道完成加密传输与板端执行。"
+                            if is_ok
+                            else f"ML-KEM 推理中断（已完成 {self_self._completed}/{self_self._max}），已回退。"
+                        ),
+                        "control_transport": "mlkem",
+                        "control_handshake_complete": True,
+                        "runner_summary": {
+                            "processed_count": self_self._completed,
+                            "input_count": self_self._max,
+                            "max_inputs": self_self._max,
+                            "total_ms": round(total_wall, 3),
+                        },
+                        "wrapper_summary": {
+                            "total_ms": round(total_wall, 3),
+                            "sha_match": self_self._sha_match,
+                            "handshake_ms": mgr._handshake_ms,
+                            "per_image_ms": round(per_image_ms, 1),
+                            "transport_mode": "daemon",
+                        },
+                        "diagnostics": {"control_preflight": self_self._preflight},
+                        "progress": {
+                            "state": "completed" if is_ok else "fallback",
+                            "label": "ML-KEM 加密推理完成" if is_ok else "ML-KEM 推理中断",
+                            "tone": "online" if is_ok else "degraded",
+                            "percent": 100 if is_ok else int(round(self_self._completed / self_self._max * 100)),
+                            "phase_percent": 100,
+                            "completed_count": self_self._completed,
+                            "expected_count": self_self._max,
+                            "remaining_count": self_self._max - self_self._completed,
+                            "completion_ratio": round(self_self._completed / self_self._max, 4) if self_self._max > 0 else 0.0,
+                            "count_source": "mlkem_live",
+                            "count_label": f"{self_self._completed} / {self_self._max}",
+                            "current_stage": "加密推理完成" if is_ok else "推理中断",
+                            "stages": [{"key": "mlkem_live_done", "label": "ML-KEM 全链路", "status": "done" if is_ok else "error",
+                                         "detail": f"wall={round(total_wall, 1)}ms, sha_match={self_self._sha_match}"}],
+                            "event_log": [] if is_ok else [f"error: {self_self._error}"],
+                        },
+                        "artifacts": [],
+                    }
+                    self_self._app._event_spine.publish("JOB_DONE", source="inference", plane="data",
+                        mode_scope=DATA_MODE_SCOPE,
+                        message=f"ML-KEM live job {self_self.job_id} completed (daemon).",
+                        data={"variant": self_self._variant, "image_index": self_self._img_idx,
+                              "total_ms": round(total_wall, 3), "sha256_match": self_self._sha_match,
+                              "control_transport": "mlkem"})
+
+            def _run_loop_subprocess(self_self, input_path: Path,
+                                     remaining: int | None = None) -> None:
+                """通过一次性子进程发送图片（原有逻辑，回退路径）"""
+                count = remaining if remaining is not None else self_self._max
+                cmd, env = build_local_crypto_client_command(
+                    self_self._env_vals, host=self_self._board.host,
+                    input_path=input_path, client_script=self_self._client,
+                )
+                cmd.extend([
+                    "--job-id", self_self.job_id,
+                    "--count", str(count),
+                    "--json-summary",
+                ])
+                env["PYTHONUNBUFFERED"] = "1"
+                timeout_s = count * 10
+                t0 = time.monotonic()
+                stdout_lines: list[str] = []
+                print(f"[ML-KEM _run_loop_subprocess] cmd={' '.join(cmd[:8])}...")
+                try:
+                    proc = subprocess.Popen(
+                        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                        text=True, env=env, bufsize=1)
+                    assert proc.stdout is not None
+                    for raw_line in proc.stdout:
+                        line = raw_line.rstrip('\n')
+                        stdout_lines.append(line)
+                        if "✓" in line:
+                            with self_self._lock:
+                                self_self._completed += 1
+                                self_self._total_ms = (time.monotonic() - t0) * 1000
+                    proc.wait(timeout=timeout_s - (time.monotonic() - t0))
+                except subprocess.TimeoutExpired:
+                    print(f"[ML-KEM _run_loop_subprocess] TIMEOUT after {timeout_s}s")
+                    with self_self._lock:
+                        self_self._error = "ML-KEM 批量传输超时"
+                    return
+                except Exception as e:
+                    print(f"[ML-KEM _run_loop_subprocess] EXCEPTION: {e}")
+                    with self_self._lock:
+                        self_self._error = f"ML-KEM 进程异常: {e}"
+                    return
+                total_wall = (time.monotonic() - t0) * 1000
+                stdout_full = '\n'.join(stdout_lines)
+
+                if proc.returncode != 0:
+                    stderr = (proc.stderr.read() if proc.stderr else "")[-300:]
+                    with self_self._lock:
+                        self_self._error = f"ML-KEM 批量失败 (rc={proc.returncode}): {stderr.strip()}"
+                    print(f"[ML-KEM _run_loop_subprocess] FAIL rc={proc.returncode}: {stderr.strip()[:200]}")
+                    return
+
+                print(f"[ML-KEM _run_loop_subprocess] done rc=0, {len(stdout_lines)} lines, {total_wall:.0f}ms")
+
+                summary = _MlkemJob._parse_json_summary(stdout_full)
+                success = summary.get("success", self_self._completed)
+                total = summary.get("total", count)
+                handshake_ms = summary.get("handshake_ms", 0)
+                per_image_ms = summary.get("per_image_ms", 0)
+
+                with self_self._lock:
+                    self_self._completed = success
+                    self_self._total_ms = total_wall
+                    self_self._stages_summary = [
+                        {"label": "ML-KEM 握手 (1 次)", "value_ms": handshake_ms, "emphasis": "host"},
+                        {"label": "AEAD 加密传输 (N 张)", "value_ms": round(per_image_ms * total, 1), "emphasis": "data"},
+                    ]
+                    self_self._sha_match = (success == total)
+                    is_ok = self_self._completed == self_self._max and self_self._error is None
+                    self_self._final_snapshot = {
+                        "status": "success" if is_ok else "fallback",
+                        "request_state": "completed",
+                        "status_category": "success" if is_ok else "fallback",
+                        "execution_mode": "live" if is_ok else "fallback",
+                        "variant": self_self._variant,
+                        "message": (
+                            "Current 已通过 ML-KEM 安全信道完成 300 张加密传输与板端执行。"
+                            if is_ok
+                            else f"ML-KEM 推理中断（已完成 {self_self._completed}/{self_self._max}），已回退。"
+                        ),
+                        "control_transport": "mlkem",
+                        "control_handshake_complete": True,
+                        "runner_summary": {
+                            "processed_count": self_self._completed,
+                            "input_count": self_self._max,
+                            "max_inputs": self_self._max,
+                            "total_ms": round(total_wall, 3),
+                        },
+                        "wrapper_summary": {
+                            "total_ms": round(total_wall, 3),
+                            "sha_match": self_self._sha_match,
+                            "handshake_ms": handshake_ms,
+                            "per_image_ms": per_image_ms,
+                        },
+                        "diagnostics": {"control_preflight": self_self._preflight},
+                        "progress": {
+                            "state": "completed" if is_ok else "fallback",
+                            "label": "ML-KEM 加密推理完成" if is_ok else "ML-KEM 推理中断",
+                            "tone": "online" if is_ok else "degraded",
+                            "percent": 100 if is_ok else int(round(self_self._completed / self_self._max * 100)),
+                            "phase_percent": 100,
+                            "completed_count": self_self._completed,
+                            "expected_count": self_self._max,
+                            "remaining_count": self_self._max - self_self._completed,
+                            "completion_ratio": round(self_self._completed / self_self._max, 4) if self_self._max > 0 else 0.0,
+                            "count_source": "mlkem_live",
+                            "count_label": f"{self_self._completed} / {self_self._max}",
+                            "current_stage": "加密推理完成" if is_ok else "推理中断",
+                            "stages": [{"key": "mlkem_live_done", "label": "ML-KEM 全链路", "status": "done" if is_ok else "error",
+                                         "detail": f"wall={round(total_wall, 1)}ms, sha_match={self_self._sha_match}"}],
+                            "event_log": [] if is_ok else [f"error: {self_self._error}"],
+                        },
+                        "artifacts": [],
+                    }
+                    self_self._app._event_spine.publish("JOB_DONE", source="inference", plane="data",
+                        mode_scope=DATA_MODE_SCOPE,
+                        message=f"ML-KEM live job {self_self.job_id} completed.",
+                        data={"variant": self_self._variant, "image_index": self_self._img_idx,
+                              "total_ms": round(total_wall, 3), "sha256_match": self_self._sha_match,
+                              "control_transport": "mlkem"})
+                    self_self._app._archive_event_snapshot(
+                        reason="mlkem_live_done", job_id=self_self.job_id,
+                        extra={"variant": self_self._variant, "completed": self_self._completed,
+                              "total_ms": round(total_wall, 3)})
+
+            @staticmethod
+            def _parse_json_summary(stdout: str) -> dict[str, Any]:
+                """解析 tcp_client.py --json-summary 输出的 JSON"""
+                # JSON 摘要在 stdout 末尾，找到最后一个 '{' 开始的行
+                lines = stdout.splitlines()
+                json_start = -1
+                for i, line in enumerate(lines):
+                    stripped = line.strip()
+                    if stripped.startswith('{') or stripped.startswith('['):
+                        json_start = i
+                if json_start < 0:
+                    return {}
+                try:
+                    return json.loads('\n'.join(lines[json_start:]))
+                except (json.JSONDecodeError, ValueError):
+                    return {}
 
             @staticmethod
             def _parse_stdout(stdout: str) -> dict[str, Any]:
@@ -3040,10 +3258,12 @@ class DashboardState:
                             metrics["sha_match"] = True
                 return metrics
 
+        mgr = self._get_mlkem_session_manager(board_access, env_values)
         mlkem_job = _MlkemJob(
             jid=mlkem_job_id, max_n=max_inputs, board=board_access,
             env_vals=env_values, client_script=tcp_client, variant_name=variant,
             img_idx=image_index, preflight_data=preflight, app_state=self,
+            session_mgr=mgr,
         )
 
         # 初始 "running" snapshot → 通过 _build_inference_response 生成 payload
