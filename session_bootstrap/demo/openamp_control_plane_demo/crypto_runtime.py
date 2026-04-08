@@ -4,9 +4,11 @@ import io
 import json
 import os
 import queue
+import select
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from shlex import quote as shlex_quote
 import shutil
@@ -439,31 +441,26 @@ class MlkemSessionManager:
         self._proc.stdin.flush()
 
     def _read_line(self, timeout: float) -> str:
-        """从 daemon stdout 读取一行，带超时"""
+        """从 daemon stdout 读取一行，带超时（O-2: select 替代线程 spawn）"""
         assert self._proc is not None and self._proc.stdout is not None
-        result_q: queue.Queue[str | Exception] = queue.Queue()
-
-        def _reader() -> None:
-            try:
-                line = self._proc.stdout.readline()  # type: ignore[union-attr]
-                if not line:
-                    result_q.put(EOFError("daemon stdout 已关闭"))
-                else:
-                    result_q.put(line.rstrip("\n"))
-            except Exception as e:
-                result_q.put(e)
-
-        t = threading.Thread(target=_reader, daemon=True)
-        t.start()
-        try:
-            raw = result_q.get(timeout=timeout)
-            if isinstance(raw, Exception):
+        fd = self._proc.stdout.fileno()
+        deadline = time.monotonic() + timeout
+        buf: list[str] = []
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
                 self._alive = False
-                raise RuntimeError(f"daemon 读取出错: {raw}") from raw
-            return raw
-        except queue.Empty:
-            self._alive = False
-            raise TimeoutError(f"daemon 读取超时 ({timeout}s)")
+                raise TimeoutError(f"daemon 读取超时 ({timeout}s)")
+            ready, _, _ = select.select([fd], [], [], min(remaining, 0.5))
+            if not ready:
+                continue
+            ch = self._proc.stdout.read(1)
+            if not ch:
+                self._alive = False
+                raise RuntimeError("daemon stdout 已关闭")
+            if ch == '\n':
+                return ''.join(buf)
+            buf.append(ch)
 
     def _kill_proc(self) -> None:
         if self._proc is not None:

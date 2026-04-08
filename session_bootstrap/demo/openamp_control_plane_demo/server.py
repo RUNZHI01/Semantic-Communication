@@ -2812,41 +2812,63 @@ class DashboardState:
                 diagnostics={"board_configured": False},
             )
 
-        live_board_access = self._live_board_access_for_variant(board_access, variant=variant)
-        variant_expected_sha = expected_sha_for_variant(live_board_access, variant) or self._trusted_current_sha
-        preflight = query_live_status(board_access, trusted_sha=variant_expected_sha)
-        if preflight.get("status") != "success":
-            soft_recover = self._maybe_soft_recover_control_plane(
-                board_access,
-                trusted_sha=variant_expected_sha,
-                reason="mlkem_preflight_failed",
-            )
-            retry = soft_recover.get("status_retry") if isinstance(soft_recover.get("status_retry"), dict) else {}
-            if retry.get("status") == "success":
-                preflight = retry
-            else:
-                if allow_preflight_degraded:
-                    preflight = {
-                        "status": "degraded",
-                        "message": str(preflight.get("message") or "control preflight timeout"),
-                        "logs": list(preflight.get("logs") or []),
-                        "guard_state": "UNKNOWN",
-                        "last_fault_code": "UNKNOWN",
-                        "heartbeat_ok": 0,
-                        "total_fault_count": 0,
-                        "status_category": "control_preflight_degraded",
-                    }
+        # ── Preflight：daemon 存活时跳过 SSH 查询（O-1 优化） ──
+        env_values = board_access.build_env()
+        mgr_early = self._get_mlkem_session_manager(board_access, env_values)
+        daemon_alive = mgr_early is not None and mgr_early.is_alive
+
+        if daemon_alive:
+            # daemon 已与板端建立 ML-KEM 会话，板卡 TCP 通道畅通，无需 SSH 预检
+            with self._lock:
+                preflight = self._last_control_status
+            if not preflight or preflight.get("status") not in ("success", "degraded"):
+                preflight = {
+                    "status": "degraded",
+                    "message": "daemon 存活，跳过 SSH preflight",
+                    "logs": [],
+                    "guard_state": "UNKNOWN",
+                    "last_fault_code": "NONE",
+                    "heartbeat_ok": 1,
+                    "total_fault_count": 0,
+                    "status_category": "daemon_skip_preflight",
+                }
+        else:
+            # daemon 未启动，走完整 SSH + RPMsg 预检
+            live_board_access = self._live_board_access_for_variant(board_access, variant=variant)
+            variant_expected_sha = expected_sha_for_variant(live_board_access, variant) or self._trusted_current_sha
+            preflight = query_live_status(board_access, trusted_sha=variant_expected_sha)
+            if preflight.get("status") != "success":
+                soft_recover = self._maybe_soft_recover_control_plane(
+                    board_access,
+                    trusted_sha=variant_expected_sha,
+                    reason="mlkem_preflight_failed",
+                )
+                retry = soft_recover.get("status_retry") if isinstance(soft_recover.get("status_retry"), dict) else {}
+                if retry.get("status") == "success":
+                    preflight = retry
                 else:
-                    return self._build_blocked_inference_payload(
-                        variant=variant,
-                        image_index=image_index,
-                        status_category="control_preflight_failed",
-                        source_label="控制面预检失败，回退展示（归档样例）",
-                        message="控制面 STATUS_REQ 预检失败，本次不继续 ML-KEM 推理。",
-                        detail=str(preflight.get("message") or "未拿到有效 STATUS_RESP"),
-                        diagnostics={"control_status": preflight, "soft_recover": soft_recover},
-                        event_log=list(preflight.get("logs") or []),
-                    )
+                    if allow_preflight_degraded:
+                        preflight = {
+                            "status": "degraded",
+                            "message": str(preflight.get("message") or "control preflight timeout"),
+                            "logs": list(preflight.get("logs") or []),
+                            "guard_state": "UNKNOWN",
+                            "last_fault_code": "UNKNOWN",
+                            "heartbeat_ok": 0,
+                            "total_fault_count": 0,
+                            "status_category": "control_preflight_degraded",
+                        }
+                    else:
+                        return self._build_blocked_inference_payload(
+                            variant=variant,
+                            image_index=image_index,
+                            status_category="control_preflight_failed",
+                            source_label="控制面预检失败，回退展示（归档样例）",
+                            message="控制面 STATUS_REQ 预检失败，本次不继续 ML-KEM 推理。",
+                            detail=str(preflight.get("message") or "未拿到有效 STATUS_RESP"),
+                            diagnostics={"control_status": preflight, "soft_recover": soft_recover},
+                            event_log=list(preflight.get("logs") or []),
+                        )
 
         with self._lock:
             self._last_control_status = preflight
@@ -2870,9 +2892,14 @@ class DashboardState:
                 event_log=list(preflight.get("logs") or []),
             )
 
-        env_values = board_access.build_env()
+        # env_values 已在上方 O-1 优化块中提前获取
         self._ensure_board_tcp_server(board_access)
-        tcp_client, searched_paths = resolve_local_crypto_client(env_values)
+        # O-3: 复用 mgr_early 的 client_script，避免重复文件系统搜索
+        if mgr_early is not None:
+            tcp_client = mgr_early._client_script
+            searched_paths = [tcp_client]
+        else:
+            tcp_client, searched_paths = resolve_local_crypto_client(env_values)
         if tcp_client is None:
             searched_text = ", ".join(str(path) for path in searched_paths[:5]) or "no candidate paths"
             return self._build_blocked_inference_payload(
