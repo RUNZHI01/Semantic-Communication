@@ -441,11 +441,15 @@ class MlkemSessionManager:
         self._proc.stdin.flush()
 
     def _read_line(self, timeout: float) -> str:
-        """从 daemon stdout 读取一行，带超时（O-2: select 替代线程 spawn）"""
+        """从 daemon stdout 读取一行，带超时（O-2: select 替代线程 spawn）
+
+        注意：必须用 os.read() 直接读 fd，绕过 TextIOWrapper 的内部缓冲区。
+        BufferedReader 首次 read() 会预读整个 fd，导致后续 select 看不到数据。
+        """
         assert self._proc is not None and self._proc.stdout is not None
         fd = self._proc.stdout.fileno()
         deadline = time.monotonic() + timeout
-        buf: list[str] = []
+        buf: list[bytes] = []
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -454,13 +458,13 @@ class MlkemSessionManager:
             ready, _, _ = select.select([fd], [], [], min(remaining, 0.5))
             if not ready:
                 continue
-            ch = self._proc.stdout.read(1)
-            if not ch:
+            raw = os.read(fd, 1)
+            if not raw:
                 self._alive = False
                 raise RuntimeError("daemon stdout 已关闭")
-            if ch == '\n':
-                return ''.join(buf)
-            buf.append(ch)
+            if raw == b'\n':
+                return b''.join(buf).decode('utf-8')
+            buf.append(raw)
 
     def _kill_proc(self) -> None:
         if self._proc is not None:
