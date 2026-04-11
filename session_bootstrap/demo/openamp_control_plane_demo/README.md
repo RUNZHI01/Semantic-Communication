@@ -43,6 +43,13 @@ bash ./session_bootstrap/scripts/run_openamp_demo.sh \
   --probe-env ./session_bootstrap/config/phytium_pi_login.env
 ```
 
+Optional local external positioning feed wiring:
+
+```bash
+bash ./session_bootstrap/scripts/run_openamp_demo.sh \
+  --aircraft-position-env ./session_bootstrap/config/aircraft_position_baidu_ip.example.env
+```
+
 ## Session Readiness Check
 
 Before trying to continue the live operator flow, run the launcher-level readiness preflight first:
@@ -193,6 +200,67 @@ bash ./session_bootstrap/scripts/run_openamp_demo_probe_once.sh \
 
 The helper stays honest about snapshot freshness. If the capture still says `保存的只读 SSH 探板` and the summary says the result comes from a saved record, treat that as saved-probe replay rather than claiming a fresh startup probe succeeded.
 
+## External Position API
+
+The current demo already supports a purchased external positioning feed as long as the upstream can be pulled as an HTTP `GET` that returns a JSON object with at least latitude and longitude.
+
+The normalization bridge entrypoint is:
+
+```bash
+python3 ./session_bootstrap/demo/openamp_control_plane_demo/aircraft_position_bridge.py --once
+```
+
+Recommended config template:
+
+```bash
+./session_bootstrap/config/aircraft_position_external_api.example.env
+```
+
+For the current Baidu service-side IP location route, use:
+
+```bash
+./session_bootstrap/config/aircraft_position_baidu_ip.example.env
+```
+
+Typical runtime keys:
+
+```bash
+AIRCRAFT_POSITION_UPSTREAM_URL=https://provider.example/api/v1/position?token=<key>
+AIRCRAFT_POSITION_BACKEND_BASE_URL=http://127.0.0.1:8079
+AIRCRAFT_POSITION_UPSTREAM_HEADERS_JSON='{"Authorization":"Bearer <token>"}'
+AIRCRAFT_POSITION_LATITUDE_PATH=
+AIRCRAFT_POSITION_LONGITUDE_PATH=
+```
+
+If the upstream is called by the local demo machine rather than the board, set:
+
+```bash
+AIRCRAFT_POSITION_EXECUTION_MODE=local
+```
+
+What the bridge already handles without code changes:
+
+- custom upstream headers via `AIRCRAFT_POSITION_UPSTREAM_HEADERS_JSON`
+- query-string auth embedded directly in `AIRCRAFT_POSITION_UPSTREAM_URL`
+- non-default field names through `AIRCRAFT_POSITION_*_PATH`
+- unit scaling through `AIRCRAFT_POSITION_GROUND_SPEED_SCALE`, `AIRCRAFT_POSITION_ALTITUDE_SCALE`, and `AIRCRAFT_POSITION_VERTICAL_SPEED_SCALE`
+
+Important boundary:
+
+- if the vendor gives you a plain HTTP JSON API, the existing bridge can usually connect directly
+- if the vendor only gives you an SDK or device-side binary interface, you still need a thin wrapper service that exposes an HTTP JSON endpoint for this demo
+
+For the `北斗`-aligned route we checked so far:
+
+- 百度地图 `智能硬件定位` is listed as an advanced paid service and follows `申请试用 -> 开通试用 -> 正式付费` rather than a simple self-serve public JSON API
+- 百度地图 `北斗高精度定位服务` is presented as商务咨询/合作咨询导向
+
+Official pages:
+
+- `地图高级服务 / 智能硬件定位`: https://lbs.baidu.com/cashier/service
+- `百度智能定位`: https://lbs.baidu.com/products/location
+- `北斗高精度定位服务`: https://lbs.baidu.com/products/highaccbdloc
+
 If you want a non-interactive, one-shot ML-KEM live closure (startup -> board session -> crypto ON -> current inference -> summary capture), use:
 
 ```bash
@@ -251,6 +319,110 @@ python3 ./session_bootstrap/scripts/check_openamp_demo_session_readiness.py \
 ```
 
 The readiness outputs only report `has_password=true/false`; they do not print the raw password back out.
+
+## Board GPS bridge
+
+The cockpit and static demo page already read the unified backend contract at `/api/aircraft-position`.
+What was missing is a real producer that can run on the board and forward live GPS/INS data into that contract.
+
+The repo now also includes a board-local positioning API service at
+`session_bootstrap/demo/openamp_control_plane_demo/board_position_api_service.py`.
+It exposes `http://127.0.0.1:9000/api/v1/position` on the board and tries common native
+GNSS sources in order:
+
+- `gpsd` on `127.0.0.1:2947`
+- local NMEA devices such as `/dev/ttyUSB0`, `/dev/ttyACM0`, `/dev/ttyAMA0`, `/dev/ttyS0`
+
+That service is auto-deployed before the bridge probe runs, so if the board has a real GNSS source but
+did not already expose an HTTP positioning API, the demo can still discover `9000/api/v1/position` and
+wire it into `/api/aircraft-position`.
+
+You can now run a portable bridge on the board:
+
+```bash
+bash ./session_bootstrap/scripts/run_aircraft_position_bridge.sh \
+  --upstream-url http://127.0.0.1:9000/gps \
+  --backend-base-url http://<demo-host>:8079 \
+  --ground-speed-scale 3.6
+```
+
+Behavior:
+
+- polls the real board-side positioning API at `--upstream-url`
+- normalizes the payload into the existing `/api/aircraft-position` schema
+- POSTs live samples into the current demo backend without changing the Electron/frontend contract
+- keeps working even if the upstream JSON shape differs, via `--latitude-path`, `--longitude-path`, and the other `--*-path` overrides
+
+The demo backend can now auto-deploy and auto-start this bridge on the board after you save board access in the UI.
+To enable that path, put these env vars into the same board/inference env that the demo already loads:
+
+```bash
+AIRCRAFT_POSITION_UPSTREAM_URL=http://127.0.0.1:9000/gps
+AIRCRAFT_POSITION_BACKEND_BASE_URL=http://<demo-host>:8079
+AIRCRAFT_POSITION_GROUND_SPEED_SCALE=3.6
+```
+
+If the demo backend is started on a non-loopback bind address such as `0.0.0.0`, the backend can auto-derive
+`AIRCRAFT_POSITION_BACKEND_BASE_URL` from the current host network address and only `AIRCRAFT_POSITION_UPSTREAM_URL`
+remains mandatory.
+
+If you do not want to hardcode a single upstream URL, the board bridge and demo backend now also support
+candidate auto-discovery:
+
+```bash
+AIRCRAFT_POSITION_UPSTREAM_CANDIDATES_JSON='[
+  "http://127.0.0.1:9000/gps",
+  "http://127.0.0.1:9000/api/v1/position",
+  "http://127.0.0.1:9527/api/v1/position"
+]'
+```
+
+With that in place:
+
+- the backend probes common board-local endpoints after `board-access` is saved
+- the built-in defaults already cover common `/gps`, `/position`, `/location`, `/api/*`, and `/api/v1/*` paths on `9000`, `9527`, and `8080`
+- `/api/system-status` exposes whether the bridge is `autodiscovered`, `upstream_not_found`, or `upstream_probe_error`
+- if one candidate responds with usable latitude/longitude, the backend injects the discovered URL and starts the bridge automatically
+
+Optional envs supported by the bridge and safe for remote auto-deploy:
+
+- `AIRCRAFT_POSITION_UPSTREAM_HEADERS_JSON`
+- `AIRCRAFT_POSITION_UPSTREAM_CANDIDATES_JSON`
+- `AIRCRAFT_POSITION_BACKEND_HEADERS_JSON`
+- `AIRCRAFT_POSITION_SOURCE_LABEL`
+- `AIRCRAFT_POSITION_SOURCE_NOTE`
+- `AIRCRAFT_POSITION_AIRCRAFT_ID`
+- `AIRCRAFT_POSITION_MISSION_CALL_SIGN`
+- `AIRCRAFT_POSITION_INTERVAL_SEC`
+- `AIRCRAFT_POSITION_TIMEOUT_SEC`
+- `AIRCRAFT_POSITION_*_PATH`
+
+When those vars are present and the session has `host/user/password`, the demo backend uploads:
+
+- `aircraft_position_bridge.py`
+- `run_aircraft_position_bridge.sh`
+- `aircraft_position_bridge.env`
+- a user-level `systemd` unit
+
+to `~/.openamp-demo/aircraft_position_bridge` on the board, then tries `systemctl --user enable --now`.
+If the board does not expose a working user `systemd` bus, the demo falls back to a background `nohup` process instead.
+
+Typical path overrides for a non-demo-native upstream:
+
+```bash
+bash ./session_bootstrap/scripts/run_aircraft_position_bridge.sh \
+  --upstream-url http://127.0.0.1:9000/api/v1/position \
+  --backend-base-url http://<demo-host>:8079 \
+  --latitude-path gps.latitude_deg \
+  --longitude-path gps.longitude_deg \
+  --ground-speed-kph-path gps.speed_mps \
+  --ground-speed-scale 3.6 \
+  --captured-at-path meta.timestamp \
+  --sequence-path meta.seq
+```
+
+Use `--once` for one-shot validation during bring-up. In steady state, leave it in loop mode and supervise it with your usual board-side process manager.
+The repo also includes a matching user-service template at `session_bootstrap/scripts/aircraft_position_bridge.service.example`.
 
 ## Web-side credential flow
 

@@ -5,6 +5,7 @@ import json
 import os
 import queue
 import select
+import shlex
 import subprocess
 import sys
 import threading
@@ -30,8 +31,11 @@ LOCAL_SCRIPT_ROOT_KEYS = ("MLKEM_SCRIPT_ROOT",)
 LOCAL_CLIENT_SCRIPT_KEYS = ("MLKEM_CLIENT_SCRIPT", "MLKEM_TCP_CLIENT_SCRIPT")
 LOCAL_SERVER_SCRIPT_KEYS = ("MLKEM_SERVER_SCRIPT", "MLKEM_TCP_SERVER_SCRIPT")
 OQS_INSTALL_KEYS = ("OQS_INSTALL_PATH", "MLKEM_OQS_INSTALL_PATH", "MLKEM_LIBOQS_ROOT")
+LOCAL_TONGSUO_BRIDGE_KEYS = ("MLKEM_LOCAL_TONGSUO_KEM_BRIDGE", "TONGSUO_KEM_BRIDGE")
+LOCAL_LD_LIBRARY_KEYS = ("MLKEM_LOCAL_LD_LIBRARY_PATH",)
 
-REMOTE_PROJECT_ROOT_KEYS = ("MLKEM_REMOTE_PROJECT_ROOT", "OPENAMP_REMOTE_PROJECT_ROOT", "REMOTE_PROJECT_ROOT")
+REMOTE_PROJECT_ROOT_KEYS = ("MLKEM_REMOTE_PROJECT_ROOT", "OPENAMP_REMOTE_PROJECT_ROOT")
+LEGACY_REMOTE_PROJECT_ROOT_KEYS = ("REMOTE_PROJECT_ROOT",)
 REMOTE_SERVER_SCRIPT_KEYS = ("MLKEM_REMOTE_SERVER_SCRIPT", "MLKEM_REMOTE_TCP_SERVER_SCRIPT")
 REMOTE_STARTUP_CMD_KEYS = ("MLKEM_REMOTE_STARTUP_CMD",)
 REMOTE_ACTIVATE_KEYS = ("MLKEM_REMOTE_ACTIVATE",)
@@ -42,7 +46,7 @@ REMOTE_TONGSUO_BRIDGE_KEYS = ("MLKEM_REMOTE_TONGSUO_KEM_BRIDGE",)
 REMOTE_PRELUDE_KEYS = ("MLKEM_REMOTE_PRELUDE", "MLKEM_REMOTE_EXTRA_ENV")
 REMOTE_PYTHON_KEYS = ("MLKEM_REMOTE_PYTHON",)
 REMOTE_ARTIFACT_KEYS = ("REMOTE_CURRENT_ARTIFACT",)
-REMOTE_TVM_PYTHON_KEYS = ("REMOTE_TVM_PYTHON",)
+REMOTE_TVM_PYTHON_KEYS = ("REMOTE_TVM_PYTHON", "REMOTE_TVM310_PYTHON")
 REMOTE_TVM_ENABLE_KEYS = ("MLKEM_ENABLE_TVM", "MLKEM_REMOTE_ENABLE_TVM")
 REMOTE_PORT_KEYS = ("MLKEM_PORT", "MLKEM_SERVER_PORT", "MLKEM_DATA_PORT", "MLKEM_TCP_PORT")
 STATUS_PORT_KEYS = ("MLKEM_STATUS_PORT", "MLKEM_REMOTE_STATUS_PORT")
@@ -52,6 +56,9 @@ REMOTE_LOG_PATH_KEYS = ("MLKEM_REMOTE_LOG_PATH",)
 REMOTE_SNR_KEYS = ("MLKEM_SNR", "REMOTE_SNR_CURRENT")
 
 LOCAL_PYTHON_KEYS = ("COCKPIT_PYTHON", "PYTHON")
+
+_LOCAL_CRYPTO_CLIENT_CAP_CACHE: dict[Path, dict[str, bool]] = {}
+_LOCAL_CRYPTO_SERVER_CAP_CACHE: dict[Path, dict[str, bool]] = {}
 
 
 def _sources(env_values: Mapping[str, str] | None) -> tuple[Mapping[str, str], Mapping[str, str]]:
@@ -100,7 +107,11 @@ def _resolve_existing_path(raw_path: str, *, base_dir: Path | None = None) -> Pa
         candidate = (seed_dir / candidate).resolve()
     else:
         candidate = candidate.resolve()
-    if candidate.exists():
+    try:
+        exists = candidate.exists()
+    except OSError:
+        exists = False
+    if exists:
         return candidate
     return None
 
@@ -134,7 +145,11 @@ def _candidate_base_dirs(
         _append_unique(paths, seen, _resolve_existing_path(str(raw_root)))
 
     for default_root in (PROJECT_ROOT, Path.cwd(), PROJECT_ROOT.parent, Path.cwd().parent):
-        if default_root.exists():
+        try:
+            exists = default_root.exists()
+        except OSError:
+            exists = False
+        if exists:
             _append_unique(paths, seen, default_root)
 
     return paths
@@ -172,14 +187,22 @@ def resolve_local_asset(
                 continue
             candidate = root / relative
             _append_unique(searched, seen, candidate)
-            if candidate.exists():
+            try:
+                exists = candidate.exists()
+            except OSError:
+                exists = False
+            if exists:
                 return candidate.resolve(), searched
 
     base_dirs = _candidate_base_dirs(env_values, extra_roots=extra_roots)
     for root in base_dirs:
         candidate = root / relative
         _append_unique(searched, seen, candidate)
-        if candidate.exists():
+        try:
+            exists = candidate.exists()
+        except OSError:
+            exists = False
+        if exists:
             return candidate.resolve(), searched
 
     sibling_parents = [root.parent for root in base_dirs if root.parent.exists()]
@@ -196,7 +219,11 @@ def resolve_local_asset(
         for child in children:
             candidate = child / relative
             _append_unique(searched, seen, candidate)
-            if candidate.exists():
+            try:
+                exists = candidate.exists()
+            except OSError:
+                exists = False
+            if exists:
                 return candidate.resolve(), searched
 
     return None, searched
@@ -230,6 +257,61 @@ def resolve_local_crypto_server(
     )
 
 
+def inspect_local_crypto_client_capabilities(client_script: Path) -> dict[str, bool]:
+    """Best-effort feature detection for locally discovered tcp_client.py.
+
+    We may discover different client generations across machines. The newer demo
+    path expects `--daemon`, `--count`, and `--json-summary`, while the older
+    single-shot client only supports `--input` / `--output`. Detect features from
+    the checked-in script text so we can choose a compatible execution path
+    without assuming a specific external repo revision.
+    """
+    resolved = client_script.resolve()
+    cached = _LOCAL_CRYPTO_CLIENT_CAP_CACHE.get(resolved)
+    if cached is not None:
+        return dict(cached)
+
+    try:
+        script_text = resolved.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        script_text = ""
+
+    capabilities = {
+        "supports_daemon": "--daemon" in script_text,
+        "supports_count": "--count" in script_text,
+        "supports_json_summary": "--json-summary" in script_text,
+        "supports_output": "--output" in script_text,
+        "supports_expect_result": "--expect-result" in script_text,
+    }
+    capabilities["supports_batch_summary"] = (
+        capabilities["supports_count"] and capabilities["supports_json_summary"]
+    )
+    capabilities["legacy_single_input_only"] = not capabilities["supports_batch_summary"]
+
+    _LOCAL_CRYPTO_CLIENT_CAP_CACHE[resolved] = dict(capabilities)
+    return dict(capabilities)
+
+
+def inspect_local_crypto_server_capabilities(server_script: Path) -> dict[str, bool]:
+    resolved = server_script.resolve()
+    cached = _LOCAL_CRYPTO_SERVER_CAP_CACHE.get(resolved)
+    if cached is not None:
+        return dict(cached)
+
+    try:
+        script_text = resolved.read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        capabilities = {"supports_status_port": True}
+        _LOCAL_CRYPTO_SERVER_CAP_CACHE[resolved] = dict(capabilities)
+        return dict(capabilities)
+
+    capabilities = {
+        "supports_status_port": "--status-port" in script_text,
+    }
+    _LOCAL_CRYPTO_SERVER_CAP_CACHE[resolved] = dict(capabilities)
+    return dict(capabilities)
+
+
 def resolve_local_oqs_install(
     env_values: Mapping[str, str] | None = None,
     *,
@@ -244,6 +326,150 @@ def resolve_local_oqs_install(
     )
 
 
+def resolve_local_mlkem_runtime_root(
+    env_values: Mapping[str, str] | None = None,
+    *,
+    extra_roots: Sequence[Path | str] = (),
+) -> tuple[Path | None, list[Path]]:
+    searched: list[Path] = []
+    seen: set[Path] = set()
+
+    for base_dir in _candidate_base_dirs(env_values, extra_roots=extra_roots):
+        candidate_dirs: list[Path] = [base_dir]
+
+        for sibling_name in ("ICCompetition2026", "mlkem_link", "mlkem"):
+            candidate_dirs.append(base_dir / sibling_name)
+            candidate_dirs.append(base_dir.parent / sibling_name)
+
+        try:
+            for child in base_dir.parent.iterdir():
+                candidate_dirs.append(child)
+        except OSError:
+            pass
+
+        for candidate_dir in candidate_dirs:
+            resolved = _resolve_existing_path(str(candidate_dir))
+            _append_unique(searched, seen, resolved)
+            if resolved is None or not resolved.is_dir():
+                continue
+            try:
+                has_runtime = (resolved / "mlkem_link").is_dir()
+            except OSError:
+                has_runtime = False
+            if has_runtime:
+                return resolved, searched
+
+    return None, searched
+
+
+def _prepend_env_path(env: dict[str, str], key: str, path_value: str) -> None:
+    value = str(path_value or "").strip()
+    if not value:
+        return
+
+    existing = [segment for segment in str(env.get(key, "")).split(os.pathsep) if segment]
+    if value in existing:
+        return
+    env[key] = os.pathsep.join([value, *existing]) if existing else value
+
+
+def _detect_local_python_command(
+    env_values: Mapping[str, str] | None,
+    *,
+    runtime_root: Path | None,
+) -> str:
+    explicit = first_config_value(env_values, keys=LOCAL_PYTHON_KEYS, default="")
+    if explicit:
+        return explicit
+
+    if runtime_root is not None:
+        detected = runtime_root / ".venv" / "bin" / "python"
+        if detected.exists():
+            return str(detected)
+
+    return sys.executable or "python3"
+
+
+def _detect_local_tongsuo_bridge(runtime_root: Path | None) -> Path | None:
+    if runtime_root is None:
+        return None
+
+    candidates = (
+        runtime_root / "tongsuo-dist" / "tongsuo" / "lib" / "libtongsuo_kem_bridge.so",
+        runtime_root / "tongsuo-dist" / "lib64" / "libtongsuo_kem_bridge.so",
+        runtime_root / "tongsuo-dist" / "lib" / "libtongsuo_kem_bridge.so",
+    )
+    for candidate in candidates:
+        try:
+            exists = candidate.exists()
+        except OSError:
+            exists = False
+        if exists:
+            return candidate.resolve()
+    return None
+
+
+def _build_local_crypto_env(
+    env_values: Mapping[str, str] | None,
+    *,
+    client_script: Path,
+    runtime_root: Path | None,
+) -> dict[str, str]:
+    env = dict(os.environ)
+
+    if runtime_root is not None and (runtime_root / "mlkem_link").is_dir():
+        _prepend_env_path(env, "PYTHONPATH", str(runtime_root))
+
+    oqs_install = first_config_value(env_values, keys=OQS_INSTALL_KEYS)
+    if oqs_install:
+        env["OQS_INSTALL_PATH"] = oqs_install
+    else:
+        extra_roots: list[Path] = [client_script.parent.parent]
+        if runtime_root is not None:
+            extra_roots.append(runtime_root)
+        detected_oqs_root, _ = resolve_local_oqs_install(env_values, extra_roots=tuple(extra_roots))
+        if detected_oqs_root is not None:
+            env["OQS_INSTALL_PATH"] = str(detected_oqs_root)
+
+    bridge_value = first_config_value(env_values, keys=LOCAL_TONGSUO_BRIDGE_KEYS, default="")
+    bridge_path: Path | None = None
+    if bridge_value:
+        bridge_path = _resolve_existing_path(bridge_value)
+    if bridge_path is None:
+        bridge_path = _detect_local_tongsuo_bridge(runtime_root)
+    if bridge_path is not None:
+        env["TONGSUO_KEM_BRIDGE"] = str(bridge_path)
+
+    explicit_local_ld = first_config_value(env_values, keys=LOCAL_LD_LIBRARY_KEYS, default="")
+    if explicit_local_ld:
+        for segment in reversed([item for item in explicit_local_ld.split(os.pathsep) if item]):
+            _prepend_env_path(env, "LD_LIBRARY_PATH", segment)
+    elif bridge_path is not None:
+        _prepend_env_path(env, "LD_LIBRARY_PATH", str(bridge_path.parent))
+
+    return env
+
+
+def _normalize_remote_tvm_python(raw_value: str) -> str:
+    value = str(raw_value or "").strip()
+    if not value:
+        return value
+
+    try:
+        parts = shlex.split(value)
+    except ValueError:
+        return value
+    if not parts:
+        return value
+    if len(parts) == 1:
+        return parts[0]
+    if parts[0] == "env":
+        for token in reversed(parts[1:]):
+            if "=" not in token:
+                return token
+    return value
+
+
 def build_local_crypto_client_command(
     env_values: Mapping[str, str] | None,
     *,
@@ -251,21 +477,22 @@ def build_local_crypto_client_command(
     input_path: Path,
     client_script: Path,
 ) -> tuple[list[str], dict[str, str]]:
-    python_command = first_config_value(env_values, keys=LOCAL_PYTHON_KEYS, default=sys.executable or "python3")
+    runtime_root, _ = resolve_local_mlkem_runtime_root(
+        env_values,
+        extra_roots=(client_script.parent.parent,),
+    )
+    python_command = _detect_local_python_command(env_values, runtime_root=runtime_root)
     suite = first_config_value(env_values, keys=SUITE_KEYS, default=DEFAULT_CIPHER_SUITE)
     crypto_port = parse_int_config(
         first_config_value(env_values, keys=REMOTE_PORT_KEYS),
         DEFAULT_CRYPTO_PORT,
     )
 
-    env = dict(os.environ)
-    oqs_install = first_config_value(env_values, keys=OQS_INSTALL_KEYS)
-    if oqs_install:
-        env["OQS_INSTALL_PATH"] = oqs_install
-    else:
-        detected_oqs_root, _ = resolve_local_oqs_install(env_values, extra_roots=(client_script.parent.parent,))
-        if detected_oqs_root is not None:
-            env["OQS_INSTALL_PATH"] = str(detected_oqs_root)
+    env = _build_local_crypto_env(
+        env_values,
+        client_script=client_script,
+        runtime_root=runtime_root,
+    )
 
     command = [
         python_command,
@@ -293,21 +520,22 @@ def build_local_crypto_daemon_command(
     daemon 模式下不需要 --input / --count / --json-summary，
     这些参数通过 stdin JSON 指令按需传入。
     """
-    python_command = first_config_value(env_values, keys=LOCAL_PYTHON_KEYS, default=sys.executable or "python3")
+    runtime_root, _ = resolve_local_mlkem_runtime_root(
+        env_values,
+        extra_roots=(client_script.parent.parent,),
+    )
+    python_command = _detect_local_python_command(env_values, runtime_root=runtime_root)
     suite = first_config_value(env_values, keys=SUITE_KEYS, default=DEFAULT_CIPHER_SUITE)
     crypto_port = parse_int_config(
         first_config_value(env_values, keys=REMOTE_PORT_KEYS),
         DEFAULT_CRYPTO_PORT,
     )
 
-    env = dict(os.environ)
-    oqs_install = first_config_value(env_values, keys=OQS_INSTALL_KEYS)
-    if oqs_install:
-        env["OQS_INSTALL_PATH"] = oqs_install
-    else:
-        detected_oqs_root, _ = resolve_local_oqs_install(env_values, extra_roots=(client_script.parent.parent,))
-        if detected_oqs_root is not None:
-            env["OQS_INSTALL_PATH"] = str(detected_oqs_root)
+    env = _build_local_crypto_env(
+        env_values,
+        client_script=client_script,
+        runtime_root=runtime_root,
+    )
 
     command = [
         python_command,
@@ -362,7 +590,18 @@ class MlkemSessionManager:
         with self._lock:
             if self.is_alive:
                 return
-            self._start_daemon()
+            last_error: Exception | None = None
+            for attempt in range(3):
+                try:
+                    self._start_daemon()
+                    return
+                except Exception as exc:
+                    last_error = exc
+                    if attempt >= 2:
+                        break
+                    time.sleep(0.5)
+            assert last_error is not None
+            raise last_error
 
     def _start_daemon(self) -> None:
         """启动 daemon 子进程，等待 'ready' 响应"""
@@ -373,7 +612,7 @@ class MlkemSessionManager:
         print(f"[MlkemSessionManager] 启动 daemon: {' '.join(cmd[:6])}...")
         self._proc = subprocess.Popen(
             cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL, text=True, env=env, bufsize=1)
+            stderr=subprocess.PIPE, text=True, env=env, bufsize=1)
         assert self._proc.stdin is not None
         assert self._proc.stdout is not None
 
@@ -388,10 +627,26 @@ class MlkemSessionManager:
             print(f"[MlkemSessionManager] daemon 就绪 "
                   f"(握手={self._handshake_ms:.0f}ms)")
         except Exception as e:
+            stderr_tail = ""
+            if self._proc is not None and self._proc.poll() is not None and self._proc.stderr is not None:
+                try:
+                    stderr_tail = (self._proc.stderr.read() or "").strip()[-400:]
+                except Exception:
+                    stderr_tail = ""
             self._kill_proc()
-            raise RuntimeError(f"daemon 启动失败: {e}") from e
+            detail = f"{e}"
+            if stderr_tail:
+                detail = f"{detail}; stderr={stderr_tail}"
+            raise RuntimeError(f"daemon 启动失败: {detail}") from e
 
-    def send_image(self, input_path: str | Path, job_id: str) -> dict:
+    def send_image(
+        self,
+        input_path: str | Path,
+        job_id: str,
+        *,
+        run_tvm: bool = False,
+        expect_result: bool = False,
+    ) -> dict:
         """通过 daemon 发送单张图片
 
         Returns:
@@ -400,16 +655,72 @@ class MlkemSessionManager:
             RuntimeError: daemon 不可用
         """
         with self._lock:
-            if not self.is_alive:
-                raise RuntimeError("daemon 未运行")
-            self._stdin_write(json.dumps({
-                "action": "send", "input": str(input_path), "job_id": job_id,
-            }))
-            response_line = self._read_line(timeout=self._io_timeout)
-            response = json.loads(response_line)
-            if response.get("status") == "ok":
-                self._images_sent += 1
-            return response
+            last_error: Exception | None = None
+            for attempt in range(2):
+                if not self.is_alive:
+                    self._start_daemon()
+                try:
+                    self._stdin_write(json.dumps({
+                        "action": "send",
+                        "input": str(input_path),
+                        "job_id": job_id,
+                        "run_tvm": run_tvm,
+                        "expect_result": expect_result,
+                    }))
+                    response_line = self._read_line(timeout=self._io_timeout)
+                    response = json.loads(response_line)
+                    if response.get("status") == "ok":
+                        self._images_sent += 1
+                        return response
+                    message = str(
+                        response.get("message")
+                        or response.get("error")
+                        or response.get("detail")
+                        or ""
+                    ).strip()
+                    if self._is_retryable_send_error(message):
+                        last_error = RuntimeError(message or "daemon link lost")
+                        self._alive = False
+                        self._kill_proc()
+                        if attempt >= 1:
+                            break
+                        print(
+                            f"[MlkemSessionManager] daemon 响应链路错误，正在重连重试 "
+                            f"(job_id={job_id}): {message or 'daemon link lost'}"
+                        )
+                        continue
+                    return response
+                except Exception as exc:
+                    last_error = exc
+                    self._alive = False
+                    self._kill_proc()
+                    if attempt >= 1:
+                        break
+                    print(
+                        f"[MlkemSessionManager] daemon 发送失败，正在重连重试 "
+                        f"(job_id={job_id}): {exc}"
+                    )
+            assert last_error is not None
+            raise RuntimeError(f"daemon 发送失败: {last_error}") from last_error
+
+    @staticmethod
+    def _is_retryable_send_error(message: str) -> bool:
+        text = str(message or "").strip().lower()
+        if not text:
+            return False
+        retry_tokens = (
+            "连接关闭",
+            "已读 0 字节",
+            "connection closed",
+            "connection reset",
+            "reset by peer",
+            "broken pipe",
+            "eof",
+            "timed out",
+            "timeout",
+            "daemon link lost",
+        )
+        return any(token in text for token in retry_tokens)
 
     def ping(self) -> dict:
         """检查 daemon 健康状态"""
@@ -493,6 +804,16 @@ def _derive_remote_server_script(
         return explicit_remote_script
 
     remote_project_root = first_config_value(env_values, keys=REMOTE_PROJECT_ROOT_KEYS)
+    if not remote_project_root and local_server_script is not None:
+        try:
+            local_server_script.resolve().relative_to(PROJECT_ROOT)
+        except ValueError:
+            # The ML-KEM helper was discovered from a sibling/external repo.
+            # In that case, a generic REMOTE_PROJECT_ROOT usually refers to the
+            # OpenAMP project on the board, not the ML-KEM helper location.
+            pass
+        else:
+            remote_project_root = first_config_value(env_values, keys=LEGACY_REMOTE_PROJECT_ROOT_KEYS)
     if remote_project_root:
         if local_server_script is not None:
             try:
@@ -526,6 +847,11 @@ def build_remote_crypto_server_command(
     crypto_port = parse_int_config(first_config_value(env_values, keys=REMOTE_PORT_KEYS), DEFAULT_CRYPTO_PORT)
     status_port_raw = first_config_value(env_values, keys=STATUS_PORT_KEYS)
     enable_tvm = parse_bool_config(first_config_value(env_values, keys=REMOTE_TVM_ENABLE_KEYS), True)
+    server_caps = (
+        inspect_local_crypto_server_capabilities(local_server_script)
+        if local_server_script is not None
+        else {"supports_status_port": True}
+    )
 
     server_argv: list[str] = [
         remote_python,
@@ -539,15 +865,16 @@ def build_remote_crypto_server_command(
         "--suite",
         suite,
     ]
-    if status_port_raw:
-        server_argv.extend(["--status-port", str(parse_int_config(status_port_raw, DEFAULT_STATUS_PORT))])
-    else:
-        server_argv.extend(["--status-port", str(DEFAULT_STATUS_PORT)])
+    if server_caps.get("supports_status_port", True):
+        if status_port_raw:
+            server_argv.extend(["--status-port", str(parse_int_config(status_port_raw, DEFAULT_STATUS_PORT))])
+        else:
+            server_argv.extend(["--status-port", str(DEFAULT_STATUS_PORT)])
     if enable_tvm:
         server_argv.append("--tvm")
         remote_tvm_python = first_config_value(env_values, keys=REMOTE_TVM_PYTHON_KEYS)
         if remote_tvm_python:
-            server_argv.extend(["--tvm-python", remote_tvm_python])
+            server_argv.extend(["--tvm-python", _normalize_remote_tvm_python(remote_tvm_python)])
         remote_artifact = first_config_value(env_values, keys=REMOTE_ARTIFACT_KEYS)
         if remote_artifact:
             server_argv.extend(["--artifact-path", remote_artifact])
@@ -565,32 +892,32 @@ def build_remote_crypto_server_command(
         conda_sh = first_config_value(env_values, keys=REMOTE_CONDA_SH_KEYS)
         if conda_env and conda_sh:
             command_steps.append(
-                f"if [ -f {shlex.quote(conda_sh)} ]; then . {shlex.quote(conda_sh)} && "
-                f"conda activate {shlex.quote(conda_env)}; fi"
+                f"if [ -f {shlex_quote(conda_sh)} ]; then . {shlex_quote(conda_sh)} && "
+                f"conda activate {shlex_quote(conda_env)}; fi"
             )
         elif conda_env:
             command_steps.append(
                 "if command -v conda >/dev/null 2>&1; then "
-                f'eval "$(conda shell.bash hook)" >/dev/null 2>&1 && conda activate {shlex.quote(conda_env)}; fi'
+                f'eval "$(conda shell.bash hook)" >/dev/null 2>&1 && conda activate {shlex_quote(conda_env)}; fi'
             )
 
     ld_library_path = first_config_value(env_values, keys=REMOTE_LD_LIBRARY_KEYS)
     if ld_library_path:
         command_steps.append(
-            f"export LD_LIBRARY_PATH={shlex.quote(ld_library_path)}${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}"
+            f"export LD_LIBRARY_PATH={shlex_quote(ld_library_path)}${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}"
         )
 
     tongsuo_bridge = first_config_value(env_values, keys=REMOTE_TONGSUO_BRIDGE_KEYS)
     if tongsuo_bridge:
-        command_steps.append(f"export TONGSUO_KEM_BRIDGE={shlex.quote(tongsuo_bridge)}")
+        command_steps.append(f"export TONGSUO_KEM_BRIDGE={shlex_quote(tongsuo_bridge)}")
 
     remote_prelude = first_config_value(env_values, keys=REMOTE_PRELUDE_KEYS)
     if remote_prelude:
         command_steps.append(remote_prelude)
 
-    server_command = " ".join(shlex.quote(str(arg)) for arg in server_argv)
-    command_steps.append(f"nohup {server_command} </dev/null >> {shlex.quote(log_path)} 2>&1 &")
-    return f"bash -c {shlex.quote('; '.join(command_steps))}"
+    server_command = " ".join(shlex_quote(str(arg)) for arg in server_argv)
+    command_steps.append(f"nohup {server_command} </dev/null >> {shlex_quote(log_path)} 2>&1 &")
+    return f"bash -c {shlex_quote('; '.join(command_steps))}"
 
 
 def run_ssh_command(
@@ -626,12 +953,15 @@ def run_ssh_command(
         askpass_path = Path(raw_path)
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write("#!/bin/sh\n")
-            handle.write(f"printf '%s\\n' {shlex.quote(password)}\n")
+            handle.write(f"printf '%s\\n' {shlex_quote(password)}\n")
         askpass_path.chmod(stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR)
         env["SSH_ASKPASS"] = str(askpass_path)
         env["SSH_ASKPASS_REQUIRE"] = "force"
         env.setdefault("DISPLAY", "codex-askpass:0")
-        command = ssh_command
+        if shutil.which("setsid"):
+            command = ["setsid", "-w", *ssh_command]
+        else:
+            command = ssh_command
     else:
         command = ssh_command
 

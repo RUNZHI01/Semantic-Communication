@@ -16,6 +16,12 @@ interface BoardTelemetryCardProps {
 export function BoardTelemetryCard({ system }: BoardTelemetryCardProps) {
   const status = system.data
   const inf = status?.active_inference
+  const telemetry = status?.live?.telemetry
+  const boardPositionApi = status?.live?.board_position_api as Record<string, unknown> | undefined
+  const memorySummary = telemetry?.memory_used_mb != null && telemetry?.memory_total_mb != null
+    ? `${Math.round(telemetry.memory_used_mb)} / ${Math.round(telemetry.memory_total_mb)} MB`
+    : '—'
+  const boardPositionApiStatus = String(boardPositionApi?.status ?? 'unavailable').toUpperCase()
 
   return (
     <PanelCard title="板卡遥测" icon={Icons.Cpu}>
@@ -53,6 +59,26 @@ export function BoardTelemetryCard({ system }: BoardTelemetryCardProps) {
               {String(status.live.rpmsg_device ?? '—')}
             </span>
           </Descriptions.Item>
+          <Descriptions.Item label={telemetry?.compute_label?.toLowerCase() ?? 'cpu'}>
+            <span className="text-number font-mono metricValue">
+              {telemetry?.compute_pct != null ? `${telemetry.compute_pct.toFixed(1)}%` : '—'}
+            </span>
+          </Descriptions.Item>
+          <Descriptions.Item label="memory">
+            <span className="text-number font-mono metricValue">
+              {memorySummary}
+            </span>
+          </Descriptions.Item>
+          <Descriptions.Item label="telemetry">
+            <ToneTag tone={telemetry?.status === 'ok' ? 'success' : 'neutral'}>
+              {String(telemetry?.status ?? 'unavailable').toUpperCase()}
+            </ToneTag>
+          </Descriptions.Item>
+          <Descriptions.Item label="定位 API">
+            <ToneTag tone={boardPositionApiStatus === 'LIVE' ? 'success' : 'neutral'}>
+              {boardPositionApiStatus}
+            </ToneTag>
+          </Descriptions.Item>
           <Descriptions.Item label="作业">
             <div className={s.metricItem} role="status" aria-live="polite">
               {inf?.running ? (
@@ -70,11 +96,6 @@ export function BoardTelemetryCard({ system }: BoardTelemetryCardProps) {
               </Text>
             )}
           </Descriptions.Item>
-          {status.live.status_note && (
-            <Descriptions.Item label="说明">
-              <Text className="text-caption">{status.live.status_note}</Text>
-            </Descriptions.Item>
-          )}
         </Descriptions>
       )}
     </PanelCard>

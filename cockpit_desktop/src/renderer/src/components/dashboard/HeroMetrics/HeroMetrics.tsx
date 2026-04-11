@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { UseQueryResult } from '@tanstack/react-query'
 import type { SystemStatusResponse } from '../../../api/types'
+import type { BatchStateResponse } from '../../../api/types/crypto'
 import { Icons } from '../../icons'
 import { CountUp } from '../../shared/CountUp'
 import s from './HeroMetrics.module.css'
@@ -29,9 +30,10 @@ function Sparkline({ data, color }: { data: number[], color: string }) {
 interface HeroMetricsProps {
   system: UseQueryResult<SystemStatusResponse>
   inferenceProgress?: any
+  batchState?: UseQueryResult<BatchStateResponse>
 }
 
-export function HeroMetrics({ system, inferenceProgress }: HeroMetricsProps) {
+export function HeroMetrics({ system, inferenceProgress, batchState }: HeroMetricsProps) {
   const status = system.data
   const results = status?.recent_results
   const current = results?.['current']
@@ -46,8 +48,19 @@ export function HeroMetrics({ system, inferenceProgress }: HeroMetricsProps) {
     : null
 
   const lp = inferenceProgress?.data?.live_progress
-  const isActiveInference = !!inferenceProgress?.data && inferenceProgress.data.request_state === 'running'
-  const progressLabel = lp?.label ?? inferenceProgress?.data?.status_category ?? inferenceProgress?.data?.request_state
+  const batch = batchState?.data
+  const isSingleInferenceActive = !!inferenceProgress?.data && inferenceProgress.data.request_state === 'running'
+  const isBatchActive = batch?.status === 'running'
+  const isActiveInference = isSingleInferenceActive || isBatchActive
+  const progressLabel = isSingleInferenceActive
+    ? (lp?.label ?? inferenceProgress?.data?.status_category ?? inferenceProgress?.data?.request_state)
+    : isBatchActive
+      ? `Current 300 张 ${batch?.completed ?? 0}/${batch?.total ?? 300}`
+      : batch?.status === 'done'
+        ? batch.fallback && batch.fallback > 0
+          ? `批量结束 ${batch.success ?? 0}/${batch.total ?? 300} 成功`
+          : '批量完成'
+        : '空闲'
 
   // Dynamic Jitter State
   const [displayPayload, setDisplayPayload] = useState<number | null | undefined>(basePayloadCurrent)

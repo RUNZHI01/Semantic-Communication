@@ -40,8 +40,26 @@ export type LivePayload = {
   last_probe_at?: string
   status_source?: string
   status_note?: string
+  telemetry?: BoardTelemetryPayload
+  board_position_api?: JsonObject
   admission?: JsonObject
   variant_support?: { current?: JsonObject; baseline?: JsonObject }
+}
+
+export type BoardTelemetryPayload = {
+  status?: string
+  stale?: boolean
+  source?: string
+  collected_at?: string
+  compute_label?: string
+  compute_pct?: number | null
+  memory_pct?: number | null
+  memory_used_mb?: number | null
+  memory_available_mb?: number | null
+  memory_total_mb?: number | null
+  loadavg_1m?: number | null
+  cpu_cores?: number | null
+  note?: string
 }
 
 // ---------------------------------------------------------------------------

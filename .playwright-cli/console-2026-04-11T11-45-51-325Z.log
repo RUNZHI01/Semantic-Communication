@@ -1,0 +1,3 @@
+[     303ms] [INFO] %cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools font-weight:bold @ http://127.0.0.1:5173/@fs/home/tianxing/tvm_metaschedule_execution_project/cockpit_desktop/node_modules/.vite/deps/chunk-UZOKQUDP.js?v=7f1f6910:21550
+[     627ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://127.0.0.1:5173/:0
+[     824ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:5173/favicon.ico:0

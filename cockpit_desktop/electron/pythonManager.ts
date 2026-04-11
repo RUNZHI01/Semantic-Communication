@@ -12,6 +12,11 @@ const SERVER_RELATIVE_PATH = path.join(
 )
 const DEFAULT_BACKEND_HOST = '127.0.0.1'
 const DEFAULT_BACKEND_PORT = 8079
+const DEFAULT_AIRCRAFT_POSITION_ENV_RELATIVE_PATH = path.join(
+  'session_bootstrap',
+  'tmp',
+  'aircraft_position_baidu_ip.local.env',
+)
 
 export type BackendOptions = {
   host?: string
@@ -23,6 +28,7 @@ export type BackendRuntimeConfig = {
   port: number
   baseUrl: string
   skipPython: boolean
+  aircraftPositionEnv?: string
   pythonCommand?: string
   repoRoot?: string
   serverScript?: string
@@ -76,6 +82,23 @@ function uniquePaths(values: string[]): string[] {
 
 function resolveServerScriptFromRepoRoot(repoRoot: string): string {
   return path.join(repoRoot, SERVER_RELATIVE_PATH)
+}
+
+function resolveAircraftPositionEnv(repoRoot: string): string | undefined {
+  const requested = process.env.COCKPIT_AIRCRAFT_POSITION_ENV?.trim()
+  if (requested) {
+    const resolved = path.resolve(requested)
+    if (!existsSync(resolved)) {
+      throw new Error(`COCKPIT_AIRCRAFT_POSITION_ENV 指向的文件不存在: ${resolved}`)
+    }
+    return resolved
+  }
+
+  const defaultPath = path.join(repoRoot, DEFAULT_AIRCRAFT_POSITION_ENV_RELATIVE_PATH)
+  if (existsSync(defaultPath)) {
+    return defaultPath
+  }
+  return undefined
 }
 
 function resolveServerLocation(): { repoRoot: string; serverScript: string; cwd: string } {
@@ -164,12 +187,14 @@ export function getBackendRuntimeConfig(options: BackendOptions = {}): BackendRu
 
   const { repoRoot, serverScript, cwd } = resolveServerLocation()
   const pythonCommand = resolvePythonCommand()
+  const aircraftPositionEnv = resolveAircraftPositionEnv(repoRoot)
 
   return {
     host,
     port,
     baseUrl,
     skipPython,
+    aircraftPositionEnv,
     pythonCommand,
     repoRoot,
     serverScript,
@@ -183,15 +208,20 @@ export function startPythonBackend(runtimeConfig: BackendRuntimeConfig): Running
     return null
   }
 
+  const args = [
+    runtimeConfig.serverScript as string,
+    '--host',
+    runtimeConfig.host,
+    '--port',
+    String(runtimeConfig.port),
+  ]
+  if (runtimeConfig.aircraftPositionEnv) {
+    args.push('--aircraft-position-env', runtimeConfig.aircraftPositionEnv)
+  }
+
   const child = spawn(
     runtimeConfig.pythonCommand as string,
-    [
-      runtimeConfig.serverScript as string,
-      '--host',
-      runtimeConfig.host,
-      '--port',
-      String(runtimeConfig.port),
-    ],
+    args,
     {
       cwd: runtimeConfig.cwd,
       stdio: 'inherit',

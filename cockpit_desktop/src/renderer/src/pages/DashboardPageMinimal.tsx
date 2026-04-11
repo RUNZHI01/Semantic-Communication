@@ -3,10 +3,11 @@ import { useSystemStatus } from '../hooks/useSystemStatus'
 import { useDemoSnapshot } from '../hooks/useSnapshot'
 import { useAircraftPosition } from '../hooks/useAircraftPosition'
 import { useInferenceProgressPoll } from '../hooks/useInferenceProgress'
+import { useBatchStatePoll } from '../hooks/useBatchState'
 import { useAppStore } from '../stores/appStore'
 import {
   useProbeBoard,
-  useRunInference,
+  useRunInferenceBatch,
   useRunBaseline,
   useInjectFault,
   useRecover,
@@ -26,18 +27,19 @@ export function DashboardPageMinimal() {
   useDemoSnapshot()
   const aircraft = useAircraftPosition()
   const inferenceProgress = useInferenceProgressPoll()
+  const batchState = useBatchStatePoll()
 
   const activeJobId = useAppStore((s) => s.activeJobId)
-  const lastCompletedInference = useAppStore((s) => s.lastCompletedInference)
   const chinaTheater = useAppStore((s) => s.chinaTheater)
   const setChinaTheater = useAppStore((s) => s.setChinaTheater)
   const [boardPassword, setBoardPassword] = useState('')
   const [toasts, setToasts] = useState<{ id: number; text: string; type: 'success' | 'error' }[]>([])
   const [faultExpanded, setFaultExpanded] = useState(false)
   const [logs, setLogs] = useState<string[]>([])
+  const batch = batchState.isError ? undefined : batchState.data
 
   useEffect(() => {
-    if (inferenceProgress?.data?.request_state !== 'running') {
+    if (batch?.status !== 'running') {
       setLogs([])
       return
     }
@@ -54,10 +56,10 @@ export function DashboardPageMinimal() {
     }, 800)
     
     return () => clearInterval(id)
-  }, [inferenceProgress?.data?.request_state])
+  }, [batch?.status])
 
   const probeMut = useProbeBoard()
-  const inferenceMut = useRunInference()
+  const batchMut = useRunInferenceBatch()
   const baselineMut = useRunBaseline()
   const faultMut = useInjectFault()
   const recoverMut = useRecover()
@@ -75,12 +77,14 @@ export function DashboardPageMinimal() {
 
   const handleRunInference = useMemo(
     () => () => {
-      inferenceMut.mutate({ imageIndex: 0, variant: 'current' }, {
+      batchMut.mutate({ count: 300 }, {
         onSuccess: (data) => {
-          if (data.status === 'fallback') {
-            showToast(data.message || '板卡连接失败，请先探测板卡并输入密码', 'error')
+          if (data.status === 'already_running') {
+            showToast('Current 300 张任务已在运行中', 'success')
+          } else if (data.status === 'started') {
+            showToast('Current 300 张任务已启动', 'success')
           } else {
-            showToast('推理任务已启动！', 'success')
+            showToast(data.message || 'Current 300 张任务启动失败', 'error')
           }
         },
         onError: (error) => {
@@ -88,7 +92,7 @@ export function DashboardPageMinimal() {
         }
       })
     },
-    [inferenceMut, showToast],
+    [batchMut, showToast],
   )
 
   const handleSavePassword = useMemo(
@@ -113,7 +117,11 @@ export function DashboardPageMinimal() {
   // Derived data
   const status = system.data
   const results = status?.recent_results
-  const currentResult = results?.['current']
+  const currentResult = (
+    results?.['current']?.execution_mode === 'live' && results?.['current']?.status === 'success'
+      ? results?.['current']
+      : undefined
+  )
   const baselineResult = results?.['baseline']
   const payloadMs = currentResult?.timings?.payload_ms
   const baselineMs = baselineResult?.timings?.payload_ms
@@ -121,14 +129,28 @@ export function DashboardPageMinimal() {
     ? ((baselineMs - payloadMs) / baselineMs * 100)
     : null
 
-  const progress = inferenceProgress?.data?.live_progress?.completed_count
-    ?? lastCompletedInference?.live_progress?.completed_count
-    ?? 0
-  const totalImages = 300
-  const isRunning = inferenceProgress?.data?.request_state === 'running'
-  const currentStage = inferenceProgress?.data?.live_progress?.current_stage
-    ?? lastCompletedInference?.live_progress?.current_stage
-    ?? '等待触发'
+  const totalImages = Math.max(1, batch?.total ?? 300)
+  const progress = Math.max(0, Math.min(batch?.completed ?? 0, totalImages))
+  const batchSuccess = Math.max(0, batch?.success ?? 0)
+  const batchFallback = Math.max(0, batch?.fallback ?? 0)
+  const isRunning = batch?.status === 'running'
+  const isDone = batch?.status === 'done'
+  const currentStage = isRunning
+    ? `Current 在线推进 ${progress}/${totalImages}`
+    : isDone
+      ? batchFallback > 0
+        ? `批量结束：成功 ${batchSuccess}，回退 ${batchFallback}`
+        : `批量完成：${progress}/${totalImages}`
+      : '等待操作员启动 Current 300 张'
+  const progressBadge = isRunning
+    ? '运行中'
+    : isDone
+      ? batchFallback > 0
+        ? (batchSuccess > 0 ? '部分回退' : '已回退')
+        : '已完成'
+      : '等待触发'
+  const progressSubtitle = `${totalImages} 张图像在线推进`
+  const progressSuffix = isRunning ? '处理中' : isDone ? '已完成' : '待启动'
   const boardOnline = status?.live?.board_online ?? false
 
   return (
@@ -152,7 +174,7 @@ export function DashboardPageMinimal() {
 
       {/* Metrics Bar */}
       <div className={s.metricsBar}>
-        <HeroMetrics system={system} inferenceProgress={inferenceProgress} />
+        <HeroMetrics system={system} inferenceProgress={inferenceProgress} batchState={batchState} />
       </div>
 
       {/* Main Content Area */}
@@ -166,17 +188,17 @@ export function DashboardPageMinimal() {
                 <div className={s.progressHeader}>
                   <div>
                     <div className={s.progressLabel}>Current 重建进度</div>
-                    <div className={s.progressSubTitle}>300 张图像在线推进</div>
+                    <div className={s.progressSubTitle}>{progressSubtitle}</div>
                   </div>
                   <div className={s.progressBadge}>
                     {isRunning && <span className={s.pulseDot} />}
-                    {isRunning ? '运行中' : progress > 0 ? '已完成' : '等待触发'}
+                    {progressBadge}
                   </div>
                 </div>
 
                 <div className={s.progressCount}>
                   <strong>{progress}</strong>
-                  <span>/ {totalImages} 已完成</span>
+                  <span>/ {totalImages} {progressSuffix}</span>
                 </div>
 
                 <div className={s.progressTrack}>
@@ -210,10 +232,10 @@ export function DashboardPageMinimal() {
                 <button
                   className={s.btnFilled}
                   onClick={handleRunInference}
-                  disabled={inferenceMut.isPending}
+                  disabled={batchMut.isPending || isRunning}
                 >
-                  {inferenceMut.isPending ? <span className={s.spinner} /> : <Icons.Play size={18} />}
-                  <span>{inferenceMut.isPending ? '启动中...' : '启动 Current 重建（300张图）'}</span>
+                  {batchMut.isPending ? <span className={s.spinner} /> : <Icons.Play size={18} />}
+                  <span>{batchMut.isPending ? '启动中...' : '启动 Current 300 张重建'}</span>
                 </button>
 
                 <div className={s.actionRow}>
@@ -360,7 +382,7 @@ export function DashboardPageMinimal() {
                       暂无推理结果
                     </div>
                     <div className={s.emptySubtitle}>
-                      点击上方「启动 Current 重建」开始首次推理
+                      点击上方「启动 Current 300 张重建」开始在线推进
                     </div>
                     <div className={s.emptyDescription}>
                       推理完成后将展示 Current vs Baseline 延迟对比、加速比、PSNR/SSIM 质量指标

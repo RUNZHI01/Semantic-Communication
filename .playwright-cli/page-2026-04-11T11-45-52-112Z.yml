@@ -1,0 +1,135 @@
+- generic [ref=e3]:
+  - banner [ref=e4]:
+    - generic [ref=e5]:
+      - img [ref=e6]
+      - heading "飞腾多核弱网安全语义视觉回传 · 座舱演示" [level=1] [ref=e13]
+    - navigation "主导航" [ref=e14]:
+      - button "仪表盘" [ref=e15] [cursor=pointer]
+      - button "Session" [ref=e16] [cursor=pointer]
+    - generic [ref=e17]:
+      - generic [ref=e18]:
+        - status "系统离线" [ref=e19]
+        - generic [ref=e20]: 离线
+      - generic [ref=e22]: 19:45:51
+      - button "切换全屏模式" [ref=e24] [cursor=pointer]:
+        - img [ref=e25]
+  - main [ref=e30]:
+    - generic [ref=e31]:
+      - generic [ref=e33]:
+        - generic [ref=e34]:
+          - generic [ref=e37]: 状态
+          - generic [ref=e38]: Offline
+        - generic [ref=e39]:
+          - generic [ref=e40]:
+            - img [ref=e41]
+            - generic [ref=e43]: Guard
+          - generic [ref=e44]: —
+        - generic [ref=e45]:
+          - generic [ref=e46]:
+            - img [ref=e47]
+            - generic [ref=e49]: Payload
+          - generic [ref=e51]: —
+        - generic [ref=e52]:
+          - generic [ref=e53]:
+            - img [ref=e54]
+            - generic [ref=e56]: Baseline
+          - generic [ref=e58]: —
+        - generic [ref=e59]:
+          - generic [ref=e60]:
+            - img [ref=e61]
+            - generic [ref=e62]: 推理状态
+          - generic [ref=e63]: 空闲
+      - generic [ref=e64]:
+        - generic [ref=e66]:
+          - generic [ref=e68]:
+            - generic [ref=e69]:
+              - generic [ref=e70]:
+                - generic [ref=e71]: Current 重建进度
+                - generic [ref=e72]: 300 张图像在线推进
+              - generic [ref=e73]: 等待触发
+            - generic [ref=e74]:
+              - strong [ref=e75]: "0"
+              - generic [ref=e76]: / 300 待启动
+            - generic [ref=e78]: 当前阶段：等待操作员启动 Current 300 张
+          - generic [ref=e80]:
+            - generic [ref=e81]: 执行操作
+            - button "启动 Current 300 张重建" [ref=e82] [cursor=pointer]:
+              - img [ref=e83]
+              - generic [ref=e85]: 启动 Current 300 张重建
+            - generic [ref=e86]:
+              - button "探测板卡" [ref=e87] [cursor=pointer]:
+                - img [ref=e89]
+                - generic [ref=e96]: 探测板卡
+              - button "票据预检" [ref=e97] [cursor=pointer]:
+                - img [ref=e98]
+                - generic [ref=e101]: 票据预检
+              - button "PyTorch Live" [ref=e102] [cursor=pointer]:
+                - img [ref=e103]
+                - generic [ref=e105]: PyTorch Live
+            - button "故障注入与恢复" [ref=e106] [cursor=pointer]:
+              - img [ref=e107]
+              - generic [ref=e109]: 故障注入与恢复
+              - img [ref=e110]
+          - generic [ref=e113]:
+            - generic [ref=e114]: 推理结果对比
+            - generic [ref=e115]:
+              - img [ref=e117]
+              - generic [ref=e119]: 暂无推理结果
+              - generic [ref=e120]: 点击上方「启动 Current 300 张重建」开始在线推进
+              - generic [ref=e121]: 推理完成后将展示 Current vs Baseline 延迟对比、加速比、PSNR/SSIM 质量指标
+          - generic [ref=e123]:
+            - generic [ref=e124]: 板卡连接设置
+            - generic [ref=e125]:
+              - textbox "板卡密码" [ref=e126]:
+                - /placeholder: 输入板卡密码
+              - button "保存" [ref=e127] [cursor=pointer]
+        - generic [ref=e128]:
+          - group "Map theater selection" [ref=e137]:
+            - generic [ref=e138]: 中国战区
+            - switch "Enable China theater map" [ref=e139] [cursor=pointer]
+          - generic [ref=e142]:
+            - generic [ref=e144]:
+              - img [ref=e145]
+              - generic [ref=e147]: Hardware Telemetry
+            - generic [ref=e153]:
+              - generic [ref=e154]:
+                - img [ref=e155]
+                - generic [ref=e158]: "0"
+                - generic [ref=e159]: CPU
+              - generic [ref=e160]:
+                - img [ref=e161]
+                - generic [ref=e164]: "0"
+                - generic [ref=e165]: MEM
+            - generic [ref=e166]:
+              - generic [ref=e167]:
+                - generic [ref=e168]: Link Status
+                - generic [ref=e170]:
+                  - generic "PWR" [ref=e171]
+                  - generic "LINK" [ref=e172]
+                  - generic "SYNC" [ref=e173]
+              - generic [ref=e174]:
+                - generic [ref=e175]: Guard State
+                - generic [ref=e176]: —
+              - generic [ref=e177]:
+                - generic [ref=e178]: Last Fault
+                - generic [ref=e179]: None
+              - generic [ref=e180]:
+                - generic [ref=e181]: Target
+                - generic [ref=e182]: —
+              - generic [ref=e183]:
+                - generic [ref=e184]: Memory
+                - generic [ref=e185]: —
+              - generic [ref=e186]:
+                - generic [ref=e187]: Load 1m
+                - generic [ref=e188]: —
+              - generic [ref=e189]:
+                - generic [ref=e190]: Telemetry
+                - generic [ref=e191]: UNAVAILABLE
+              - generic [ref=e192]:
+                - generic [ref=e193]: 定位 API
+                - generic [ref=e194]: UNAVAILABLE
+          - generic [ref=e195]:
+            - generic [ref=e196]:
+              - generic [ref=e197]: ML-KEM 安全信道
+              - switch "请先输入板卡密码" [disabled] [ref=e198] [cursor=pointer]
+            - generic [ref=e202]: 请先在下方输入板卡密码

@@ -1,0 +1,16 @@
+{
+  "resume_id": "019d7873-03c7-78e0-83ab-ac0f4dde136c",
+  "last_success": {
+    "run_id": "019d7873-03c7-78e0-83ab-ac0f4dde136c",
+    "submit_status": "ok",
+    "submitted_at": "1775914828",
+    "anchor_fingerprint": "25437a543098cffd3e5c5e415bf7f30314c133eb",
+    "tail_fingerprint": "f69a171c9caac2d0f7ae95f56d0bbd151d0bc1c8",
+    "latest_visible": {
+      "role": "assistant",
+      "text": "好的master",
+      "timestamp": "2026-04-11T13:40:42.835Z"
+    },
+    "unchanged_tail_skips": 0
+  }
+}

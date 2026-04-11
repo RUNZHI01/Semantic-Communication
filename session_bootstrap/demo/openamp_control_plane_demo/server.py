@@ -2,35 +2,48 @@
 from __future__ import annotations
 
 import argparse
+import base64
+import hashlib
 import html
 import json
 import mimetypes
 import os
 import re
+import shutil
+import shlex
+import socket
 import subprocess
+import threading
 import time
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from threading import Lock
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 from urllib.request import build_opener, ProxyHandler, Request, urlopen
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 
+from aircraft_position_bridge import FIELD_PATH_CANDIDATES, build_config_from_env_values, fetch_normalized_payload
 from archive_replay import ArchiveSessionNotFoundError, list_archive_sessions, load_archive_session
-from board_access import BoardAccessConfig, build_board_access_config, build_demo_default_board_access
+from board_access import BoardAccessConfig, build_board_access_config, build_demo_default_board_access, load_env_file
 from board_probe import DEFAULT_LIVE_PROBE_OUTPUT, is_successful_probe, load_probe_output, run_live_probe, write_probe_output
 from crypto_runtime import (
     DEFAULT_CIPHER_SUITE,
     DEFAULT_CRYPTO_PORT,
     DEFAULT_STATUS_PORT,
+    REMOTE_PROJECT_ROOT_KEYS,
+    REMOTE_SERVER_SCRIPT_KEYS,
+    REMOTE_TVM_PYTHON_KEYS,
     STATUS_PORT_KEYS,
     SUITE_KEYS,
+    _derive_remote_server_script,
+    _normalize_remote_tvm_python,
     MlkemSessionManager,
     build_local_crypto_client_command,
     build_remote_crypto_server_command,
     first_config_value,
+    inspect_local_crypto_client_capabilities,
     parse_int_config,
     resolve_local_crypto_client,
     resolve_local_crypto_server,
@@ -70,6 +83,111 @@ from inference_runner import (
 
 
 STATIC_ROOT = Path(__file__).resolve().parent / "static"
+MLKEM_MODERN_INPUT_BYTES = 1 * 32 * 32 * 32 * 4
+MLKEM_LEGACY_INPUT_BYTES = 1 * 3 * 64 * 64 * 4
+BOARD_TELEMETRY_TTL_SEC = 5.0
+BOARD_POSITION_API_TTL_SEC = 5.0
+AIRCRAFT_POSITION_UPSTREAM_DISCOVERY_TTL_SEC = 15.0
+DEFAULT_BOARD_POSITION_API_REMOTE_ROOT = "~/.openamp-demo/board_position_api_service"
+BOARD_POSITION_API_REMOTE_ROOT_KEYS = ("BOARD_POSITION_API_REMOTE_ROOT",)
+BOARD_POSITION_API_SERVICE_NAME = "board-position-api.service"
+BOARD_POSITION_API_ENV_FILE_NAME = "board_position_api_service.env"
+BOARD_POSITION_API_SCRIPT_NAME = "board_position_api_service.py"
+BOARD_POSITION_API_RUNNER_NAME = "run_board_position_api_service.sh"
+BOARD_POSITION_API_LOG_NAME = "board_position_api_service.log"
+BOARD_POSITION_API_USER_SERVICE_PATH = f"~/.config/systemd/user/{BOARD_POSITION_API_SERVICE_NAME}"
+BOARD_POSITION_API_RUNTIME_ENV_KEYS = (
+    "BOARD_POSITION_API_BIND_HOST",
+    "BOARD_POSITION_API_PORT",
+    "BOARD_POSITION_API_GPSD_HOST",
+    "BOARD_POSITION_API_GPSD_PORT",
+    "BOARD_POSITION_API_SOURCE_ORDER",
+    "BOARD_POSITION_API_SAMPLE_TIMEOUT_SEC",
+    "BOARD_POSITION_API_NMEA_DEVICE",
+    "BOARD_POSITION_API_NMEA_BAUDRATE",
+    "BOARD_POSITION_API_HTTP_UPSTREAM_URL",
+    "BOARD_POSITION_API_HTTP_HEADERS_JSON",
+    "BOARD_POSITION_API_HTTP_TIMEOUT_SEC",
+    "BOARD_POSITION_API_HTTP_LATITUDE_PATH",
+    "BOARD_POSITION_API_HTTP_LONGITUDE_PATH",
+    "BOARD_POSITION_API_HTTP_ALTITUDE_M_PATH",
+    "BOARD_POSITION_API_HTTP_GROUND_SPEED_KPH_PATH",
+    "BOARD_POSITION_API_HTTP_HEADING_DEG_PATH",
+    "BOARD_POSITION_API_HTTP_VERTICAL_SPEED_MPS_PATH",
+    "BOARD_POSITION_API_HTTP_FIX_TYPE_PATH",
+    "BOARD_POSITION_API_HTTP_CONFIDENCE_M_PATH",
+    "BOARD_POSITION_API_HTTP_SATELLITES_PATH",
+    "BOARD_POSITION_API_HTTP_CAPTURED_AT_PATH",
+    "BOARD_POSITION_API_HTTP_SEQUENCE_PATH",
+    "BOARD_POSITION_API_HTTP_GROUND_SPEED_SCALE",
+    "BOARD_POSITION_API_HTTP_ALTITUDE_SCALE",
+    "BOARD_POSITION_API_HTTP_VERTICAL_SPEED_SCALE",
+    "AIRCRAFT_POSITION_UPSTREAM_URL",
+    "AIRCRAFT_POSITION_UPSTREAM_HEADERS_JSON",
+    "AIRCRAFT_POSITION_SOURCE_LABEL",
+    "AIRCRAFT_POSITION_SOURCE_NOTE",
+    "AIRCRAFT_POSITION_PRODUCER_ID",
+    "AIRCRAFT_POSITION_TRANSPORT",
+    "AIRCRAFT_POSITION_AIRCRAFT_ID",
+    "AIRCRAFT_POSITION_MISSION_CALL_SIGN",
+    "AIRCRAFT_POSITION_TIMEOUT_SEC",
+    "AIRCRAFT_POSITION_GROUND_SPEED_SCALE",
+    "AIRCRAFT_POSITION_ALTITUDE_SCALE",
+    "AIRCRAFT_POSITION_VERTICAL_SPEED_SCALE",
+    *(f"AIRCRAFT_POSITION_{field_name.upper()}_PATH" for field_name in FIELD_PATH_CANDIDATES),
+    "BOARD_POSITION_API_REMOTE_ROOT",
+)
+DEFAULT_AIRCRAFT_POSITION_REMOTE_ROOT = "~/.openamp-demo/aircraft_position_bridge"
+AIRCRAFT_POSITION_REMOTE_ROOT_KEYS = ("AIRCRAFT_POSITION_REMOTE_ROOT",)
+AIRCRAFT_POSITION_EXECUTION_MODE_KEYS = ("AIRCRAFT_POSITION_EXECUTION_MODE",)
+AIRCRAFT_POSITION_UPSTREAM_URL_KEYS = ("AIRCRAFT_POSITION_UPSTREAM_URL",)
+AIRCRAFT_POSITION_UPSTREAM_CANDIDATES_JSON_KEYS = ("AIRCRAFT_POSITION_UPSTREAM_CANDIDATES_JSON",)
+AIRCRAFT_POSITION_BACKEND_BASE_URL_KEYS = ("AIRCRAFT_POSITION_BACKEND_BASE_URL",)
+AIRCRAFT_POSITION_SERVICE_NAME = "aircraft-position-bridge.service"
+AIRCRAFT_POSITION_ENV_FILE_NAME = "aircraft_position_bridge.env"
+AIRCRAFT_POSITION_SCRIPT_NAME = "aircraft_position_bridge.py"
+AIRCRAFT_POSITION_RUNNER_NAME = "run_aircraft_position_bridge.sh"
+AIRCRAFT_POSITION_LOG_NAME = "aircraft_position_bridge.log"
+AIRCRAFT_POSITION_USER_SERVICE_PATH = f"~/.config/systemd/user/{AIRCRAFT_POSITION_SERVICE_NAME}"
+AIRCRAFT_POSITION_RUNTIME_ENV_KEYS = (
+    "AIRCRAFT_POSITION_EXECUTION_MODE",
+    "AIRCRAFT_POSITION_UPSTREAM_URL",
+    "AIRCRAFT_POSITION_UPSTREAM_CANDIDATES_JSON",
+    "AIRCRAFT_POSITION_BACKEND_BASE_URL",
+    "AIRCRAFT_POSITION_UPSTREAM_HEADERS_JSON",
+    "AIRCRAFT_POSITION_BACKEND_HEADERS_JSON",
+    "AIRCRAFT_POSITION_SOURCE_LABEL",
+    "AIRCRAFT_POSITION_SOURCE_NOTE",
+    "AIRCRAFT_POSITION_PRODUCER_ID",
+    "AIRCRAFT_POSITION_TRANSPORT",
+    "AIRCRAFT_POSITION_AIRCRAFT_ID",
+    "AIRCRAFT_POSITION_MISSION_CALL_SIGN",
+    "AIRCRAFT_POSITION_INTERVAL_SEC",
+    "AIRCRAFT_POSITION_TIMEOUT_SEC",
+    "AIRCRAFT_POSITION_GROUND_SPEED_SCALE",
+    "AIRCRAFT_POSITION_ALTITUDE_SCALE",
+    "AIRCRAFT_POSITION_VERTICAL_SPEED_SCALE",
+    "AIRCRAFT_POSITION_REMOTE_ROOT",
+) + tuple(
+    f"AIRCRAFT_POSITION_{field_name.upper()}_PATH" for field_name in FIELD_PATH_CANDIDATES
+)
+DEFAULT_AIRCRAFT_POSITION_UPSTREAM_CANDIDATE_PORTS = (9000, 9527, 8080)
+DEFAULT_AIRCRAFT_POSITION_UPSTREAM_CANDIDATE_PATHS = (
+    "/gps",
+    "/position",
+    "/location",
+    "/api/gps",
+    "/api/position",
+    "/api/location",
+    "/api/v1/gps",
+    "/api/v1/position",
+    "/api/v1/location",
+)
+DEFAULT_AIRCRAFT_POSITION_UPSTREAM_CANDIDATES = tuple(
+    f"http://127.0.0.1:{port}{path}"
+    for port in DEFAULT_AIRCRAFT_POSITION_UPSTREAM_CANDIDATE_PORTS
+    for path in DEFAULT_AIRCRAFT_POSITION_UPSTREAM_CANDIDATE_PATHS
+)
 
 
 def fetch_json_direct(url: str, *, timeout: float) -> dict[str, Any]:
@@ -80,14 +198,1000 @@ def fetch_json_direct(url: str, *, timeout: float) -> dict[str, Any]:
         return json.loads(resp.read())
 
 
+def _is_loopback_host(host: str) -> bool:
+    normalized = str(host or "").strip().lower()
+    return normalized in {"", "127.0.0.1", "localhost", "::1", "[::1]"}
+
+
+def _tailscale_ipv4() -> str:
+    if not shutil.which("tailscale"):
+        return ""
+    try:
+        output = subprocess.check_output(["tailscale", "ip", "-4"], text=True, timeout=2.0)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    for raw_line in output.splitlines():
+        candidate = raw_line.strip()
+        if re.fullmatch(r"\d+\.\d+\.\d+\.\d+", candidate):
+            return candidate
+    return ""
+
+
+def _default_backend_base_url_for_board(*, remote_host: str, bind_host: str, bind_port: int) -> str:
+    normalized_bind_host = str(bind_host or "").strip()
+    if _is_loopback_host(normalized_bind_host):
+        return ""
+
+    publish_host = normalized_bind_host
+    if normalized_bind_host in {"0.0.0.0", "::", "[::]"}:
+        remote_host_text = str(remote_host or "").strip()
+        if remote_host_text.startswith("100."):
+            publish_host = _tailscale_ipv4()
+        if not publish_host or publish_host in {"0.0.0.0", "::", "[::]"}:
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+                    sock.connect((remote_host_text or "8.8.8.8", 1))
+                    publish_host = sock.getsockname()[0]
+            except OSError:
+                publish_host = ""
+
+    if _is_loopback_host(publish_host) or publish_host in {"0.0.0.0", "::", "[::]"}:
+        return ""
+    return f"http://{publish_host}:{int(bind_port)}"
+
+
+def _parse_json_dict_text(raw_value: str) -> dict[str, str]:
+    value = str(raw_value or "").strip()
+    if not value:
+        return {}
+    try:
+        payload = json.loads(value)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    parsed: dict[str, str] = {}
+    for key, item in payload.items():
+        name = str(key or "").strip()
+        text = str(item or "").strip()
+        if not name or not text:
+            continue
+        parsed[name] = text
+    return parsed
+
+
+def _parse_aircraft_position_upstream_candidates(raw_value: str) -> list[str]:
+    value = str(raw_value or "").strip()
+    if not value:
+        return []
+    try:
+        payload = json.loads(value)
+    except json.JSONDecodeError:
+        payload = None
+
+    candidates: list[str] = []
+    if isinstance(payload, str):
+        candidates.append(payload)
+    elif isinstance(payload, list):
+        candidates.extend(str(item or "").strip() for item in payload)
+    else:
+        candidates.extend(part.strip() for part in value.replace("\n", ",").split(","))
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for raw_candidate in candidates:
+        candidate = str(raw_candidate or "").strip()
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        deduped.append(candidate)
+    return deduped
+
+
+def _board_position_api_local_assets() -> dict[str, Path]:
+    return {
+        "service_script": PROJECT_ROOT / "session_bootstrap/demo/openamp_control_plane_demo/board_position_api_service.py",
+        "runner_script": PROJECT_ROOT / "session_bootstrap/scripts/run_board_position_api_service.sh",
+    }
+
+
+def _board_position_api_remote_paths(remote_root: str) -> dict[str, str]:
+    root = remote_root.rstrip("/")
+    return {
+        "remote_root": root,
+        "service_script": f"{root}/{BOARD_POSITION_API_SCRIPT_NAME}",
+        "runner_script": f"{root}/{BOARD_POSITION_API_RUNNER_NAME}",
+        "env_file": f"{root}/{BOARD_POSITION_API_ENV_FILE_NAME}",
+        "log_file": f"{root}/{BOARD_POSITION_API_LOG_NAME}",
+        "user_service": BOARD_POSITION_API_USER_SERVICE_PATH,
+    }
+
+
+def _remote_sudo_bash_command(command: str, password: str) -> str:
+    sudo_inner = (
+        f"printf '%s\\n' {shlex.quote(password)} | "
+        f"sudo -S -k bash -lc {shlex.quote(command)}"
+    )
+    return f"/usr/bin/env bash -lc {shlex.quote(sudo_inner)}"
+
+
+def _board_position_api_runtime(board_access: BoardAccessConfig) -> dict[str, Any]:
+    env_values = board_access.build_env()
+    runtime_env = {
+        key: str(env_values.get(key, "") or "").strip()
+        for key in BOARD_POSITION_API_RUNTIME_ENV_KEYS
+        if str(env_values.get(key, "") or "").strip()
+    }
+    runtime_env.setdefault("BOARD_POSITION_API_BIND_HOST", "127.0.0.1")
+    runtime_env.setdefault("BOARD_POSITION_API_PORT", "9000")
+    has_http_upstream = bool(
+        runtime_env.get("BOARD_POSITION_API_HTTP_UPSTREAM_URL") or runtime_env.get("AIRCRAFT_POSITION_UPSTREAM_URL")
+    )
+    runtime_env.setdefault("BOARD_POSITION_API_SOURCE_ORDER", "http,gpsd,nmea" if has_http_upstream else "gpsd,nmea")
+    runtime_env.setdefault("BOARD_POSITION_API_SAMPLE_TIMEOUT_SEC", "2.0")
+    if has_http_upstream:
+        inherited_http_timeout = str(runtime_env.get("AIRCRAFT_POSITION_TIMEOUT_SEC") or "").strip()
+        if inherited_http_timeout and not runtime_env.get("BOARD_POSITION_API_HTTP_TIMEOUT_SEC"):
+            runtime_env["BOARD_POSITION_API_HTTP_TIMEOUT_SEC"] = inherited_http_timeout
+    remote_root = first_config_value(
+        env_values,
+        keys=BOARD_POSITION_API_REMOTE_ROOT_KEYS,
+        default=DEFAULT_BOARD_POSITION_API_REMOTE_ROOT,
+    )
+    return {
+        "remote_root": remote_root,
+        "runtime_env": runtime_env,
+    }
+
+
+def _aircraft_position_bridge_local_assets() -> dict[str, Path]:
+    return {
+        "bridge_script": PROJECT_ROOT / "session_bootstrap/demo/openamp_control_plane_demo/aircraft_position_bridge.py",
+        "runner_script": PROJECT_ROOT / "session_bootstrap/scripts/run_aircraft_position_bridge.sh",
+    }
+
+
+def _aircraft_position_bridge_remote_paths(remote_root: str) -> dict[str, str]:
+    root = remote_root.rstrip("/")
+    return {
+        "remote_root": root,
+        "bridge_script": f"{root}/{AIRCRAFT_POSITION_SCRIPT_NAME}",
+        "runner_script": f"{root}/{AIRCRAFT_POSITION_RUNNER_NAME}",
+        "env_file": f"{root}/{AIRCRAFT_POSITION_ENV_FILE_NAME}",
+        "log_file": f"{root}/{AIRCRAFT_POSITION_LOG_NAME}",
+        "user_service": AIRCRAFT_POSITION_USER_SERVICE_PATH,
+    }
+
+
+def _aircraft_position_bridge_runtime(
+    board_access: BoardAccessConfig,
+    *,
+    bind_host: str = "127.0.0.1",
+    bind_port: int = 8079,
+    discovered_upstream_url: str = "",
+) -> dict[str, Any]:
+    env_values = board_access.build_env()
+    runtime_env = {
+        key: str(env_values.get(key, "") or "").strip()
+        for key in AIRCRAFT_POSITION_RUNTIME_ENV_KEYS
+        if str(env_values.get(key, "") or "").strip()
+    }
+    execution_mode = first_config_value(env_values, keys=AIRCRAFT_POSITION_EXECUTION_MODE_KEYS).lower()
+    upstream_url = first_config_value(env_values, keys=AIRCRAFT_POSITION_UPSTREAM_URL_KEYS)
+    upstream_url_source = "env" if upstream_url else ""
+    if not upstream_url and discovered_upstream_url:
+        upstream_url = str(discovered_upstream_url).strip()
+        upstream_url_source = "auto_discovered"
+        if upstream_url:
+            runtime_env["AIRCRAFT_POSITION_UPSTREAM_URL"] = upstream_url
+    raw_candidate_config = first_config_value(env_values, keys=AIRCRAFT_POSITION_UPSTREAM_CANDIDATES_JSON_KEYS)
+    candidate_urls = _parse_aircraft_position_upstream_candidates(raw_candidate_config)
+    candidate_url_source = "env" if candidate_urls else "defaults"
+    if not candidate_urls:
+        candidate_urls = list(DEFAULT_AIRCRAFT_POSITION_UPSTREAM_CANDIDATES)
+    backend_base_url = first_config_value(env_values, keys=AIRCRAFT_POSITION_BACKEND_BASE_URL_KEYS)
+    if not backend_base_url and execution_mode == "local":
+        backend_base_url = f"http://127.0.0.1:{int(bind_port)}"
+        runtime_env["AIRCRAFT_POSITION_BACKEND_BASE_URL"] = backend_base_url
+    if not backend_base_url:
+        backend_base_url = _default_backend_base_url_for_board(
+            remote_host=board_access.host,
+            bind_host=bind_host,
+            bind_port=bind_port,
+        )
+        if backend_base_url:
+            runtime_env["AIRCRAFT_POSITION_BACKEND_BASE_URL"] = backend_base_url
+    remote_root = first_config_value(
+        env_values,
+        keys=AIRCRAFT_POSITION_REMOTE_ROOT_KEYS,
+        default=DEFAULT_AIRCRAFT_POSITION_REMOTE_ROOT,
+    )
+    missing_env: list[str] = []
+    if not upstream_url:
+        missing_env.append(AIRCRAFT_POSITION_UPSTREAM_URL_KEYS[0])
+    if not backend_base_url:
+        missing_env.append(AIRCRAFT_POSITION_BACKEND_BASE_URL_KEYS[0])
+    return {
+        "configured": not missing_env,
+        "missing_env": missing_env,
+        "execution_mode": execution_mode,
+        "remote_root": remote_root,
+        "runtime_env": runtime_env,
+        "upstream_url": upstream_url,
+        "upstream_url_source": upstream_url_source,
+        "candidate_urls": candidate_urls,
+        "candidate_url_source": candidate_url_source,
+        "backend_base_url": backend_base_url,
+    }
+
+
+def _aircraft_position_bridge_execution_mode_for_runtime(
+    board_access: BoardAccessConfig,
+    runtime: dict[str, Any],
+) -> str:
+    explicit_mode = str(runtime.get("execution_mode") or "").strip().lower()
+    if explicit_mode in {"local", "board"}:
+        return explicit_mode
+
+    upstream_url = str(runtime.get("upstream_url") or "").strip()
+    if not upstream_url:
+        return "board"
+    if str(runtime.get("upstream_url_source") or "").strip() == "auto_discovered":
+        return "board"
+
+    upstream_host = str(urlparse(upstream_url).hostname or "").strip().lower()
+    board_host = str(urlparse(f"ssh://{board_access.host}").hostname or "").strip().lower() if board_access.host else ""
+    if not upstream_host or _is_loopback_host(upstream_host) or (board_host and upstream_host == board_host):
+        return "board"
+    return "local"
+
+
+def _board_aircraft_position_probe_remote_command(
+    *,
+    candidate_urls: list[str],
+    upstream_headers: dict[str, str],
+    timeout_sec: float,
+) -> str:
+    latitude_paths = list(FIELD_PATH_CANDIDATES["latitude"])
+    longitude_paths = list(FIELD_PATH_CANDIDATES["longitude"])
+    return (
+        "if command -v python3 >/dev/null 2>&1; then PY=python3; "
+        "elif command -v python >/dev/null 2>&1; then PY=python; "
+        "else echo 'python not found on remote host' >&2; exit 127; fi; "
+        "$PY - <<'PY'\n"
+        "import json\n"
+        "from urllib.error import HTTPError, URLError\n"
+        "from urllib.request import Request, urlopen\n"
+        f"CANDIDATES = {json.dumps(candidate_urls, ensure_ascii=True)}\n"
+        f"HEADERS = {json.dumps(upstream_headers, ensure_ascii=True)}\n"
+        f"TIMEOUT_SEC = {float(timeout_sec)!r}\n"
+        f"LAT_PATHS = {json.dumps(latitude_paths, ensure_ascii=True)}\n"
+        f"LON_PATHS = {json.dumps(longitude_paths, ensure_ascii=True)}\n"
+        "def extract(payload, path):\n"
+        "    current = payload\n"
+        "    for part in path.split('.'):\n"
+        "        if isinstance(current, dict):\n"
+        "            if part not in current:\n"
+        "                return None\n"
+        "            current = current[part]\n"
+        "            continue\n"
+        "        if isinstance(current, list):\n"
+        "            try:\n"
+        "                index = int(part)\n"
+        "            except ValueError:\n"
+        "                return None\n"
+        "            if index < 0 or index >= len(current):\n"
+        "                return None\n"
+        "            current = current[index]\n"
+        "            continue\n"
+        "        return None\n"
+        "    return current\n"
+        "def first_present(payload, paths):\n"
+        "    for path in paths:\n"
+        "        value = extract(payload, path)\n"
+        "        if value not in (None, ''):\n"
+        "            return value\n"
+        "    return None\n"
+        "results = []\n"
+        "for url in CANDIDATES:\n"
+        "    item = {'url': url}\n"
+        "    try:\n"
+        "        request = Request(url, headers=dict(HEADERS))\n"
+        "        with urlopen(request, timeout=TIMEOUT_SEC) as response:\n"
+        "            item['http_status'] = getattr(response, 'status', 200)\n"
+        "            body = response.read().decode('utf-8').strip()\n"
+        "        payload = json.loads(body) if body else None\n"
+        "        if not isinstance(payload, dict):\n"
+        "            item['error'] = 'invalid_json_object'\n"
+        "            results.append(item)\n"
+        "            continue\n"
+        "        latitude = first_present(payload, LAT_PATHS)\n"
+        "        longitude = first_present(payload, LON_PATHS)\n"
+        "        item['has_coordinates'] = latitude not in (None, '') and longitude not in (None, '')\n"
+        "        item['sample_keys'] = sorted(str(key) for key in payload.keys())[:8]\n"
+        "        if item['has_coordinates']:\n"
+        "            print(json.dumps({'status': 'detected', 'selected_url': url, 'results': results + [item]}, ensure_ascii=False))\n"
+        "            raise SystemExit(0)\n"
+        "        item['error'] = 'missing_coordinates'\n"
+        "    except HTTPError as exc:\n"
+        "        item['http_status'] = exc.code\n"
+        "        item['error'] = f'http_error:{exc.code}'\n"
+        "    except URLError as exc:\n"
+        "        item['error'] = f'url_error:{exc.reason}'\n"
+        "    except Exception as exc:\n"
+        "        item['error'] = f'{type(exc).__name__}:{exc}'\n"
+        "    results.append(item)\n"
+        "print(json.dumps({'status': 'not_found', 'selected_url': '', 'results': results}, ensure_ascii=False))\n"
+        "PY"
+    )
+
+
+def query_board_aircraft_position_upstream(
+    board_access: BoardAccessConfig,
+    *,
+    candidate_urls: list[str],
+    upstream_headers: dict[str, str] | None = None,
+    timeout_sec: float = 6.0,
+) -> dict[str, Any]:
+    if not candidate_urls:
+        return {
+            "status": "disabled",
+            "selected_url": "",
+            "candidate_urls": [],
+            "results": [],
+            "checked_at": now_iso(),
+        }
+    proc = run_ssh_command(
+        host=board_access.host,
+        user=board_access.user,
+        password=board_access.password,
+        port=board_access.port,
+        remote_command=_board_aircraft_position_probe_remote_command(
+            candidate_urls=candidate_urls,
+            upstream_headers=dict(upstream_headers or {}),
+            timeout_sec=max(min(timeout_sec / max(len(candidate_urls), 1), 2.0), 0.8),
+        ),
+        timeout=max(timeout_sec, 2.0),
+    )
+    if proc.returncode != 0:
+        error_output = (proc.stderr or proc.stdout or "board aircraft-position probe failed").strip()
+        raise RuntimeError(error_output)
+    payload = json.loads((proc.stdout or "").strip() or "{}")
+    if not isinstance(payload, dict):
+        raise RuntimeError("board aircraft-position probe returned invalid JSON")
+    payload.setdefault("status", "unknown")
+    payload.setdefault("selected_url", "")
+    payload.setdefault("results", [])
+    payload["candidate_urls"] = list(candidate_urls)
+    payload["checked_at"] = now_iso()
+    return payload
+
+
+def _aircraft_position_bridge_status(
+    board_access: BoardAccessConfig,
+    *,
+    aircraft_position_payload: dict[str, Any],
+    bind_host: str = "127.0.0.1",
+    bind_port: int = 8079,
+    discovered_upstream_url: str = "",
+    upstream_probe: dict[str, Any] | None = None,
+    local_runtime_state: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    runtime = _aircraft_position_bridge_runtime(
+        board_access,
+        bind_host=bind_host,
+        bind_port=bind_port,
+        discovered_upstream_url=discovered_upstream_url,
+    )
+    execution_mode = _aircraft_position_bridge_execution_mode_for_runtime(board_access, runtime)
+    source_kind = str(aircraft_position_payload.get("source_kind") or "").strip()
+    source_status = str(aircraft_position_payload.get("source_status") or "").strip()
+    live_feed_active = source_kind == "upper_computer_gps" and source_status == "live"
+    local_state = dict(local_runtime_state or {})
+
+    if live_feed_active:
+        status = "live"
+        if execution_mode == "local":
+            note = "本机外部定位 bridge 已驱动当前 aircraft-position live contract。"
+        else:
+            note = "定位 bridge 已驱动当前 aircraft-position live contract。"
+    elif execution_mode == "local" and runtime["configured"]:
+        local_status = str(local_state.get("status") or "").strip()
+        last_error = str(local_state.get("last_error") or "").strip()
+        if local_status == "error" and last_error:
+            status = "local_error"
+            note = f"本机外部定位 bridge 调用上游失败：{last_error}"
+        else:
+            status = "armed_local"
+            note = "本机外部定位 bridge 配置已存在；demo 启动后会直接在本机轮询上游并更新 aircraft-position。"
+    elif runtime["configured"] and runtime["upstream_url_source"] == "auto_discovered":
+        status = "autodiscovered"
+        note = "已自动探测到板卡定位 API 候选；保存会话后会尝试用发现到的 URL 启动定位 bridge。"
+    elif not runtime["configured"]:
+        probe_status = str((upstream_probe or {}).get("status") or "").strip()
+        if probe_status == "not_found":
+            status = "upstream_not_found"
+            note = "已探测常见板卡定位 API 候选，但当前没有发现可用上游；当前仍是 stub/fallback 合同。"
+        elif probe_status == "error":
+            status = "upstream_probe_error"
+            note = "板卡定位上游探测失败；当前仍是 stub/fallback 合同。"
+        else:
+            status = "config_missing"
+            note = "缺少定位 bridge 上游 URL 或 backend 回推地址；当前仍是 stub/fallback 合同。"
+    elif not board_access.connection_ready:
+        status = "waiting_session"
+        note = "定位 bridge 配置已存在，但当前板卡会话未补齐。"
+    else:
+        status = "armed"
+        note = "定位 bridge 配置已存在；保存会话后会尝试自动部署并启动。"
+
+    return {
+        "status": status,
+        "note": note,
+        "configured": runtime["configured"],
+        "missing_env": list(runtime["missing_env"]),
+        "execution_mode": execution_mode,
+        "connection_ready": board_access.connection_ready,
+        "upstream_url": runtime["upstream_url"],
+        "upstream_url_source": runtime["upstream_url_source"],
+        "candidate_urls": list(runtime["candidate_urls"]),
+        "candidate_url_source": runtime["candidate_url_source"],
+        "backend_base_url": runtime["backend_base_url"],
+        "remote_root": runtime["remote_root"],
+        "live_feed_active": live_feed_active,
+        "upstream_probe": dict(upstream_probe or {}),
+        "local_runtime_state": local_state,
+    }
+
+
+def _render_aircraft_position_bridge_env_file(runtime_env: dict[str, str]) -> str:
+    lines = [
+        "#!/usr/bin/env bash",
+        "# Generated by the OpenAMP demo backend. Do not edit on the board.",
+        "set -euo pipefail",
+    ]
+    for key in sorted(runtime_env):
+        lines.append(f"export {key}={shlex.quote(runtime_env[key])}")
+    return "\n".join(lines) + "\n"
+
+
+def _render_board_position_api_env_file(runtime_env: dict[str, str]) -> str:
+    lines = [
+        "#!/usr/bin/env bash",
+        "# Generated by the OpenAMP demo backend. Do not edit on the board.",
+        "set -euo pipefail",
+    ]
+    for key in sorted(runtime_env):
+        lines.append(f"export {key}={shlex.quote(runtime_env[key])}")
+    return "\n".join(lines) + "\n"
+
+
+def _render_aircraft_position_bridge_user_service(remote_root: str) -> str:
+    paths = _aircraft_position_bridge_remote_paths(remote_root)
+    working_directory = (
+        f"%h/{paths['remote_root'][2:]}" if paths["remote_root"].startswith("~/") else paths["remote_root"]
+    )
+    return "\n".join(
+        [
+            "[Unit]",
+            "Description=Aircraft Position Bridge",
+            "After=network-online.target",
+            "Wants=network-online.target",
+            "",
+            "[Service]",
+            "Type=simple",
+            f"WorkingDirectory={working_directory}",
+            (
+                "ExecStart=/usr/bin/env bash -lc "
+                f"\"set -a; . {paths['env_file']}; set +a; "
+                f"exec {paths['runner_script']} >> {paths['log_file']} 2>&1\""
+            ),
+            "Restart=always",
+            "RestartSec=2",
+            "",
+            "[Install]",
+            "WantedBy=default.target",
+            "",
+        ]
+    )
+
+
+def _render_board_position_api_user_service(remote_root: str) -> str:
+    paths = _board_position_api_remote_paths(remote_root)
+    working_directory = (
+        f"%h/{paths['remote_root'][2:]}" if paths["remote_root"].startswith("~/") else paths["remote_root"]
+    )
+    return "\n".join(
+        [
+            "[Unit]",
+            "Description=Board Position API Service",
+            "After=network-online.target",
+            "Wants=network-online.target",
+            "",
+            "[Service]",
+            "Type=simple",
+            f"WorkingDirectory={working_directory}",
+            (
+                "ExecStart=/usr/bin/env bash -lc "
+                f"\"set -a; . {paths['env_file']}; set +a; "
+                f"exec {paths['runner_script']} >> {paths['log_file']} 2>&1\""
+            ),
+            "Restart=always",
+            "RestartSec=2",
+            "",
+            "[Install]",
+            "WantedBy=default.target",
+            "",
+        ]
+    )
+
+
+def _build_remote_text_write_command(remote_path: str, content: str, mode: int) -> str:
+    encoded = base64.b64encode(content.encode("utf-8")).decode("ascii")
+    return (
+        "if command -v python3 >/dev/null 2>&1; then PY=python3; "
+        "elif command -v python >/dev/null 2>&1; then PY=python; "
+        "else echo 'python not found on remote host' >&2; exit 127; fi; "
+        "$PY - <<'PY'\n"
+        "import base64\n"
+        "import os\n"
+        "from pathlib import Path\n"
+        f"path = Path({json.dumps(remote_path)}).expanduser()\n"
+        "path.parent.mkdir(parents=True, exist_ok=True)\n"
+        f"path.write_bytes(base64.b64decode({json.dumps(encoded)}))\n"
+        f"os.chmod(path, {mode})\n"
+        "PY"
+    )
+
+
+def _remote_http_wait_command(
+    url: str,
+    *,
+    attempts: int = 12,
+    sleep_sec: float = 0.4,
+    timeout_sec: float = 1.0,
+) -> str:
+    script = "\n".join(
+        [
+            "import sys",
+            "import time",
+            "from urllib.error import HTTPError, URLError",
+            "from urllib.request import Request, urlopen",
+            f"URL = {json.dumps(url, ensure_ascii=True)}",
+            f"ATTEMPTS = {max(int(attempts), 1)!r}",
+            f"SLEEP_SEC = {max(float(sleep_sec), 0.05)!r}",
+            f"TIMEOUT_SEC = {max(float(timeout_sec), 0.2)!r}",
+            "last_error = 'http_wait_failed'",
+            "for _ in range(ATTEMPTS):",
+            "    try:",
+            "        request = Request(URL, headers={'Accept': 'application/json'})",
+            "        with urlopen(request, timeout=TIMEOUT_SEC) as response:",
+            "            status = int(getattr(response, 'status', 200))",
+            "            if status == 200:",
+            "                raise SystemExit(0)",
+            "            last_error = f'http_status:{status}'",
+            "    except HTTPError as exc:",
+            "        last_error = f'http_error:{exc.code}'",
+            "    except URLError as exc:",
+            "        last_error = f'url_error:{exc.reason}'",
+            "    except Exception as exc:",
+            "        last_error = f'{type(exc).__name__}:{exc}'",
+            "    time.sleep(SLEEP_SEC)",
+            "sys.stderr.write(last_error)",
+            "raise SystemExit(1)",
+        ]
+    )
+    encoded = base64.b64encode(script.encode("utf-8")).decode("ascii")
+    python_command = (
+        "import base64; "
+        f"exec(base64.b64decode({encoded!r}).decode('utf-8'))"
+    )
+    return (
+        "if command -v python3 >/dev/null 2>&1; then PY=python3; "
+        "elif command -v python >/dev/null 2>&1; then PY=python; "
+        "else echo 'python not found on remote host' >&2; exit 127; fi; "
+        f"$PY -c {shlex.quote(python_command)}"
+    )
+
+
+def _remote_http_json_probe_command(url: str, *, timeout_sec: float = 2.0) -> str:
+    script = "\n".join(
+        [
+            "import json",
+            "from urllib.error import HTTPError, URLError",
+            "from urllib.request import Request, urlopen",
+            f"URL = {json.dumps(url, ensure_ascii=True)}",
+            f"TIMEOUT_SEC = {max(float(timeout_sec), 0.2)!r}",
+            "result = {'status': 'error', 'url': URL, 'http_status': None, 'payload': None, 'body': '', 'error': ''}",
+            "try:",
+            "    request = Request(URL, headers={'Accept': 'application/json'})",
+            "    with urlopen(request, timeout=TIMEOUT_SEC) as response:",
+            "        body = response.read().decode('utf-8', errors='ignore')",
+            "        payload = json.loads(body) if body else None",
+            "        result.update(status='ok', http_status=int(getattr(response, 'status', 200)), body=body[:2000])",
+            "        if isinstance(payload, dict):",
+            "            result['payload'] = payload",
+            "except HTTPError as exc:",
+            "    body = exc.read().decode('utf-8', errors='ignore')",
+            "    payload = None",
+            "    try:",
+            "        payload = json.loads(body) if body else None",
+            "    except json.JSONDecodeError:",
+            "        payload = None",
+            "    result.update(status='http_error', http_status=int(exc.code), body=body[:2000], error=str(exc))",
+            "    if isinstance(payload, dict):",
+            "        result['payload'] = payload",
+            "except URLError as exc:",
+            "    result.update(status='url_error', error=str(exc.reason))",
+            "except Exception as exc:",
+            "    result.update(status=type(exc).__name__, error=str(exc))",
+            "print(json.dumps(result, ensure_ascii=False))",
+        ]
+    )
+    encoded = base64.b64encode(script.encode("utf-8")).decode("ascii")
+    python_command = (
+        "import base64; "
+        f"exec(base64.b64decode({encoded!r}).decode('utf-8'))"
+    )
+    return (
+        "if command -v python3 >/dev/null 2>&1; then PY=python3; "
+        "elif command -v python >/dev/null 2>&1; then PY=python; "
+        "else echo 'python not found on remote host' >&2; exit 127; fi; "
+        f"$PY -c {shlex.quote(python_command)}"
+    )
+
+
+def _remote_terminate_matching_processes_command(pattern: str) -> str:
+    script = "\n".join(
+        [
+            "import os",
+            "import signal",
+            "import subprocess",
+            f"PATTERN = {json.dumps(pattern, ensure_ascii=True)}",
+            "current_pid = os.getpid()",
+            "parent_pid = os.getppid()",
+            "try:",
+            "    output = subprocess.check_output(['ps', '-eo', 'pid=,args='], text=True)",
+            "except Exception:",
+            "    raise SystemExit(0)",
+            "for raw_line in output.splitlines():",
+            "    line = raw_line.strip()",
+            "    if not line:",
+            "        continue",
+            "    pid_text, _, args = line.partition(' ')",
+            "    try:",
+            "        pid = int(pid_text)",
+            "    except ValueError:",
+            "        continue",
+            "    if pid in {current_pid, parent_pid}:",
+            "        continue",
+            "    if PATTERN not in args:",
+            "        continue",
+            "    try:",
+            "        os.kill(pid, signal.SIGTERM)",
+            "    except ProcessLookupError:",
+            "        pass",
+            "    except PermissionError:",
+            "        pass",
+        ]
+    )
+    encoded = base64.b64encode(script.encode("utf-8")).decode("ascii")
+    python_command = (
+        "import base64; "
+        f"exec(base64.b64decode({encoded!r}).decode('utf-8'))"
+    )
+    return (
+        "if command -v python3 >/dev/null 2>&1; then PY=python3; "
+        "elif command -v python >/dev/null 2>&1; then PY=python; "
+        "else echo 'python not found on remote host' >&2; exit 127; fi; "
+        f"$PY -c {shlex.quote(python_command)}"
+    )
+
+
+def _board_position_api_health_url(runtime_env: dict[str, str]) -> str:
+    bind_host = str(runtime_env.get("BOARD_POSITION_API_BIND_HOST") or "127.0.0.1").strip() or "127.0.0.1"
+    if bind_host in {"0.0.0.0", "::", "[::]"}:
+        bind_host = "127.0.0.1"
+    bind_port = parse_int_config(runtime_env.get("BOARD_POSITION_API_PORT"), 9000)
+    return f"http://{bind_host}:{bind_port}/health"
+
+
+def _board_position_api_sample_url(runtime_env: dict[str, str]) -> str:
+    bind_host = str(runtime_env.get("BOARD_POSITION_API_BIND_HOST") or "127.0.0.1").strip() or "127.0.0.1"
+    if bind_host in {"0.0.0.0", "::", "[::]"}:
+        bind_host = "127.0.0.1"
+    bind_port = parse_int_config(runtime_env.get("BOARD_POSITION_API_PORT"), 9000)
+    return f"http://{bind_host}:{bind_port}/api/v1/position"
+
+
+def query_board_position_api_health(
+    board_access: BoardAccessConfig,
+    *,
+    runtime_env: dict[str, str],
+    timeout_sec: float = 3.0,
+) -> dict[str, Any]:
+    health_url = _board_position_api_health_url(runtime_env)
+    proc = run_ssh_command(
+        host=board_access.host,
+        user=board_access.user,
+        password=board_access.password,
+        port=board_access.port,
+        remote_command=_remote_http_json_probe_command(health_url, timeout_sec=timeout_sec),
+        timeout=max(timeout_sec + 2.0, 4.0),
+    )
+    if proc.returncode != 0:
+        raise RuntimeError((proc.stderr or proc.stdout or "board position-api health probe failed").strip())
+    payload = json.loads((proc.stdout or "").strip() or "{}")
+    if not isinstance(payload, dict):
+        raise RuntimeError("board position-api health probe returned invalid JSON")
+    payload.setdefault("status", "error")
+    payload.setdefault("url", health_url)
+    return payload
+
+
+def query_board_position_api_sample(
+    board_access: BoardAccessConfig,
+    *,
+    runtime_env: dict[str, str],
+    timeout_sec: float = 3.0,
+) -> dict[str, Any]:
+    sample_url = _board_position_api_sample_url(runtime_env)
+    proc = run_ssh_command(
+        host=board_access.host,
+        user=board_access.user,
+        password=board_access.password,
+        port=board_access.port,
+        remote_command=_remote_http_json_probe_command(sample_url, timeout_sec=timeout_sec),
+        timeout=max(timeout_sec + 2.0, 4.0),
+    )
+    if proc.returncode != 0:
+        raise RuntimeError((proc.stderr or proc.stdout or "board position-api sample probe failed").strip())
+    payload = json.loads((proc.stdout or "").strip() or "{}")
+    if not isinstance(payload, dict):
+        raise RuntimeError("board position-api sample probe returned invalid JSON")
+    payload.setdefault("status", "error")
+    payload.setdefault("url", sample_url)
+    return payload
+
+
+def _board_position_api_status(
+    board_access: BoardAccessConfig,
+    *,
+    timeout_sec: float = 3.0,
+) -> dict[str, Any]:
+    runtime = _board_position_api_runtime(board_access)
+    status_payload = {
+        "status": "waiting_session" if not board_access.connection_ready else "unknown",
+        "note": "板卡会话未补齐，尚未探测板端定位 API 服务。" if not board_access.connection_ready else "",
+        "service_reachable": False,
+        "http_status": None,
+        "health_url": _board_position_api_health_url(runtime["runtime_env"]),
+        "remote_root": runtime["remote_root"],
+        "sample_ready": False,
+        "service_state": "",
+        "last_error": "",
+        "source_order": [],
+        "sample": None,
+    }
+    if not board_access.connection_ready:
+        return status_payload
+
+    try:
+        probe = query_board_position_api_health(board_access, runtime_env=runtime["runtime_env"], timeout_sec=timeout_sec)
+    except Exception as exc:
+        status_payload.update(
+            {
+                "status": "probe_error",
+                "note": f"板端定位 API 健康探测失败: {exc}",
+                "last_error": str(exc),
+            }
+        )
+        return status_payload
+
+    probe_status = str(probe.get("status") or "").strip()
+    http_status = probe.get("http_status")
+    payload = probe.get("payload") if isinstance(probe.get("payload"), dict) else {}
+    service_state = str(payload.get("status") or "").strip()
+    last_error = str(payload.get("last_error") or probe.get("error") or "").strip()
+    sample = payload.get("sample") if isinstance(payload.get("sample"), dict) else None
+    sample_ready = isinstance(sample, dict)
+    source_order = list(payload.get("source_order") or []) if isinstance(payload.get("source_order"), list) else []
+    sample_probe: dict[str, Any] | None = None
+
+    status_payload.update(
+        {
+            "service_reachable": probe_status == "ok",
+            "http_status": http_status,
+            "service_state": service_state,
+            "last_error": last_error,
+            "source_order": source_order,
+            "sample": sample,
+            "sample_ready": sample_ready,
+        }
+    )
+
+    if probe_status == "ok" and not sample_ready:
+        try:
+            sample_probe = query_board_position_api_sample(
+                board_access,
+                runtime_env=runtime["runtime_env"],
+                timeout_sec=timeout_sec,
+            )
+        except Exception as exc:
+            sample_probe = {"status": "probe_error", "error": str(exc)}
+        sample_probe_status = str(sample_probe.get("status") or "").strip()
+        sample_probe_payload = sample_probe.get("payload") if isinstance(sample_probe.get("payload"), dict) else {}
+        live_sample = sample_probe_payload if sample_probe_status == "ok" else None
+        if isinstance(live_sample, dict):
+            status_payload.update(
+                {
+                    "http_status": sample_probe.get("http_status"),
+                    "service_state": str(live_sample.get("status") or service_state or "").strip(),
+                    "last_error": "",
+                    "sample": live_sample,
+                    "sample_ready": True,
+                }
+            )
+            sample = live_sample
+            sample_ready = True
+        elif sample_probe_status == "http_error":
+            sample_error_payload = sample_probe_payload
+            status_payload["http_status"] = sample_probe.get("http_status")
+            status_payload["last_error"] = str(
+                sample_error_payload.get("error") or sample_probe.get("error") or last_error or ""
+            ).strip()
+
+    if probe_status == "ok" and service_state == "ok" and sample_ready:
+        status_payload["status"] = "live"
+        status_payload["note"] = "板端定位 API 服务已返回 live sample。"
+    elif probe_status == "ok" and sample_ready:
+        status_payload["status"] = "live"
+        status_payload["note"] = "板端定位 API 服务已返回 live sample。"
+    elif probe_status == "ok":
+        status_payload["status"] = "source_unavailable"
+        status_payload["note"] = "板端定位 API 服务已启动，但当前没有拿到有效位置样本。"
+    elif probe_status == "http_error":
+        status_payload["status"] = "service_error"
+        status_payload["note"] = "板端定位 API 服务返回了错误 HTTP 状态。"
+    elif probe_status == "url_error":
+        status_payload["status"] = "offline"
+        status_payload["note"] = "板端定位 API 服务当前不可达。"
+    else:
+        status_payload["status"] = "probe_error"
+        status_payload["note"] = "板端定位 API 健康探测未返回可用结果。"
+
+    return status_payload
+
+
+def _board_telemetry_remote_command() -> str:
+    return (
+        "sh -lc '"
+        "cat /proc/meminfo; "
+        "printf \"__CODEX_MEMINFO_END__\\n\"; "
+        "cat /proc/stat; "
+        "printf \"__CODEX_STAT1_END__\\n\"; "
+        "sleep 0.1; "
+        "cat /proc/stat; "
+        "printf \"__CODEX_STAT2_END__\\n\"; "
+        "cat /proc/loadavg; "
+        "printf \"__CODEX_LOADAVG_END__\\n\"; "
+        "(getconf _NPROCESSORS_ONLN 2>/dev/null || nproc 2>/dev/null || echo 1)"
+        "'"
+    )
+
+
+def _parse_marker_sections(stdout: str) -> dict[str, str]:
+    marker_to_name = {
+        "__CODEX_MEMINFO_END__": "meminfo",
+        "__CODEX_STAT1_END__": "stat1",
+        "__CODEX_STAT2_END__": "stat2",
+        "__CODEX_LOADAVG_END__": "loadavg",
+    }
+    section_order = ["meminfo", "stat1", "stat2", "loadavg", "cpu_cores"]
+    sections: dict[str, list[str]] = {name: [] for name in section_order}
+    current_name = "meminfo"
+    for raw_line in stdout.splitlines():
+        marker_name = marker_to_name.get(raw_line.strip())
+        if marker_name is not None:
+            index = section_order.index(marker_name)
+            current_name = section_order[index + 1]
+            continue
+        sections[current_name].append(raw_line)
+    return {name: "\n".join(lines).strip() for name, lines in sections.items()}
+
+
+def _parse_meminfo_kb(meminfo_text: str) -> dict[str, int]:
+    result: dict[str, int] = {}
+    for line in meminfo_text.splitlines():
+        key, _, rest = line.partition(":")
+        if not key or not rest:
+            continue
+        value_token = rest.strip().split(" ", 1)[0]
+        try:
+            result[key] = int(value_token)
+        except ValueError:
+            continue
+    return result
+
+
+def _parse_proc_stat_total_idle(stat_text: str) -> tuple[int, int]:
+    for line in stat_text.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("cpu "):
+            continue
+        parts = stripped.split()
+        values = [int(token) for token in parts[1:9]]
+        idle = values[3] + values[4]
+        total = sum(values)
+        return total, idle
+    raise ValueError("missing aggregate cpu line in /proc/stat")
+
+
+def _memory_pct(used_kb: int, total_kb: int) -> float:
+    if total_kb <= 0:
+        return 0.0
+    return round((used_kb * 100.0) / total_kb, 3)
+
+
+def query_board_telemetry(board_access: BoardAccessConfig, *, timeout_sec: float = 3.0) -> dict[str, Any]:
+    proc = run_ssh_command(
+        host=board_access.host,
+        user=board_access.user,
+        password=board_access.password,
+        port=board_access.port,
+        remote_command=_board_telemetry_remote_command(),
+        timeout=timeout_sec,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError((proc.stderr or proc.stdout or "board telemetry probe failed").strip())
+
+    sections = _parse_marker_sections(proc.stdout or "")
+    meminfo = _parse_meminfo_kb(sections["meminfo"])
+    total1, idle1 = _parse_proc_stat_total_idle(sections["stat1"])
+    total2, idle2 = _parse_proc_stat_total_idle(sections["stat2"])
+    total_delta = total2 - total1
+    idle_delta = idle2 - idle1
+    cpu_pct = 0.0 if total_delta <= 0 else round(((total_delta - idle_delta) * 100.0) / total_delta, 3)
+
+    mem_total_kb = int(meminfo.get("MemTotal", 0))
+    mem_available_kb = int(meminfo.get("MemAvailable", meminfo.get("MemFree", 0)))
+    mem_used_kb = max(mem_total_kb - mem_available_kb, 0)
+    loadavg_line = sections["loadavg"].split()
+    loadavg_1m = round(float(loadavg_line[0]), 3) if loadavg_line else 0.0
+    try:
+        cpu_cores = max(int((sections["cpu_cores"] or "1").splitlines()[0].strip()), 1)
+    except ValueError:
+        cpu_cores = 1
+
+    return {
+        "status": "ok",
+        "stale": False,
+        "source": "ssh_procfs",
+        "collected_at": now_iso(),
+        "compute_label": "CPU",
+        "compute_pct": cpu_pct,
+        "memory_pct": _memory_pct(mem_used_kb, mem_total_kb),
+        "memory_used_mb": round(mem_used_kb / 1024.0, 2),
+        "memory_available_mb": round(mem_available_kb / 1024.0, 2),
+        "memory_total_mb": round(mem_total_kb / 1024.0, 2),
+        "loadavg_1m": loadavg_1m,
+        "cpu_cores": cpu_cores,
+    }
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Serve the Feiteng semantic visual return demo dashboard.")
-    parser.add_argument("--host", default="127.0.0.1", help="Bind host.")
+    parser.add_argument("--host", default="0.0.0.0", help="Bind host.")
     parser.add_argument("--port", type=int, default=8079, help="Bind port.")
     parser.add_argument(
         "--probe-env",
         default="",
         help="Optional env file for read-only SSH board probes.",
+    )
+    parser.add_argument(
+        "--aircraft-position-env",
+        default="",
+        help="Optional env file for a local external aircraft-position provider.",
     )
     parser.add_argument(
         "--probe-timeout-sec",
@@ -793,11 +1897,15 @@ class DashboardState:
         probe_cache_path: str | Path | None = DEFAULT_LIVE_PROBE_OUTPUT,
         demo_startup_env_overrides: dict[str, str] | None = None,
         event_archive_root: str | Path | None = None,
+        bind_host: str = "127.0.0.1",
+        bind_port: int = 8079,
     ) -> None:
         self._probe_env = probe_env or None
         self._probe_timeout_sec = probe_timeout_sec
         self._probe_cache_path = probe_cache_path
         self._event_archive_root = Path(event_archive_root).resolve() if event_archive_root is not None else None
+        self._bind_host = str(bind_host or "127.0.0.1").strip() or "127.0.0.1"
+        self._bind_port = int(bind_port)
         self._lock = Lock()
         self._board_access = build_demo_default_board_access(
             self._probe_env,
@@ -814,6 +1922,21 @@ class DashboardState:
         self._event_spine = DemoEventSpine(event_archive_root)
         self._crypto_status_cache: dict[str, Any] | None = None
         self._crypto_status_cache_ts: float = 0.0
+        self._board_telemetry_cache: dict[str, Any] | None = None
+        self._board_telemetry_cache_ts: float = 0.0
+        self._board_telemetry_refreshing = False
+        self._board_position_api_cache: dict[str, Any] | None = None
+        self._board_position_api_cache_ts: float = 0.0
+        self._board_position_api_refreshing = False
+        self._aircraft_position_upstream_probe_cache: dict[str, Any] | None = None
+        self._aircraft_position_upstream_probe_cache_ts: float = 0.0
+        self._local_aircraft_bridge_state: dict[str, Any] = {
+            "status": "idle",
+            "last_error": "",
+            "last_success_at": "",
+            "upstream_url": "",
+        }
+        self._local_aircraft_bridge_thread_started = False
         self._crypto_enabled: bool = False
         self._last_soft_recover_ts: float = 0.0
         self._soft_recover_cooldown_sec: float = 45.0
@@ -822,6 +1945,7 @@ class DashboardState:
         self._batch_state: dict[str, Any] | None = None
         # ── ML-KEM 持久化会话 ──
         self._mlkem_session_mgr: MlkemSessionManager | None = None
+        self._mlkem_remote_asset_signatures: dict[str, str] = {}
 
         cached_probe = load_probe_output(probe_cache_path) if probe_cache_path else None
         if is_successful_probe(cached_probe):
@@ -833,11 +1957,111 @@ class DashboardState:
         self._trusted_current_sha = initial_snapshot["project"]["trusted_current_sha"]
         self._target_label = "cortex-a72 + neon"
         self._runtime_label = "tvm"
+        self._ensure_local_aircraft_position_bridge_thread()
 
     def _live_board_access_for_variant(self, board_access: BoardAccessConfig, *, variant: str) -> BoardAccessConfig:
         if variant != "current" or not self._trusted_current_sha:
             return board_access
         return board_access.with_env_overrides({"INFERENCE_CURRENT_EXPECTED_SHA256": self._trusted_current_sha})
+
+    def _local_aircraft_position_bridge_config(self) -> tuple[dict[str, Any], Any] | None:
+        with self._lock:
+            board_access = self._board_access
+        runtime = _aircraft_position_bridge_runtime(
+            board_access,
+            bind_host=self._bind_host,
+            bind_port=self._bind_port,
+        )
+        if not runtime["configured"]:
+            with self._lock:
+                self._local_aircraft_bridge_state = {
+                    **self._local_aircraft_bridge_state,
+                    "status": "idle",
+                    "last_error": "",
+                    "upstream_url": "",
+                }
+            return None
+        if _aircraft_position_bridge_execution_mode_for_runtime(board_access, runtime) != "local":
+            with self._lock:
+                self._local_aircraft_bridge_state = {
+                    **self._local_aircraft_bridge_state,
+                    "status": "idle",
+                    "last_error": "",
+                    "upstream_url": "",
+                }
+            return None
+        try:
+            config = build_config_from_env_values(
+                runtime["runtime_env"],
+                backend_base_url_default=runtime["backend_base_url"] or f"http://127.0.0.1:{self._bind_port}",
+            )
+        except ValueError as exc:
+            with self._lock:
+                self._local_aircraft_bridge_state = {
+                    **self._local_aircraft_bridge_state,
+                    "status": "error",
+                    "last_error": str(exc),
+                    "upstream_url": runtime["upstream_url"],
+                }
+            return None
+        return runtime, config
+
+    def _run_local_aircraft_position_bridge_once(self) -> bool:
+        prepared = self._local_aircraft_position_bridge_config()
+        if prepared is None:
+            return False
+        runtime, config = prepared
+        with self._lock:
+            self._local_aircraft_bridge_state = {
+                **self._local_aircraft_bridge_state,
+                "status": "running",
+                "last_error": "",
+                "upstream_url": runtime["upstream_url"],
+            }
+        try:
+            normalized_payload = fetch_normalized_payload(config)
+        except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError) as exc:
+            with self._lock:
+                self._local_aircraft_bridge_state = {
+                    **self._local_aircraft_bridge_state,
+                    "status": "error",
+                    "last_error": str(exc),
+                    "upstream_url": runtime["upstream_url"],
+                }
+            return False
+        self.set_aircraft_position(normalized_payload)
+        with self._lock:
+            self._local_aircraft_bridge_state = {
+                **self._local_aircraft_bridge_state,
+                "status": "running",
+                "last_error": "",
+                "last_success_at": now_iso(),
+                "upstream_url": runtime["upstream_url"],
+            }
+        return True
+
+    def _local_aircraft_position_bridge_loop(self) -> None:
+        while True:
+            prepared = self._local_aircraft_position_bridge_config()
+            if prepared is None:
+                time.sleep(1.0)
+                continue
+            _runtime, config = prepared
+            self._run_local_aircraft_position_bridge_once()
+            time.sleep(config.interval_sec)
+
+    def _ensure_local_aircraft_position_bridge_thread(self) -> None:
+        if self._local_aircraft_position_bridge_config() is None:
+            return
+        with self._lock:
+            if self._local_aircraft_bridge_thread_started:
+                return
+            self._local_aircraft_bridge_thread_started = True
+        threading.Thread(
+            target=self._local_aircraft_position_bridge_loop,
+            daemon=True,
+            name="local-aircraft-position-bridge",
+        ).start()
 
     def set_board_access(self, payload: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
@@ -845,16 +2069,36 @@ class DashboardState:
         config = build_board_access_config(payload, fallback=fallback)
         with self._lock:
             self._board_access = config
+            self._board_telemetry_cache = None
+            self._board_telemetry_cache_ts = 0.0
+            self._board_telemetry_refreshing = False
+            self._board_position_api_cache = None
+            self._board_position_api_cache_ts = 0.0
+            self._board_position_api_refreshing = False
+            self._aircraft_position_upstream_probe_cache = None
+            self._aircraft_position_upstream_probe_cache_ts = 0.0
             crypto_enabled = self._crypto_enabled
         # 密码录入后立即在后台尝试启动板端 tcp_server，无需等待 toggle ON 或首次推理
         if config.connection_ready:
-            import threading
             threading.Thread(
                 target=self._ensure_board_tcp_server,
                 args=(config,),
                 daemon=True,
                 name="tcp-server-autostart",
             ).start()
+            runtime = _aircraft_position_bridge_runtime(
+                config,
+                bind_host=self._bind_host,
+                bind_port=self._bind_port,
+            )
+            if _aircraft_position_bridge_execution_mode_for_runtime(config, runtime) == "board":
+                threading.Thread(
+                    target=self._autostart_board_aircraft_position_bridge,
+                    args=(config,),
+                    daemon=True,
+                    name="aircraft-position-bridge-autostart",
+                ).start()
+        self._ensure_local_aircraft_position_bridge_thread()
         return config.to_public_dict()
 
     def _merged_aircraft_position_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -925,9 +2169,9 @@ class DashboardState:
             if not payload.get("source_status"):
                 merged["source_status"] = "live"
             if not payload.get("source_label"):
-                merged["source_label"] = "Upper Computer GPS live feed"
+                merged["source_label"] = "上位机位置"
             if not payload.get("source_note"):
-                merged["source_note"] = "Upper-computer GPS live samples are currently driving the backend aircraft-position contract."
+                merged["source_note"] = "当前定位展示来自上位机本机位置数据。"
             explicit_captured_at = payload.get("captured_at") not in (None, "") or (
                 isinstance(payload.get("sample"), dict) and payload["sample"].get("captured_at") not in (None, "")
             )
@@ -1062,12 +2306,31 @@ class DashboardState:
         tcp_client, _ = resolve_local_crypto_client(env_values)
         if tcp_client is None:
             return None
+        if not inspect_local_crypto_client_capabilities(tcp_client).get("supports_daemon"):
+            return None
 
         mgr = MlkemSessionManager(
             env_values, host=board_access.host, client_script=tcp_client)
         with self._lock:
             self._mlkem_session_mgr = mgr
         return mgr
+
+    def _create_mlkem_input_file(self, client_script: Path) -> Path:
+        """Create a temporary ML-KEM input file compatible with the discovered client."""
+        import tempfile
+
+        capabilities = inspect_local_crypto_client_capabilities(client_script)
+        payload_size = (
+            MLKEM_LEGACY_INPUT_BYTES
+            if capabilities.get("legacy_single_input_only")
+            else MLKEM_MODERN_INPUT_BYTES
+        )
+        tmp = tempfile.NamedTemporaryFile(suffix=".bin", delete=False)
+        try:
+            tmp.write(b"\0" * payload_size)
+        finally:
+            tmp.close()
+        return Path(tmp.name)
 
     def _idle_active_inference_summary(self) -> dict[str, Any]:
         return {
@@ -1800,6 +3063,295 @@ class DashboardState:
 
         return {"enabled": enabled}
 
+    def _write_remote_text_file(
+        self,
+        board_access: BoardAccessConfig,
+        *,
+        remote_path: str,
+        content: str,
+        mode: int,
+        timeout: float,
+    ) -> None:
+        proc = run_ssh_command(
+            host=board_access.host,
+            user=board_access.user,
+            password=board_access.password,
+            port=board_access.port or "22",
+            remote_command=_build_remote_text_write_command(remote_path, content, mode),
+            timeout=timeout,
+        )
+        if proc.returncode == 0:
+            return
+        error_output = proc.stderr.strip() or proc.stdout.strip() or "unknown error"
+        raise RuntimeError(f"failed to write remote file {remote_path}: {error_output}")
+
+    def _aircraft_position_upstream_probe_snapshot(self, *, board_access: BoardAccessConfig) -> dict[str, Any]:
+        runtime = _aircraft_position_bridge_runtime(
+            board_access,
+            bind_host=self._bind_host,
+            bind_port=self._bind_port,
+        )
+        if runtime["upstream_url_source"] == "env":
+            return {
+                "status": "configured",
+                "selected_url": runtime["upstream_url"],
+                "selected_source": "env",
+                "candidate_urls": list(runtime["candidate_urls"]),
+                "results": [],
+                "checked_at": now_iso(),
+            }
+        if not board_access.connection_ready:
+            return {
+                "status": "waiting_session",
+                "selected_url": "",
+                "selected_source": "",
+                "candidate_urls": list(runtime["candidate_urls"]),
+                "results": [],
+                "checked_at": now_iso(),
+            }
+        with self._lock:
+            cached_probe = (
+                json.loads(json.dumps(self._aircraft_position_upstream_probe_cache, ensure_ascii=False))
+                if self._aircraft_position_upstream_probe_cache is not None
+                else None
+            )
+            cached_ts = self._aircraft_position_upstream_probe_cache_ts
+        if cached_probe is not None and (time.monotonic() - cached_ts) <= AIRCRAFT_POSITION_UPSTREAM_DISCOVERY_TTL_SEC:
+            return cached_probe
+        try:
+            probe = query_board_aircraft_position_upstream(
+                board_access,
+                candidate_urls=list(runtime["candidate_urls"]),
+                upstream_headers=_parse_json_dict_text(runtime["runtime_env"].get("AIRCRAFT_POSITION_UPSTREAM_HEADERS_JSON", "")),
+                timeout_sec=min(max(self._probe_timeout_sec, 2.0), 8.0),
+            )
+        except Exception as exc:
+            probe = {
+                "status": "error",
+                "selected_url": "",
+                "selected_source": "",
+                "candidate_urls": list(runtime["candidate_urls"]),
+                "results": [],
+                "checked_at": now_iso(),
+                "error": str(exc),
+            }
+        else:
+            if probe.get("selected_url"):
+                probe["selected_source"] = "auto_discovered"
+            else:
+                probe.setdefault("selected_source", "")
+        with self._lock:
+            self._aircraft_position_upstream_probe_cache = json.loads(json.dumps(probe, ensure_ascii=False))
+            self._aircraft_position_upstream_probe_cache_ts = time.monotonic()
+        return probe
+
+    def _ensure_board_position_api_service(self, board_access: BoardAccessConfig) -> None:
+        runtime = _board_position_api_runtime(board_access)
+        assets = _board_position_api_local_assets()
+        remote_paths = _board_position_api_remote_paths(runtime["remote_root"])
+        health_wait = _remote_http_wait_command(_board_position_api_health_url(runtime["runtime_env"]))
+        stop_command = _remote_terminate_matching_processes_command(BOARD_POSITION_API_SCRIPT_NAME)
+        ssh_timeout = 25.0
+        try:
+            self._write_remote_text_file(
+                board_access,
+                remote_path=remote_paths["service_script"],
+                content=read_text(assets["service_script"]),
+                mode=0o755,
+                timeout=ssh_timeout,
+            )
+            self._write_remote_text_file(
+                board_access,
+                remote_path=remote_paths["runner_script"],
+                content=read_text(assets["runner_script"]),
+                mode=0o755,
+                timeout=ssh_timeout,
+            )
+            self._write_remote_text_file(
+                board_access,
+                remote_path=remote_paths["env_file"],
+                content=_render_board_position_api_env_file(runtime["runtime_env"]),
+                mode=0o600,
+                timeout=ssh_timeout,
+            )
+            self._write_remote_text_file(
+                board_access,
+                remote_path=remote_paths["user_service"],
+                content=_render_board_position_api_user_service(runtime["remote_root"]),
+                mode=0o644,
+                timeout=ssh_timeout,
+            )
+        except Exception as exc:
+            print(f"[board-position-api] remote asset sync failed: {exc}")
+            return
+
+        root_direct_proc: subprocess.CompletedProcess[str] | None = None
+        if board_access.password:
+            root_direct_inner = (
+                f'USER_HOME="$(getent passwd {shlex.quote(board_access.user)} | cut -d: -f6)"; '
+                f'[ -n "$USER_HOME" ] || USER_HOME={shlex.quote(f"/home/{board_access.user}")}; '
+                'export HOME="$USER_HOME"; '
+                f"{stop_command} && "
+                "/usr/bin/env bash -lc "
+                f"\"nohup /usr/bin/env bash -lc 'set -a; . {remote_paths['env_file']}; set +a; "
+                f"exec {remote_paths['runner_script']}' >> {remote_paths['log_file']} 2>&1 < /dev/null &\" && "
+                f"{health_wait}"
+            )
+            root_direct_proc = run_ssh_command(
+                host=board_access.host,
+                user=board_access.user,
+                password=board_access.password,
+                port=board_access.port or "22",
+                remote_command=_remote_sudo_bash_command(root_direct_inner, board_access.password),
+                timeout=20.0,
+            )
+            if root_direct_proc.returncode == 0:
+                return
+
+        direct_command = (
+            f"{stop_command} && "
+            "/usr/bin/env bash -lc "
+            f"\"nohup /usr/bin/env bash -lc 'set -a; . {remote_paths['env_file']}; set +a; "
+            f"exec {remote_paths['runner_script']}' >> {remote_paths['log_file']} 2>&1 < /dev/null &\" && "
+            f"{health_wait}"
+        )
+        direct_proc = run_ssh_command(
+            host=board_access.host,
+            user=board_access.user,
+            password=board_access.password,
+            port=board_access.port or "22",
+            remote_command=direct_command,
+            timeout=20.0,
+        )
+        if direct_proc.returncode == 0:
+            return
+
+        fallback_command = (
+            "mkdir -p ~/.config/systemd/user && "
+            f"{stop_command} && "
+            f"systemctl --user daemon-reload && systemctl --user enable --now {BOARD_POSITION_API_SERVICE_NAME} && "
+            f"{health_wait}"
+        )
+        fallback_proc = run_ssh_command(
+            host=board_access.host,
+            user=board_access.user,
+            password=board_access.password,
+            port=board_access.port or "22",
+            remote_command=fallback_command,
+            timeout=20.0,
+        )
+        if fallback_proc.returncode != 0:
+            root_error = (
+                root_direct_proc.stderr.strip() or root_direct_proc.stdout.strip() or "root launch skipped"
+            ) if root_direct_proc is not None else "root launch skipped"
+            direct_error = direct_proc.stderr.strip() or direct_proc.stdout.strip() or "unknown direct error"
+            fallback_error = fallback_proc.stderr.strip() or fallback_proc.stdout.strip() or "unknown fallback error"
+            print(
+                "[board-position-api] remote start failed: "
+                f"root={root_error}; direct={direct_error}; fallback={fallback_error}"
+            )
+
+    def _autostart_board_aircraft_position_bridge(self, board_access: BoardAccessConfig) -> None:
+        self._ensure_board_position_api_service(board_access)
+        probe = self._aircraft_position_upstream_probe_snapshot(board_access=board_access)
+        selected_url = str(probe.get("selected_url") or "").strip()
+        runtime = _aircraft_position_bridge_runtime(
+            board_access,
+            bind_host=self._bind_host,
+            bind_port=self._bind_port,
+            discovered_upstream_url=selected_url,
+        )
+        if not runtime["configured"]:
+            return
+        effective_board_access = board_access
+        if selected_url and runtime["upstream_url_source"] == "auto_discovered":
+            effective_board_access = board_access.with_env_overrides({"AIRCRAFT_POSITION_UPSTREAM_URL": selected_url})
+        self._ensure_board_aircraft_position_bridge(effective_board_access)
+
+    def _ensure_board_aircraft_position_bridge(self, board_access: BoardAccessConfig) -> None:
+        runtime = _aircraft_position_bridge_runtime(
+            board_access,
+            bind_host=self._bind_host,
+            bind_port=self._bind_port,
+        )
+        if not runtime["configured"]:
+            return
+
+        assets = _aircraft_position_bridge_local_assets()
+        remote_paths = _aircraft_position_bridge_remote_paths(runtime["remote_root"])
+        stop_command = _remote_terminate_matching_processes_command(remote_paths["bridge_script"])
+        ssh_timeout = 25.0
+        try:
+            self._write_remote_text_file(
+                board_access,
+                remote_path=remote_paths["bridge_script"],
+                content=read_text(assets["bridge_script"]),
+                mode=0o755,
+                timeout=ssh_timeout,
+            )
+            self._write_remote_text_file(
+                board_access,
+                remote_path=remote_paths["runner_script"],
+                content=read_text(assets["runner_script"]),
+                mode=0o755,
+                timeout=ssh_timeout,
+            )
+            self._write_remote_text_file(
+                board_access,
+                remote_path=remote_paths["env_file"],
+                content=_render_aircraft_position_bridge_env_file(runtime["runtime_env"]),
+                mode=0o600,
+                timeout=ssh_timeout,
+            )
+            self._write_remote_text_file(
+                board_access,
+                remote_path=remote_paths["user_service"],
+                content=_render_aircraft_position_bridge_user_service(runtime["remote_root"]),
+                mode=0o644,
+                timeout=ssh_timeout,
+            )
+        except Exception as exc:
+            print(f"[aircraft-position-bridge] remote asset sync failed: {exc}")
+            return
+
+        service_command = (
+            "mkdir -p ~/.config/systemd/user && "
+            f"{stop_command} && "
+            f"systemctl --user daemon-reload && systemctl --user enable --now {AIRCRAFT_POSITION_SERVICE_NAME}"
+        )
+        service_proc = run_ssh_command(
+            host=board_access.host,
+            user=board_access.user,
+            password=board_access.password,
+            port=board_access.port or "22",
+            remote_command=service_command,
+            timeout=15.0,
+        )
+        if service_proc.returncode == 0:
+            return
+
+        fallback_command = (
+            f"{stop_command} && "
+            "/usr/bin/env bash -lc "
+            f"\"nohup /usr/bin/env bash -lc 'set -a; . {remote_paths['env_file']}; set +a; "
+            f"exec {remote_paths['runner_script']}' >> {remote_paths['log_file']} 2>&1 < /dev/null &\""
+        )
+        fallback_proc = run_ssh_command(
+            host=board_access.host,
+            user=board_access.user,
+            password=board_access.password,
+            port=board_access.port or "22",
+            remote_command=fallback_command,
+            timeout=15.0,
+        )
+        if fallback_proc.returncode != 0:
+            service_error = service_proc.stderr.strip() or service_proc.stdout.strip() or "unknown service error"
+            fallback_error = fallback_proc.stderr.strip() or fallback_proc.stdout.strip() or "unknown fallback error"
+            print(
+                "[aircraft-position-bridge] remote start failed: "
+                f"systemd={service_error}; fallback={fallback_error}"
+            )
+
     def _ensure_board_tcp_server(self, board_access: BoardAccessConfig) -> None:
         """通过 SSH 检测板卡 tcp_server 是否运行，如果没有则启动它。"""
         host = board_access.host
@@ -1811,18 +3363,90 @@ class DashboardState:
             first_config_value(env_values, keys=STATUS_PORT_KEYS),
             DEFAULT_STATUS_PORT,
         )
+        runtime_env_values = dict(env_values)
+        explicit_remote_script = first_config_value(env_values, keys=REMOTE_SERVER_SCRIPT_KEYS)
+        explicit_remote_root = first_config_value(env_values, keys=REMOTE_PROJECT_ROOT_KEYS)
+        if not explicit_remote_script and not explicit_remote_root:
+            try:
+                home_proc = run_ssh_command(
+                    host=host,
+                    user=user,
+                    password=password,
+                    port=ssh_port,
+                    remote_command='printf %s "$HOME"',
+                    timeout=8,
+                )
+                remote_home = (home_proc.stdout or "").strip()
+                if home_proc.returncode == 0 and remote_home:
+                    runtime_env_values["MLKEM_REMOTE_SERVER_SCRIPT"] = (
+                        f"{remote_home.rstrip('/')}/tcp_server.py"
+                    )
+            except Exception:
+                pass
+
+        local_server_script, _ = resolve_local_crypto_server(runtime_env_values)
+        remote_asset_sync = self._sync_remote_mlkem_server_assets(
+            board_access,
+            runtime_env_values=runtime_env_values,
+            local_server_script=local_server_script,
+        )
 
         # 1) 检测 status 端口是否响应，并验证密码套件是否匹配
         expected_suite = first_config_value(env_values, keys=SUITE_KEYS, default=DEFAULT_CIPHER_SUITE).lower().replace("_", "-")
+        expected_tvm_python_raw = first_config_value(env_values, keys=REMOTE_TVM_PYTHON_KEYS)
+        expected_tvm_python = _normalize_remote_tvm_python(expected_tvm_python_raw)
+        forced_restart = False
+        if remote_asset_sync.get("updated"):
+            forced_restart = True
+            print(f"[ML-KEM auto-start] 已同步板端 helper 资产: {remote_asset_sync.get('note', 'remote assets refreshed')}")
+        elif remote_asset_sync.get("error"):
+            print(f"[ML-KEM auto-start] 板端 helper 同步失败，将继续尝试复用远端现有脚本: {remote_asset_sync.get('note', '')}")
+        hotfix_result = self._apply_remote_mlkem_hotfixes(board_access)
+        if hotfix_result.get("patched"):
+            forced_restart = True
+            print(f"[ML-KEM auto-start] 已应用板端热修: {hotfix_result.get('note', 'remote helper patched')}")
         # AES_256_GCM → aes-256-gcm, SM4_GCM → sm4-gcm
         try:
             status = fetch_json_direct(f"http://{host}:{status_port}/status", timeout=2)
             running_suite = str(status.get("cipher_suite") or "").lower()
-            if running_suite and running_suite == expected_suite:
-                return  # 已在运行且套件匹配
+            restart_reason = ""
             if running_suite and running_suite != expected_suite:
-                print(f"[ML-KEM auto-start] 套件不匹配 (running={running_suite}, expected={expected_suite})，重启板端 tcp_server")
-                # kill 旧进程
+                restart_reason = (
+                    f"套件不匹配 (running={running_suite}, expected={expected_suite})"
+                )
+            elif running_suite and expected_tvm_python_raw:
+                try:
+                    pgrep_proc = run_ssh_command(
+                        host=host,
+                        user=user,
+                        password=password,
+                        port=ssh_port,
+                        remote_command="pgrep -af 'tcp_server.py' || true",
+                        timeout=8,
+                    )
+                    running_cmdline = pgrep_proc.stdout or ""
+                    if running_cmdline and expected_tvm_python_raw not in running_cmdline:
+                        restart_reason = (
+                            "检测到板端 tcp_server 的 --tvm-python 与当前期望运行时不一致"
+                        )
+                    elif (
+                        running_cmdline
+                        and expected_tvm_python
+                        and expected_tvm_python != expected_tvm_python_raw
+                        and "--tvm-python env " in running_cmdline
+                    ):
+                        restart_reason = (
+                            "检测到板端 tcp_server 仍使用 shell 包装的 --tvm-python 参数"
+                        )
+                except Exception:
+                    pass
+
+            if running_suite and not restart_reason and not forced_restart:
+                return  # 已在运行且配置匹配
+            if restart_reason or forced_restart:
+                reason_text = restart_reason or "检测到板端 helper 资产已更新"
+                print(f"[ML-KEM auto-start] {reason_text}，重启板端 tcp_server")
+                forced_restart = True
                 run_ssh_command(
                     host=host, user=user, password=password, port=ssh_port,
                     remote_command="pkill -f 'tcp_server.py' || true",
@@ -1833,29 +3457,29 @@ class DashboardState:
             pass  # 没运行，继续启动
 
         # 1b) 若进程已在运行但 status 不通，等一下再试
-        try:
-            pgrep_proc = run_ssh_command(
-                host=host,
-                user=user,
-                password=password,
-                port=ssh_port,
-                remote_command="pgrep -af 'tcp_server.py' || true",
-                timeout=8,
-            )
-            if pgrep_proc.returncode == 0 and (pgrep_proc.stdout or "").strip():
-                for _ in range(4):
-                    try:
-                        fetch_json_direct(f"http://{host}:{status_port}/status", timeout=2)
-                        return
-                    except Exception:
-                        time.sleep(0.8)
-        except Exception:
-            pass
+        if not forced_restart:
+            try:
+                pgrep_proc = run_ssh_command(
+                    host=host,
+                    user=user,
+                    password=password,
+                    port=ssh_port,
+                    remote_command="pgrep -af 'tcp_server.py' || true",
+                    timeout=8,
+                )
+                if pgrep_proc.returncode == 0 and (pgrep_proc.stdout or "").strip():
+                    for _ in range(4):
+                        try:
+                            fetch_json_direct(f"http://{host}:{status_port}/status", timeout=2)
+                            return
+                        except Exception:
+                            time.sleep(0.8)
+            except Exception:
+                pass
 
         # 2) SSH 到板卡启动 tcp_server
-        local_server_script, _ = resolve_local_crypto_server(env_values)
         remote_command = build_remote_crypto_server_command(
-            env_values,
+            runtime_env_values,
             local_server_script=local_server_script,
         )
 
@@ -1881,6 +3505,99 @@ class DashboardState:
         except Exception as exc:
             print(f"[ML-KEM auto-start] error: {exc}")
 
+    def _sync_remote_mlkem_server_assets(
+        self,
+        board_access: BoardAccessConfig,
+        *,
+        runtime_env_values: dict[str, str],
+        local_server_script: Path | None,
+    ) -> dict[str, Any]:
+        if local_server_script is None:
+            return {"updated": False, "note": "local tcp_server.py not found"}
+
+        remote_server_script = _derive_remote_server_script(
+            runtime_env_values,
+            local_server_script=local_server_script,
+        )
+        local_helper_script = local_server_script.with_name("tvm_inference_helper.py")
+        assets: list[tuple[str, Path]] = [(remote_server_script, local_server_script)]
+        if local_helper_script.exists():
+            remote_helper_script = str(
+                PurePosixPath(remote_server_script).with_name(local_helper_script.name)
+            )
+            assets.append((remote_helper_script, local_helper_script))
+
+        hasher = hashlib.sha256()
+        for _remote_path, local_path in assets:
+            hasher.update(local_path.read_bytes())
+        signature = hasher.hexdigest()
+        signature_key = f"{board_access.host}:{remote_server_script}"
+
+        with self._lock:
+            if self._mlkem_remote_asset_signatures.get(signature_key) == signature:
+                return {"updated": False, "note": "remote helper assets already synced"}
+
+        try:
+            for remote_path, local_path in assets:
+                self._write_remote_text_file(
+                    board_access,
+                    remote_path=remote_path,
+                    content=local_path.read_text(encoding="utf-8"),
+                    mode=0o755,
+                    timeout=25.0,
+                )
+        except Exception as exc:
+            return {"updated": False, "error": True, "note": str(exc)}
+
+        with self._lock:
+            self._mlkem_remote_asset_signatures[signature_key] = signature
+        return {"updated": True, "note": f"{len(assets)} file(s) uploaded to {remote_server_script}"}
+
+    def _apply_remote_mlkem_hotfixes(self, board_access: BoardAccessConfig) -> dict[str, Any]:
+        """修补板端已知的 helper bug，避免长批次中途断链。"""
+        hotfix_script = "\n".join(
+            [
+                "from pathlib import Path",
+                "import os",
+                "",
+                "path = Path(os.path.expanduser('~/replay_guard.py'))",
+                "if not path.exists():",
+                "    print('missing:replay_guard.py')",
+                "    raise SystemExit(0)",
+                "text = path.read_text(encoding='utf-8')",
+                "old = \"                oldest_key, _ = next(iter(self._window))\\n                oldest_job, oldest_seq = oldest_key\\n\"",
+                "new = \"                oldest_job, oldest_seq = next(iter(self._window))\\n\"",
+                "if old in text:",
+                "    path.write_text(text.replace(old, new, 1), encoding='utf-8')",
+                "    print('patched:replay_guard_window_unpack')",
+                "elif new in text:",
+                "    print('ok:replay_guard_window_unpack')",
+                "else:",
+                "    print('unknown:replay_guard_window_unpack')",
+            ]
+        )
+        remote_command = f"python3 -c {shlex.quote(hotfix_script)}"
+        try:
+            proc = run_ssh_command(
+                host=board_access.host,
+                user=board_access.user,
+                password=board_access.password,
+                port=board_access.port or "22",
+                remote_command=remote_command,
+                timeout=12,
+            )
+        except Exception as exc:
+            return {"patched": False, "note": f"hotfix probe failed: {exc}"}
+
+        output = (proc.stdout or proc.stderr or "").strip()
+        if proc.returncode != 0:
+            return {"patched": False, "note": output or "hotfix probe failed"}
+        if "patched:replay_guard_window_unpack" in output:
+            return {"patched": True, "note": "replay_guard window unpack bug fixed"}
+        if "ok:replay_guard_window_unpack" in output:
+            return {"patched": False, "note": "replay_guard window unpack already fixed"}
+        return {"patched": False, "note": output or "no remote hotfix applied"}
+
     def run_crypto_test(self) -> dict[str, Any]:
         """通过 tcp_client.py 向板卡发送测试 latent，验证 ML-KEM 加密通道"""
         with self._lock:
@@ -1902,13 +3619,8 @@ class DashboardState:
                 f"searched: {searched_text}",
             }
 
-        # 生成测试 latent：优先使用 .bin，避免本机必须装 numpy。
-        import tempfile
-
-        tmp = tempfile.NamedTemporaryFile(suffix=".bin", delete=False)
-        tmp.write(b"\0" * (1 * 32 * 32 * 32 * 4))
-        tmp.close()
-        tmp_path = Path(tmp.name)
+        # 生成测试输入：兼容新版 batch client 与旧版单图 client。
+        tmp_path = self._create_mlkem_input_file(tcp_client)
 
         cmd, env = build_local_crypto_client_command(
             env_values,
@@ -1923,7 +3635,12 @@ class DashboardState:
             try:
                 mgr.ensure_alive()
                 t0 = time.monotonic()
-                daemon_result = mgr.send_image(str(tmp_path), "crypto_test")
+                daemon_result = mgr.send_image(
+                    str(tmp_path),
+                    "crypto_test",
+                    run_tvm=False,
+                    expect_result=False,
+                )
                 wall_ms = round((time.monotonic() - t0) * 1000, 1)
                 tmp_path.unlink()
                 return {
@@ -1981,6 +3698,189 @@ class DashboardState:
                 pass
             return {"status": "error", "message": str(exc)}
 
+    def _board_telemetry_snapshot(self, *, board_access: BoardAccessConfig, board_online: bool) -> dict[str, Any]:
+        with self._lock:
+            cached = (
+                json.loads(json.dumps(self._board_telemetry_cache, ensure_ascii=False))
+                if self._board_telemetry_cache is not None
+                else None
+            )
+            cached_ts = self._board_telemetry_cache_ts
+            refreshing = self._board_telemetry_refreshing
+
+        age_sec = time.monotonic() - cached_ts if cached_ts > 0 else None
+        if cached is not None and age_sec is not None and age_sec <= BOARD_TELEMETRY_TTL_SEC:
+            return cached
+
+        if not board_access.connection_ready:
+            if cached is not None:
+                cached["status"] = "stale"
+                cached["stale"] = True
+                cached["note"] = "当前板卡会话不完整，继续展示上一次缓存的板端资源占用。"
+                return cached
+            return {
+                "status": "unavailable",
+                "stale": True,
+                "source": "none",
+                "collected_at": "",
+                "compute_label": "CPU",
+                "compute_pct": None,
+                "memory_pct": None,
+                "memory_used_mb": None,
+                "memory_available_mb": None,
+                "memory_total_mb": None,
+                "loadavg_1m": None,
+                "cpu_cores": None,
+                "note": "板卡会话未配置，无法采集系统占用。",
+            }
+
+        if not board_online and cached is None:
+            return {
+                "status": "unavailable",
+                "stale": True,
+                "source": "none",
+                "collected_at": "",
+                "compute_label": "CPU",
+                "compute_pct": None,
+                "memory_pct": None,
+                "memory_used_mb": None,
+                "memory_available_mb": None,
+                "memory_total_mb": None,
+                "loadavg_1m": None,
+                "cpu_cores": None,
+                "note": "板卡当前未在线，尚无可展示的实时系统占用。",
+            }
+
+        if cached is not None:
+            self._start_board_telemetry_refresh(
+                board_access,
+                timeout_sec=min(max(self._probe_timeout_sec, 3.0), 12.0),
+            )
+            cached["status"] = "stale"
+            cached["stale"] = True
+            cached["note"] = (
+                "板端资源占用后台刷新中，继续展示最近一次缓存值。"
+                if not refreshing
+                else "板端资源占用仍在后台刷新，继续展示最近一次缓存值。"
+            )
+            return cached
+
+        try:
+            telemetry = query_board_telemetry(
+                board_access,
+                timeout_sec=min(max(self._probe_timeout_sec, 2.0), 4.0),
+            )
+        except Exception as exc:
+            if cached is not None:
+                cached["status"] = "stale"
+                cached["stale"] = True
+                cached["note"] = f"板端资源占用刷新失败，继续展示缓存值: {exc}"
+                return cached
+            return {
+                "status": "error",
+                "stale": True,
+                "source": "ssh_procfs",
+                "collected_at": "",
+                "compute_label": "CPU",
+                "compute_pct": None,
+                "memory_pct": None,
+                "memory_used_mb": None,
+                "memory_available_mb": None,
+                "memory_total_mb": None,
+                "loadavg_1m": None,
+                "cpu_cores": None,
+                "note": f"板端资源占用采集失败: {exc}",
+            }
+
+        with self._lock:
+            self._board_telemetry_cache = json.loads(json.dumps(telemetry, ensure_ascii=False))
+            self._board_telemetry_cache_ts = time.monotonic()
+        return telemetry
+
+    def _start_board_telemetry_refresh(self, board_access: BoardAccessConfig, *, timeout_sec: float) -> None:
+        with self._lock:
+            if self._board_telemetry_refreshing:
+                return
+            self._board_telemetry_refreshing = True
+
+        def worker() -> None:
+            try:
+                telemetry = query_board_telemetry(board_access, timeout_sec=timeout_sec)
+                with self._lock:
+                    self._board_telemetry_cache = json.loads(json.dumps(telemetry, ensure_ascii=False))
+                    self._board_telemetry_cache_ts = time.monotonic()
+            except Exception:
+                return
+            finally:
+                with self._lock:
+                    self._board_telemetry_refreshing = False
+
+        threading.Thread(
+            target=worker,
+            daemon=True,
+            name="board-telemetry-refresh",
+        ).start()
+
+    def _board_position_api_snapshot(self, board_access: BoardAccessConfig) -> dict[str, Any]:
+        with self._lock:
+            cached = (
+                json.loads(json.dumps(self._board_position_api_cache, ensure_ascii=False))
+                if self._board_position_api_cache is not None
+                else None
+            )
+            cached_ts = self._board_position_api_cache_ts
+            refreshing = self._board_position_api_refreshing
+
+        age_sec = time.monotonic() - cached_ts if cached_ts > 0 else None
+        if cached is not None and age_sec is not None and age_sec <= BOARD_POSITION_API_TTL_SEC:
+            return cached
+
+        if cached is not None and board_access.connection_ready:
+            self._start_board_position_api_refresh(
+                board_access,
+                timeout_sec=min(max(self._probe_timeout_sec, 1.0), 4.0),
+            )
+            cached["stale"] = True
+            cached["note"] = (
+                "板端定位 API 状态后台刷新中，继续展示最近一次缓存值。"
+                if not refreshing
+                else "板端定位 API 状态仍在后台刷新，继续展示最近一次缓存值。"
+            )
+            return cached
+
+        payload = _board_position_api_status(
+            board_access,
+            timeout_sec=min(max(self._probe_timeout_sec, 1.0), 2.0),
+        )
+        with self._lock:
+            self._board_position_api_cache = json.loads(json.dumps(payload, ensure_ascii=False))
+            self._board_position_api_cache_ts = time.monotonic()
+        return payload
+
+    def _start_board_position_api_refresh(self, board_access: BoardAccessConfig, *, timeout_sec: float) -> None:
+        with self._lock:
+            if self._board_position_api_refreshing:
+                return
+            self._board_position_api_refreshing = True
+
+        def worker() -> None:
+            try:
+                payload = _board_position_api_status(board_access, timeout_sec=timeout_sec)
+                with self._lock:
+                    self._board_position_api_cache = json.loads(json.dumps(payload, ensure_ascii=False))
+                    self._board_position_api_cache_ts = time.monotonic()
+            except Exception:
+                return
+            finally:
+                with self._lock:
+                    self._board_position_api_refreshing = False
+
+        threading.Thread(
+            target=worker,
+            daemon=True,
+            name="board-position-api-refresh",
+        ).start()
+
     def current_system_status(self) -> dict[str, Any]:
         with self._lock:
             live_probe = self._last_live_probe
@@ -1990,9 +3890,27 @@ class DashboardState:
             recent_inference_results = dict(self._recent_inference_results)
             last_fault = self._last_fault_result
             aircraft_position = self._aircraft_position
+            local_aircraft_bridge_state = json.loads(json.dumps(self._local_aircraft_bridge_state, ensure_ascii=False))
 
         snapshot = build_snapshot(live_probe=live_probe, aircraft_position=aircraft_position)
         aircraft_position_payload = snapshot["aircraft_position"]
+        aircraft_upstream_probe = self._aircraft_position_upstream_probe_snapshot(board_access=board_access)
+        discovered_upstream_url = str(aircraft_upstream_probe.get("selected_url") or "").strip()
+        board_position_api = self._board_position_api_snapshot(board_access)
+        aircraft_bridge = _aircraft_position_bridge_status(
+            board_access,
+            aircraft_position_payload=aircraft_position_payload,
+            bind_host=self._bind_host,
+            bind_port=self._bind_port,
+            discovered_upstream_url=discovered_upstream_url,
+            upstream_probe=aircraft_upstream_probe,
+            local_runtime_state=local_aircraft_bridge_state,
+        )
+        aircraft_position_payload = {
+            **aircraft_position_payload,
+            "bridge_runtime": aircraft_bridge,
+            "position_api_runtime": board_position_api,
+        }
         event_spine = self._event_spine.summary(limit=1)
         active_inference = self._active_inference_summary()
         current_board_access = self._live_board_access_for_variant(board_access, variant="current")
@@ -2010,6 +3928,8 @@ class DashboardState:
         )
         rpmsg_devices = live_details.get("rpmsg_devices", [])
         rpmsg_device = rpmsg_devices[0] if rpmsg_devices else evidence_status["transport"].get("rpmsg_dev", "unknown")
+
+        board_online = bool(live_probe and live_probe.get("reachable"))
 
         if control_status and control_status.get("status") == "success":
             guard_state = control_status.get("guard_state", "UNKNOWN")
@@ -2034,7 +3954,10 @@ class DashboardState:
                 f"不会自动 SAFE_STOP。{active_job_text}请等待现有作业完成，或由操作员手动 SAFE_STOP 后再重试。"
             )
 
-        board_online = bool(live_probe and live_probe.get("reachable"))
+        live_telemetry = self._board_telemetry_snapshot(
+            board_access=board_access,
+            board_online=board_online,
+        )
         safety_panel = build_safety_panel(
             guard_state=str(guard_state or "UNKNOWN"),
             last_fault_code=str(last_fault_code or "UNKNOWN"),
@@ -2085,6 +4008,9 @@ class DashboardState:
             "last_probe_at": live_probe.get("requested_at", "") if live_probe else "",
             "status_source": status_source,
             "status_note": status_note,
+            "telemetry": live_telemetry,
+            "aircraft_bridge": aircraft_bridge,
+            "board_position_api": board_position_api,
         }
         event_spine_payload = {
             "api_path": "/api/event-spine",
@@ -2383,6 +4309,15 @@ class DashboardState:
         except (TypeError, ValueError):
             return default
 
+    @staticmethod
+    def _empty_live_timings() -> dict[str, Any]:
+        return {
+            "payload_ms": None,
+            "prepare_ms": None,
+            "total_ms": None,
+            "stages": [],
+        }
+
     def refresh_live_probe(self) -> dict[str, Any]:
         with self._lock:
             board_access = self._board_access
@@ -2430,6 +4365,18 @@ class DashboardState:
         image_index = int(record["image_index"])
         control_transport = str(live_attempt.get("control_transport") or "hook").strip().lower()
         runner_only_mode = control_transport == "none"
+        security_protocol = str(record.get("security_protocol") or "").strip().lower()
+        security_handshake_ms = record.get("security_handshake_ms")
+        security_summary = str(record.get("security_summary") or "").strip()
+        security_armed = security_protocol == "mlkem_control"
+        live_attempt_payload = dict(live_attempt)
+        if security_armed:
+            live_attempt_payload["security"] = {
+                "protocol": security_protocol,
+                "handshake_ms": security_handshake_ms,
+                "summary": security_summary,
+                "channel_state": str(record.get("security_channel_state") or ""),
+            }
         payload = build_prerecorded_inference_result(image_index, variant)
         progress = live_attempt.get("progress", {})
         payload["job_id"] = record["job_id"]
@@ -2442,77 +4389,124 @@ class DashboardState:
                     "status": "running",
                     "execution_mode": "live",
                     "status_category": "running",
-                    "source_label": "真实在线执行（控制面降级）" if runner_only_mode else "真实在线推进",
+                    "source_label": (
+                        "ML-KEM 安全协议就绪 + 真实在线执行（控制面降级）"
+                        if security_armed and runner_only_mode
+                        else (
+                            "ML-KEM 安全协议就绪 + 真实在线推进"
+                            if security_armed
+                            else ("真实在线执行（控制面降级）" if runner_only_mode else "真实在线推进")
+                        )
+                    ),
                     "message": (
                         live_attempt.get("message")
                         or (
-                            "控制面预检未通过后已切到 SSH 兼容模式，界面正在同步板端执行进度。"
-                            if runner_only_mode
-                            else "OpenAMP 控制面已接入本次演示，界面正在同步板端推进阶段。"
+                            (
+                                f"{security_summary} 控制面预检未通过后已切到 SSH 兼容模式，"
+                                "界面正在同步板端本地 latent 重建进度。"
+                            )
+                            if security_armed and runner_only_mode
+                            else (
+                                f"{security_summary} 界面正在同步板端本地 latent 重建进度。"
+                                if security_armed
+                                else (
+                                    "控制面预检未通过后已切到 SSH 兼容模式，界面正在同步板端执行进度。"
+                                    if runner_only_mode
+                                    else "OpenAMP 控制面已接入本次演示，界面正在同步板端推进阶段。"
+                                )
+                            )
                         )
                     ),
-                    "timings": {
-                        "payload_ms": None,
-                        "prepare_ms": None,
-                        "total_ms": None,
-                        "stages": [],
-                    },
+                    "timings": self._empty_live_timings(),
                     "quality": payload["quality"],
-                    "live_attempt": live_attempt,
+                    "live_attempt": live_attempt_payload,
                 }
             )
             return payload
 
         if live_attempt.get("status") == "success":
             summary = live_attempt["runner_summary"]
+            wrapper_summary = live_attempt.get("wrapper_summary", {})
+            load_ms = round(float(summary.get("load_ms") or 0.0), 3)
+            vm_init_ms = round(float(summary.get("vm_init_ms") or 0.0), 3)
+            board_payload_ms_raw = summary.get("run_median_ms")
+            if board_payload_ms_raw is None:
+                board_payload_ms_raw = summary.get("run_mean_ms")
             live_stages = [
                 {
                     "label": "板端装载",
-                    "value_ms": round(float(summary.get("load_ms") or 0.0), 3),
+                    "value_ms": load_ms,
                     "emphasis": "host",
                 },
                 {
                     "label": "板端初始化",
-                    "value_ms": round(float(summary.get("vm_init_ms") or 0.0), 3),
+                    "value_ms": vm_init_ms,
                     "emphasis": "board",
                 },
-                {
-                    "label": "板端推理",
-                    "value_ms": round(float(summary.get("run_median_ms") or summary.get("run_mean_ms") or 0.0), 3),
-                    "emphasis": "total",
-                },
             ]
-            live_total_ms = round(sum(item["value_ms"] for item in live_stages), 3)
+            board_payload_ms = (
+                round(float(board_payload_ms_raw), 3)
+                if board_payload_ms_raw is not None
+                else None
+            )
+            if board_payload_ms is not None:
+                live_stages.append(
+                    {
+                        "label": "板端推理",
+                        "value_ms": board_payload_ms,
+                        "emphasis": "total",
+                    }
+                )
+            live_total_ms = wrapper_summary.get("per_image_ms")
+            if live_total_ms is not None:
+                live_total_ms = round(load_ms + vm_init_ms + float(live_total_ms), 3)
+            else:
+                live_total_ms = round(sum(item["value_ms"] for item in live_stages), 3)
             payload.update(
                 {
                     "status": "success",
                     "execution_mode": "live",
                     "status_category": "success",
                     "source_label": (
-                        "真实在线执行（控制面降级） + 归档样例图"
-                        if runner_only_mode
-                        else "真实在线推进 + 归档样例图"
+                        "ML-KEM 安全协议就绪 + 真实在线执行（控制面降级） + 归档样例图"
+                        if security_armed and runner_only_mode
+                        else (
+                            "ML-KEM 安全协议就绪 + 真实在线推进 + 归档样例图"
+                            if security_armed
+                            else (
+                                "真实在线执行（控制面降级） + 归档样例图"
+                                if runner_only_mode
+                                else "真实在线推进 + 归档样例图"
+                            )
+                        )
                     ),
                     "message": live_attempt.get("message")
                     or (
-                        "本次演示已通过 OpenAMP 控制面完成作业下发、板端执行与结果回收；图像对比继续使用归档样例，"
-                        "现场呈现更稳定。"
-                        if not runner_only_mode
+                        (
+                            f"{security_summary} 本次重建未通过 TCP 批量搬运 latent；"
+                            "真实重建继续使用板端本地 latent / 既有 live 数据面，图像对比继续使用归档样例。"
+                        )
+                        if security_armed
                         else (
-                            "本次演示已在 SSH 兼容模式下完成真实板端执行；"
-                            "图像对比继续使用归档样例，当前不宣称控制面握手已成功。"
+                            "本次演示已通过 OpenAMP 控制面完成作业下发、板端执行与结果回收；图像对比继续使用归档样例，"
+                            "现场呈现更稳定。"
+                            if not runner_only_mode
+                            else (
+                                "本次演示已在 SSH 兼容模式下完成真实板端执行；"
+                                "图像对比继续使用归档样例，当前不宣称控制面握手已成功。"
+                            )
                         )
                     ),
                     "timings": {
-                        "payload_ms": round(float(summary.get("run_median_ms") or summary.get("run_mean_ms") or 0.0), 3),
-                        "prepare_ms": round(float(summary.get("load_ms") or 0.0) + float(summary.get("vm_init_ms") or 0.0), 3),
-                        "total_ms": live_total_ms,
+                        "payload_ms": board_payload_ms,
+                        "prepare_ms": round(load_ms + vm_init_ms, 3),
+                        "total_ms": round(float(live_total_ms), 3),
                         "stages": live_stages,
                     },
                     "artifact_sha": summary.get("artifact_sha256") or payload["artifact_sha"],
                     "runner_summary": summary,
-                    "wrapper_summary": live_attempt.get("wrapper_summary", {}),
-                    "live_attempt": live_attempt,
+                    "wrapper_summary": wrapper_summary,
+                    "live_attempt": live_attempt_payload,
                 }
             )
             return payload
@@ -2535,23 +4529,26 @@ class DashboardState:
                         else " 当前画面已切回归档样例，上方阶段条保留本次真机推进停留点。"
                     )
                 ),
-                "live_attempt": live_attempt,
+                "timings": self._empty_live_timings(),
+                "live_attempt": live_attempt_payload,
             }
         )
         return payload
 
     def _update_last_inference_summary(self, payload: dict[str, Any], variant: str) -> None:
         cached_payload = json.loads(json.dumps(payload, ensure_ascii=False))
+        timings = payload.get("timings") if isinstance(payload.get("timings"), dict) else {}
+        sample = payload.get("sample") if isinstance(payload.get("sample"), dict) else {}
         self._last_inference_result = {
-            "status": payload["status"],
-            "execution_mode": payload["execution_mode"],
+            "status": payload.get("status", ""),
+            "execution_mode": payload.get("execution_mode", ""),
             "status_category": payload.get("status_category", "fallback"),
             "variant": variant,
-            "total_ms": payload["timings"].get("total_ms"),
-            "artifact_sha": payload["artifact_sha"],
-            "message": payload["message"],
-            "source_label": payload["source_label"],
-            "sample_label": payload["sample"]["label"],
+            "total_ms": timings.get("total_ms"),
+            "artifact_sha": payload.get("artifact_sha"),
+            "message": payload.get("message", ""),
+            "source_label": payload.get("source_label", ""),
+            "sample_label": sample.get("label", ""),
             "request_state": payload.get("request_state", "completed"),
         }
         self._recent_inference_results[variant] = cached_payload
@@ -2577,9 +4574,9 @@ class DashboardState:
         *,
         label: str,
         detail: str,
+        expected_count: int = DEFAULT_MAX_INPUTS,
         event_log: list[str] | None = None,
     ) -> dict[str, Any]:
-        expected_count = DEFAULT_MAX_INPUTS
         return {
             "state": "completed",
             "label": label,
@@ -2614,6 +4611,7 @@ class DashboardState:
         message: str,
         detail: str,
         diagnostics: dict[str, Any],
+        expected_count: int = DEFAULT_MAX_INPUTS,
         event_log: list[str] | None = None,
     ) -> dict[str, Any]:
         payload = self._build_prerecorded_payload_safe(image_index=image_index, variant=variant)
@@ -2625,7 +4623,13 @@ class DashboardState:
                 "status_category": status_category,
                 "source_label": source_label,
                 "message": message,
-                "live_progress": self._blocked_live_progress(label=source_label, detail=detail, event_log=event_log),
+                "timings": self._empty_live_timings(),
+                "live_progress": self._blocked_live_progress(
+                    label=source_label,
+                    detail=detail,
+                    expected_count=expected_count,
+                    event_log=event_log,
+                ),
                 "live_attempt": {
                     "status": "blocked",
                     "request_state": "completed",
@@ -2662,6 +4666,7 @@ class DashboardState:
             "inference_ms": None,
             "result_recv_ms": None,
             "sha256_match": None,
+            "result_received": None,
             "suite": "",
             "backend": "",
         }
@@ -2686,10 +4691,16 @@ class DashboardState:
                 if m:
                     metrics["result_recv_ms"] = float(m.group(1))
                     metrics["decrypt_ms"] = metrics["result_recv_ms"]
+                metrics["result_received"] = True
             elif "TVM 推理耗时" in text:
                 m = re.search(r"([\d.]+)\s*ms", text)
                 if m:
                     metrics["inference_ms"] = float(m.group(1))
+            elif "板端重建结果:" in text:
+                if "已回传" in text:
+                    metrics["result_received"] = True
+                elif "未回传" in text:
+                    metrics["result_received"] = False
             elif "对端 SHA256 匹配: 是" in text or "SHA256 匹配" in text:
                 metrics["sha256_match"] = True
             elif "SHA256 不匹配" in text:
@@ -2705,8 +4716,113 @@ class DashboardState:
             return {"status": "idle"}
         return dict(state)
 
+    def _peek_inference_progress(self, job_id: str) -> dict[str, Any]:
+        with self._lock:
+            record = self._inference_jobs.get(job_id)
+        if record is None:
+            raise KeyError(job_id)
+        job_snapshot = record["job"].snapshot()
+        with self._lock:
+            record["last_snapshot"] = job_snapshot
+        return self._build_inference_response(record, job_snapshot)
+
+    def _register_live_job(
+        self,
+        *,
+        live_job: Any,
+        variant: str,
+        image_index: int,
+        security_context: dict[str, Any] | None = None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        live_result = live_job.snapshot()
+        record: dict[str, Any] = {
+            "job": live_job,
+            "job_id": live_job.job_id,
+            "variant": variant,
+            "image_index": image_index,
+            "last_snapshot": live_result,
+        }
+        if security_context:
+            record["security_protocol"] = str(security_context.get("protocol") or "")
+            record["security_handshake_ms"] = security_context.get("handshake_ms")
+            record["security_summary"] = str(security_context.get("summary") or "")
+            record["security_channel_state"] = str(security_context.get("channel_state") or "")
+        with self._lock:
+            self._inference_jobs[live_job.job_id] = record
+        return record, self._build_inference_response(record, live_result)
+
+    def _arm_mlkem_security_context(
+        self,
+        *,
+        board_access: BoardAccessConfig,
+        variant: str,
+        image_index: int,
+        expected_count: int,
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        with self._lock:
+            crypto_enabled = self._crypto_enabled
+        if not crypto_enabled or variant != "current":
+            return None, None
+
+        if not board_access.connection_ready:
+            return None, self._build_blocked_inference_payload(
+                variant=variant,
+                image_index=image_index,
+                status_category="config_error",
+                source_label="ML-KEM 会话未配置，回退展示（归档样例）",
+                message="尚未录入完整板卡会话，无法建立 ML-KEM 安全协议。",
+                detail="请先补齐 host/user/password/port 后再启用 Current live 重建。",
+                diagnostics={"crypto_enabled": True},
+                expected_count=expected_count,
+            )
+
+        env_values = board_access.build_env()
+        self._ensure_board_tcp_server(board_access)
+        mgr = self._get_mlkem_session_manager(board_access, env_values)
+        if mgr is None:
+            tcp_client, searched_paths = resolve_local_crypto_client(env_values)
+            searched_text = ", ".join(str(path) for path in (searched_paths or [])[:5]) or "no candidate paths"
+            detail = (
+                f"searched: {searched_text}"
+                if tcp_client is None
+                else f"tcp_client={tcp_client} does not support persistent daemon mode"
+            )
+            return None, self._build_blocked_inference_payload(
+                variant=variant,
+                image_index=image_index,
+                status_category="client_missing",
+                source_label="ML-KEM 客户端缺失，回退展示（归档样例）",
+                message="本机未找到可用的 ML-KEM 客户端，无法建立安全协议。",
+                detail=detail,
+                diagnostics={"searched": (searched_paths or [])[:10]},
+                expected_count=expected_count,
+            )
+
+        try:
+            mgr.ensure_alive()
+            ping = mgr.ping()
+        except Exception as exc:
+            return None, self._build_blocked_inference_payload(
+                variant=variant,
+                image_index=image_index,
+                status_category="crypto_unavailable",
+                source_label="ML-KEM 安全协议未就绪，回退展示（归档样例）",
+                message="ML-KEM 安全协议未建立，本次按安全策略不发起 Current live 重建。",
+                detail=str(exc),
+                diagnostics={"crypto_enabled": True},
+                expected_count=expected_count,
+            )
+
+        handshake_ms = mgr._handshake_ms if mgr._handshake_ms > 0 else None
+        return {
+            "protocol": "mlkem_control",
+            "handshake_ms": round(float(handshake_ms), 3) if handshake_ms is not None else None,
+            "channel_state": str(ping.get("status") or "ok"),
+            "summary": "ML-KEM 安全协议已建立；Current 继续走板端本地 latent / 既有 live 数据面。",
+        }, None
+
     def start_batch_inference(self, *, count: int = 300, allow_preflight_degraded: bool = True) -> dict[str, Any]:
-        """在后台线程启动批量 ML-KEM 加密推理，返回 batch_job_id。"""
+        """在后台线程启动 Current live 300 张推进，并镜像为 batch_state。"""
         import threading
 
         with self._lock:
@@ -2736,35 +4852,98 @@ class DashboardState:
             }
 
         def _worker() -> None:
-            for i in range(count):
-                result = self.run_mlkem_inference(
+            worker_error = ""
+            last_result: dict[str, Any] | None = None
+            try:
+                result = self.run_demo_inference(
                     variant="current",
-                    image_index=i,
+                    image_index=0,
                     allow_preflight_degraded=allow_preflight_degraded,
+                    max_inputs=count,
                 )
+                last_result = result
+
+                if result.get("request_state") == "running" and result.get("job_id"):
+                    deadline = time.monotonic() + max(120.0, count * 10.0)
+                    while True:
+                        result = self._peek_inference_progress(str(result["job_id"]))
+                        last_result = result
+                        progress = result.get("live_progress") if isinstance(result.get("live_progress"), dict) else {}
+                        with self._lock:
+                            state = self._batch_state
+                            if state is None or state.get("status") != "running":
+                                return
+                            state["completed"] = int(progress.get("completed_count") or 0)
+                            state["total"] = max(1, int(progress.get("expected_count") or count))
+                            if result.get("request_state") != "running":
+                                break
+                        if time.monotonic() >= deadline:
+                            result = {
+                                "status": "fallback",
+                                "execution_mode": "fallback",
+                                "request_state": "completed",
+                                "message": "Current 300 张在线推进等待完成超时",
+                                "live_progress": {
+                                    "completed_count": int(progress.get("completed_count") or 0),
+                                    "expected_count": max(1, int(progress.get("expected_count") or count)),
+                                },
+                                "live_attempt": {
+                                    "diagnostics": {"reason": "batch_wait_timeout"},
+                                    "security": (
+                                        (last_result.get("live_attempt") or {}).get("security")
+                                        if isinstance(last_result.get("live_attempt"), dict)
+                                        else {}
+                                    ),
+                                },
+                                "timings": {},
+                            }
+                            last_result = result
+                            break
+                        time.sleep(0.05)
+
+                assert last_result is not None
+                progress = last_result.get("live_progress") if isinstance(last_result.get("live_progress"), dict) else {}
+                completed = int(progress.get("completed_count") or 0)
+                total = max(1, int(progress.get("expected_count") or count))
+                is_live = last_result.get("execution_mode") == "live" and last_result.get("status") == "success"
+                live_attempt = last_result.get("live_attempt") if isinstance(last_result.get("live_attempt"), dict) else {}
+                security = live_attempt.get("security") if isinstance(live_attempt.get("security"), dict) else {}
+                timings = last_result.get("timings") if isinstance(last_result.get("timings"), dict) else {}
+                runner_summary = live_attempt.get("runner_summary") if isinstance(live_attempt.get("runner_summary"), dict) else {}
+                wrapper_summary = live_attempt.get("wrapper_summary") if isinstance(live_attempt.get("wrapper_summary"), dict) else {}
+
                 with self._lock:
                     state = self._batch_state
-                    if state is None or state.get("status") != "running":
-                        break
-                    state["completed"] += 1
-                    is_live = result.get("execution_mode") == "live" and result.get("status") == "success"
-                    if is_live:
-                        state["success"] += 1
-                    else:
-                        state["fallback"] += 1
-                    if result.get("live_attempt", {}).get("metrics", {}).get("sha256_match"):
-                        state["sha_match"] += 1
-                    if is_live:
-                        m = result.get("live_attempt", {}).get("metrics", {})
-                        t = result.get("timings", {})
-                        samples = state["_samples"]
-                        for key in ("handshake_ms", "encrypt_ms", "decrypt_ms", "inference_ms"):
-                            v = m.get(key)
-                            if v is not None:
-                                samples[key].append(float(v))
-                        total = t.get("total_ms")
-                        if total is not None:
-                            samples["total_ms"].append(float(total))
+                    if state is None:
+                        return
+                    state["completed"] = completed
+                    state["total"] = total
+                    state["success"] = completed if is_live else 0
+                    state["fallback"] = 0 if is_live else max(0, total - completed)
+                    state["sha_match"] = 0
+                    samples = state["_samples"]
+                    handshake_ms = security.get("handshake_ms")
+                    if handshake_ms is not None:
+                        samples["handshake_ms"] = [float(handshake_ms)]
+                    board_payload_ms = timings.get("payload_ms")
+                    if board_payload_ms is not None and is_live:
+                        samples["inference_ms"] = [float(board_payload_ms)]
+                    total_ms = timings.get("total_ms")
+                    if total_ms is None:
+                        total_ms = wrapper_summary.get("per_image_ms")
+                    if total_ms is not None and is_live:
+                        samples["total_ms"] = [float(total_ms)]
+                    if (
+                        last_result.get("request_state") == "completed"
+                        and isinstance(last_result.get("sample"), dict)
+                        and isinstance(timings, dict)
+                        and "source_label" in last_result
+                        and "message" in last_result
+                        and "artifact_sha" in last_result
+                    ):
+                        self._update_last_inference_summary(last_result, "current")
+            except Exception as exc:
+                worker_error = f"{type(exc).__name__}: {exc}"
 
             with self._lock:
                 state = self._batch_state
@@ -2773,6 +4952,8 @@ class DashboardState:
                 state["status"] = "done"
                 state["finished_at"] = time.time()
                 state["benchmark"] = _compute_benchmark(state["_samples"])
+                if worker_error:
+                    state["error"] = worker_error
 
         thread = threading.Thread(target=_worker, daemon=True)
         thread.start()
@@ -2784,6 +4965,7 @@ class DashboardState:
         variant: str,
         image_index: int,
         allow_preflight_degraded: bool = False,
+        max_inputs: int = DEFAULT_MAX_INPUTS,
     ) -> dict[str, Any]:
         payload = self._build_prerecorded_payload_safe(image_index=image_index, variant=variant)
         with self._lock:
@@ -2799,6 +4981,7 @@ class DashboardState:
                 message="当前 ML-KEM 开关为 OFF，本次不发起加密推理。",
                 detail="启用安全信道后，Current 主路径才会走 ML-KEM 加密通道。",
                 diagnostics={"crypto_enabled": False},
+                expected_count=max_inputs,
             )
 
         if not (board_access and board_access.connection_ready):
@@ -2810,6 +4993,7 @@ class DashboardState:
                 message="尚未录入完整板卡会话，无法发起 ML-KEM 推理。",
                 detail="请先补齐 host/user/password。",
                 diagnostics={"board_configured": False},
+                expected_count=max_inputs,
             )
 
         # ── Preflight：daemon 存活时跳过 SSH 查询（O-1 优化） ──
@@ -2867,6 +5051,7 @@ class DashboardState:
                             message="控制面 STATUS_REQ 预检失败，本次不继续 ML-KEM 推理。",
                             detail=str(preflight.get("message") or "未拿到有效 STATUS_RESP"),
                             diagnostics={"control_status": preflight, "soft_recover": soft_recover},
+                            expected_count=max_inputs,
                             event_log=list(preflight.get("logs") or []),
                         )
 
@@ -2889,6 +5074,7 @@ class DashboardState:
                 ),
                 detail="STATUS_RESP 显示 guard_state=JOB_ACTIVE；未再发起新的加密推理。",
                 diagnostics={"control_status": preflight},
+                expected_count=max_inputs,
                 event_log=list(preflight.get("logs") or []),
             )
 
@@ -2910,6 +5096,7 @@ class DashboardState:
                 message="tcp_client.py 未找到，无法执行 ML-KEM 推理主路径。",
                 detail=f"searched: {searched_text}",
                 diagnostics={"searched": searched_paths[:10]},
+                expected_count=max_inputs,
             )
 
         import tempfile
@@ -2917,14 +5104,18 @@ class DashboardState:
 
         # ── 构建 ML-KEM 后台 job（和 SSH 路径一样：返回 running，后台推进） ──
         mlkem_job_id = generate_live_job_id()
-        max_inputs = DEFAULT_MAX_INPUTS
+        client_caps = inspect_local_crypto_client_capabilities(tcp_client)
+        max_inputs = max(1, int(max_inputs))
+        if client_caps.get("legacy_single_input_only") and max_inputs == DEFAULT_MAX_INPUTS:
+            max_inputs = 1
 
         class _MlkemJob:
             """模拟 LiveRemoteReconstructionJob：后台线程逐张 ML-KEM 推理，前端轮询进度。"""
             def __init__(self_self, jid: str, max_n: int, board: Any, env_vals: dict,
                          client_script: str, variant_name: str, img_idx: int,
                          preflight_data: dict, app_state: Any,
-                         session_mgr: "MlkemSessionManager | None" = None):
+                         session_mgr: "MlkemSessionManager | None" = None,
+                         client_caps: dict[str, bool] | None = None):
                 self_self.job_id = jid
                 self_self._max = max_n
                 self_self._board = board
@@ -2935,6 +5126,7 @@ class DashboardState:
                 self_self._preflight = preflight_data
                 self_self._app = app_state
                 self_self._session_mgr = session_mgr
+                self_self._client_caps = dict(client_caps or {})
                 self_self._lock = Lock()
                 self_self._completed = 0
                 self_self._final_snapshot: dict[str, Any] | None = None
@@ -2942,6 +5134,12 @@ class DashboardState:
                 self_self._total_ms = 0.0
                 self_self._sha_match: bool | None = None
                 self_self._error: str | None = None
+                self_self._metrics_samples: dict[str, list[float]] = {
+                    "encrypt_ms": [],
+                    "decrypt_ms": [],
+                    "inference_ms": [],
+                    "total_ms": [],
+                }
 
             def snapshot(self_self) -> dict:
                 with self_self._lock:
@@ -2984,11 +5182,136 @@ class DashboardState:
             def start(self_self) -> None:
                 Thread(target=self_self._run_loop, daemon=True).start()
 
+            def _average_metric(self_self, key: str) -> float | None:
+                values = self_self._metrics_samples.get(key) or []
+                if not values:
+                    return None
+                return round(sum(values) / len(values), 3)
+
+            def _metric_payload(self_self, *, handshake_ms: float | None, per_image_ms: float | None = None) -> dict[str, Any]:
+                total_ms = per_image_ms
+                if total_ms is None:
+                    total_ms = self_self._average_metric("total_ms")
+                return {
+                    "handshake_ms": round(float(handshake_ms), 3) if handshake_ms is not None else None,
+                    "encrypt_ms": self_self._average_metric("encrypt_ms"),
+                    "decrypt_ms": self_self._average_metric("decrypt_ms"),
+                    "inference_ms": self_self._average_metric("inference_ms"),
+                    "total_ms": round(float(total_ms), 3) if total_ms is not None else None,
+                    "sha256_match": self_self._sha_match,
+                }
+
+            def _set_final_snapshot(
+                self_self,
+                *,
+                transport_mode: str,
+                total_wall: float,
+                handshake_ms: float | None,
+                per_image_ms: float | None = None,
+                board_inference_ms: float | None = None,
+                completed_override: int | None = None,
+                error_message: str | None = None,
+            ) -> None:
+                if completed_override is not None:
+                    self_self._completed = completed_override
+                self_self._total_ms = total_wall
+                self_self._error = error_message
+                if self_self._sha_match is None:
+                    self_self._sha_match = self_self._completed == self_self._max and error_message is None
+                effective_per_image = per_image_ms
+                if effective_per_image is None and self_self._completed > 0:
+                    effective_per_image = total_wall / self_self._completed
+                effective_board_inference_ms = board_inference_ms
+                if effective_board_inference_ms is None:
+                    effective_board_inference_ms = self_self._average_metric("inference_ms")
+                is_ok = self_self._completed == self_self._max and self_self._error is None
+                metrics = self_self._metric_payload(handshake_ms=handshake_ms, per_image_ms=effective_per_image)
+                fallback_message = error_message or (
+                    f"ML-KEM 推理中断（已完成 {self_self._completed}/{self_self._max}），已回退。"
+                )
+                self_self._final_snapshot = {
+                    "status": "success" if is_ok else "fallback",
+                    "request_state": "completed",
+                    "status_category": "success" if is_ok else "fallback",
+                    "execution_mode": "live" if is_ok else "fallback",
+                    "variant": self_self._variant,
+                    "message": (
+                        "Current 已通过 ML-KEM 安全信道完成加密传输与板端执行。"
+                        if is_ok
+                        else fallback_message
+                    ),
+                    "control_transport": "mlkem",
+                    "control_handshake_complete": True,
+                    "runner_summary": {
+                        "processed_count": self_self._completed,
+                        "input_count": self_self._max,
+                        "max_inputs": self_self._max,
+                        "total_ms": round(total_wall, 3),
+                        "load_ms": round(float(handshake_ms or 0.0), 3),
+                        "vm_init_ms": 0.0,
+                        "run_mean_ms": (
+                            round(float(effective_board_inference_ms), 3)
+                            if effective_board_inference_ms is not None
+                            else None
+                        ),
+                        "run_median_ms": (
+                            round(float(effective_board_inference_ms), 3)
+                            if effective_board_inference_ms is not None
+                            else None
+                        ),
+                    },
+                    "wrapper_summary": {
+                        "total_ms": round(total_wall, 3),
+                        "sha_match": self_self._sha_match,
+                        "handshake_ms": round(float(handshake_ms), 3) if handshake_ms is not None else None,
+                        "per_image_ms": round(float(effective_per_image), 3) if effective_per_image is not None else None,
+                        "transport_mode": transport_mode,
+                    },
+                    "metrics": metrics,
+                    "diagnostics": {"control_preflight": self_self._preflight},
+                    "progress": {
+                        "state": "completed" if is_ok else "fallback",
+                        "label": "ML-KEM 加密推理完成" if is_ok else "ML-KEM 推理中断",
+                        "tone": "online" if is_ok else "degraded",
+                        "percent": 100 if is_ok else int(round(self_self._completed / self_self._max * 100)),
+                        "phase_percent": 100,
+                        "completed_count": self_self._completed,
+                        "expected_count": self_self._max,
+                        "remaining_count": self_self._max - self_self._completed,
+                        "completion_ratio": round(self_self._completed / self_self._max, 4) if self_self._max > 0 else 0.0,
+                        "count_source": "mlkem_live",
+                        "count_label": f"{self_self._completed} / {self_self._max}",
+                        "current_stage": "加密推理完成" if is_ok else "推理中断",
+                        "stages": [{
+                            "key": "mlkem_live_done",
+                            "label": "ML-KEM 全链路",
+                            "status": "done" if is_ok else "error",
+                            "detail": f"wall={round(total_wall, 1)}ms, sha_match={self_self._sha_match}",
+                        }],
+                        "event_log": [] if is_ok else [f"error: {self_self._error}"],
+                    },
+                    "artifacts": [],
+                }
+
+            def _finish_with_error(
+                self_self,
+                *,
+                error_message: str,
+                transport_mode: str,
+                total_wall: float,
+                handshake_ms: float | None,
+                completed_override: int | None = None,
+            ) -> None:
+                self_self._set_final_snapshot(
+                    transport_mode=transport_mode,
+                    total_wall=total_wall,
+                    handshake_ms=handshake_ms,
+                    completed_override=completed_override,
+                    error_message=error_message,
+                )
+
             def _run_loop(self_self) -> None:
-                tmp_in = tempfile.NamedTemporaryFile(suffix=".bin", delete=False)
-                tmp_in.write(b"\0" * (1 * 32 * 32 * 32 * 4))
-                tmp_in.close()
-                input_path = Path(tmp_in.name)
+                input_path = self_self._app._create_mlkem_input_file(self_self._client)
                 try:
                     if self_self._session_mgr is not None:
                         self_self._run_loop_daemon(input_path)
@@ -3013,78 +5336,76 @@ class DashboardState:
                     return
 
                 t0 = time.monotonic()
+                should_expect_result = (
+                    self_self._max == 1
+                    and bool(self_self._client_caps.get("supports_expect_result"))
+                )
                 for i in range(self_self._max):
                     job_id = f"{self_self.job_id}_{i:04d}"
                     try:
-                        result = mgr.send_image(str(input_path), job_id)
+                        result = mgr.send_image(
+                            str(input_path),
+                            job_id,
+                            run_tvm=True,
+                            expect_result=should_expect_result,
+                        )
                     except Exception as e:
                         print(f"[ML-KEM _run_loop] daemon 错误 (第 {i} 张): {e}")
                         # 回退：剩余图片用子进程
                         remaining = self_self._max - i
                         if remaining > 0:
-                            self_self._run_loop_subprocess(input_path, remaining=remaining)
+                            self_self._run_loop_subprocess(
+                                input_path,
+                                remaining=remaining,
+                                completed_prefix=self_self._completed,
+                            )
                         return
 
                     if result.get("status") == "ok":
+                        if should_expect_result and result.get("result_received") is not True:
+                            print(f"[ML-KEM _run_loop] 第 {i} 张未回传板端结果: {result}")
+                            total_wall = (time.monotonic() - t0) * 1000
+                            with self_self._lock:
+                                self_self._sha_match = False
+                                self_self._finish_with_error(
+                                    error_message=f"第 {i} 张未收到板端重建结果",
+                                    transport_mode="daemon",
+                                    total_wall=total_wall,
+                                    handshake_ms=mgr._handshake_ms,
+                                )
+                            return
                         with self_self._lock:
                             self_self._completed += 1
                             self_self._total_ms = (time.monotonic() - t0) * 1000
+                            for key in ("encrypt_ms", "decrypt_ms", "inference_ms", "total_ms"):
+                                value = result.get(key)
+                                if value is not None:
+                                    self_self._metrics_samples[key].append(float(value))
                     else:
                         print(f"[ML-KEM _run_loop] 第 {i} 张失败: {result}")
+                        total_wall = (time.monotonic() - t0) * 1000
                         with self_self._lock:
-                            self_self._error = f"第 {i} 张失败: {result.get('message', '')}"
+                            self_self._sha_match = False
+                            self_self._finish_with_error(
+                                error_message=f"第 {i} 张失败: {result.get('message', '')}",
+                                transport_mode="daemon",
+                                total_wall=total_wall,
+                                handshake_ms=mgr._handshake_ms,
+                            )
+                        return
 
                 total_wall = (time.monotonic() - t0) * 1000
                 with self_self._lock:
                     self_self._sha_match = (self_self._completed == self_self._max)
-                    is_ok = self_self._completed == self_self._max and self_self._error is None
                     per_image_ms = total_wall / max(self_self._max, 1)
-                    self_self._final_snapshot = {
-                        "status": "success" if is_ok else "fallback",
-                        "request_state": "completed",
-                        "status_category": "success" if is_ok else "fallback",
-                        "execution_mode": "live" if is_ok else "fallback",
-                        "variant": self_self._variant,
-                        "message": (
-                            "Current 已通过 ML-KEM 安全信道完成加密传输与板端执行。"
-                            if is_ok
-                            else f"ML-KEM 推理中断（已完成 {self_self._completed}/{self_self._max}），已回退。"
-                        ),
-                        "control_transport": "mlkem",
-                        "control_handshake_complete": True,
-                        "runner_summary": {
-                            "processed_count": self_self._completed,
-                            "input_count": self_self._max,
-                            "max_inputs": self_self._max,
-                            "total_ms": round(total_wall, 3),
-                        },
-                        "wrapper_summary": {
-                            "total_ms": round(total_wall, 3),
-                            "sha_match": self_self._sha_match,
-                            "handshake_ms": mgr._handshake_ms,
-                            "per_image_ms": round(per_image_ms, 1),
-                            "transport_mode": "daemon",
-                        },
-                        "diagnostics": {"control_preflight": self_self._preflight},
-                        "progress": {
-                            "state": "completed" if is_ok else "fallback",
-                            "label": "ML-KEM 加密推理完成" if is_ok else "ML-KEM 推理中断",
-                            "tone": "online" if is_ok else "degraded",
-                            "percent": 100 if is_ok else int(round(self_self._completed / self_self._max * 100)),
-                            "phase_percent": 100,
-                            "completed_count": self_self._completed,
-                            "expected_count": self_self._max,
-                            "remaining_count": self_self._max - self_self._completed,
-                            "completion_ratio": round(self_self._completed / self_self._max, 4) if self_self._max > 0 else 0.0,
-                            "count_source": "mlkem_live",
-                            "count_label": f"{self_self._completed} / {self_self._max}",
-                            "current_stage": "加密推理完成" if is_ok else "推理中断",
-                            "stages": [{"key": "mlkem_live_done", "label": "ML-KEM 全链路", "status": "done" if is_ok else "error",
-                                         "detail": f"wall={round(total_wall, 1)}ms, sha_match={self_self._sha_match}"}],
-                            "event_log": [] if is_ok else [f"error: {self_self._error}"],
-                        },
-                        "artifacts": [],
-                    }
+                    self_self._set_final_snapshot(
+                        transport_mode="daemon",
+                        total_wall=total_wall,
+                        handshake_ms=mgr._handshake_ms,
+                        per_image_ms=per_image_ms,
+                        board_inference_ms=self_self._average_metric("inference_ms"),
+                    )
+                    is_ok = self_self._completed == self_self._max and self_self._error is None
                     self_self._app._event_spine.publish("JOB_DONE", source="inference", plane="data",
                         mode_scope=DATA_MODE_SCOPE,
                         message=f"ML-KEM live job {self_self.job_id} completed (daemon).",
@@ -3093,9 +5414,18 @@ class DashboardState:
                               "control_transport": "mlkem"})
 
             def _run_loop_subprocess(self_self, input_path: Path,
-                                     remaining: int | None = None) -> None:
+                                     remaining: int | None = None,
+                                     completed_prefix: int = 0) -> None:
                 """通过一次性子进程发送图片（原有逻辑，回退路径）"""
                 count = remaining if remaining is not None else self_self._max
+                if not self_self._client_caps.get("supports_batch_summary"):
+                    self_self._run_loop_legacy_subprocess(
+                        input_path,
+                        count=count,
+                        completed_prefix=completed_prefix,
+                    )
+                    return
+
                 cmd, env = build_local_crypto_client_command(
                     self_self._env_vals, host=self_self._board.host,
                     input_path=input_path, client_script=self_self._client,
@@ -3104,7 +5434,10 @@ class DashboardState:
                     "--job-id", self_self.job_id,
                     "--count", str(count),
                     "--json-summary",
+                    "--run-tvm",
                 ])
+                if self_self._max == 1 and self_self._client_caps.get("supports_expect_result"):
+                    cmd.append("--expect-result")
                 env["PYTHONUNBUFFERED"] = "1"
                 timeout_s = count * 10
                 t0 = time.monotonic()
@@ -3126,12 +5459,26 @@ class DashboardState:
                 except subprocess.TimeoutExpired:
                     print(f"[ML-KEM _run_loop_subprocess] TIMEOUT after {timeout_s}s")
                     with self_self._lock:
-                        self_self._error = "ML-KEM 批量传输超时"
+                        self_self._sha_match = False
+                        self_self._finish_with_error(
+                            error_message="ML-KEM 批量传输超时",
+                            transport_mode="subprocess",
+                            total_wall=(time.monotonic() - t0) * 1000,
+                            handshake_ms=None,
+                            completed_override=self_self._completed,
+                        )
                     return
                 except Exception as e:
                     print(f"[ML-KEM _run_loop_subprocess] EXCEPTION: {e}")
                     with self_self._lock:
-                        self_self._error = f"ML-KEM 进程异常: {e}"
+                        self_self._sha_match = False
+                        self_self._finish_with_error(
+                            error_message=f"ML-KEM 进程异常: {e}",
+                            transport_mode="subprocess",
+                            total_wall=(time.monotonic() - t0) * 1000,
+                            handshake_ms=None,
+                            completed_override=self_self._completed,
+                        )
                     return
                 total_wall = (time.monotonic() - t0) * 1000
                 stdout_full = '\n'.join(stdout_lines)
@@ -3139,72 +5486,41 @@ class DashboardState:
                 if proc.returncode != 0:
                     stderr = (proc.stderr.read() if proc.stderr else "")[-300:]
                     with self_self._lock:
-                        self_self._error = f"ML-KEM 批量失败 (rc={proc.returncode}): {stderr.strip()}"
+                        self_self._sha_match = False
+                        self_self._finish_with_error(
+                            error_message=f"ML-KEM 批量失败 (rc={proc.returncode}): {stderr.strip()}",
+                            transport_mode="subprocess",
+                            total_wall=total_wall,
+                            handshake_ms=None,
+                            completed_override=self_self._completed,
+                        )
                     print(f"[ML-KEM _run_loop_subprocess] FAIL rc={proc.returncode}: {stderr.strip()[:200]}")
                     return
 
                 print(f"[ML-KEM _run_loop_subprocess] done rc=0, {len(stdout_lines)} lines, {total_wall:.0f}ms")
 
                 summary = _MlkemJob._parse_json_summary(stdout_full)
-                success = summary.get("success", self_self._completed)
+                success = int(summary.get("success", max(self_self._completed - completed_prefix, 0)))
                 total = summary.get("total", count)
                 handshake_ms = summary.get("handshake_ms", 0)
                 per_image_ms = summary.get("per_image_ms", 0)
 
                 with self_self._lock:
-                    self_self._completed = success
+                    self_self._completed = completed_prefix + success
                     self_self._total_ms = total_wall
                     self_self._stages_summary = [
                         {"label": "ML-KEM 握手 (1 次)", "value_ms": handshake_ms, "emphasis": "host"},
                         {"label": "AEAD 加密传输 (N 张)", "value_ms": round(per_image_ms * total, 1), "emphasis": "data"},
                     ]
-                    self_self._sha_match = (success == total)
+                    self_self._sha_match = (completed_prefix + success) == self_self._max
+                    self_self._metrics_samples["total_ms"].append(float(per_image_ms or total_wall))
+                    self_self._set_final_snapshot(
+                        transport_mode="subprocess",
+                        total_wall=total_wall,
+                        handshake_ms=handshake_ms,
+                        per_image_ms=per_image_ms,
+                    )
                     is_ok = self_self._completed == self_self._max and self_self._error is None
-                    self_self._final_snapshot = {
-                        "status": "success" if is_ok else "fallback",
-                        "request_state": "completed",
-                        "status_category": "success" if is_ok else "fallback",
-                        "execution_mode": "live" if is_ok else "fallback",
-                        "variant": self_self._variant,
-                        "message": (
-                            "Current 已通过 ML-KEM 安全信道完成 300 张加密传输与板端执行。"
-                            if is_ok
-                            else f"ML-KEM 推理中断（已完成 {self_self._completed}/{self_self._max}），已回退。"
-                        ),
-                        "control_transport": "mlkem",
-                        "control_handshake_complete": True,
-                        "runner_summary": {
-                            "processed_count": self_self._completed,
-                            "input_count": self_self._max,
-                            "max_inputs": self_self._max,
-                            "total_ms": round(total_wall, 3),
-                        },
-                        "wrapper_summary": {
-                            "total_ms": round(total_wall, 3),
-                            "sha_match": self_self._sha_match,
-                            "handshake_ms": handshake_ms,
-                            "per_image_ms": per_image_ms,
-                        },
-                        "diagnostics": {"control_preflight": self_self._preflight},
-                        "progress": {
-                            "state": "completed" if is_ok else "fallback",
-                            "label": "ML-KEM 加密推理完成" if is_ok else "ML-KEM 推理中断",
-                            "tone": "online" if is_ok else "degraded",
-                            "percent": 100 if is_ok else int(round(self_self._completed / self_self._max * 100)),
-                            "phase_percent": 100,
-                            "completed_count": self_self._completed,
-                            "expected_count": self_self._max,
-                            "remaining_count": self_self._max - self_self._completed,
-                            "completion_ratio": round(self_self._completed / self_self._max, 4) if self_self._max > 0 else 0.0,
-                            "count_source": "mlkem_live",
-                            "count_label": f"{self_self._completed} / {self_self._max}",
-                            "current_stage": "加密推理完成" if is_ok else "推理中断",
-                            "stages": [{"key": "mlkem_live_done", "label": "ML-KEM 全链路", "status": "done" if is_ok else "error",
-                                         "detail": f"wall={round(total_wall, 1)}ms, sha_match={self_self._sha_match}"}],
-                            "event_log": [] if is_ok else [f"error: {self_self._error}"],
-                        },
-                        "artifacts": [],
-                    }
                     self_self._app._event_spine.publish("JOB_DONE", source="inference", plane="data",
                         mode_scope=DATA_MODE_SCOPE,
                         message=f"ML-KEM live job {self_self.job_id} completed.",
@@ -3215,6 +5531,203 @@ class DashboardState:
                         reason="mlkem_live_done", job_id=self_self.job_id,
                         extra={"variant": self_self._variant, "completed": self_self._completed,
                               "total_ms": round(total_wall, 3)})
+
+            def _run_loop_legacy_subprocess(
+                self_self,
+                input_path: Path,
+                *,
+                count: int,
+                completed_prefix: int = 0,
+            ) -> None:
+                """兼容仅支持单张 --input 的旧版 tcp_client.py。"""
+                t0 = time.monotonic()
+                handshake_samples: list[float] = []
+                total_samples: list[float] = []
+                board_inference_samples: list[float] = []
+
+                for index in range(count):
+                    cmd, env = build_local_crypto_client_command(
+                        self_self._env_vals,
+                        host=self_self._board.host,
+                        input_path=input_path,
+                        client_script=self_self._client,
+                    )
+                    job_id = (
+                        self_self.job_id
+                        if count == 1 and completed_prefix == 0
+                        else f"{self_self.job_id}_{completed_prefix + index:04d}"
+                    )
+                    cmd.extend(["--job-id", job_id])
+                    cmd.append("--run-tvm")
+                    if self_self._max == 1 and self_self._client_caps.get("supports_expect_result"):
+                        cmd.append("--expect-result")
+                    env["PYTHONUNBUFFERED"] = "1"
+
+                    iter_t0 = time.monotonic()
+                    try:
+                        proc = subprocess.run(
+                            cmd,
+                            capture_output=True,
+                            text=True,
+                            timeout=60,
+                            env=env,
+                        )
+                    except subprocess.TimeoutExpired:
+                        with self_self._lock:
+                            self_self._sha_match = False
+                            self_self._finish_with_error(
+                                error_message=(
+                                    f"ML-KEM 单张兼容模式超时 "
+                                    f"({completed_prefix + index + 1}/{self_self._max})"
+                                ),
+                                transport_mode="subprocess_legacy",
+                                total_wall=(time.monotonic() - t0) * 1000,
+                                handshake_ms=None,
+                                completed_override=self_self._completed,
+                            )
+                        return
+
+                    stdout = proc.stdout or ""
+                    stderr = proc.stderr or ""
+                    metrics = self_self._app._parse_mlkem_client_metrics(stdout)
+                    iter_total_ms = (time.monotonic() - iter_t0) * 1000
+
+                    if proc.returncode != 0:
+                        error_text = (stderr.strip() or stdout.strip() or "unknown error")[-300:]
+                        with self_self._lock:
+                            self_self._sha_match = False
+                            self_self._finish_with_error(
+                                error_message=(
+                                    f"ML-KEM 单张兼容模式失败 "
+                                    f"(rc={proc.returncode}, {completed_prefix + index + 1}/{self_self._max}): "
+                                    f"{error_text}"
+                                ),
+                                transport_mode="subprocess_legacy",
+                                total_wall=(time.monotonic() - t0) * 1000,
+                                handshake_ms=None,
+                                completed_override=self_self._completed,
+                            )
+                        return
+
+                    if metrics.get("sha256_match") is False:
+                        with self_self._lock:
+                            self_self._sha_match = False
+                            self_self._finish_with_error(
+                                error_message=(
+                                    f"ML-KEM 单张兼容模式 SHA256 校验失败 "
+                                    f"({completed_prefix + index + 1}/{self_self._max})"
+                                ),
+                                transport_mode="subprocess_legacy",
+                                total_wall=(time.monotonic() - t0) * 1000,
+                                handshake_ms=None,
+                                completed_override=self_self._completed,
+                            )
+                        return
+
+                    if metrics.get("result_received") is False:
+                        with self_self._lock:
+                            self_self._sha_match = False
+                            self_self._finish_with_error(
+                                error_message=(
+                                    f"ML-KEM 单张兼容模式未收到板端重建结果 "
+                                    f"({completed_prefix + index + 1}/{self_self._max})"
+                                ),
+                                transport_mode="subprocess_legacy",
+                                total_wall=(time.monotonic() - t0) * 1000,
+                                handshake_ms=None,
+                                completed_override=self_self._completed,
+                            )
+                        return
+
+                    handshake_ms = metrics.get("handshake_ms")
+                    if handshake_ms is not None:
+                        handshake_samples.append(float(handshake_ms))
+
+                    for key in ("encrypt_ms", "decrypt_ms", "inference_ms"):
+                        value = metrics.get(key)
+                        if value is not None:
+                            self_self._metrics_samples[key].append(float(value))
+                    if metrics.get("inference_ms") is not None:
+                        board_inference_samples.append(float(metrics["inference_ms"]))
+
+                    per_image_total = sum(
+                        float(metrics.get(key) or 0.0)
+                        for key in ("encrypt_ms", "decrypt_ms", "inference_ms")
+                        if metrics.get(key) is not None
+                    )
+                    if per_image_total <= 0:
+                        per_image_total = iter_total_ms
+                    total_samples.append(float(per_image_total))
+                    self_self._metrics_samples["total_ms"].append(float(per_image_total))
+
+                    with self_self._lock:
+                        self_self._completed = completed_prefix + index + 1
+                        self_self._total_ms = (time.monotonic() - t0) * 1000
+
+                total_wall = (time.monotonic() - t0) * 1000
+                avg_handshake_ms = (
+                    round(sum(handshake_samples) / len(handshake_samples), 3)
+                    if handshake_samples
+                    else None
+                )
+                per_image_ms = (
+                    round(sum(total_samples) / len(total_samples), 3)
+                    if total_samples
+                    else round(total_wall / max(count, 1), 3)
+                )
+                board_inference_ms = (
+                    round(sum(board_inference_samples) / len(board_inference_samples), 3)
+                    if board_inference_samples
+                    else None
+                )
+
+                with self_self._lock:
+                    self_self._completed = completed_prefix + count
+                    self_self._total_ms = total_wall
+                    self_self._stages_summary = [
+                        {
+                            "label": "ML-KEM 握手 (兼容模式)",
+                            "value_ms": round(float(avg_handshake_ms or 0.0), 3),
+                            "emphasis": "host",
+                        },
+                        {
+                            "label": "AEAD 加密传输 + 板端执行",
+                            "value_ms": round(per_image_ms * count, 1),
+                            "emphasis": "data",
+                        },
+                    ]
+                    self_self._sha_match = self_self._completed == self_self._max
+                    self_self._set_final_snapshot(
+                        transport_mode="subprocess_legacy",
+                        total_wall=total_wall,
+                        handshake_ms=avg_handshake_ms,
+                        per_image_ms=per_image_ms,
+                        board_inference_ms=board_inference_ms,
+                    )
+                    self_self._app._event_spine.publish(
+                        "JOB_DONE",
+                        source="inference",
+                        plane="data",
+                        mode_scope=DATA_MODE_SCOPE,
+                        message=f"ML-KEM live job {self_self.job_id} completed (legacy client compatibility).",
+                        data={
+                            "variant": self_self._variant,
+                            "image_index": self_self._img_idx,
+                            "total_ms": round(total_wall, 3),
+                            "sha256_match": self_self._sha_match,
+                            "control_transport": "mlkem",
+                        },
+                    )
+                    self_self._app._archive_event_snapshot(
+                        reason="mlkem_live_done",
+                        job_id=self_self.job_id,
+                        extra={
+                            "variant": self_self._variant,
+                            "completed": self_self._completed,
+                            "total_ms": round(total_wall, 3),
+                            "transport_mode": "subprocess_legacy",
+                        },
+                    )
 
             @staticmethod
             def _parse_json_summary(stdout: str) -> dict[str, Any]:
@@ -3264,6 +5777,7 @@ class DashboardState:
             env_vals=env_values, client_script=tcp_client, variant_name=variant,
             img_idx=image_index, preflight_data=preflight, app_state=self,
             session_mgr=mgr,
+            client_caps=client_caps,
         )
 
         # 初始 "running" snapshot → 通过 _build_inference_response 生成 payload
@@ -3287,7 +5801,7 @@ class DashboardState:
         self._event_spine.publish(
             "JOB_SUBMITTED", source="inference", plane="control",
             mode_scope=CONTROL_MODE_SCOPE,
-            message=f"ML-KEM live job {mlkem_job_id} submitted (300 images).",
+            message=f"ML-KEM live job {mlkem_job_id} submitted ({max_inputs} images).",
             data={"variant": variant, "image_index": image_index, "control_transport": "mlkem"},
         )
         self._event_spine.publish(
@@ -3305,24 +5819,41 @@ class DashboardState:
         variant: str,
         image_index: int,
         allow_preflight_degraded: bool = False,
+        max_inputs: int = DEFAULT_MAX_INPUTS,
     ) -> dict[str, Any]:
-        with self._lock:
-            crypto_enabled = self._crypto_enabled
-        if crypto_enabled and variant == "current":
-            return self.run_mlkem_inference(
-                variant=variant,
-                image_index=image_index,
-                allow_preflight_degraded=allow_preflight_degraded,
-            )
-
         payload = self._build_prerecorded_payload_safe(image_index=image_index, variant=variant)
         event_record: dict[str, Any] | None = None
+        security_context: dict[str, Any] | None = None
         with self._lock:
             board_access = self._board_access
             last_live_probe = self._last_live_probe
         live_board_access = self._live_board_access_for_variant(board_access, variant=variant)
         variant_expected_sha = expected_sha_for_variant(live_board_access, variant) or self._trusted_current_sha
         variant_support = describe_demo_variant_support(live_board_access, variant=variant)
+        missing_inference_fields = live_board_access.missing_inference_fields(variant)
+
+        if missing_inference_fields:
+            payload = self._build_blocked_inference_payload(
+                variant=variant,
+                image_index=image_index,
+                status_category="config_error",
+                source_label="配置不完整，回退展示（归档样例）",
+                message="远端推理配置不完整或不可用，请检查连接信息和推理环境参数。 当前已回退到预录结果。",
+                detail=f"missing_fields={', '.join(missing_inference_fields)}",
+                diagnostics={"missing_fields": missing_inference_fields},
+                expected_count=max_inputs,
+            )
+            payload["live_attempt"]["status"] = "config_error"
+            with self._lock:
+                self._update_last_inference_summary(payload, variant)
+            self._emit_inference_rejection_events(
+                variant=variant,
+                image_index=image_index,
+                status_category="config_error",
+                message=str(payload.get("message") or "Live job request rejected in demo spine."),
+                diagnostics={"missing_fields": missing_inference_fields},
+            )
+            return payload
 
         if board_access.configured:
             active_record = self._running_inference_job_record()
@@ -3344,6 +5875,7 @@ class DashboardState:
                         "running_job_id": active_job_id,
                         "running_variant": active_variant,
                     },
+                    expected_count=max_inputs,
                     event_log=[message],
                 )
             elif board_access.probe_ready:
@@ -3372,6 +5904,7 @@ class DashboardState:
                             message=message,
                             detail="STATUS_RESP 显示 guard_state=JOB_ACTIVE；未再发起新的 live launch。",
                             diagnostics={"board_status": status_payload},
+                            expected_count=max_inputs,
                             event_log=status_payload.get("logs", []),
                         )
                 else:
@@ -3405,24 +5938,28 @@ class DashboardState:
                         diagnostics["last_live_probe"] = last_live_probe
                     event_log = list(status_payload.get("logs") or [])
                     if self._can_launch_runner_only_fallback(board_access=board_access, status_payload=status_payload):
-                        live_job = launch_remote_reconstruction_job(
-                            live_board_access,
+                        security_context, security_blocked = self._arm_mlkem_security_context(
+                            board_access=board_access,
                             variant=variant,
-                            control_transport="none",
-                            control_preflight=status_payload,
+                            image_index=image_index,
+                            expected_count=max_inputs,
                         )
-                        live_result = live_job.snapshot()
-                        record = {
-                            "job": live_job,
-                            "job_id": live_job.job_id,
-                            "variant": variant,
-                            "image_index": image_index,
-                            "last_snapshot": live_result,
-                        }
-                        with self._lock:
-                            self._inference_jobs[live_job.job_id] = record
-                        event_record = record
-                        payload = self._build_inference_response(record, live_result)
+                        if security_blocked is not None:
+                            payload = security_blocked
+                        else:
+                            live_job = launch_remote_reconstruction_job(
+                                live_board_access,
+                                variant=variant,
+                                max_inputs=max_inputs,
+                                control_transport="none",
+                                control_preflight=status_payload,
+                            )
+                            event_record, payload = self._register_live_job(
+                                live_job=live_job,
+                                variant=variant,
+                                image_index=image_index,
+                                security_context=security_context,
+                            )
                     else:
                         if detail not in event_log:
                             event_log.append(detail)
@@ -3434,42 +5971,58 @@ class DashboardState:
                             message=message,
                             detail=detail,
                             diagnostics=diagnostics,
+                            expected_count=max_inputs,
                             event_log=event_log,
                         )
                 if payload.get("status") != "fallback" and not payload.get("job_id"):
-                    live_job = launch_remote_reconstruction_job(live_board_access, variant=variant)
-                    live_result = live_job.snapshot()
-                    record = {
-                        "job": live_job,
-                        "job_id": live_job.job_id,
-                        "variant": variant,
-                        "image_index": image_index,
-                        "last_snapshot": live_result,
-                    }
-                    with self._lock:
-                        self._inference_jobs[live_job.job_id] = record
-                    event_record = record
-                    payload = self._build_inference_response(record, live_result)
+                    security_context, security_blocked = self._arm_mlkem_security_context(
+                        board_access=board_access,
+                        variant=variant,
+                        image_index=image_index,
+                        expected_count=max_inputs,
+                    )
+                    if security_blocked is not None:
+                        payload = security_blocked
+                    else:
+                        live_job = launch_remote_reconstruction_job(
+                            live_board_access,
+                            variant=variant,
+                            max_inputs=max_inputs,
+                        )
+                        event_record, payload = self._register_live_job(
+                            live_job=live_job,
+                            variant=variant,
+                            image_index=image_index,
+                            security_context=security_context,
+                        )
             else:
-                live_job = launch_remote_reconstruction_job(live_board_access, variant=variant)
-                live_result = live_job.snapshot()
-                record = {
-                    "job": live_job,
-                    "job_id": live_job.job_id,
-                    "variant": variant,
-                    "image_index": image_index,
-                    "last_snapshot": live_result,
-                }
-                with self._lock:
-                    self._inference_jobs[live_job.job_id] = record
-                event_record = record
-                payload = self._build_inference_response(record, live_result)
+                security_context, security_blocked = self._arm_mlkem_security_context(
+                    board_access=board_access,
+                    variant=variant,
+                    image_index=image_index,
+                    expected_count=max_inputs,
+                )
+                if security_blocked is not None:
+                    payload = security_blocked
+                else:
+                    live_job = launch_remote_reconstruction_job(
+                        live_board_access,
+                        variant=variant,
+                        max_inputs=max_inputs,
+                    )
+                    event_record, payload = self._register_live_job(
+                        live_job=live_job,
+                        variant=variant,
+                        image_index=image_index,
+                        security_context=security_context,
+                    )
         else:
             payload.update(
                 {
                     "status": "fallback",
                     "request_state": "completed",
                     "status_category": "config_error",
+                    "timings": self._empty_live_timings(),
                     "live_progress": {
                         "state": "completed",
                         "label": "回退展示",
@@ -3477,11 +6030,11 @@ class DashboardState:
                         "percent": 0,
                         "phase_percent": 100,
                         "completed_count": 0,
-                        "expected_count": DEFAULT_MAX_INPUTS,
-                        "remaining_count": DEFAULT_MAX_INPUTS,
+                        "expected_count": max_inputs,
+                        "remaining_count": max_inputs,
                         "completion_ratio": 0.0,
                         "count_source": "demo_default",
-                        "count_label": f"0 / {DEFAULT_MAX_INPUTS}",
+                        "count_label": f"0 / {max_inputs}",
                         "current_stage": "回退展示",
                         "stages": [],
                         "event_log": [],
@@ -3513,14 +6066,11 @@ class DashboardState:
         return payload
 
     def get_inference_progress(self, job_id: str) -> dict[str, Any]:
+        payload = self._peek_inference_progress(job_id)
         with self._lock:
             record = self._inference_jobs.get(job_id)
         if record is None:
             raise KeyError(job_id)
-        job_snapshot = record["job"].snapshot()
-        with self._lock:
-            record["last_snapshot"] = job_snapshot
-        payload = self._build_inference_response(record, job_snapshot)
         with self._lock:
             if payload.get("request_state") == "completed":
                 self._update_last_inference_summary(payload, record["variant"])
@@ -3735,6 +6285,15 @@ class DemoHTTPServer(ThreadingHTTPServer):
 
 def demo_startup_env_overrides(args: argparse.Namespace) -> dict[str, str]:
     overrides: dict[str, str] = {}
+    aircraft_position_env_path = str(getattr(args, "aircraft_position_env", "") or "").strip()
+    if aircraft_position_env_path:
+        _, env_values = load_env_file(aircraft_position_env_path)
+        overrides.update({str(key): str(value) for key, value in env_values.items() if str(value).strip()})
+
+    for env_name in AIRCRAFT_POSITION_RUNTIME_ENV_KEYS:
+        env_value = str(os.environ.get(env_name, "") or "").strip()
+        if env_value:
+            overrides[env_name] = env_value
 
     env_or_arg_pairs = (
         (DEMO_ADMISSION_MODE_ENV, str(getattr(args, "demo_admission_mode", "") or "").strip()),
@@ -4087,6 +6646,8 @@ def main() -> int:
         args.probe_timeout_sec,
         demo_startup_env_overrides=demo_startup_env_overrides(args),
         event_archive_root=default_event_archive_root(),
+        bind_host=args.host,
+        bind_port=args.port,
     )
     if args.probe_startup:
         app_state.refresh_live_probe()

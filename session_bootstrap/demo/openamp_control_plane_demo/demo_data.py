@@ -277,8 +277,8 @@ DEFAULT_AIRCRAFT_POSITION = {
     "mission_call_sign": "M9-DEMO",
     "source_kind": "backend_stub",
     "source_status": "stub",
-    "source_label": "Backend stub contract",
-    "source_note": "真实上位机 feed 缺席时，demo backend 持续通过同一 aircraft-position contract 提供 stub telemetry。",
+    "source_label": "上位机位置（stub）",
+    "source_note": "真实上位机定位缺席时，demo backend 继续通过同一 aircraft-position contract 提供 stub telemetry。",
     "latitude": 30.572815,
     "longitude": 104.066801,
     "altitude_m": 1820.0,
@@ -377,7 +377,7 @@ def build_aircraft_position_snapshot(feed: dict[str, Any] | None = None) -> dict
         payload.get("source_status") or payload.get("feed_status") or DEFAULT_AIRCRAFT_POSITION["source_status"]
     ).strip().lower()
     source_kind = str(payload.get("source_kind") or DEFAULT_AIRCRAFT_POSITION["source_kind"]).strip() or "backend_stub"
-    source_label = str(payload.get("source_label") or DEFAULT_AIRCRAFT_POSITION["source_label"]).strip() or "Backend stub contract"
+    source_label = str(payload.get("source_label") or DEFAULT_AIRCRAFT_POSITION["source_label"]).strip() or "上位机位置（stub）"
     source_note = str(payload.get("source_note") or DEFAULT_AIRCRAFT_POSITION["source_note"]).strip()
     fix_type = str(payload.get("fix_type") or fix_payload.get("type") or DEFAULT_AIRCRAFT_POSITION["fix_type"]).strip() or "3D"
     captured_at = str(sample_payload.get("captured_at") or payload.get("captured_at") or payload.get("updated_at") or now_iso())
@@ -401,7 +401,7 @@ def build_aircraft_position_snapshot(feed: dict[str, Any] | None = None) -> dict
         if primary_feed_active
         else "Upper-computer GPS feed is absent; cockpit telemetry is currently served by the backend stub contract."
     )
-    active_contract_label = "Upper Computer GPS" if primary_feed_active else "Backend Stub Contract"
+    active_contract_label = "上位机位置" if primary_feed_active else "上位机位置（stub）"
 
     return {
         "contract_version": "aircraft_position.v1",

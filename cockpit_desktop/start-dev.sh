@@ -7,6 +7,19 @@ BACKEND_HOST="${COCKPIT_BACKEND_HOST:-127.0.0.1}"
 BACKEND_PORT="${COCKPIT_BACKEND_PORT:-8079}"
 FRONTEND_PORT="${COCKPIT_FRONTEND_PORT:-5173}"
 BACKEND_LOG="${TMPDIR:-/tmp}/openamp-server.log"
+DEFAULT_AIRCRAFT_POSITION_ENV="$REPO_ROOT/session_bootstrap/tmp/aircraft_position_baidu_ip.local.env"
+
+resolve_aircraft_position_env() {
+  if [[ -n "${COCKPIT_AIRCRAFT_POSITION_ENV:-}" ]]; then
+    printf '%s\n' "$COCKPIT_AIRCRAFT_POSITION_ENV"
+    return 0
+  fi
+  if [[ -f "$DEFAULT_AIRCRAFT_POSITION_ENV" ]]; then
+    printf '%s\n' "$DEFAULT_AIRCRAFT_POSITION_ENV"
+    return 0
+  fi
+  return 1
+}
 
 resolve_python() {
   if [[ -n "${COCKPIT_PYTHON:-}" ]]; then
@@ -73,12 +86,18 @@ if [[ -n "$PORT_PIDS" ]]; then
 fi
 
 echo "启动 Python 后端..."
+SERVER_ARGS=(
+  session_bootstrap/demo/openamp_control_plane_demo/server.py
+  --host "$BACKEND_HOST"
+  --port "$BACKEND_PORT"
+)
+if AIRCRAFT_POSITION_ENV="$(resolve_aircraft_position_env)"; then
+  echo "检测到本机定位配置: $AIRCRAFT_POSITION_ENV"
+  SERVER_ARGS+=(--aircraft-position-env "$AIRCRAFT_POSITION_ENV")
+fi
 (
   cd "$REPO_ROOT"
-  nohup "$PYTHON_CMD" session_bootstrap/demo/openamp_control_plane_demo/server.py \
-    --host "$BACKEND_HOST" \
-    --port "$BACKEND_PORT" \
-    >"$BACKEND_LOG" 2>&1 &
+  nohup "$PYTHON_CMD" "${SERVER_ARGS[@]}" >"$BACKEND_LOG" 2>&1 &
   echo $! >"${TMPDIR:-/tmp}/cockpit-backend.pid"
 )
 

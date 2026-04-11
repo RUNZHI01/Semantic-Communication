@@ -8,6 +8,7 @@ from pathlib import Path
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from unittest.mock import Mock, patch
 from urllib.parse import quote
@@ -96,6 +97,28 @@ class FakeInferenceJob:
         index = min(self._calls, len(self._snapshots) - 1)
         self._calls += 1
         return json.loads(json.dumps(self._snapshots[index]))
+
+
+class FakeTextStream:
+    def __init__(self, lines: list[str] | None = None, *, read_text: str = "") -> None:
+        self._lines = list(lines or [])
+        self._read_text = read_text
+
+    def __iter__(self):
+        return iter(self._lines)
+
+    def read(self) -> str:
+        return self._read_text
+
+
+class FakePopen:
+    def __init__(self, stdout_lines: list[str] | None = None, *, stderr_text: str = "", returncode: int = 0) -> None:
+        self.stdout = FakeTextStream(stdout_lines or [])
+        self.stderr = FakeTextStream(read_text=stderr_text)
+        self.returncode = returncode
+
+    def wait(self, timeout: float | None = None) -> int:
+        return self.returncode
 
 
 class NonClosingBytesIO(io.BytesIO):
@@ -275,6 +298,1126 @@ class DashboardStateTest(unittest.TestCase):
         self.assertTrue(snapshot["board"]["current_status"]["reachable"])
         self.assertEqual(cached_after_failure["requested_at"], success["requested_at"])
 
+    def test_start_batch_inference_tracks_one_live_current_job(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        progress_calls: dict[str, int] = {}
+
+        def fake_run_demo_inference(
+            *,
+            variant: str,
+            image_index: int,
+            allow_preflight_degraded: bool = False,
+            max_inputs: int = server.DEFAULT_MAX_INPUTS,
+        ) -> dict[str, object]:
+            self.assertEqual(variant, "current")
+            self.assertEqual(image_index, 0)
+            self.assertEqual(max_inputs, 2)
+            return {
+                "status": "running",
+                "execution_mode": "live",
+                "request_state": "running",
+                "job_id": "current-live-300",
+                "live_progress": {
+                    "completed_count": 0,
+                    "expected_count": 2,
+                },
+            }
+
+        def fake_peek_inference_progress(job_id: str) -> dict[str, object]:
+            calls = progress_calls.get(job_id, 0)
+            progress_calls[job_id] = calls + 1
+            if calls == 0:
+                return {
+                    "status": "running",
+                    "execution_mode": "live",
+                    "request_state": "running",
+                    "job_id": job_id,
+                    "live_progress": {
+                        "completed_count": 1,
+                        "expected_count": 2,
+                    },
+                }
+            return {
+                "status": "success",
+                "execution_mode": "live",
+                "request_state": "completed",
+                "job_id": job_id,
+                "source_label": "ML-KEM 安全协议就绪 + 真实在线推进 + 归档样例图",
+                "message": "ML-KEM 安全协议已建立；Current 继续走板端本地 latent / 既有 live 数据面。",
+                "artifact_sha": "sha-live",
+                "sample": {"label": "sample-live"},
+                "live_progress": {
+                    "completed_count": 2,
+                    "expected_count": 2,
+                },
+                "live_attempt": {
+                    "security": {
+                        "protocol": "mlkem_control",
+                        "handshake_ms": 11.0,
+                        "summary": "ML-KEM 安全协议已建立；Current 继续走板端本地 latent / 既有 live 数据面。",
+                    },
+                },
+                "timings": {"payload_ms": 20.0, "total_ms": 31.0},
+            }
+
+        with (
+            patch.object(state, "run_demo_inference", side_effect=fake_run_demo_inference),
+            patch.object(state, "_peek_inference_progress", side_effect=fake_peek_inference_progress),
+        ):
+            payload = state.start_batch_inference(count=2)
+            self.assertEqual(payload["status"], "started")
+            deadline = time.monotonic() + 2.0
+            while time.monotonic() < deadline:
+                current = state.get_batch_state()
+                if current.get("status") == "done":
+                    break
+                time.sleep(0.02)
+            else:
+                self.fail(f"batch state did not finish: {state.get_batch_state()}")
+
+        final_state = state.get_batch_state()
+        self.assertEqual(final_state["completed"], 2)
+        self.assertEqual(final_state["success"], 2)
+        self.assertEqual(final_state["fallback"], 0)
+        self.assertEqual(final_state["sha_match"], 0)
+        self.assertEqual(final_state["benchmark"]["handshake_ms"]["n"], 1)
+        self.assertEqual(final_state["benchmark"]["handshake_ms"]["mean_ms"], 11.0)
+        self.assertEqual(final_state["benchmark"]["total_ms"]["mean_ms"], 31.0)
+        self.assertEqual(state._recent_inference_results["current"]["status"], "success")
+
+    def test_start_batch_inference_marks_done_when_worker_raises(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+
+        with patch.object(state, "run_demo_inference", side_effect=IndexError("invalid image_index")):
+            payload = state.start_batch_inference(count=3)
+            self.assertEqual(payload["status"], "started")
+            deadline = time.monotonic() + 2.0
+            while time.monotonic() < deadline:
+                current = state.get_batch_state()
+                if current.get("status") == "done":
+                    break
+                time.sleep(0.02)
+            else:
+                self.fail(f"batch state did not finish after worker error: {state.get_batch_state()}")
+
+        final_state = state.get_batch_state()
+        self.assertEqual(final_state["completed"], 0)
+        self.assertEqual(final_state["success"], 0)
+        self.assertEqual(final_state["fallback"], 0)
+        self.assertEqual(final_state["error"], "IndexError: invalid image_index")
+
+    def test_run_demo_inference_with_crypto_uses_standard_live_job_with_security_context(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        state._crypto_enabled = True
+        state._board_access = Mock(configured=True, probe_ready=False, connection_ready=True)
+
+        fake_live_job = FakeInferenceJob(
+            [
+                {
+                    "status": "running",
+                    "request_state": "running",
+                    "control_transport": "hook",
+                    "progress": {
+                        "completed_count": 0,
+                        "expected_count": 300,
+                    },
+                }
+            ],
+            job_id="live-job-001",
+        )
+
+        class FakeVariantAccess:
+            def missing_inference_fields(self, variant: str) -> list[str]:
+                del variant
+                return []
+
+        security_context = {
+            "protocol": "mlkem_control",
+            "handshake_ms": 12.3,
+            "summary": "ML-KEM 安全协议已建立；Current 继续走板端本地 latent / 既有 live 数据面。",
+            "channel_state": "ok",
+        }
+
+        with (
+            patch.object(state, "_live_board_access_for_variant", return_value=FakeVariantAccess()),
+            patch("server.expected_sha_for_variant", return_value="abcd" * 16),
+            patch("server.describe_demo_variant_support", return_value={"mode": "legacy_runner"}),
+            patch.object(state, "_arm_mlkem_security_context", return_value=(security_context, None)),
+            patch.object(state, "run_mlkem_inference", side_effect=AssertionError("legacy ML-KEM data path should not be used")),
+            patch("server.launch_remote_reconstruction_job", return_value=fake_live_job) as launch_job,
+        ):
+            payload = state.run_demo_inference(variant="current", image_index=0)
+
+        launch_job.assert_called_once()
+        self.assertEqual(payload["job_id"], "live-job-001")
+        self.assertEqual(payload["status"], "running")
+        self.assertIn("ML-KEM 安全协议就绪", str(payload["source_label"]))
+        self.assertIn("板端本地 latent", str(payload["message"]))
+        security = payload.get("live_attempt", {}).get("security", {})
+        self.assertEqual(security.get("protocol"), "mlkem_control")
+        self.assertEqual(security.get("handshake_ms"), 12.3)
+
+    def test_run_mlkem_inference_subprocess_failure_completes_as_fallback(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        state._crypto_enabled = True
+        state._board_access = server.build_board_access_config(
+            {"host": "demo-board", "user": "demo-user", "password": "demo-pass", "port": "22"},
+            fallback=state._board_access,
+        )
+        preflight = {
+            "status": "success",
+            "guard_state": "READY",
+            "last_fault_code": "NONE",
+            "heartbeat_ok": 1,
+            "total_fault_count": 0,
+            "logs": [],
+        }
+
+        with (
+            patch.object(state, "_ensure_board_tcp_server", return_value=None),
+            patch.object(state, "_get_mlkem_session_manager", return_value=None),
+            patch("server.query_live_status", return_value=preflight),
+            patch(
+                "server.resolve_local_crypto_client",
+                return_value=(Path("/tmp/tcp_client.py"), [Path("/tmp/tcp_client.py")]),
+            ),
+            patch(
+                "server.inspect_local_crypto_client_capabilities",
+                return_value={
+                    "supports_daemon": True,
+                    "supports_count": True,
+                    "supports_json_summary": True,
+                    "supports_output": True,
+                    "supports_expect_result": False,
+                    "supports_batch_summary": True,
+                    "legacy_single_input_only": False,
+                },
+            ),
+            patch(
+                "server.build_local_crypto_client_command",
+                return_value=(["fake-python", "tcp_client.py"], {}),
+            ),
+            patch(
+                "server.subprocess.Popen",
+                return_value=FakePopen(stderr_text="simulated subprocess failure", returncode=1),
+            ),
+        ):
+            start_payload = state.run_mlkem_inference(variant="current", image_index=0, max_inputs=1)
+            self.assertEqual(start_payload["request_state"], "running")
+            deadline = time.monotonic() + 2.0
+            while time.monotonic() < deadline:
+                progress = state.get_inference_progress(str(start_payload["job_id"]))
+                if progress.get("request_state") == "completed":
+                    break
+                time.sleep(0.02)
+            else:
+                self.fail("ML-KEM subprocess failure path stayed in running state")
+
+        self.assertEqual(progress["status"], "fallback")
+        self.assertEqual(progress["request_state"], "completed")
+        self.assertEqual(progress["live_progress"]["state"], "fallback")
+        self.assertIn("ML-KEM 批量失败", progress["live_progress"]["event_log"][0])
+
+    def test_run_mlkem_inference_daemon_fallback_preserves_completed_count(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        state._crypto_enabled = True
+        state._board_access = server.build_board_access_config(
+            {"host": "demo-board", "user": "demo-user", "password": "demo-pass", "port": "22"},
+            fallback=state._board_access,
+        )
+        state._last_control_status = {
+            "status": "success",
+            "guard_state": "READY",
+            "last_fault_code": "NONE",
+            "heartbeat_ok": 1,
+            "total_fault_count": 0,
+            "logs": [],
+        }
+
+        class FakeMgr:
+            def __init__(self) -> None:
+                self.is_alive = True
+                self._host = "demo-board"
+                self._client_script = Path("/tmp/tcp_client.py")
+                self._handshake_ms = 9.0
+                self._calls = 0
+
+            def ensure_alive(self) -> None:
+                return None
+
+            def send_image(
+                self,
+                input_path: str,
+                job_id: str,
+                *,
+                run_tvm: bool = False,
+                expect_result: bool = False,
+            ) -> dict[str, object]:
+                del input_path, job_id, expect_result
+                self.run_tvm = run_tvm
+                self._calls += 1
+                if self._calls == 1:
+                    return {
+                        "status": "ok",
+                        "sha256_match": True,
+                        "result_received": True,
+                        "inference_ms": 5.0,
+                        "total_ms": 8.0,
+                    }
+                raise RuntimeError("daemon link lost")
+
+        fake_mgr = FakeMgr()
+
+        with (
+            patch.object(state, "_ensure_board_tcp_server", return_value=None),
+            patch.object(state, "_get_mlkem_session_manager", return_value=fake_mgr),
+            patch(
+                "server.inspect_local_crypto_client_capabilities",
+                return_value={
+                    "supports_daemon": True,
+                    "supports_count": True,
+                    "supports_json_summary": True,
+                    "supports_output": True,
+                    "supports_expect_result": True,
+                    "supports_batch_summary": True,
+                    "legacy_single_input_only": False,
+                },
+            ),
+            patch(
+                "server.build_local_crypto_client_command",
+                return_value=(["fake-python", "tcp_client.py"], {}),
+            ),
+            patch(
+                "server.subprocess.Popen",
+                return_value=FakePopen(
+                    stdout_lines=[
+                        "✓ remain-1\n",
+                        "✓ remain-2\n",
+                        '{"success": 2, "total": 2, "handshake_ms": 7.0, "per_image_ms": 11.0}\n',
+                    ],
+                    returncode=0,
+                ),
+            ) as popen_mock,
+        ):
+            start_payload = state.run_mlkem_inference(variant="current", image_index=0, max_inputs=3)
+            self.assertEqual(start_payload["request_state"], "running")
+            deadline = time.monotonic() + 2.0
+            while time.monotonic() < deadline:
+                progress = state.get_inference_progress(str(start_payload["job_id"]))
+                if progress.get("request_state") == "completed":
+                    break
+                time.sleep(0.02)
+            else:
+                self.fail("ML-KEM daemon fallback path did not finish")
+
+        self.assertEqual(progress["status"], "success")
+        self.assertEqual(progress["live_progress"]["completed_count"], 3)
+        self.assertAlmostEqual(progress["timings"]["payload_ms"], 5.0)
+        self.assertAlmostEqual(progress["timings"]["total_ms"], 18.0)
+        popen_cmd = " ".join(popen_mock.call_args.args[0])
+        self.assertIn("--run-tvm", popen_cmd)
+        self.assertNotIn("--expect-result", popen_cmd)
+
+    def test_run_mlkem_inference_daemon_requires_board_result(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        state._crypto_enabled = True
+        state._board_access = server.build_board_access_config(
+            {"host": "demo-board", "user": "demo-user", "password": "demo-pass", "port": "22"},
+            fallback=state._board_access,
+        )
+        state._last_control_status = {
+            "status": "success",
+            "guard_state": "READY",
+            "last_fault_code": "NONE",
+            "heartbeat_ok": 1,
+            "total_fault_count": 0,
+            "logs": [],
+        }
+
+        class FakeMgr:
+            def __init__(self) -> None:
+                self.is_alive = True
+                self._host = "demo-board"
+                self._client_script = Path("/tmp/tcp_client.py")
+                self._handshake_ms = 9.0
+
+            def ensure_alive(self) -> None:
+                return None
+
+            def send_image(
+                self,
+                input_path: str,
+                job_id: str,
+                *,
+                run_tvm: bool = False,
+                expect_result: bool = False,
+            ) -> dict[str, object]:
+                del input_path, job_id
+                self.run_tvm = run_tvm
+                self.expect_result = expect_result
+                return {
+                    "status": "ok",
+                    "sha256_match": True,
+                    "result_received": False,
+                    "inference_ms": None,
+                    "total_ms": 8.0,
+                }
+
+        fake_mgr = FakeMgr()
+
+        with (
+            patch.object(state, "_ensure_board_tcp_server", return_value=None),
+            patch.object(state, "_get_mlkem_session_manager", return_value=fake_mgr),
+            patch(
+                "server.inspect_local_crypto_client_capabilities",
+                return_value={
+                    "supports_daemon": True,
+                    "supports_count": True,
+                    "supports_json_summary": True,
+                    "supports_output": True,
+                    "supports_expect_result": True,
+                    "supports_batch_summary": True,
+                    "legacy_single_input_only": False,
+                },
+            ),
+        ):
+            start_payload = state.run_mlkem_inference(variant="current", image_index=0, max_inputs=1)
+            self.assertEqual(start_payload["request_state"], "running")
+            deadline = time.monotonic() + 2.0
+            while time.monotonic() < deadline:
+                progress = state.get_inference_progress(str(start_payload["job_id"]))
+                if progress.get("request_state") == "completed":
+                    break
+                time.sleep(0.02)
+            else:
+                self.fail("ML-KEM daemon missing-result path did not finish")
+
+        self.assertTrue(fake_mgr.run_tvm)
+        self.assertTrue(fake_mgr.expect_result)
+        self.assertEqual(progress["status"], "fallback")
+        self.assertIn("未收到板端重建结果", progress["message"])
+
+    def test_run_mlkem_inference_legacy_client_compatibility_caps_single_launch(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        state._crypto_enabled = True
+        state._board_access = server.build_board_access_config(
+            {"host": "demo-board", "user": "demo-user", "password": "demo-pass", "port": "22"},
+            fallback=state._board_access,
+        )
+        preflight = {
+            "status": "success",
+            "guard_state": "READY",
+            "last_fault_code": "NONE",
+            "heartbeat_ok": 1,
+            "total_fault_count": 0,
+            "logs": [],
+        }
+        run_calls: list[list[str]] = []
+
+        def fake_run(
+            cmd: list[str],
+            *,
+            capture_output: bool,
+            text: bool,
+            timeout: float,
+            env: dict[str, str],
+        ):
+            del capture_output, text, timeout, env
+            run_calls.append(list(cmd))
+            self.assertNotIn("--daemon", cmd)
+            self.assertNotIn("--count", cmd)
+            self.assertNotIn("--json-summary", cmd)
+            input_path = Path(cmd[cmd.index("--input") + 1])
+            self.assertEqual(input_path.stat().st_size, 1 * 3 * 64 * 64 * 4)
+            stdout = "\n".join(
+                [
+                    "密码套件:  SM4_GCM",
+                    "KEM 后端:  mock-backend",
+                    "握手完成: 9.0ms",
+                    "加密发送: 49152B, 耗时 3.0ms",
+                    "✓ 传输成功",
+                    "  对端 SHA256 匹配: 是",
+                    "  TVM 推理耗时: 21.0ms",
+                    "  接收重建结果: 49152B, 耗时 4.0ms",
+                ]
+            )
+            return server.subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
+
+        with (
+            patch.object(state, "_ensure_board_tcp_server", return_value=None),
+            patch("server.query_live_status", return_value=preflight),
+            patch(
+                "server.resolve_local_crypto_client",
+                return_value=(Path("/tmp/legacy_tcp_client.py"), [Path("/tmp/legacy_tcp_client.py")]),
+            ),
+            patch(
+                "server.inspect_local_crypto_client_capabilities",
+                return_value={
+                    "supports_daemon": False,
+                    "supports_count": False,
+                    "supports_json_summary": False,
+                    "supports_output": True,
+                    "supports_expect_result": False,
+                    "supports_batch_summary": False,
+                    "legacy_single_input_only": True,
+                },
+            ),
+            patch(
+                "server.build_local_crypto_client_command",
+                side_effect=lambda env_values, *, host, input_path, client_script: (
+                    ["fake-python", "tcp_client.py", "--host", host, "--input", str(input_path)],
+                    {},
+                ),
+            ),
+            patch("server.subprocess.run", side_effect=fake_run),
+        ):
+            start_payload = state.run_mlkem_inference(variant="current", image_index=0)
+            self.assertEqual(start_payload["request_state"], "running")
+            deadline = time.monotonic() + 2.0
+            while time.monotonic() < deadline:
+                progress = state.get_inference_progress(str(start_payload["job_id"]))
+                if progress.get("request_state") == "completed":
+                    break
+                time.sleep(0.02)
+            else:
+                self.fail("ML-KEM legacy compatibility path did not finish")
+
+        self.assertEqual(len(run_calls), 1)
+        self.assertEqual(progress["status"], "success")
+        self.assertEqual(progress["live_progress"]["completed_count"], 1)
+        self.assertEqual(progress["live_progress"]["expected_count"], 1)
+        self.assertAlmostEqual(progress["timings"]["payload_ms"], 21.0)
+        self.assertAlmostEqual(progress["timings"]["total_ms"], 37.0)
+
+    def test_run_mlkem_inference_legacy_client_requires_reconstruction_result(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        state._crypto_enabled = True
+        state._board_access = server.build_board_access_config(
+            {"host": "demo-board", "user": "demo-user", "password": "demo-pass", "port": "22"},
+            fallback=state._board_access,
+        )
+        preflight = {
+            "status": "success",
+            "guard_state": "READY",
+            "last_fault_code": "NONE",
+            "heartbeat_ok": 1,
+            "total_fault_count": 0,
+            "logs": [],
+        }
+
+        def fake_run(
+            cmd: list[str],
+            *,
+            capture_output: bool,
+            text: bool,
+            timeout: float,
+            env: dict[str, str],
+        ):
+            del capture_output, text, timeout, env
+            self.assertIn("--expect-result", cmd)
+            stdout = "\n".join(
+                [
+                    "密码套件:  SM4_GCM",
+                    "KEM 后端:  mock-backend",
+                    "握手完成: 9.0ms",
+                    "加密发送: 49152B, 耗时 3.0ms",
+                    "✓ 传输成功",
+                    "  对端 SHA256 匹配: 是",
+                    "  板端重建结果: 未回传",
+                ]
+            )
+            return server.subprocess.CompletedProcess(cmd, 2, stdout=stdout, stderr="")
+
+        with (
+            patch.object(state, "_ensure_board_tcp_server", return_value=None),
+            patch("server.query_live_status", return_value=preflight),
+            patch(
+                "server.resolve_local_crypto_client",
+                return_value=(Path("/tmp/local_wrapper_tcp_client.py"), [Path("/tmp/local_wrapper_tcp_client.py")]),
+            ),
+            patch(
+                "server.inspect_local_crypto_client_capabilities",
+                return_value={
+                    "supports_daemon": False,
+                    "supports_count": False,
+                    "supports_json_summary": False,
+                    "supports_output": True,
+                    "supports_expect_result": True,
+                    "supports_batch_summary": False,
+                    "legacy_single_input_only": True,
+                },
+            ),
+            patch(
+                "server.build_local_crypto_client_command",
+                side_effect=lambda env_values, *, host, input_path, client_script: (
+                    ["fake-python", "tcp_client.py", "--host", host, "--input", str(input_path)],
+                    {},
+                ),
+            ),
+            patch("server.subprocess.run", side_effect=fake_run),
+        ):
+            start_payload = state.run_mlkem_inference(variant="current", image_index=0)
+            self.assertEqual(start_payload["request_state"], "running")
+            deadline = time.monotonic() + 2.0
+            while time.monotonic() < deadline:
+                progress = state.get_inference_progress(str(start_payload["job_id"]))
+                if progress.get("request_state") == "completed":
+                    break
+                time.sleep(0.02)
+            else:
+                self.fail("ML-KEM legacy result-required path did not finish")
+
+        self.assertEqual(progress["status"], "fallback")
+        self.assertIn("板端重建结果: 未回传", progress["message"])
+        self.assertEqual(progress["live_progress"]["expected_count"], 1)
+        self.assertEqual(progress["live_progress"]["count_label"], "0 / 1")
+        self.assertIsNone(progress["timings"]["payload_ms"])
+        self.assertIsNone(progress["timings"]["total_ms"])
+        self.assertEqual(progress["timings"]["stages"], [])
+
+        status, _, system_payload = request_json(state, "GET", "/api/system-status")
+        self.assertEqual(status, 200)
+        self.assertIsNone(system_payload["recent_results"]["current"]["timings"]["payload_ms"])
+        self.assertIsNone(system_payload["recent_results"]["current"]["timings"]["total_ms"])
+
+    def test_ensure_board_aircraft_position_bridge_uploads_assets_and_enables_service(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        board_access = server.build_board_access_config(
+            {
+                "host": "demo-board",
+                "user": "demo-user",
+                "password": "demo-pass",
+                "port": "22",
+            },
+            fallback=state._board_access.with_env_overrides(
+                {
+                    "AIRCRAFT_POSITION_UPSTREAM_URL": "http://127.0.0.1:9000/gps",
+                    "AIRCRAFT_POSITION_BACKEND_BASE_URL": "http://demo-host:8079",
+                    "AIRCRAFT_POSITION_GROUND_SPEED_SCALE": "3.6",
+                }
+            ),
+        )
+        uploaded: dict[str, dict[str, object]] = {}
+
+        def fake_write_remote_text_file(
+            _board_access: server.BoardAccessConfig,
+            *,
+            remote_path: str,
+            content: str,
+            mode: int,
+            timeout: float,
+        ) -> None:
+            del _board_access, timeout
+            uploaded[remote_path] = {"content": content, "mode": mode}
+
+        with (
+            patch.object(state, "_write_remote_text_file", side_effect=fake_write_remote_text_file),
+            patch(
+                "server.run_ssh_command",
+                return_value=server.subprocess.CompletedProcess([], 0, stdout="", stderr=""),
+            ) as run_ssh,
+        ):
+            state._ensure_board_aircraft_position_bridge(board_access)
+
+        remote_paths = server._aircraft_position_bridge_remote_paths(server.DEFAULT_AIRCRAFT_POSITION_REMOTE_ROOT)
+        self.assertIn(remote_paths["env_file"], uploaded)
+        self.assertIn(
+            "AIRCRAFT_POSITION_UPSTREAM_URL=http://127.0.0.1:9000/gps",
+            uploaded[remote_paths["env_file"]]["content"],
+        )
+        self.assertIn(
+            "AIRCRAFT_POSITION_BACKEND_BASE_URL=http://demo-host:8079",
+            uploaded[remote_paths["env_file"]]["content"],
+        )
+        self.assertEqual(uploaded[remote_paths["env_file"]]["mode"], 0o600)
+        self.assertIn(remote_paths["user_service"], uploaded)
+        self.assertIn(
+            "systemctl --user enable --now aircraft-position-bridge.service",
+            run_ssh.call_args.kwargs["remote_command"],
+        )
+
+    def test_ensure_board_position_api_service_uploads_assets_and_launches_service(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        board_access = server.build_board_access_config(
+            {
+                "host": "demo-board",
+                "user": "demo-user",
+                "password": "demo-pass",
+                "port": "22",
+            },
+            fallback=state._board_access,
+        )
+        uploaded: dict[str, dict[str, object]] = {}
+
+        def fake_write_remote_text_file(
+            _board_access: server.BoardAccessConfig,
+            *,
+            remote_path: str,
+            content: str,
+            mode: int,
+            timeout: float,
+        ) -> None:
+            del _board_access, timeout
+            uploaded[remote_path] = {"content": content, "mode": mode}
+
+        with (
+            patch.object(state, "_write_remote_text_file", side_effect=fake_write_remote_text_file),
+            patch(
+                "server.run_ssh_command",
+                return_value=server.subprocess.CompletedProcess([], 0, stdout="", stderr=""),
+            ) as run_ssh,
+        ):
+            state._ensure_board_position_api_service(board_access)
+
+        remote_paths = server._board_position_api_remote_paths(server.DEFAULT_BOARD_POSITION_API_REMOTE_ROOT)
+        self.assertIn(remote_paths["env_file"], uploaded)
+        self.assertIn("BOARD_POSITION_API_BIND_HOST=127.0.0.1", uploaded[remote_paths["env_file"]]["content"])
+        self.assertIn("BOARD_POSITION_API_PORT=9000", uploaded[remote_paths["env_file"]]["content"])
+        self.assertIn(remote_paths["user_service"], uploaded)
+        self.assertEqual(run_ssh.call_count, 1)
+        self.assertIn("sudo -S -k bash -lc", run_ssh.call_args.kwargs["remote_command"])
+        self.assertIn("nohup", run_ssh.call_args.kwargs["remote_command"])
+        self.assertIn("run_board_position_api_service.sh", run_ssh.call_args.kwargs["remote_command"])
+        self.assertIn("$PY -c", run_ssh.call_args.kwargs["remote_command"])
+        self.assertIn("base64.b64decode", run_ssh.call_args.kwargs["remote_command"])
+
+    def test_ensure_board_position_api_service_propagates_external_http_position_env(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        board_access = server.build_board_access_config(
+            {
+                "host": "demo-board",
+                "user": "demo-user",
+                "password": "demo-pass",
+                "port": "22",
+            },
+            fallback=state._board_access,
+        ).with_env_overrides(
+            {
+                "AIRCRAFT_POSITION_UPSTREAM_URL": "https://api.map.baidu.com/location/ip?coor=bd09ll&output=json&ak=demo",
+                "AIRCRAFT_POSITION_LATITUDE_PATH": "content.point.y",
+                "AIRCRAFT_POSITION_LONGITUDE_PATH": "content.point.x",
+                "AIRCRAFT_POSITION_SOURCE_LABEL": "百度IP定位",
+            }
+        )
+        uploaded: dict[str, str] = {}
+
+        def fake_write_remote_text_file(
+            _board_access: server.BoardAccessConfig,
+            *,
+            remote_path: str,
+            content: str,
+            mode: int,
+            timeout: float,
+        ) -> None:
+            del _board_access, mode, timeout
+            uploaded[remote_path] = content
+
+        with (
+            patch.object(state, "_write_remote_text_file", side_effect=fake_write_remote_text_file),
+            patch(
+                "server.run_ssh_command",
+                return_value=server.subprocess.CompletedProcess([], 0, stdout="", stderr=""),
+            ),
+        ):
+            state._ensure_board_position_api_service(board_access)
+
+        remote_paths = server._board_position_api_remote_paths(server.DEFAULT_BOARD_POSITION_API_REMOTE_ROOT)
+        env_content = uploaded[remote_paths["env_file"]]
+        self.assertIn("export AIRCRAFT_POSITION_UPSTREAM_URL=", env_content)
+        self.assertIn("api.map.baidu.com/location/ip", env_content)
+        self.assertIn("export AIRCRAFT_POSITION_LATITUDE_PATH=content.point.y", env_content)
+        self.assertIn("export AIRCRAFT_POSITION_LONGITUDE_PATH=content.point.x", env_content)
+        self.assertIn("export BOARD_POSITION_API_SOURCE_ORDER=http,gpsd,nmea", env_content)
+
+    def test_ensure_board_position_api_service_reports_launch_failure(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        board_access = server.build_board_access_config(
+            {
+                "host": "demo-board",
+                "user": "demo-user",
+                "password": "demo-pass",
+                "port": "22",
+            },
+            fallback=state._board_access,
+        )
+
+        with (
+            patch.object(state, "_write_remote_text_file", return_value=None),
+            patch(
+                "server.run_ssh_command",
+                side_effect=[
+                    server.subprocess.CompletedProcess([], 1, stdout="", stderr="sudo failed"),
+                    server.subprocess.CompletedProcess([], 1, stdout="", stderr="systemd failed"),
+                    server.subprocess.CompletedProcess([], 1, stdout="", stderr="fallback failed"),
+                ],
+            ) as run_ssh,
+            patch("builtins.print") as print_mock,
+        ):
+            state._ensure_board_position_api_service(board_access)
+
+        self.assertEqual(run_ssh.call_count, 3)
+        self.assertIn("sudo -S -k bash -lc", run_ssh.call_args_list[0].kwargs["remote_command"])
+        self.assertIn("nohup", run_ssh.call_args_list[1].kwargs["remote_command"])
+        self.assertIn(
+            "systemctl --user enable --now board-position-api.service",
+            run_ssh.call_args_list[2].kwargs["remote_command"],
+        )
+        self.assertIn("$PY -c", run_ssh.call_args_list[2].kwargs["remote_command"])
+        self.assertIn("base64.b64decode", run_ssh.call_args_list[2].kwargs["remote_command"])
+        print_mock.assert_called()
+
+    def test_ensure_board_position_api_service_falls_back_to_systemd_when_direct_launch_fails(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        board_access = server.build_board_access_config(
+            {
+                "host": "demo-board",
+                "user": "demo-user",
+                "password": "demo-pass",
+                "port": "22",
+            },
+            fallback=state._board_access,
+        )
+
+        with (
+            patch.object(state, "_write_remote_text_file", return_value=None),
+            patch(
+                "server.run_ssh_command",
+                side_effect=[
+                    server.subprocess.CompletedProcess([], 1, stdout="", stderr="root launch failed"),
+                    server.subprocess.CompletedProcess([], 1, stdout="", stderr="direct launch failed"),
+                    server.subprocess.CompletedProcess([], 0, stdout="", stderr=""),
+                ],
+            ) as run_ssh,
+        ):
+            state._ensure_board_position_api_service(board_access)
+
+        self.assertEqual(run_ssh.call_count, 3)
+        self.assertIn("sudo -S -k bash -lc", run_ssh.call_args_list[0].kwargs["remote_command"])
+        self.assertIn("nohup", run_ssh.call_args_list[1].kwargs["remote_command"])
+        self.assertIn(
+            "systemctl --user enable --now board-position-api.service",
+            run_ssh.call_args_list[2].kwargs["remote_command"],
+        )
+
+    def test_aircraft_bridge_runtime_auto_derives_backend_base_url_when_server_binds_publicly(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None, bind_host="0.0.0.0", bind_port=8079)
+        board_access = server.build_board_access_config(
+            {
+                "host": "100.121.87.73",
+                "user": "demo-user",
+                "password": "demo-pass",
+                "port": "22",
+            },
+            fallback=state._board_access.with_env_overrides(
+                {
+                    "AIRCRAFT_POSITION_UPSTREAM_URL": "http://127.0.0.1:9000/gps",
+                }
+            ),
+        )
+
+        with patch(
+            "server._default_backend_base_url_for_board",
+            return_value="http://100.116.93.120:8079",
+        ):
+            runtime = server._aircraft_position_bridge_runtime(
+                board_access,
+                bind_host=state._bind_host,
+                bind_port=state._bind_port,
+            )
+
+        self.assertTrue(runtime["configured"])
+        self.assertEqual(runtime["backend_base_url"], "http://100.116.93.120:8079")
+        self.assertEqual(
+            runtime["runtime_env"]["AIRCRAFT_POSITION_BACKEND_BASE_URL"],
+            "http://100.116.93.120:8079",
+        )
+
+    def test_aircraft_bridge_runtime_uses_auto_discovered_upstream_url(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None, bind_host="0.0.0.0", bind_port=8079)
+        board_access = server.build_board_access_config(
+            {
+                "host": "100.121.87.73",
+                "user": "demo-user",
+                "password": "demo-pass",
+                "port": "22",
+            },
+            fallback=state._board_access,
+        )
+
+        with patch(
+            "server._default_backend_base_url_for_board",
+            return_value="http://100.116.93.120:8079",
+        ):
+            runtime = server._aircraft_position_bridge_runtime(
+                board_access,
+                bind_host=state._bind_host,
+                bind_port=state._bind_port,
+                discovered_upstream_url="http://127.0.0.1:9527/api/v1/position",
+            )
+
+        self.assertTrue(runtime["configured"])
+        self.assertEqual(runtime["upstream_url"], "http://127.0.0.1:9527/api/v1/position")
+        self.assertEqual(runtime["upstream_url_source"], "auto_discovered")
+        self.assertEqual(
+            runtime["runtime_env"]["AIRCRAFT_POSITION_UPSTREAM_URL"],
+            "http://127.0.0.1:9527/api/v1/position",
+        )
+
+    def test_autostart_board_aircraft_position_bridge_uses_discovered_upstream_url(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None, bind_host="0.0.0.0", bind_port=8079)
+        board_access = server.build_board_access_config(
+            {
+                "host": "100.121.87.73",
+                "user": "demo-user",
+                "password": "demo-pass",
+                "port": "22",
+            },
+            fallback=state._board_access,
+        )
+
+        with (
+            patch.object(
+                state,
+                "_aircraft_position_upstream_probe_snapshot",
+                return_value={
+                    "status": "detected",
+                    "selected_url": "http://127.0.0.1:9527/api/v1/position",
+                    "selected_source": "auto_discovered",
+                    "candidate_urls": list(server.DEFAULT_AIRCRAFT_POSITION_UPSTREAM_CANDIDATES),
+                    "results": [],
+                },
+            ),
+            patch(
+                "server._default_backend_base_url_for_board",
+                return_value="http://100.116.93.120:8079",
+            ),
+            patch.object(state, "_ensure_board_aircraft_position_bridge") as ensure_bridge,
+        ):
+            state._autostart_board_aircraft_position_bridge(board_access)
+
+        effective_board_access = ensure_bridge.call_args.args[0]
+        self.assertEqual(
+            effective_board_access.build_env()["AIRCRAFT_POSITION_UPSTREAM_URL"],
+            "http://127.0.0.1:9527/api/v1/position",
+        )
+
+    def test_autostart_board_aircraft_position_bridge_starts_board_position_api_first(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None, bind_host="0.0.0.0", bind_port=8079)
+        board_access = server.build_board_access_config(
+            {
+                "host": "100.121.87.73",
+                "user": "demo-user",
+                "password": "demo-pass",
+                "port": "22",
+            },
+            fallback=state._board_access,
+        )
+        order: list[str] = []
+
+        with (
+            patch.object(state, "_ensure_board_position_api_service", side_effect=lambda *_args, **_kwargs: order.append("position_api")),
+            patch.object(
+                state,
+                "_aircraft_position_upstream_probe_snapshot",
+                return_value={
+                    "status": "detected",
+                    "selected_url": "http://127.0.0.1:9000/api/v1/position",
+                    "selected_source": "auto_discovered",
+                    "candidate_urls": list(server.DEFAULT_AIRCRAFT_POSITION_UPSTREAM_CANDIDATES),
+                    "results": [],
+                },
+            ),
+            patch(
+                "server._default_backend_base_url_for_board",
+                return_value="http://100.116.93.120:8079",
+            ),
+            patch.object(state, "_ensure_board_aircraft_position_bridge", side_effect=lambda *_args, **_kwargs: order.append("bridge")),
+        ):
+            state._autostart_board_aircraft_position_bridge(board_access)
+
+        self.assertEqual(order, ["position_api", "bridge"])
+
+    def test_ensure_board_aircraft_position_bridge_falls_back_to_nohup_when_systemd_user_fails(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        board_access = server.build_board_access_config(
+            {
+                "host": "demo-board",
+                "user": "demo-user",
+                "password": "demo-pass",
+                "port": "22",
+            },
+            fallback=state._board_access.with_env_overrides(
+                {
+                    "AIRCRAFT_POSITION_UPSTREAM_URL": "http://127.0.0.1:9000/gps",
+                    "AIRCRAFT_POSITION_BACKEND_BASE_URL": "http://demo-host:8079",
+                }
+            ),
+        )
+
+        with (
+            patch.object(state, "_write_remote_text_file", return_value=None),
+            patch(
+                "server.run_ssh_command",
+                side_effect=[
+                    server.subprocess.CompletedProcess([], 1, stdout="", stderr="systemd user bus unavailable"),
+                    server.subprocess.CompletedProcess([], 0, stdout="", stderr=""),
+                ],
+            ) as run_ssh,
+        ):
+            state._ensure_board_aircraft_position_bridge(board_access)
+
+        self.assertEqual(run_ssh.call_count, 2)
+        self.assertIn(
+            "systemctl --user enable --now aircraft-position-bridge.service",
+            run_ssh.call_args_list[0].kwargs["remote_command"],
+        )
+        self.assertIn("nohup", run_ssh.call_args_list[1].kwargs["remote_command"])
+
+    def test_ensure_board_tcp_server_uses_remote_home_tcp_server_when_mlkem_path_unspecified(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        board_access = server.build_board_access_config(
+            {
+                "host": "demo-board",
+                "user": "demo-user",
+                "password": "demo-pass",
+                "port": "22",
+                "env_file": "session_bootstrap/tmp/inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.env",
+            },
+            fallback=state._board_access,
+        )
+        captured: dict[str, object] = {}
+
+        def fake_run_ssh_command(*, remote_command: str, **kwargs: object):
+            del kwargs
+            if remote_command == 'printf %s "$HOME"':
+                return server.subprocess.CompletedProcess([], 0, stdout="/home/demo-user", stderr="")
+            captured.setdefault("commands", []).append(remote_command)
+            return server.subprocess.CompletedProcess([], 0, stdout="", stderr="")
+
+        def fake_build_remote_crypto_server_command(env_values: dict[str, str], *, local_server_script: Path | None = None) -> str:
+            del local_server_script
+            captured["env_values"] = dict(env_values)
+            return "echo start-remote-server"
+
+        with (
+            patch("server.fetch_json_direct", side_effect=RuntimeError("status down")),
+            patch("server.resolve_local_crypto_server", return_value=(Path("/tmp/ICCompetition2026/scripts/tcp_server.py"), [])),
+            patch.object(state, "_sync_remote_mlkem_server_assets", return_value={"updated": False}),
+            patch("server.run_ssh_command", side_effect=fake_run_ssh_command),
+            patch("server.build_remote_crypto_server_command", side_effect=fake_build_remote_crypto_server_command),
+            patch("server.time.sleep", return_value=None),
+        ):
+            state._ensure_board_tcp_server(board_access)
+
+        self.assertEqual(captured["env_values"]["MLKEM_REMOTE_SERVER_SCRIPT"], "/home/demo-user/tcp_server.py")
+        self.assertIn("echo start-remote-server", captured["commands"])
+
+    def test_ensure_board_tcp_server_restarts_when_running_process_uses_shell_wrapped_tvm_python(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        board_access = server.build_board_access_config(
+            {
+                "host": "demo-board",
+                "user": "demo-user",
+                "password": "demo-pass",
+                "port": "22",
+            },
+            fallback=state._board_access.with_env_overrides(
+                {
+                    "MLKEM_REMOTE_SERVER_SCRIPT": "/home/demo-user/tcp_server.py",
+                    "REMOTE_TVM_PYTHON": "env FOO=1 /opt/tvm/bin/python",
+                }
+            ),
+        )
+        captured: list[str] = []
+
+        def fake_run_ssh_command(*, remote_command: str, **kwargs: object):
+            del kwargs
+            captured.append(remote_command)
+            if remote_command == "pgrep -af 'tcp_server.py' || true":
+                return server.subprocess.CompletedProcess(
+                    [],
+                    0,
+                    stdout=(
+                        "257019 /home/user/anaconda3/envs/mlkem/bin/python "
+                        "/home/user/tcp_server.py --tvm --tvm-python env FOO=1 /opt/tvm/bin/python\n"
+                    ),
+                    stderr="",
+                )
+            return server.subprocess.CompletedProcess([], 0, stdout="", stderr="")
+
+        with (
+            patch(
+                "server.fetch_json_direct",
+                side_effect=[
+                    {"cipher_suite": "sm4-gcm"},
+                    {"cipher_suite": "sm4-gcm"},
+                ],
+            ),
+            patch("server.resolve_local_crypto_server", return_value=(Path("/tmp/tcp_server.py"), [])),
+            patch.object(state, "_sync_remote_mlkem_server_assets", return_value={"updated": False}),
+            patch("server.run_ssh_command", side_effect=fake_run_ssh_command),
+            patch("server.build_remote_crypto_server_command", return_value="echo restart-remote-server"),
+            patch("server.time.sleep", return_value=None),
+        ):
+            state._ensure_board_tcp_server(board_access)
+
+        self.assertIn("pgrep -af 'tcp_server.py' || true", captured)
+        self.assertIn("pkill -f 'tcp_server.py' || true", captured)
+        self.assertIn("echo restart-remote-server", captured)
+
+    def test_sync_remote_mlkem_server_assets_uploads_server_and_helper_once(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        board_access = server.build_board_access_config(
+            {
+                "host": "demo-board",
+                "user": "demo-user",
+                "password": "demo-pass",
+                "port": "22",
+            },
+            fallback=state._board_access,
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            scripts_dir = Path(temp_dir)
+            local_server_script = scripts_dir / "tcp_server.py"
+            local_helper_script = scripts_dir / "tvm_inference_helper.py"
+            local_server_script.write_text("#!/usr/bin/env python3\nprint('server')\n", encoding="utf-8")
+            local_helper_script.write_text("#!/usr/bin/env python3\nprint('helper')\n", encoding="utf-8")
+            uploads: list[str] = []
+
+            def fake_write_remote_text_file(
+                _board_access: server.BoardAccessConfig,
+                *,
+                remote_path: str,
+                content: str,
+                mode: int,
+                timeout: float,
+            ) -> None:
+                del _board_access, content, mode, timeout
+                uploads.append(remote_path)
+
+            with patch.object(state, "_write_remote_text_file", side_effect=fake_write_remote_text_file):
+                first = state._sync_remote_mlkem_server_assets(
+                    board_access,
+                    runtime_env_values={"MLKEM_REMOTE_SERVER_SCRIPT": "/home/demo-user/tcp_server.py"},
+                    local_server_script=local_server_script,
+                )
+                second = state._sync_remote_mlkem_server_assets(
+                    board_access,
+                    runtime_env_values={"MLKEM_REMOTE_SERVER_SCRIPT": "/home/demo-user/tcp_server.py"},
+                    local_server_script=local_server_script,
+                )
+
+        self.assertTrue(first["updated"])
+        self.assertFalse(second["updated"])
+        self.assertEqual(
+            uploads,
+            [
+                "/home/demo-user/tcp_server.py",
+                "/home/demo-user/tvm_inference_helper.py",
+            ],
+        )
+
     def test_get_crypto_status_fetches_board_status_without_proxy(self) -> None:
         class FakeResponse:
             def __init__(self, payload: bytes) -> None:
@@ -333,11 +1476,46 @@ class DashboardStateTest(unittest.TestCase):
 
 
 class ServerMainTest(unittest.TestCase):
+    def test_demo_startup_env_overrides_loads_aircraft_position_env_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env_path = Path(tmpdir) / "aircraft_position.env"
+            env_path.write_text(
+                "\n".join(
+                    [
+                        "AIRCRAFT_POSITION_EXECUTION_MODE=local",
+                        "AIRCRAFT_POSITION_UPSTREAM_URL=https://api.map.baidu.com/location/ip?coor=bd09ll&output=json&ak=demo",
+                        "AIRCRAFT_POSITION_LATITUDE_PATH=content.point.y",
+                        "AIRCRAFT_POSITION_LONGITUDE_PATH=content.point.x",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            args = Namespace(
+                aircraft_position_env=str(env_path),
+                demo_admission_mode="",
+                signed_manifest_file="",
+                signed_manifest_public_key="",
+                baseline_admission_mode="",
+                baseline_signed_manifest_file="",
+                baseline_signed_manifest_public_key="",
+            )
+
+            overrides = server.demo_startup_env_overrides(args)
+
+        self.assertEqual(overrides["AIRCRAFT_POSITION_EXECUTION_MODE"], "local")
+        self.assertEqual(
+            overrides["AIRCRAFT_POSITION_UPSTREAM_URL"],
+            "https://api.map.baidu.com/location/ip?coor=bd09ll&output=json&ak=demo",
+        )
+        self.assertEqual(overrides["AIRCRAFT_POSITION_LATITUDE_PATH"], "content.point.y")
+
     def test_main_builds_server_and_serves_without_startup_probe(self) -> None:
         args = Namespace(
             host="0.0.0.0",
             port=8090,
             probe_env="config/openamp.env",
+            aircraft_position_env="",
             probe_timeout_sec=12.5,
             probe_startup=False,
             demo_admission_mode="",
@@ -356,12 +1534,16 @@ class ServerMainTest(unittest.TestCase):
             probe_timeout_sec: float,
             demo_startup_env_overrides: dict[str, str] | None = None,
             event_archive_root: str | Path | None = None,
+            bind_host: str = "127.0.0.1",
+            bind_port: int = 8079,
         ) -> Mock:
             events.append("state_init")
             self.assertEqual(probe_env, args.probe_env)
             self.assertEqual(probe_timeout_sec, args.probe_timeout_sec)
             self.assertEqual(demo_startup_env_overrides, {})
             self.assertEqual(event_archive_root, server.default_event_archive_root())
+            self.assertEqual(bind_host, args.host)
+            self.assertEqual(bind_port, args.port)
             return fake_app_state
 
         def build_server(server_address: tuple[str, int], handler: type[DemoRequestHandler], app_state: Mock) -> Mock:
@@ -386,6 +1568,8 @@ class ServerMainTest(unittest.TestCase):
             args.probe_timeout_sec,
             demo_startup_env_overrides={},
             event_archive_root=server.default_event_archive_root(),
+            bind_host=args.host,
+            bind_port=args.port,
         )
         server_cls.assert_called_once_with((args.host, args.port), DemoRequestHandler, fake_app_state)
         fake_app_state.refresh_live_probe.assert_not_called()
@@ -405,6 +1589,7 @@ class ServerMainTest(unittest.TestCase):
             host="127.0.0.1",
             port=8079,
             probe_env="config/probe.env",
+            aircraft_position_env="",
             probe_timeout_sec=5.0,
             probe_startup=True,
             demo_admission_mode="",
@@ -423,12 +1608,16 @@ class ServerMainTest(unittest.TestCase):
             probe_timeout_sec: float,
             demo_startup_env_overrides: dict[str, str] | None = None,
             event_archive_root: str | Path | None = None,
+            bind_host: str = "127.0.0.1",
+            bind_port: int = 8079,
         ) -> Mock:
             events.append("state_init")
             self.assertEqual(probe_env, args.probe_env)
             self.assertEqual(probe_timeout_sec, args.probe_timeout_sec)
             self.assertEqual(demo_startup_env_overrides, {})
             self.assertEqual(event_archive_root, server.default_event_archive_root())
+            self.assertEqual(bind_host, args.host)
+            self.assertEqual(bind_port, args.port)
             return fake_app_state
 
         def build_server(server_address: tuple[str, int], handler: type[DemoRequestHandler], app_state: Mock) -> Mock:
@@ -454,6 +1643,8 @@ class ServerMainTest(unittest.TestCase):
             args.probe_timeout_sec,
             demo_startup_env_overrides={},
             event_archive_root=server.default_event_archive_root(),
+            bind_host=args.host,
+            bind_port=args.port,
         )
         server_cls.assert_called_once_with((args.host, args.port), DemoRequestHandler, fake_app_state)
         fake_app_state.refresh_live_probe.assert_called_once_with()
@@ -1334,6 +2525,401 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertFalse(payload["aircraft_position"]["feed_contract"]["primary_source"]["active"])
         self.assertTrue(payload["aircraft_position"]["feed_contract"]["fallback_source"]["active"])
         self.assertEqual(payload["aircraft_position"]["sample"]["sequence"], 0)
+        self.assertEqual(payload["aircraft_position"]["bridge_runtime"]["status"], "config_missing")
+        self.assertEqual(
+            payload["aircraft_position"]["bridge_runtime"]["missing_env"],
+            ["AIRCRAFT_POSITION_UPSTREAM_URL", "AIRCRAFT_POSITION_BACKEND_BASE_URL"],
+        )
+        self.assertEqual(payload["aircraft_position"]["position_api_runtime"]["status"], "waiting_session")
+        self.assertEqual(payload["live"]["aircraft_bridge"]["status"], "config_missing")
+        self.assertEqual(payload["live"]["board_position_api"]["status"], "waiting_session")
+
+    def test_query_board_position_api_health_parses_remote_health_payload(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        board_access = server.build_board_access_config(
+            {"host": "demo-board", "user": "demo-user", "password": "demo-pass", "port": "22"},
+            fallback=state._board_access,
+        )
+        stdout = json.dumps(
+            {
+                "status": "ok",
+                "url": "http://127.0.0.1:9000/health",
+                "http_status": 200,
+                "payload": {
+                    "status": "starting",
+                    "source_order": ["gpsd", "nmea"],
+                    "last_error": "gpsd:[Errno 111] Connection refused",
+                    "sample": None,
+                },
+                "body": "{}",
+                "error": "",
+            },
+            ensure_ascii=False,
+        )
+
+        with patch(
+            "server.run_ssh_command",
+            return_value=server.subprocess.CompletedProcess([], 0, stdout=stdout, stderr=""),
+        ):
+            payload = server.query_board_position_api_health(
+                board_access,
+                runtime_env={"BOARD_POSITION_API_BIND_HOST": "127.0.0.1", "BOARD_POSITION_API_PORT": "9000"},
+                timeout_sec=3.0,
+            )
+
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["http_status"], 200)
+        self.assertEqual(payload["payload"]["status"], "starting")
+
+    def test_board_position_api_status_promotes_live_sample_from_position_endpoint(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        board_access = server.build_board_access_config(
+            {"host": "demo-board", "user": "demo-user", "password": "demo-pass", "port": "22"},
+            fallback=state._board_access,
+        ).with_env_overrides(
+            {
+                "AIRCRAFT_POSITION_UPSTREAM_URL": "https://api.map.baidu.com/location/ip?coor=bd09ll&output=json&ak=demo",
+                "AIRCRAFT_POSITION_LATITUDE_PATH": "content.point.y",
+                "AIRCRAFT_POSITION_LONGITUDE_PATH": "content.point.x",
+            }
+        )
+
+        with (
+            patch(
+                "server.query_board_position_api_health",
+                return_value={
+                    "status": "ok",
+                    "http_status": 200,
+                    "payload": {
+                        "status": "starting",
+                        "source_order": ["http", "gpsd", "nmea"],
+                        "last_error": "",
+                        "sample": None,
+                    },
+                },
+            ),
+            patch(
+                "server.query_board_position_api_sample",
+                return_value={
+                    "status": "ok",
+                    "http_status": 200,
+                    "payload": {
+                        "status": "live",
+                        "source": "http:https://api.map.baidu.com/location/ip?coor=bd09ll&output=json&ak=demo",
+                        "source_kind": "http",
+                        "latitude": 22.943853,
+                        "longitude": 113.390465,
+                        "captured_at": "2026-04-11T20:24:08+0800",
+                        "sequence": 1,
+                    },
+                },
+            ),
+        ):
+            payload = server._board_position_api_status(board_access, timeout_sec=3.0)
+
+        self.assertEqual(payload["status"], "live")
+        self.assertTrue(payload["sample_ready"])
+        self.assertEqual(payload["sample"]["source_kind"], "http")
+        self.assertAlmostEqual(payload["sample"]["latitude"], 22.943853)
+
+    def test_system_status_reports_board_position_api_source_unavailable_from_health_probe(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None, bind_host="0.0.0.0", bind_port=8079)
+        request_json(
+            state,
+            "POST",
+            "/api/session/board-access",
+            body=json.dumps(
+                {"host": "100.121.87.73", "user": "demo-user", "password": "demo-pass", "port": "22"}
+            ).encode("utf-8"),
+        )
+
+        with (
+            patch.object(
+                state,
+                "_aircraft_position_upstream_probe_snapshot",
+                return_value={
+                    "status": "not_found",
+                    "selected_url": "",
+                    "selected_source": "",
+                    "candidate_urls": list(server.DEFAULT_AIRCRAFT_POSITION_UPSTREAM_CANDIDATES),
+                    "results": [],
+                },
+            ),
+            patch(
+                "server._board_position_api_status",
+                return_value={
+                    "status": "source_unavailable",
+                    "note": "板端定位 API 服务已启动，但当前没有拿到有效位置样本。",
+                    "service_reachable": True,
+                    "http_status": 200,
+                    "health_url": "http://127.0.0.1:9000/health",
+                    "remote_root": server.DEFAULT_BOARD_POSITION_API_REMOTE_ROOT,
+                    "sample_ready": False,
+                    "service_state": "starting",
+                    "last_error": "gpsd:[Errno 111] Connection refused; nmea:/dev/ttyS1: [Errno 13] Permission denied",
+                    "source_order": ["gpsd", "nmea"],
+                    "sample": None,
+                },
+            ),
+        ):
+            status, _, payload = request_json(state, "GET", "/api/system-status")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["aircraft_position"]["position_api_runtime"]["status"], "source_unavailable")
+        self.assertEqual(payload["live"]["board_position_api"]["status"], "source_unavailable")
+        self.assertTrue(payload["live"]["board_position_api"]["service_reachable"])
+
+    def test_query_board_telemetry_parses_cpu_and_memory_usage(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        board_access = server.build_board_access_config(
+            {"host": "demo-board", "user": "demo-user", "password": "demo-pass", "port": "22"},
+            fallback=state._board_access,
+        )
+        stdout = "\n".join(
+            [
+                "MemTotal:        2048000 kB",
+                "MemFree:          128000 kB",
+                "MemAvailable:     512000 kB",
+                "Buffers:           64000 kB",
+                "Cached:           256000 kB",
+                "__CODEX_MEMINFO_END__",
+                "cpu  100 0 50 850 0 0 0 0 0 0",
+                "__CODEX_STAT1_END__",
+                "cpu  130 0 60 870 0 0 0 0 0 0",
+                "__CODEX_STAT2_END__",
+                "1.25 0.50 0.25 1/100 1234",
+                "__CODEX_LOADAVG_END__",
+                "4",
+            ]
+        )
+
+        with patch(
+            "server.run_ssh_command",
+            return_value=server.subprocess.CompletedProcess([], 0, stdout=stdout, stderr=""),
+        ):
+            telemetry = server.query_board_telemetry(board_access, timeout_sec=3.0)
+
+        self.assertEqual(telemetry["status"], "ok")
+        self.assertEqual(telemetry["compute_label"], "CPU")
+        self.assertAlmostEqual(telemetry["compute_pct"], 66.667, places=3)
+        self.assertAlmostEqual(telemetry["memory_pct"], 75.0, places=3)
+        self.assertAlmostEqual(telemetry["memory_used_mb"], 1500.0, places=1)
+        self.assertAlmostEqual(telemetry["memory_total_mb"], 2000.0, places=1)
+        self.assertEqual(telemetry["cpu_cores"], 4)
+
+    def test_system_status_endpoint_exposes_board_telemetry(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        request_json(
+            state,
+            "POST",
+            "/api/session/board-access",
+            body=json.dumps({"password": "demo-pass"}).encode("utf-8"),
+        )
+        state._last_live_probe = live_probe_payload("2026-04-11T03:33:00+0800", "board reachable")
+
+        with patch(
+            "server.query_board_telemetry",
+            return_value={
+                "status": "ok",
+                "stale": False,
+                "source": "ssh_procfs",
+                "collected_at": "2026-04-11T03:33:05+0800",
+                "compute_label": "CPU",
+                "compute_pct": 48.5,
+                "memory_pct": 61.2,
+                "memory_used_mb": 1254.0,
+                "memory_available_mb": 796.0,
+                "memory_total_mb": 2050.0,
+                "loadavg_1m": 1.42,
+                "cpu_cores": 4,
+            },
+        ), patch.object(
+            state,
+            "_aircraft_position_upstream_probe_snapshot",
+            return_value={
+                "status": "not_found",
+                "selected_url": "",
+                "selected_source": "",
+                "candidate_urls": list(server.DEFAULT_AIRCRAFT_POSITION_UPSTREAM_CANDIDATES),
+                "results": [],
+            },
+        ):
+            status, _, payload = request_json(state, "GET", "/api/system-status")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["live"]["telemetry"]["status"], "ok")
+        self.assertEqual(payload["live"]["telemetry"]["compute_label"], "CPU")
+        self.assertAlmostEqual(payload["live"]["telemetry"]["compute_pct"], 48.5)
+        self.assertAlmostEqual(payload["live"]["telemetry"]["memory_pct"], 61.2)
+        self.assertAlmostEqual(payload["live"]["telemetry"]["memory_used_mb"], 1254.0)
+
+    def test_system_status_reuses_cached_board_telemetry_while_refreshing(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        request_json(
+            state,
+            "POST",
+            "/api/session/board-access",
+            body=json.dumps({"password": "demo-pass"}).encode("utf-8"),
+        )
+        state._last_live_probe = live_probe_payload("2026-04-11T03:33:00+0800", "board reachable")
+        state._board_telemetry_cache = {
+            "status": "ok",
+            "stale": False,
+            "source": "ssh_procfs",
+            "collected_at": "2026-04-11T03:33:05+0800",
+            "compute_label": "CPU",
+            "compute_pct": 48.5,
+            "memory_pct": 61.2,
+            "memory_used_mb": 1254.0,
+            "memory_available_mb": 796.0,
+            "memory_total_mb": 2050.0,
+            "loadavg_1m": 1.42,
+            "cpu_cores": 4,
+        }
+        state._board_telemetry_cache_ts = time.monotonic() - (server.BOARD_TELEMETRY_TTL_SEC + 1.0)
+
+        fake_thread = Mock()
+        fake_thread.start = Mock()
+
+        with (
+            patch.object(
+                state,
+                "_aircraft_position_upstream_probe_snapshot",
+                return_value={
+                    "status": "not_found",
+                    "selected_url": "",
+                    "selected_source": "",
+                    "candidate_urls": list(server.DEFAULT_AIRCRAFT_POSITION_UPSTREAM_CANDIDATES),
+                    "results": [],
+                },
+            ),
+            patch.object(
+                state,
+                "_board_position_api_snapshot",
+                return_value={
+                    "status": "source_unavailable",
+                    "note": "板端定位 API 服务已启动，但当前没有拿到有效位置样本。",
+                },
+            ),
+            patch("server.threading.Thread", return_value=fake_thread) as thread_cls,
+        ):
+            status, _, payload = request_json(state, "GET", "/api/system-status")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["live"]["telemetry"]["status"], "stale")
+        self.assertAlmostEqual(payload["live"]["telemetry"]["memory_pct"], 61.2)
+        self.assertIn("后台刷新中", payload["live"]["telemetry"]["note"])
+        thread_cls.assert_called_once()
+        fake_thread.start.assert_called_once()
+
+    def test_board_position_api_snapshot_reuses_cached_payload_while_refreshing(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        request_json(
+            state,
+            "POST",
+            "/api/session/board-access",
+            body=json.dumps(
+                {"host": "100.121.87.73", "user": "demo-user", "password": "demo-pass", "port": "22"}
+            ).encode("utf-8"),
+        )
+        state._board_position_api_cache = {
+            "status": "source_unavailable",
+            "note": "板端定位 API 服务已启动，但当前没有拿到有效位置样本。",
+            "service_reachable": True,
+            "http_status": 200,
+            "sample_ready": False,
+        }
+        state._board_position_api_cache_ts = time.monotonic() - (server.BOARD_POSITION_API_TTL_SEC + 1.0)
+
+        fake_thread = Mock()
+        fake_thread.start = Mock()
+
+        with patch("server.threading.Thread", return_value=fake_thread) as thread_cls:
+            payload = state._board_position_api_snapshot(state._board_access)
+
+        self.assertEqual(payload["status"], "source_unavailable")
+        self.assertTrue(payload["stale"])
+        self.assertIn("后台刷新中", payload["note"])
+        thread_cls.assert_called_once()
+        fake_thread.start.assert_called_once()
+
+    def test_system_status_reports_upstream_not_found_when_probe_finds_no_candidate(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None, bind_host="0.0.0.0", bind_port=8079)
+        request_json(
+            state,
+            "POST",
+            "/api/session/board-access",
+            body=json.dumps(
+                {"host": "100.121.87.73", "user": "demo-user", "password": "demo-pass", "port": "22"}
+            ).encode("utf-8"),
+        )
+
+        with (
+            patch(
+                "server._default_backend_base_url_for_board",
+                return_value="http://100.116.93.120:8079",
+            ),
+            patch.object(
+                state,
+                "_aircraft_position_upstream_probe_snapshot",
+                return_value={
+                    "status": "not_found",
+                    "selected_url": "",
+                    "selected_source": "",
+                    "candidate_urls": list(server.DEFAULT_AIRCRAFT_POSITION_UPSTREAM_CANDIDATES),
+                    "results": [{"url": "http://127.0.0.1:9000/gps", "error": "url_error:connection refused"}],
+                },
+            ),
+        ):
+            status, _, payload = request_json(state, "GET", "/api/system-status")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["aircraft_position"]["bridge_runtime"]["status"], "upstream_not_found")
+        self.assertFalse(payload["aircraft_position"]["bridge_runtime"]["configured"])
+        self.assertEqual(payload["live"]["aircraft_bridge"]["status"], "upstream_not_found")
+
+    def test_system_status_reports_autodiscovered_upstream_when_probe_finds_candidate(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None, bind_host="0.0.0.0", bind_port=8079)
+        request_json(
+            state,
+            "POST",
+            "/api/session/board-access",
+            body=json.dumps(
+                {"host": "100.121.87.73", "user": "demo-user", "password": "demo-pass", "port": "22"}
+            ).encode("utf-8"),
+        )
+
+        with (
+            patch(
+                "server._default_backend_base_url_for_board",
+                return_value="http://100.116.93.120:8079",
+            ),
+            patch.object(
+                state,
+                "_aircraft_position_upstream_probe_snapshot",
+                return_value={
+                    "status": "detected",
+                    "selected_url": "http://127.0.0.1:9527/api/v1/position",
+                    "selected_source": "auto_discovered",
+                    "candidate_urls": list(server.DEFAULT_AIRCRAFT_POSITION_UPSTREAM_CANDIDATES),
+                    "results": [{"url": "http://127.0.0.1:9527/api/v1/position", "has_coordinates": True}],
+                },
+            ),
+        ):
+            status, _, payload = request_json(state, "GET", "/api/system-status")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["aircraft_position"]["bridge_runtime"]["status"], "autodiscovered")
+        self.assertTrue(payload["aircraft_position"]["bridge_runtime"]["configured"])
+        self.assertEqual(
+            payload["aircraft_position"]["bridge_runtime"]["upstream_url"],
+            "http://127.0.0.1:9527/api/v1/position",
+        )
+        self.assertEqual(
+            payload["aircraft_position"]["bridge_runtime"]["upstream_url_source"],
+            "auto_discovered",
+        )
+        self.assertEqual(payload["live"]["aircraft_bridge"]["status"], "autodiscovered")
 
     def test_aircraft_position_endpoint_updates_backend_feed(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
@@ -1379,6 +2965,96 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertAlmostEqual(latest["kinematics"]["altitude_m"], 3201.2)
         self.assertEqual(latest["sample"]["sequence"], 12)
         self.assertEqual(latest["feed_contract"]["active_source_label"], "Upper Computer GPS")
+
+    def test_system_status_marks_aircraft_bridge_live_when_live_feed_is_active(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        state._board_access = state._board_access.with_env_overrides(
+            {
+                "AIRCRAFT_POSITION_UPSTREAM_URL": "http://127.0.0.1:9000/gps",
+                "AIRCRAFT_POSITION_BACKEND_BASE_URL": "http://demo-host:8079",
+            }
+        )
+        request_json(
+            state,
+            "POST",
+            "/api/aircraft-position",
+            body=json.dumps(
+                {
+                    "source_kind": "upper_computer_gps",
+                    "source_status": "live",
+                    "position": {"latitude": 31.205, "longitude": 121.551},
+                }
+            ).encode("utf-8"),
+        )
+
+        status, _, payload = request_json(state, "GET", "/api/system-status")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["aircraft_position"]["bridge_runtime"]["status"], "live")
+        self.assertTrue(payload["aircraft_position"]["bridge_runtime"]["configured"])
+        self.assertTrue(payload["aircraft_position"]["bridge_runtime"]["live_feed_active"])
+        self.assertEqual(payload["live"]["aircraft_bridge"]["status"], "live")
+
+    def test_system_status_marks_external_aircraft_bridge_as_local(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        state._board_access = state._board_access.with_env_overrides(
+            {
+                "AIRCRAFT_POSITION_EXECUTION_MODE": "local",
+                "AIRCRAFT_POSITION_UPSTREAM_URL": "https://api.map.baidu.com/location/ip?coor=bd09ll&output=json&ak=demo",
+                "AIRCRAFT_POSITION_LATITUDE_PATH": "content.point.y",
+                "AIRCRAFT_POSITION_LONGITUDE_PATH": "content.point.x",
+                "AIRCRAFT_POSITION_SOURCE_LABEL": "百度IP定位",
+            }
+        )
+        with patch.object(
+            state,
+            "_aircraft_position_upstream_probe_snapshot",
+            return_value={
+                "status": "configured",
+                "selected_url": "https://api.map.baidu.com/location/ip?coor=bd09ll&output=json&ak=demo",
+                "selected_source": "env",
+                "candidate_urls": [],
+                "results": [],
+            },
+        ):
+            status, _, payload = request_json(state, "GET", "/api/system-status")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["aircraft_position"]["bridge_runtime"]["status"], "armed_local")
+        self.assertEqual(payload["aircraft_position"]["bridge_runtime"]["execution_mode"], "local")
+        self.assertEqual(payload["live"]["aircraft_bridge"]["status"], "armed_local")
+
+    def test_run_local_aircraft_position_bridge_once_updates_backend_feed(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        state._board_access = state._board_access.with_env_overrides(
+            {
+                "AIRCRAFT_POSITION_EXECUTION_MODE": "local",
+                "AIRCRAFT_POSITION_UPSTREAM_URL": "https://api.map.baidu.com/location/ip?coor=bd09ll&output=json&ak=demo",
+                "AIRCRAFT_POSITION_LATITUDE_PATH": "content.point.y",
+                "AIRCRAFT_POSITION_LONGITUDE_PATH": "content.point.x",
+                "AIRCRAFT_POSITION_SOURCE_LABEL": "百度IP定位",
+                "AIRCRAFT_POSITION_INTERVAL_SEC": "1.0",
+            }
+        )
+
+        with patch(
+            "server.fetch_normalized_payload",
+            return_value={
+                "source_kind": "upper_computer_gps",
+                "source_status": "live",
+                "source_label": "百度IP定位",
+                "position": {"latitude": 22.943853, "longitude": 113.390465},
+                "sample": {"captured_at": "2026-04-11T12:00:00+08:00", "upstream_url": "https://api.map.baidu.com/location/ip"},
+            },
+        ):
+            result = state._run_local_aircraft_position_bridge_once()
+
+        self.assertTrue(result)
+        latest = state.current_aircraft_position()
+        self.assertEqual(latest["source_status"], "live")
+        self.assertAlmostEqual(latest["position"]["latitude"], 22.943853)
+        self.assertAlmostEqual(latest["position"]["longitude"], 113.390465)
+        self.assertEqual(state._local_aircraft_bridge_state["status"], "running")
 
     def test_aircraft_position_endpoint_auto_sequences_live_samples_when_feed_metadata_is_implicit(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
@@ -1876,6 +3552,9 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(payload["live_progress"]["completed_count"], 0)
         self.assertEqual(payload["live_progress"]["expected_count"], server.DEFAULT_MAX_INPUTS)
         self.assertEqual(payload["live_progress"]["count_label"], f"0 / {server.DEFAULT_MAX_INPUTS}")
+        self.assertIsNone(payload["timings"]["payload_ms"])
+        self.assertIsNone(payload["timings"]["total_ms"])
+        self.assertEqual(payload["timings"]["stages"], [])
         self.assertIn("guided_demo", state.current_snapshot())
 
     def test_run_inference_endpoint_starts_live_job_with_preloaded_env_after_password_only_save(self) -> None:
@@ -2346,6 +4025,9 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertNotIn("Permission denied", payload["message"])
         self.assertEqual(payload["live_attempt"]["diagnostics"]["stderr"], "Permission denied (publickey,password).")
         self.assertEqual(payload["live_progress"]["label"], "在线失败已回退")
+        self.assertIsNone(payload["timings"]["payload_ms"])
+        self.assertIsNone(payload["timings"]["total_ms"])
+        self.assertEqual(payload["timings"]["stages"], [])
 
     def test_inference_timeout_fallback_marks_handshake_incomplete_and_archive_only(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
@@ -2424,6 +4106,9 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertIn("不宣称本次 live 已完成", payload["message"])
         self.assertFalse(payload["live_attempt"]["control_handshake_complete"])
         self.assertEqual(payload["live_progress"]["label"], "握手未完成，已回退")
+        self.assertIsNone(payload["timings"]["payload_ms"])
+        self.assertIsNone(payload["timings"]["total_ms"])
+        self.assertEqual(payload["timings"]["stages"], [])
 
     def test_inject_fault_endpoint_keeps_live_attempt_diagnostics_on_replay_fallback(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)

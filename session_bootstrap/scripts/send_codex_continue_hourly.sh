@@ -9,7 +9,9 @@ REPO_ROOT="$(cd "$SESSION_DIR/.." && pwd)"
 CODEX_HOME_DIR="${CODEX_HOME:-$HOME/.codex}"
 AUTO_CONTINUE_MARKER="[auto-continue]"
 
-DEFAULT_MESSAGE="继续"
+DEFAULT_MESSAGE_FALLBACK="继续"
+DEFAULT_MESSAGE_FILE="$SESSION_DIR/tasks/codex_continue_current_work_prompt.txt"
+DEFAULT_MESSAGE="$DEFAULT_MESSAGE_FALLBACK"
 DEFAULT_PROJECT_FOCUS="tvm-飞腾派项目"
 DEFAULT_PROJECT_GUIDE_PATHS="session_bootstrap/tasks/赛题对齐后续执行总清单_2026-03-13.md|session_bootstrap/tasks/赛题对齐执行追踪板_2026-03-13.md|session_bootstrap/README.md"
 DEFAULT_INTERVAL_MINUTES=20
@@ -48,7 +50,8 @@ Options:
   --resume-id <id>        Codex resume/session id to continue.
   --cd <dir>              Working directory to pass to `codex exec -C ... resume`. By default the
                           script resolves the original cwd from the local Codex session file.
-  --message <text>        Message to send. Default: 继续.
+  --message <text>        Message to send. Overrides the repo default prompt file when provided.
+  --message-file <path>   Read the message text from a file.
   --message-mode <mode>   `plain` = send only the raw message; `anchored` = prepend recent local
                           session context. Default: plain.
   --project-focus <text>  Fixed project scope injected into the continue prompt.
@@ -90,7 +93,9 @@ Options:
 Notes:
   - The script resolves the original workspace from ~/.codex/sessions for the given resume id,
     then passes that path via `codex exec -C ... resume`.
-  - By default the script sends only the raw `--message` text.
+  - By default the script sends only the raw message text.
+  - If `session_bootstrap/tasks/codex_continue_current_work_prompt.txt` exists and neither
+    `--message` nor `--message-file` is provided, that file becomes the default message.
   - Use `--message-mode anchored` if you want the old auto-anchored prompt behavior.
   - Assistant replies produced by a previous auto-continue are not reused as the next anchor.
   - Transient connection errors are retried automatically every 15 seconds until the tick
@@ -104,6 +109,7 @@ WORKDIR_EXPLICIT=0
 SESSION_FILE=""
 SESSION_FILE_RESOLVED=0
 MESSAGE="$DEFAULT_MESSAGE"
+MESSAGE_FILE=""
 MESSAGE_MODE="$DEFAULT_MESSAGE_MODE"
 PROJECT_FOCUS="$DEFAULT_PROJECT_FOCUS"
 PROJECT_GUIDE_PATHS="$DEFAULT_PROJECT_GUIDE_PATHS"
@@ -133,6 +139,8 @@ STATE_FILE=""
 LOG_FILE_EXPLICIT=0
 LOCK_FILE_EXPLICIT=0
 STATE_FILE_EXPLICIT=0
+MESSAGE_EXPLICIT=0
+MESSAGE_FILE_EXPLICIT=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -160,6 +168,13 @@ while [[ $# -gt 0 ]]; do
     --message)
       [[ $# -ge 2 ]] || { echo "ERROR: --message requires a value." >&2; exit 1; }
       MESSAGE="$2"
+      MESSAGE_EXPLICIT=1
+      shift 2
+      ;;
+    --message-file)
+      [[ $# -ge 2 ]] || { echo "ERROR: --message-file requires a value." >&2; exit 1; }
+      MESSAGE_FILE="$2"
+      MESSAGE_FILE_EXPLICIT=1
       shift 2
       ;;
     --message-mode)
@@ -287,6 +302,31 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+load_message_from_file() {
+  local message_path="$1"
+  if [[ ! -f "$message_path" ]]; then
+    echo "ERROR: message file not found: $message_path" >&2
+    exit 1
+  fi
+  if [[ ! -r "$message_path" ]]; then
+    echo "ERROR: message file is not readable: $message_path" >&2
+    exit 1
+  fi
+  MESSAGE="$(<"$message_path")"
+}
+
+if (( MESSAGE_EXPLICIT == 1 && MESSAGE_FILE_EXPLICIT == 1 )); then
+  echo "ERROR: pass only one of --message or --message-file." >&2
+  exit 1
+fi
+
+if (( MESSAGE_FILE_EXPLICIT == 1 )); then
+  load_message_from_file "$MESSAGE_FILE"
+elif (( MESSAGE_EXPLICIT == 0 )) && [[ -f "$DEFAULT_MESSAGE_FILE" ]]; then
+  MESSAGE_FILE="$DEFAULT_MESSAGE_FILE"
+  load_message_from_file "$MESSAGE_FILE"
+fi
 
 if [[ -n "$START_AT" && -n "$START_IN_MIN" ]]; then
   echo "ERROR: use either --start-at or --start-in-min, not both." >&2
@@ -816,6 +856,7 @@ kv_label() {
     message_mode) printf '%s' 'message_mode' ;;
     sandbox) printf '%s' 'sandbox' ;;
     approval) printf '%s' 'approval' ;;
+    message_file) printf '%s' 'message_file' ;;
     sends) printf '%s' 'sends' ;;
     at) printf '%s' 'at' ;;
     reply) printf '%s' 'reply' ;;
@@ -1661,10 +1702,11 @@ log_block "started" \
   "$(kv_line message_mode "$MESSAGE_MODE")" \
   "$(kv_line sandbox "$SANDBOX_MODE")" \
   "$(kv_line approval "$APPROVAL_POLICY")" \
+  "$(kv_line message_file "${MESSAGE_FILE:-inline}")" \
   "$(kv_line status "$([[ "$ALWAYS_SEND" -eq 1 ]] && printf '%s' 'always send' || printf 'send when tail changes (max skip %s)' "$MAX_UNCHANGED_TAIL_SKIPS")")" \
   "$(kv_line schedule_mode "$SCHEDULE_MODE")" \
   "$(kv_line wait_timeout "$(format_wait_timeout)")" \
-  "$(kv_line base_msg "$MESSAGE")"
+  "$(kv_line base_msg "$(single_line_text "$MESSAGE")")"
 
 if [[ -n "$LATEST_WORKDIR_SESSION_ID" && "$LATEST_WORKDIR_SESSION_ID" != "$RESUME_ID" ]]; then
   log_block "warning" \

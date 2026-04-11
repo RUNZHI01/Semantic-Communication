@@ -1,4 +1,3 @@
-import { useState, useEffect } from 'react'
 import { UseQueryResult } from '@tanstack/react-query'
 import type { SystemStatusResponse } from '../../../api/types'
 import { Icons } from '../../icons'
@@ -52,29 +51,20 @@ export function MinimalStatusPanel({ system }: MinimalStatusPanelProps) {
   const status = system.data
   const live = status?.live
   const sp = status?.safety_panel
+  const boardPositionApi = live?.board_position_api as Record<string, unknown> | undefined
   const boardOnline = live?.board_online ?? false
-
-  const [npuLoad, setNpuLoad] = useState(0)
-  const [memUsage, setMemUsage] = useState(0)
-
-  useEffect(() => {
-    if (!boardOnline) {
-      setNpuLoad(0)
-      setMemUsage(0)
-      return
-    }
-    
-    // Initial values
-    setNpuLoad(85)
-    setMemUsage(60)
-
-    const interval = setInterval(() => {
-      setNpuLoad(prev => Math.min(100, Math.max(75, prev + (Math.random() * 10 - 5))))
-      setMemUsage(prev => Math.min(100, Math.max(50, prev + (Math.random() * 6 - 3))))
-    }, 1500)
-
-    return () => clearInterval(interval)
-  }, [boardOnline])
+  const telemetry = live?.telemetry
+  const computeLabel = telemetry?.compute_label ?? 'CPU'
+  const computeUsage = telemetry?.compute_pct ?? 0
+  const memUsage = telemetry?.memory_pct ?? 0
+  const telemetryStatus = telemetry?.status ?? 'unavailable'
+  const memorySummary = telemetry?.memory_used_mb != null && telemetry?.memory_total_mb != null
+    ? `${Math.round(telemetry.memory_used_mb)} / ${Math.round(telemetry.memory_total_mb)} MB`
+    : '—'
+  const loadSummary = telemetry?.loadavg_1m != null
+    ? `${telemetry.loadavg_1m.toFixed(2)}`
+    : '—'
+  const boardPositionApiStatus = String(boardPositionApi?.status ?? 'unavailable')
 
   return (
     <div className={s.container}>
@@ -83,11 +73,11 @@ export function MinimalStatusPanel({ system }: MinimalStatusPanelProps) {
           <Icons.Activity size={13} style={{ color: 'var(--color-primary)' }} />
           <span>Hardware Telemetry</span>
         </div>
-        <Waveform active={boardOnline} />
+        <Waveform active={boardOnline && telemetryStatus === 'ok'} />
       </div>
 
       <div className={s.gaugesRow}>
-        <CircularGauge value={npuLoad} color="var(--color-primary)" label="NPU" />
+        <CircularGauge value={computeUsage} color="var(--color-primary)" label={computeLabel} />
         <CircularGauge value={memUsage} color="var(--color-success)" label="MEM" />
       </div>
 
@@ -118,6 +108,30 @@ export function MinimalStatusPanel({ system }: MinimalStatusPanelProps) {
         <div className={s.detailRow}>
           <span className={s.detailLabel}>Target</span>
           <span className={s.detailValue}>{live?.target ?? '—'}</span>
+        </div>
+
+        <div className={s.detailRow}>
+          <span className={s.detailLabel}>Memory</span>
+          <span className={s.detailValue}>{memorySummary}</span>
+        </div>
+
+        <div className={s.detailRow}>
+          <span className={s.detailLabel}>Load 1m</span>
+          <span className={s.detailValue}>{loadSummary}</span>
+        </div>
+
+        <div className={s.detailRow}>
+          <span className={s.detailLabel}>Telemetry</span>
+          <span className={telemetryStatus === 'ok' ? s.detailValueAccent : s.detailValue}>
+            {telemetryStatus.toUpperCase()}
+          </span>
+        </div>
+
+        <div className={s.detailRow}>
+          <span className={s.detailLabel}>定位 API</span>
+          <span className={boardPositionApiStatus === 'live' ? s.detailValueAccent : s.detailValue}>
+            {boardPositionApiStatus.toUpperCase()}
+          </span>
         </div>
       </div>
     </div>
