@@ -1,4 +1,3 @@
-import { useState, useEffect } from 'react'
 import { UseQueryResult } from '@tanstack/react-query'
 import type { SystemStatusResponse } from '../../../api/types'
 import type { BatchStateResponse } from '../../../api/types/crypto'
@@ -52,39 +51,16 @@ export function HeroMetrics({ system, inferenceProgress, batchState }: HeroMetri
   const isSingleInferenceActive = !!inferenceProgress?.data && inferenceProgress.data.request_state === 'running'
   const isBatchActive = batch?.status === 'running'
   const isActiveInference = isSingleInferenceActive || isBatchActive
+  const batchEngineLabel = batch?.engine === 'mnn' ? 'MNN 推理' : 'TVM 推理'
   const progressLabel = isSingleInferenceActive
     ? (lp?.label ?? inferenceProgress?.data?.status_category ?? inferenceProgress?.data?.request_state)
     : isBatchActive
-      ? `Current 300 张 ${batch?.completed ?? 0}/${batch?.total ?? 300}`
+      ? `${batchEngineLabel} ${batch?.completed ?? 0}/${batch?.total ?? 300}`
       : batch?.status === 'done'
         ? batch.fallback && batch.fallback > 0
           ? `批量结束 ${batch.success ?? 0}/${batch.total ?? 300} 成功`
           : '批量完成'
         : '空闲'
-
-  // Dynamic Jitter State
-  const [displayPayload, setDisplayPayload] = useState<number | null | undefined>(basePayloadCurrent)
-  const [displayImprovement, setDisplayImprovement] = useState<number | null | undefined>(baseImprovementPct)
-
-  useEffect(() => {
-    if (!isActiveInference || basePayloadCurrent == null || baseImprovementPct == null) {
-      setDisplayPayload(basePayloadCurrent)
-      setDisplayImprovement(baseImprovementPct)
-      return
-    }
-
-    const interval = setInterval(() => {
-      // Jitter payload by +/- 1.5ms
-      const payloadJitter = (Math.random() * 3) - 1.5
-      setDisplayPayload(basePayloadCurrent + payloadJitter)
-
-      // Jitter improvement by +/- 0.5%
-      const improvementJitter = (Math.random() * 1) - 0.5
-      setDisplayImprovement(baseImprovementPct + improvementJitter)
-    }, 800)
-
-    return () => clearInterval(interval)
-  }, [isActiveInference, basePayloadCurrent, baseImprovementPct])
 
   // Mock data for sparklines to show activity
   const mockPayloadData = [145, 142, 138, 135, 132, 130, 131, 129, 130];
@@ -122,10 +98,10 @@ export function HeroMetrics({ system, inferenceProgress, batchState }: HeroMetri
           <span className={s.metricLabel}>Payload</span>
         </div>
         <div className={s.metricValueContainer}>
-          {displayPayload != null ? (
+          {basePayloadCurrent != null ? (
             <>
               <span className={`${s.metricValue} ${s.metricHighlight}`}>
-                <CountUp end={displayPayload} decimals={1} duration={350} /> ms
+                <CountUp end={basePayloadCurrent} decimals={1} duration={350} /> ms
               </span>
               {isActiveInference && <Sparkline data={mockPayloadData} color="var(--color-primary)" />}
             </>
@@ -153,7 +129,7 @@ export function HeroMetrics({ system, inferenceProgress, batchState }: HeroMetri
       </div>
 
       {/* Improvement */}
-      {displayImprovement != null && (
+      {baseImprovementPct != null && (
         <div className={s.metricItem}>
           <div className={s.metricTop}>
             <Icons.TrendingUp size={11} className={s.metricIcon} style={{ color: 'var(--color-primary)' }} aria-hidden="true" />
@@ -161,7 +137,7 @@ export function HeroMetrics({ system, inferenceProgress, batchState }: HeroMetri
           </div>
           <div className={s.metricValueContainer}>
             <span className={s.metricValueGiant}>
-              <CountUp end={displayImprovement} decimals={1} duration={350} />%
+              <CountUp end={baseImprovementPct} decimals={1} duration={350} />%
             </span>
             {isActiveInference && <Sparkline data={mockSpeedupData} color="var(--color-primary)" />}
           </div>

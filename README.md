@@ -38,6 +38,7 @@
 ├── session_bootstrap/              # 执行脚手架（脚本、配置、日志、报告）
 │   ├── scripts/                       # 执行脚本（调优、推理、部署、benchmark）
 │   ├── config/                        # 环境配置（.env 文件）
+│   ├── docs/                          # 持续维护的设计文档
 │   ├── reports/                       # 实验报告与 benchmark 结果
 │   ├── logs/                          # 运行日志
 │   ├── runbooks/                      # 操作手册
@@ -73,6 +74,7 @@
 | 启动集成 OpenAMP demo 软件 | `bash session_bootstrap/scripts/run_openamp_demo.sh` |
 | OpenAMP demo 软件说明 | `session_bootstrap/demo/openamp_control_plane_demo/README.md` |
 | ML-KEM / 后量子安全链路合入位置 | 见下方“ML-KEM 工作位置” |
+| USRP latent 数据面方案（审查版） | `session_bootstrap/docs/design_usrp_latent_transport.md` |
 | 下一轮性能优化执行清单 | `session_bootstrap/runbooks/next_round_optimization_checklist.md` |
 | big.LITTLE 首次真机一键入口 | `bash session_bootstrap/scripts/run_big_little_first_real_attempt.sh` |
 | big.LITTLE 真机结论摘要（推荐入口） | `session_bootstrap/reports/big_little_real_run_summary_20260318.md` |

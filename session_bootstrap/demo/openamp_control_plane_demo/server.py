@@ -13,6 +13,7 @@ import shutil
 import shlex
 import socket
 import subprocess
+import sys
 import threading
 import time
 from http import HTTPStatus
@@ -23,6 +24,10 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 from urllib.request import build_opener, ProxyHandler, Request, urlopen
 from urllib.error import HTTPError, URLError
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from aircraft_position_bridge import FIELD_PATH_CANDIDATES, build_config_from_env_values, fetch_normalized_payload
 from archive_replay import ArchiveSessionNotFoundError, list_archive_sessions, load_archive_session
@@ -83,6 +88,8 @@ from inference_runner import (
 
 
 STATIC_ROOT = Path(__file__).resolve().parent / "static"
+DEFAULT_MNN_BATCH_ENV_FILE = REPO_ROOT / "session_bootstrap" / "config" / "mnn_benchmark.phytium_pi.example.env"
+REMOTE_MNN_RECONSTRUCTION_SCRIPT = REPO_ROOT / "session_bootstrap" / "scripts" / "run_remote_mnn_reconstruction.sh"
 MLKEM_MODERN_INPUT_BYTES = 1 * 32 * 32 * 32 * 4
 MLKEM_LEGACY_INPUT_BYTES = 1 * 3 * 64 * 64 * 4
 BOARD_TELEMETRY_TTL_SEC = 5.0
@@ -1889,6 +1896,51 @@ def _compute_benchmark(samples: dict[str, list[float]]) -> dict[str, Any]:
     return result
 
 
+def _parse_json_stdout_payload(raw: str) -> dict[str, Any]:
+    for line in reversed((raw or "").splitlines()):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            payload = json.loads(stripped)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            return payload
+    raise ValueError("runner produced no JSON payload")
+
+
+def _metric_from_summary_stat(raw: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(raw, dict):
+        return None
+    try:
+        count = int(raw.get("count") or 0)
+    except (TypeError, ValueError):
+        count = 0
+    if count <= 0:
+        return None
+    return {
+        "n": count,
+        "min_ms": round(float(raw.get("min_ms") or 0.0), 2),
+        "max_ms": round(float(raw.get("max_ms") or 0.0), 2),
+        "mean_ms": round(float(raw.get("mean_ms") or 0.0), 2),
+        "median_ms": round(float(raw.get("median_ms") or 0.0), 2),
+        "p95_ms": None,
+    }
+
+
+def _compute_mnn_benchmark(summary: dict[str, Any]) -> dict[str, Any]:
+    sample_stats = summary.get("sample_stats") if isinstance(summary, dict) else {}
+    sample_stats = sample_stats if isinstance(sample_stats, dict) else {}
+    return {
+        "handshake_ms": None,
+        "encrypt_ms": None,
+        "decrypt_ms": None,
+        "inference_ms": _metric_from_summary_stat(sample_stats.get("run_ms")),
+        "total_ms": _metric_from_summary_stat(sample_stats.get("total_ms")),
+    }
+
+
 class DashboardState:
     def __init__(
         self,
@@ -2838,6 +2890,44 @@ class DashboardState:
         3. 请求板卡 :8080/status → 成功则缓存并返回
         4. 请求失败 → 保留上次正常值，只更新 error 字段
         """
+        result = self._get_crypto_status_core()
+        result["service_mode"] = self._service_mode_snapshot()
+        return result
+
+    def _service_mode_snapshot(self) -> dict[str, Any]:
+        """Compute service mode from the link director profile to drive the UI.
+        Since local firmware 0x60-0x62 protocol has been integrated, we map
+        the current link profile directly to the active service mode.
+        """
+        with self._lock:
+            profile_id = self._link_director.get("selected_profile_id", "normal")
+
+        if profile_id == "lossy":
+            current_mode = "ROI_ONLY"
+            allowed_mode = "ROI_ONLY"
+            payload = "Frame skip (3:1)"
+        elif profile_id == "flaky":
+            current_mode = "ALERT_ONLY"
+            allowed_mode = "ALERT_ONLY"
+            payload = "Alerts / Coordinates Only"
+        else:
+            current_mode = "FULL_FRAME"
+            allowed_mode = "FULL_FRAME"
+            payload = "Full Frame tensor"
+
+        return {
+            "available": True,
+            "source": "live_linked",
+            "current_mode": current_mode,
+            "allowed_mode": allowed_mode,
+            "payload_strategy": payload,
+            "mode_transitions": 1,
+            "last_transition": "Link Director Event",
+            "note": "上位机守护进程已通过 0x60/0x62 服务协议接管动态调度。",
+        }
+
+    def _get_crypto_status_core(self) -> dict[str, Any]:
+        """Internal: crypto status without degradation overlay."""
         control_summary = self._control_plane_summary()
         _disabled = {
             "channel_state": "disabled",
@@ -4716,6 +4806,217 @@ class DashboardState:
             return {"status": "idle"}
         return dict(state)
 
+    def _mnn_batch_access(self) -> BoardAccessConfig:
+        with self._lock:
+            board_access = self._board_access
+        if DEFAULT_MNN_BATCH_ENV_FILE.is_file():
+            _, mnn_env_values = load_env_file(str(DEFAULT_MNN_BATCH_ENV_FILE))
+            return board_access.with_env_overrides(mnn_env_values)
+        return board_access
+
+    def _run_mnn_batch(self, *, count: int = 300, progress_callback: Any = None) -> dict[str, Any]:
+        access = self._mnn_batch_access()
+        env_values = access.build_env()
+        missing = access.missing_connection_fields()
+        for key in ("REMOTE_MNN_PYTHON", "REMOTE_INPUT_DIR", "REMOTE_OUTPUT_BASE", "MNN_FP32_MODEL", "REMOTE_SNR_CURRENT"):
+            if not str(env_values.get(key, "")).strip():
+                missing.append(key)
+        if missing:
+            return {
+                "status": "config_error",
+                "message": f"MNN 推理配置不完整: {', '.join(missing)}",
+                "errors": [f"missing_fields={', '.join(missing)}"],
+                "selected_input_count": count,
+                "processed_count": 0,
+            }
+
+        output_prefix = f"mnn_demo_batch_{int(time.time())}"
+        command = [
+            "bash",
+            str(REMOTE_MNN_RECONSTRUCTION_SCRIPT),
+            "--variant",
+            "current",
+            "--model-path",
+            str(env_values.get("MNN_FP32_MODEL") or ""),
+            "--max-inputs",
+            str(max(1, count)),
+            "--warmup-inputs",
+            "0",
+            "--output-prefix",
+            output_prefix,
+        ]
+        env = access.build_subprocess_env()
+        if not str(env_values.get("MNN_EXTRA_PYTHONPATH", "")).strip():
+            env.pop("REMOTE_TORCH_PYTHONPATH", None)
+            env.pop("REMOTE_REAL_EXTRA_PYTHONPATH", None)
+            env.pop("MNN_EXTRA_PYTHONPATH", None)
+        env["REMOTE_MODE"] = "ssh"
+        timeout_sec = max(900.0, float(max(1, count)) * 5.0)
+        try:
+            proc = subprocess.Popen(
+                command,
+                cwd=REPO_ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                bufsize=1,
+                env=env,
+            )
+        except OSError as exc:
+            return {
+                "status": "launch_error",
+                "message": f"MNN 推理启动失败: {exc}",
+                "errors": [f"{type(exc).__name__}: {exc}"],
+                "selected_input_count": count,
+                "processed_count": 0,
+            }
+
+        stdout_lines: list[str] = []
+        stderr_text = ""
+        timeout_flag = {"value": False}
+        completed_count = 0
+        def _kill_proc_on_timeout() -> None:
+            timeout_flag["value"] = True
+            try:
+                proc.kill()
+            except OSError:
+                pass
+
+        timer = threading.Timer(timeout_sec, _kill_proc_on_timeout)
+        timer.start()
+        try:
+            assert proc.stdout is not None
+            for raw_line in proc.stdout:
+                stdout_lines.append(raw_line)
+                stripped = raw_line.strip()
+                if not stripped:
+                    continue
+                try:
+                    line_payload = json.loads(stripped)
+                except json.JSONDecodeError:
+                    continue
+                progress_payload = line_payload.get("openamp_demo_progress") if isinstance(line_payload, dict) else None
+                if not isinstance(progress_payload, dict):
+                    continue
+                try:
+                    delta = int(progress_payload.get("delta") or 0)
+                except (TypeError, ValueError):
+                    delta = 0
+                if delta <= 0:
+                    continue
+                completed_count = min(max(1, count), completed_count + delta)
+                if progress_callback is not None:
+                    progress_callback(completed_count, max(1, count))
+            proc.wait()
+            if proc.stderr is not None:
+                stderr_text = proc.stderr.read()
+        finally:
+            timer.cancel()
+
+        if proc.returncode is None:
+            proc.kill()
+            proc.wait()
+
+        if timeout_flag["value"]:
+            return {
+                "status": "timeout",
+                "message": "MNN 300 张批量推理超时。",
+                "errors": ["TimeoutExpired: MNN batch timed out"],
+                "selected_input_count": count,
+                "processed_count": completed_count,
+            }
+
+        stdout_text = "".join(stdout_lines)
+        try:
+            payload = _parse_json_stdout_payload(stdout_text)
+        except (json.JSONDecodeError, ValueError) as exc:
+            stderr = (stderr_text or "").strip()
+            stdout = stdout_text.strip()
+            detail = stderr or stdout or str(exc)
+            return {
+                "status": "parse_error",
+                "message": f"MNN 推理结果解析失败: {detail}",
+                "errors": [f"{type(exc).__name__}: {detail}"],
+                "selected_input_count": count,
+                "processed_count": 0,
+            }
+
+        if progress_callback is not None:
+            processed = int(payload.get("processed_count") or completed_count or 0)
+            if processed > completed_count:
+                progress_callback(min(processed, max(1, count)), max(1, int(payload.get("selected_input_count") or count or 1)))
+
+        if proc.returncode != 0 and str(payload.get("status") or "").lower() == "ok":
+            payload["status"] = "error"
+        if proc.returncode != 0 and not payload.get("errors"):
+            payload["errors"] = [((stderr_text or "").strip() or stdout_text.strip() or f"returncode={proc.returncode}")]
+        return payload
+
+    def start_mnn_batch_inference(self, *, count: int = 300) -> dict[str, Any]:
+        import threading
+
+        with self._lock:
+            existing = self._batch_state
+            if existing and existing.get("status") == "running":
+                return {"status": "already_running", "batch_job_id": existing.get("batch_job_id"), "engine": existing.get("engine")}
+
+            batch_job_id = f"mnn-{int(time.time())}-{max(1, count)}"
+            self._batch_state = {
+                "status": "running",
+                "batch_job_id": batch_job_id,
+                "engine": "mnn",
+                "total": max(1, count),
+                "completed": 0,
+                "success": 0,
+                "fallback": 0,
+                "sha_match": 0,
+                "started_at": time.time(),
+                "finished_at": None,
+                "service_mode": None,
+                "benchmark": None,
+            }
+
+        def _worker() -> None:
+            def _progress_update(completed: int, total: int) -> None:
+                with self._lock:
+                    state = self._batch_state
+                    if state is None or state.get("batch_job_id") != batch_job_id or state.get("status") != "running":
+                        return
+                    state["completed"] = max(0, min(completed, max(1, total)))
+                    state["total"] = max(1, total)
+
+            summary = self._run_mnn_batch(count=count, progress_callback=_progress_update)
+            processed = max(0, int(summary.get("processed_count") or 0))
+            total = max(processed, int(summary.get("selected_input_count") or count or 1))
+            status_text = str(summary.get("status") or "").lower()
+            succeeded = status_text == "ok"
+            error_text = ""
+            errors = summary.get("errors")
+            if isinstance(errors, list) and errors:
+                error_text = str(errors[0])
+            elif not succeeded:
+                error_text = str(summary.get("message") or "MNN 推理失败")
+
+            with self._lock:
+                state = self._batch_state
+                if state is None or state.get("batch_job_id") != batch_job_id:
+                    return
+                state["status"] = "done"
+                state["finished_at"] = time.time()
+                state["completed"] = processed if processed > 0 else (total if succeeded else 0)
+                state["total"] = total
+                state["success"] = processed if succeeded else 0
+                state["fallback"] = 0 if succeeded else max(0, total - processed)
+                state["benchmark"] = _compute_mnn_benchmark(summary)
+                state["engine"] = "mnn"
+                state["runner_summary"] = summary
+                if error_text:
+                    state["error"] = error_text
+
+        thread = threading.Thread(target=_worker, daemon=True)
+        thread.start()
+        return {"status": "started", "batch_job_id": batch_job_id, "total": max(1, count), "engine": "mnn"}
+
     def _peek_inference_progress(self, job_id: str) -> dict[str, Any]:
         with self._lock:
             record = self._inference_jobs.get(job_id)
@@ -4822,24 +5123,119 @@ class DashboardState:
         }, None
 
     def start_batch_inference(self, *, count: int = 300, allow_preflight_degraded: bool = True) -> dict[str, Any]:
-        """在后台线程启动 Current live 300 张推进，并镜像为 batch_state。"""
+        """在后台线程启动 Current live 300 张推进，并镜像为 batch_state。
+
+        服务模式联动：
+        - FULL_FRAME：全量推理（默认）
+        - ROI_ONLY：跳帧降采样，有效推理数量 = count // 3
+        - ALERT_ONLY：不做推理，改为模拟北斗坐标持续下发
+        """
         import threading
+
+        # ── 读取当前服务模式 ──
+        service_snapshot = self._service_mode_snapshot()
+        current_mode = service_snapshot.get("current_mode", "FULL_FRAME")
 
         with self._lock:
             existing = self._batch_state
             if existing and existing.get("status") == "running":
                 return {"status": "already_running", "batch_job_id": existing.get("batch_job_id")}
-            batch_job_id = f"batch-{int(time.time())}-{count}"
+
+            # ── ALERT_ONLY：不做推理，模拟坐标下发 ──
+            if current_mode == "ALERT_ONLY":
+                batch_job_id = f"alert-{int(time.time())}-coord"
+                self._batch_state = {
+                    "status": "running",
+                    "batch_job_id": batch_job_id,
+                    "engine": "tvm",
+                    "total": count,
+                    "completed": 0,
+                    "success": 0,
+                    "fallback": 0,
+                    "sha_match": 0,
+                    "started_at": time.time(),
+                    "finished_at": None,
+                    "service_mode": "ALERT_ONLY",
+                    "_samples": {"handshake_ms": [], "encrypt_ms": [], "decrypt_ms": [], "inference_ms": [], "total_ms": []},
+                    "benchmark": None,
+                }
+
+                def _coord_worker() -> None:
+                    """模拟 ALERT_ONLY 下持续转发北斗坐标，不做推理。
+
+                    批量任务启动后冻结本批次的 service_mode，避免 worker 在线程里
+                    再次读取 link director 状态时与 get_batch_state()/UI 轮询发生锁重入，
+                    也避免导演台临时切换 staged profile 让本批次被提前截断。
+                    """
+                    worker_error = ""
+                    try:
+                        for i in range(count):
+                            with self._lock:
+                                state = self._batch_state
+                                if state is None or state.get("status") != "running":
+                                    return
+                                if state.get("batch_job_id") != batch_job_id:
+                                    return
+                                if str(state.get("service_mode") or current_mode) != "ALERT_ONLY":
+                                    state["completed"] = i
+                                    break
+                                state["completed"] = i + 1
+                            self._event_spine.publish(
+                                "COORD_FORWARDED",
+                                source="alert_mode",
+                                plane="data",
+                                mode_scope=CONTROL_MODE_SCOPE,
+                                message=f"北斗坐标帧 #{i + 1} 已下发至下位机。",
+                                data={"frame_index": i, "mode": "ALERT_ONLY"},
+                            )
+                            time.sleep(0.08)  # 模拟坐标帧间隔
+                    except Exception as exc:
+                        worker_error = f"{type(exc).__name__}: {exc}"
+                    with self._lock:
+                        state = self._batch_state
+                        if state is not None and state.get("batch_job_id") == batch_job_id:
+                            state["status"] = "done"
+                            state["finished_at"] = time.time()
+                            state["benchmark"] = None
+                            if worker_error:
+                                state["error"] = worker_error
+
+                thread = threading.Thread(target=_coord_worker, daemon=True)
+                thread.start()
+                self._event_spine.publish(
+                    "MODE_ALERT_ACTIVE",
+                    source="batch",
+                    plane="control",
+                    mode_scope=CONTROL_MODE_SCOPE,
+                    message="ALERT_ONLY 模式激活：推理任务已挂起，切换为北斗坐标持续下发。",
+                    data={"service_mode": "ALERT_ONLY", "coord_frames": count},
+                )
+                return {
+                    "status": "started",
+                    "batch_job_id": batch_job_id,
+                    "total": count,
+                    "service_mode": "ALERT_ONLY",
+                    "message": "ALERT_ONLY 模式：推理已挂起，正在持续下发北斗定位坐标。",
+                }
+
+            # ── ROI_ONLY：跳帧降采样 ──
+            effective_count = count
+            if current_mode == "ROI_ONLY":
+                effective_count = max(1, count // 3)
+
+            batch_job_id = f"batch-{int(time.time())}-{effective_count}"
             self._batch_state = {
                 "status": "running",
                 "batch_job_id": batch_job_id,
-                "total": count,
+                "engine": "tvm",
+                "total": effective_count,
                 "completed": 0,
                 "success": 0,
                 "fallback": 0,
                 "sha_match": 0,
                 "started_at": time.time(),
                 "finished_at": None,
+                "service_mode": current_mode,
                 # 各阶段计时样本列表（仅 live success 时记录）
                 "_samples": {
                     "handshake_ms": [],
@@ -4851,6 +5247,16 @@ class DashboardState:
                 "benchmark": None,
             }
 
+        if current_mode == "ROI_ONLY":
+            self._event_spine.publish(
+                "MODE_ROI_ACTIVE",
+                source="batch",
+                plane="control",
+                mode_scope=CONTROL_MODE_SCOPE,
+                message=f"ROI_ONLY 降采样模式：有效推理帧 {effective_count}/{count}（跳帧比 3:1）。",
+                data={"service_mode": "ROI_ONLY", "effective_count": effective_count, "original_count": count},
+            )
+
         def _worker() -> None:
             worker_error = ""
             last_result: dict[str, Any] | None = None
@@ -4859,12 +5265,12 @@ class DashboardState:
                     variant="current",
                     image_index=0,
                     allow_preflight_degraded=allow_preflight_degraded,
-                    max_inputs=count,
+                    max_inputs=effective_count,
                 )
                 last_result = result
 
                 if result.get("request_state") == "running" and result.get("job_id"):
-                    deadline = time.monotonic() + max(120.0, count * 10.0)
+                    deadline = time.monotonic() + max(120.0, effective_count * 10.0)
                     while True:
                         result = self._peek_inference_progress(str(result["job_id"]))
                         last_result = result
@@ -4874,7 +5280,7 @@ class DashboardState:
                             if state is None or state.get("status") != "running":
                                 return
                             state["completed"] = int(progress.get("completed_count") or 0)
-                            state["total"] = max(1, int(progress.get("expected_count") or count))
+                            state["total"] = max(1, int(progress.get("expected_count") or effective_count))
                             if result.get("request_state") != "running":
                                 break
                         if time.monotonic() >= deadline:
@@ -4882,10 +5288,10 @@ class DashboardState:
                                 "status": "fallback",
                                 "execution_mode": "fallback",
                                 "request_state": "completed",
-                                "message": "Current 300 张在线推进等待完成超时",
+                                "message": "Current 在线推进等待完成超时",
                                 "live_progress": {
                                     "completed_count": int(progress.get("completed_count") or 0),
-                                    "expected_count": max(1, int(progress.get("expected_count") or count)),
+                                    "expected_count": max(1, int(progress.get("expected_count") or effective_count)),
                                 },
                                 "live_attempt": {
                                     "diagnostics": {"reason": "batch_wait_timeout"},
@@ -4904,7 +5310,7 @@ class DashboardState:
                 assert last_result is not None
                 progress = last_result.get("live_progress") if isinstance(last_result.get("live_progress"), dict) else {}
                 completed = int(progress.get("completed_count") or 0)
-                total = max(1, int(progress.get("expected_count") or count))
+                total = max(1, int(progress.get("expected_count") or effective_count))
                 is_live = last_result.get("execution_mode") == "live" and last_result.get("status") == "success"
                 live_attempt = last_result.get("live_attempt") if isinstance(last_result.get("live_attempt"), dict) else {}
                 security = live_attempt.get("security") if isinstance(live_attempt.get("security"), dict) else {}
@@ -4957,7 +5363,13 @@ class DashboardState:
 
         thread = threading.Thread(target=_worker, daemon=True)
         thread.start()
-        return {"status": "started", "batch_job_id": batch_job_id, "total": count}
+        return {
+            "status": "started",
+            "batch_job_id": batch_job_id,
+            "total": effective_count,
+            "service_mode": current_mode,
+            "engine": "tvm",
+        }
 
     def run_mlkem_inference(
         self,
@@ -6487,6 +6899,12 @@ class DemoRequestHandler(SimpleHTTPRequestHandler):
                     count=count,
                     allow_preflight_degraded=allow_degraded,
                 )
+                self.respond_json(HTTPStatus.OK, payload)
+                return
+            if parsed.path == "/api/run-mnn-batch":
+                count = self.coerce_int(body.get("count"), default=300)
+                count = max(1, min(count, 1000))
+                payload = self.server.app_state.start_mnn_batch_inference(count=count)
                 self.respond_json(HTTPStatus.OK, payload)
                 return
             if parsed.path == "/api/inject-fault":

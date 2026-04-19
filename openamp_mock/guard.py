@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from .link_health import LinkHealthReport
 from .protocol import (
     Decision,
     FaultCode,
     GuardState,
     MessageType,
+    ServiceMode,
     VERSION,
     build_message,
     fault_name,
@@ -32,6 +34,23 @@ class SafetyGuard:
         self.deadline_at_ms: int | None = None
         self.seen_job_ids: set[int] = set()
         self._tx_seq = 0
+
+        # --- inner mode state machine (task-level degradation) ---
+        self.allowed_mode = ServiceMode.FULL_FRAME
+        self.current_mode = ServiceMode.FULL_FRAME
+        self.mode_log: list[dict[str, Any]] = []
+        self._degrade_window_count = 0
+        self._upgrade_window_count = 0
+        # hysteresis: 3 consecutive degraded windows to step down,
+        #             5 consecutive good windows to step back up
+        self.DEGRADE_THRESHOLD = 3
+        self.UPGRADE_THRESHOLD = 5
+        self.BURST_LOSS_EMERGENCY = 10  # bypass hysteresis on burst loss
+        # mode decision thresholds
+        self.SNR_ROI_THRESHOLD = 500       # SNR < 5 dB → ROI
+        self.PER_ROI_THRESHOLD = 50        # PER > 5%   → ROI
+        self.PER_ALERT_THRESHOLD = 200     # PER > 20%  → ALERT
+
         self._transition(GuardState.READY, "boot completed", 0)
 
     def handle(self, message, now_ms: int, transport: MockTransport) -> None:
@@ -57,6 +76,11 @@ class SafetyGuard:
         if msg_type is MessageType.RESET_REQ:
             self._handle_reset(message.header.job_id, now_ms, transport)
             return
+        if msg_type is MessageType.LINK_HEALTH:
+            self._handle_link_health_msg(message, now_ms, transport)
+            return
+        if msg_type is MessageType.MODE_ACK:
+            return  # acknowledged; no action needed on guard side
 
     def check_timeouts(self, now_ms: int, transport: MockTransport) -> None:
         if self.state is not GuardState.JOB_ACTIVE:
@@ -332,3 +356,129 @@ class SafetyGuard:
         self.expected_outputs = 0
         self.last_heartbeat_ms = None
         self.deadline_at_ms = None
+        # reset inner mode machine on job boundary
+        self.allowed_mode = ServiceMode.FULL_FRAME
+        self.current_mode = ServiceMode.FULL_FRAME
+        self._degrade_window_count = 0
+        self._upgrade_window_count = 0
+
+    # ------------------------------------------------------------------
+    # Inner mode state machine: task-level degradation
+    # ------------------------------------------------------------------
+
+    def handle_link_health(
+        self,
+        report: LinkHealthReport,
+        now_ms: int,
+        transport: MockTransport,
+    ) -> None:
+        """Consume a link_health report and update the inner service mode.
+
+        The outer safety FSM is untouched.  Mode directives are only
+        emitted while the guard is in JOB_ACTIVE state.
+        """
+        if self.state is not GuardState.JOB_ACTIVE:
+            return
+
+        # 1. Link lost → immediate SAFE_STOP (reuses existing path)
+        if not report.rx_locked:
+            self._trigger_safe_stop(
+                FaultCode.LINK_LOST,
+                "link lost (rx_locked=false)",
+                now_ms,
+                transport,
+            )
+            return
+
+        # 2. Compute target mode from measurements
+        target = self._compute_target_mode(report)
+
+        # 3. Burst-loss emergency: bypass hysteresis, jump to ALERT_ONLY
+        if report.burst_loss_max >= self.BURST_LOSS_EMERGENCY:
+            if self.current_mode != ServiceMode.ALERT_ONLY:
+                self._set_service_mode(
+                    ServiceMode.ALERT_ONLY, "burst loss emergency",
+                    now_ms, transport,
+                )
+                self._degrade_window_count = 0
+                self._upgrade_window_count = 0
+                return
+
+        # 4. Hysteresis: asymmetric thresholds (degrade=3, upgrade=5)
+        if target.value > self.current_mode.value:
+            # wants to degrade
+            self._degrade_window_count += 1
+            self._upgrade_window_count = 0
+            if self._degrade_window_count >= self.DEGRADE_THRESHOLD:
+                self._set_service_mode(
+                    target, "sustained degradation", now_ms, transport,
+                )
+                self._degrade_window_count = 0
+        elif target.value < self.current_mode.value:
+            # wants to upgrade
+            self._upgrade_window_count += 1
+            self._degrade_window_count = 0
+            if self._upgrade_window_count >= self.UPGRADE_THRESHOLD:
+                self._set_service_mode(
+                    target, "sustained recovery", now_ms, transport,
+                )
+                self._upgrade_window_count = 0
+        else:
+            self._degrade_window_count = 0
+            self._upgrade_window_count = 0
+
+    def _handle_link_health_msg(
+        self, message, now_ms: int, transport: MockTransport,
+    ) -> None:
+        """Unwrap a LINK_HEALTH control message into handle_link_health."""
+        report = LinkHealthReport(
+            snr_est_db_x100=int(message.payload.get("snr_est_db_x100", 0)),
+            per_x1000=int(message.payload.get("per_x1000", 0)),
+            burst_loss_max=int(message.payload.get("burst_loss_max", 0)),
+            rx_locked=bool(message.payload.get("rx_locked", True)),
+            effective_throughput_kbps=int(message.payload.get("effective_throughput_kbps", 0)),
+            window_id=int(message.payload.get("window_id", 0)),
+            timestamp_ms=int(message.payload.get("timestamp_ms", now_ms)),
+        )
+        self.handle_link_health(report, now_ms, transport)
+
+    def _compute_target_mode(self, report: LinkHealthReport) -> ServiceMode:
+        """Determine desired service mode from link measurements."""
+        if report.per_x1000 > self.PER_ALERT_THRESHOLD:
+            return ServiceMode.ALERT_ONLY
+        if (report.per_x1000 > self.PER_ROI_THRESHOLD
+                or report.snr_est_db_x100 < self.SNR_ROI_THRESHOLD):
+            return ServiceMode.ROI_ONLY
+        return ServiceMode.FULL_FRAME
+
+    def _set_service_mode(
+        self,
+        mode: ServiceMode,
+        reason: str,
+        now_ms: int,
+        transport: MockTransport,
+    ) -> None:
+        """Commit a service-mode transition and emit MODE_DIRECTIVE."""
+        old = self.current_mode
+        if old is mode:
+            return
+        self.current_mode = mode
+        self.allowed_mode = mode
+        self.mode_log.append({
+            "at_ms": now_ms,
+            "from_mode": old.name,
+            "to_mode": mode.name,
+            "reason": reason,
+            "job_id": self.active_job_id,
+        })
+        self._send(
+            transport=transport,
+            now_ms=now_ms,
+            msg_type=MessageType.MODE_DIRECTIVE,
+            job_id=self.active_job_id,
+            payload={
+                "allowed_mode": int(mode),
+                "mode_name": mode.name,
+                "reason": reason,
+            },
+        )

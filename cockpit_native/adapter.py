@@ -27,6 +27,28 @@ FLIGHT_SOURCE_LABEL_ENV = "COCKPIT_NATIVE_FLIGHT_SOURCE_LABEL"
 FLIGHT_SOURCE_KIND_ENV = "COCKPIT_NATIVE_FLIGHT_SOURCE_KIND"
 
 
+def _degradation_tone(status: JsonDict | None) -> str:
+    if status is None:
+        return "neutral"
+    mode = str(status.get("current_mode") or "FULL_FRAME")
+    if mode == "ALERT_ONLY":
+        return "warning"
+    if mode == "ROI_ONLY":
+        return "degraded"
+    return "online"
+
+
+def _degradation_summary_text(status: JsonDict | None) -> str:
+    if status is None:
+        return "退化引擎未接入。"
+    mode = str(status.get("current_mode") or "FULL_FRAME")
+    strategy = str(status.get("payload_strategy") or "full_latent")
+    transitions = int(status.get("mode_transitions") or 0)
+    if bool(status.get("is_link_lost")):
+        return f"链路丢失，当前模式 {mode}（仅告警），已发生 {transitions} 次模式切换。"
+    return f"当前模式 {mode}，发送策略 {strategy}，已发生 {transitions} 次模式切换。"
+
+
 @dataclass(frozen=True)
 class RepoContractPaths:
     project_root: Path
@@ -152,7 +174,7 @@ class DemoRepoAdapter:
         demo_data = self._demo_data_module()
         return dict(demo_data.build_weak_network_snapshot())
 
-    def load_contract_bundle(self) -> NativeContractBundle:
+    def load_contract_bundle(self, degradation_status: JsonDict | None = None) -> NativeContractBundle:
         snapshot_path, snapshot = self.load_snapshot()
         aircraft_position = self.load_aircraft_position_contract()
         weak_network = self.load_weak_network_contract()
@@ -161,6 +183,7 @@ class DemoRepoAdapter:
             snapshot=snapshot,
             aircraft_position=aircraft_position,
             weak_network=weak_network,
+            degradation_status=degradation_status,
         )
         return NativeContractBundle(
             snapshot_path=snapshot_path,
@@ -352,6 +375,7 @@ class DemoRepoAdapter:
         snapshot: JsonDict,
         aircraft_position: JsonDict,
         weak_network: JsonDict,
+        degradation_status: JsonDict | None = None,
     ) -> JsonDict:
         aggregate = snapshot.get("aggregate") if isinstance(snapshot.get("aggregate"), dict) else {}
         jobs = aggregate.get("jobs") if isinstance(aggregate.get("jobs"), dict) else {}
@@ -395,6 +419,15 @@ class DemoRepoAdapter:
                     "label": "链路档位",
                     "value": str(link_profile.get("selected_profile_label") or "正常链路"),
                     "tone": "neutral",
+                },
+                {
+                    "label": "退化模式",
+                    "value": (
+                        str(degradation_status.get("current_mode") or "FULL_FRAME")
+                        if degradation_status is not None
+                        else "未接入"
+                    ),
+                    "tone": _degradation_tone(degradation_status),
                 },
                 {
                     "label": "快照原因",
@@ -514,6 +547,15 @@ class DemoRepoAdapter:
                     "enabled": False,
                     "interactive": False,
                     "note": str(snapshot_path.relative_to(self.paths.project_root)),
+                    "runtime_state": "只读",
+                },
+                {
+                    "action_id": "degradation_status",
+                    "label": "退化保底状态",
+                    "tone": _degradation_tone(degradation_status),
+                    "enabled": False,
+                    "interactive": False,
+                    "note": _degradation_summary_text(degradation_status),
                     "runtime_state": "只读",
                 },
             ],

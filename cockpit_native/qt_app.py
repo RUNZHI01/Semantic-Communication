@@ -349,6 +349,7 @@ def _create_cockpit_runtime(
     *,
     software_render: bool = False,
     safe_area_insets: Mapping[str, int] | None = None,
+    degradation_engine: object | None = None,
     argv: Sequence[str] | None = None,
 ) -> QtCockpitRuntime:
     if not is_pyside6_available():
@@ -374,10 +375,17 @@ def _create_cockpit_runtime(
         stateChanged = Signal()
         actionStateChanged = Signal()
 
-        def __init__(self, repo_adapter: DemoRepoAdapter, publish_state_json: Callable[[str], None]) -> None:
+        def __init__(
+            self,
+            repo_adapter: DemoRepoAdapter,
+            publish_state_json: Callable[[str], None],
+            *,
+            degradation_engine: object | None = None,
+        ) -> None:
             super().__init__()
             self._adapter = repo_adapter
             self._publish_state_json = publish_state_json
+            self._degradation_engine = degradation_engine
             self._state: dict[str, object] = {}
             self._action_state: dict[str, object] = {
                 "busy": False,
@@ -404,7 +412,11 @@ def _create_cockpit_runtime(
             return json.dumps(self._action_state, ensure_ascii=False)
 
         def _refresh_state(self) -> None:
-            self._state = self._adapter.load_contract_bundle().ui_state
+            degradation_status = None
+            snapshot_fn = getattr(self._degradation_engine, "snapshot", None)
+            if callable(snapshot_fn):
+                degradation_status = snapshot_fn()
+            self._state = self._adapter.load_contract_bundle(degradation_status=degradation_status).ui_state
             self._publish_state_json(json.dumps(self._state, ensure_ascii=False))
 
         def _set_action_state(self, payload: dict[str, object]) -> None:
@@ -650,7 +662,7 @@ def _create_cockpit_runtime(
     def publish_state_json(state_json: str) -> None:
         engine.rootContext().setContextProperty("cockpitUiStateJson", state_json)
 
-    bridge = CockpitBridge(adapter, publish_state_json)
+    bridge = CockpitBridge(adapter, publish_state_json, degradation_engine=degradation_engine)
     primary_screen = app.primaryScreen()
     screen_metrics = {"width": 2560, "height": 1440, "devicePixelRatio": 1.0}
     if primary_screen is not None:
@@ -681,11 +693,13 @@ def launch_native_cockpit(
     *,
     software_render: bool = False,
     safe_area_insets: Mapping[str, int] | None = None,
+    degradation_engine: object | None = None,
 ) -> int:
     runtime = _create_cockpit_runtime(
         project_root=project_root,
         software_render=software_render,
         safe_area_insets=safe_area_insets,
+        degradation_engine=degradation_engine,
         argv=sys.argv[:1],
     )
     return runtime.app.exec()

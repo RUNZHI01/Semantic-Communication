@@ -1,0 +1,540 @@
+/* ControlConsolePage.module.css */
+
+.root {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
+  padding: var(--space-lg);
+}
+
+/* Ambient background */
+.meshBackground {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.meshBlob1 {
+  position: absolute;
+  width: 400px;
+  height: 400px;
+  top: -80px;
+  right: -60px;
+  background: radial-gradient(circle, rgba(99, 102, 241, 0.05) 0%, transparent 70%);
+  border-radius: 50%;
+  filter: blur(60px);
+}
+
+.meshBlob2 {
+  position: absolute;
+  width: 500px;
+  height: 500px;
+  bottom: -120px;
+  left: -100px;
+  background: radial-gradient(circle, rgba(59, 130, 246, 0.04) 0%, transparent 70%);
+  border-radius: 50%;
+  filter: blur(80px);
+}
+
+/* Page header */
+.pageHeader {
+  position: relative;
+  z-index: 1;
+  margin-bottom: var(--space-lg);
+}
+
+.pageTitle {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  margin: 0 0 4px 0;
+  letter-spacing: -0.01em;
+}
+
+.pageSubtitle {
+  font-size: 13px;
+  color: var(--color-text-tertiary);
+  margin: 0;
+}
+
+/* Grid layout */
+.grid {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-md);
+}
+
+@media (max-width: 1100px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Section card */
+.sectionCard {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(12px);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--color-border-light);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 1);
+}
+
+.sectionCard:hover {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 1), var(--elevation-1);
+  border-color: var(--color-border-base);
+}
+
+.fullWidth {
+  position: relative;
+  z-index: 1;
+  margin-bottom: var(--space-md);
+}
+
+/* Section title */
+.sectionTitle {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+/* Row grid */
+.rowGrid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 8px;
+  row-gap: 3px;
+  align-items: baseline;
+  font-size: 12px;
+}
+
+.label {
+  color: var(--color-text-tertiary);
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.mono {
+  color: var(--color-text-secondary);
+  font-family: var(--font-family-mono);
+  font-size: 11px;
+  font-feature-settings: 'tnum' 1;
+}
+
+/* ────────────────────────────────────────────────
+   Mode controller cards
+   ──────────────────────────────────────────────── */
+
+.modeGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+@media (max-width: 800px) {
+  .modeGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.modeCard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  border-radius: var(--radius-md);
+  border: 2px solid var(--color-border-light);
+  background: rgba(0, 0, 0, 0.015);
+  cursor: pointer;
+  text-align: left;
+  transition: all 200ms ease;
+}
+
+.modeCard:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: var(--elevation-2);
+}
+
+.modeCard:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.modeCardOk { border-color: rgba(5, 150, 105, 0.2); }
+.modeCardWarn { border-color: rgba(245, 158, 11, 0.2); }
+.modeCardDanger { border-color: rgba(239, 68, 68, 0.2); }
+
+.modeCardOk:hover:not(:disabled) { border-color: rgba(5, 150, 105, 0.5); background: rgba(5, 150, 105, 0.03); }
+.modeCardWarn:hover:not(:disabled) { border-color: rgba(245, 158, 11, 0.5); background: rgba(245, 158, 11, 0.03); }
+.modeCardDanger:hover:not(:disabled) { border-color: rgba(239, 68, 68, 0.5); background: rgba(239, 68, 68, 0.03); }
+
+.modeCardActive {
+  border-width: 2px;
+  box-shadow: 0 0 0 2px currentColor, var(--elevation-1);
+  transform: translateY(-1px);
+}
+
+.modeCardOk.modeCardActive { border-color: var(--color-success); color: var(--color-success); background: rgba(5, 150, 105, 0.06); }
+.modeCardWarn.modeCardActive { border-color: #D97706; color: #D97706; background: rgba(245, 158, 11, 0.06); }
+.modeCardDanger.modeCardActive { border-color: var(--color-error); color: var(--color-error); background: rgba(239, 68, 68, 0.06); }
+
+.modeCardHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.modeDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-text-muted);
+  flex-shrink: 0;
+  transition: background 200ms;
+}
+
+.modeDotActive {
+  background: currentColor;
+  box-shadow: 0 0 6px currentColor;
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.modeCardLabel {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.modeActiveBadge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 100px;
+  background: currentColor;
+  color: white;
+  margin-left: auto;
+}
+
+.modeCardDesc {
+  font-size: 12px;
+  color: var(--color-text-tertiary);
+  line-height: 1.5;
+}
+
+/* ────────────────────────────────────────────────
+   Protocol checklist
+   ──────────────────────────────────────────────── */
+
+.checklistGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+
+.checkItem {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  padding: 3px 0;
+}
+
+.badgeGreen {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-full);
+  font-size: 9px;
+  font-weight: 700;
+  flex-shrink: 0;
+  background: var(--color-success-container, rgba(5, 150, 105, 0.1));
+  color: var(--color-success);
+}
+
+/* ────────────────────────────────────────────────
+   FIT cards
+   ──────────────────────────────────────────────── */
+
+.fitGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.fitCard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: rgba(0, 0, 0, 0.015);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-light);
+}
+
+.fitLabel {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.fitDesc {
+  font-size: 11px;
+  color: var(--color-text-tertiary);
+  line-height: 1.5;
+}
+
+/* ────────────────────────────────────────────────
+   Action log (inline feedback)
+   ──────────────────────────────────────────────── */
+
+.actionLogBox {
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: rgba(0, 0, 0, 0.03);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border-light);
+  font-family: var(--font-family-mono);
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  max-height: 100px;
+  overflow-y: auto;
+}
+
+.actionLogLine {
+  line-height: 1.6;
+  animation: fadeInUp 300ms ease;
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ────────────────────────────────────────────────
+   Event timeline
+   ──────────────────────────────────────────────── */
+
+.timelineCard {
+  min-height: 400px;
+}
+
+.eventCountBadge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 100px;
+  background: var(--color-primary-container, rgba(99, 102, 241, 0.1));
+  color: var(--color-primary);
+}
+
+.timelineScroll {
+  flex: 1;
+  overflow-y: auto;
+  max-height: 500px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.timelineEmpty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 40px 0;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.timelineItem {
+  display: flex;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.03);
+  animation: fadeInUp 200ms ease;
+}
+
+.timelineDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-primary);
+  flex-shrink: 0;
+  margin-top: 6px;
+}
+
+.timelineContent {
+  flex: 1;
+  min-width: 0;
+}
+
+.timelineHeader {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 2px;
+}
+
+.evtBadge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-family-mono);
+  white-space: nowrap;
+}
+
+.evtBadgeOk {
+  background: var(--color-success-container, rgba(5, 150, 105, 0.1));
+  color: var(--color-success);
+}
+
+.evtBadgeWarn {
+  background: rgba(245, 158, 11, 0.12);
+  color: #D97706;
+}
+
+.evtBadgeDanger {
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--color-error);
+}
+
+.timelineTime {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  font-family: var(--font-family-mono);
+  margin-left: auto;
+}
+
+.timelineMsg {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  line-height: 1.4;
+  word-break: break-all;
+}
+
+.timelineMeta {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  margin-top: 2px;
+}
+
+/* ────────────────────────────────────────────────
+   Buttons
+   ──────────────────────────────────────────────── */
+
+.btnTonal {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-base);
+  background: var(--color-bg-secondary, rgba(0, 0, 0, 0.02));
+  color: var(--color-text-primary);
+  cursor: pointer;
+  transition: background 200ms, border-color 200ms;
+  white-space: nowrap;
+}
+
+.btnTonal:hover:not(:disabled) {
+  background: var(--color-bg-tertiary, rgba(0, 0, 0, 0.04));
+  border-color: var(--color-primary);
+}
+
+.btnTonal:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btnDanger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  background: rgba(239, 68, 68, 0.06);
+  color: var(--color-error);
+  cursor: pointer;
+  transition: background 200ms, border-color 200ms;
+  white-space: nowrap;
+}
+
+.btnDanger:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.5);
+}
+
+.btnDanger:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btnRecover {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border-base);
+  background: var(--color-bg-secondary, rgba(0, 0, 0, 0.02));
+  color: var(--color-text-primary);
+  cursor: pointer;
+  transition: background 200ms, border-color 200ms;
+  white-space: nowrap;
+}
+
+.btnRecover:hover:not(:disabled) {
+  background: var(--color-bg-tertiary, rgba(0, 0, 0, 0.04));
+  border-color: var(--color-primary);
+}
+
+.btnRecover:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

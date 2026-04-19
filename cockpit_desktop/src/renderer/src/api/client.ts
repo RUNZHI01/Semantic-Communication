@@ -172,6 +172,10 @@ export async function postRunInferenceBatch(count = 300): Promise<BatchInference
   return postJson<BatchInferenceResponse>('/api/run-inference-batch', { count, allow_preflight_degraded: true })
 }
 
+export async function postRunMnnBatch(count = 300): Promise<BatchInferenceResponse> {
+  return postJson<BatchInferenceResponse>('/api/run-mnn-batch', { count })
+}
+
 export async function getBatchState(): Promise<BatchStateResponse> {
   const r = await fetch(`${API_PREFIX}/api/batch-state`)
   const d = await readJson<BatchStateResponse & { message?: string }>(r)

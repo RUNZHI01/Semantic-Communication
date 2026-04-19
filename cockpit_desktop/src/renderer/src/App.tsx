@@ -1,6 +1,7 @@
 import { HashRouter, Route, Routes } from 'react-router-dom'
 import { MissionShell } from './layouts/MissionShell'
 import { DashboardPageMinimal } from './pages/DashboardPageMinimal'
+import { ControlConsolePage } from './pages/ControlConsolePage'
 import { ErrorBoundary } from './components/ErrorBoundary'
 
 export default function App() {
@@ -10,6 +11,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<MissionShell />}>
             <Route index element={<DashboardPageMinimal />} />
+            <Route path="console" element={<ControlConsolePage />} />
           </Route>
         </Routes>
       </HashRouter>

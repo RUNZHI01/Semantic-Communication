@@ -9,6 +9,16 @@ import s from './BoardTelemetryCard.module.css'
 
 const { Text } = Typography
 
+function boardPositionApiStatusLabel(rawStatus: unknown): string {
+  const status = String(rawStatus ?? '').trim().toLowerCase()
+  if (status === 'live') return 'LIVE'
+  if (status === 'source_unavailable') return 'NO_SOURCE'
+  if (status === 'service_error') return 'SERVICE_ERROR'
+  if (status === 'offline') return 'OFFLINE'
+  if (status === 'probe_error') return 'PROBE_ERROR'
+  return status ? status.toUpperCase() : 'UNAVAILABLE'
+}
+
 interface BoardTelemetryCardProps {
   system: UseQueryResult<SystemStatusResponse>
 }
@@ -21,7 +31,7 @@ export function BoardTelemetryCard({ system }: BoardTelemetryCardProps) {
   const memorySummary = telemetry?.memory_used_mb != null && telemetry?.memory_total_mb != null
     ? `${Math.round(telemetry.memory_used_mb)} / ${Math.round(telemetry.memory_total_mb)} MB`
     : '—'
-  const boardPositionApiStatus = String(boardPositionApi?.status ?? 'unavailable').toUpperCase()
+  const boardPositionApiStatus = boardPositionApiStatusLabel(boardPositionApi?.status)
 
   return (
     <PanelCard title="板卡遥测" icon={Icons.Cpu}>
@@ -74,7 +84,7 @@ export function BoardTelemetryCard({ system }: BoardTelemetryCardProps) {
               {String(telemetry?.status ?? 'unavailable').toUpperCase()}
             </ToneTag>
           </Descriptions.Item>
-          <Descriptions.Item label="定位 API">
+          <Descriptions.Item label="板端定位 API">
             <ToneTag tone={boardPositionApiStatus === 'LIVE' ? 'success' : 'neutral'}>
               {boardPositionApiStatus}
             </ToneTag>

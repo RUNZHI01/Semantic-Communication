@@ -4,7 +4,9 @@ from argparse import Namespace
 import html
 import io
 import json
+import os
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import threading
@@ -253,6 +255,21 @@ def write_archive_session(
 
 
 class DashboardStateTest(unittest.TestCase):
+    def test_parse_json_stdout_payload_skips_trailing_non_json_lines(self) -> None:
+        raw = "\n".join(
+            [
+                "[mnn-remote] startup",
+                json.dumps({"status": "ok", "processed_count": 2}, ensure_ascii=False),
+                "CPU Group: [ 0  1 ], 187500 - 1500000",
+                "The device supports: i8sdot:0, fp16:0",
+            ]
+        )
+
+        payload = server._parse_json_stdout_payload(raw)
+
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["processed_count"], 2)
+
     def test_startup_uses_saved_successful_probe(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             cache_path = Path(temp_dir) / "openamp_demo_live_probe_latest.json"
@@ -405,6 +422,314 @@ class DashboardStateTest(unittest.TestCase):
         self.assertEqual(final_state["success"], 0)
         self.assertEqual(final_state["fallback"], 0)
         self.assertEqual(final_state["error"], "IndexError: invalid image_index")
+
+    def test_start_batch_inference_alert_mode_keeps_batch_state_accessible_and_completes(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        state.set_link_director_profile({"profile_id": "flaky"})
+
+        payload = state.start_batch_inference(count=3)
+        self.assertEqual(payload["status"], "started")
+        self.assertEqual(payload["service_mode"], "ALERT_ONLY")
+        self.assertEqual(payload["total"], 3)
+
+        # Batch mode should stay stable for the lifetime of this batch even if
+        # the operator changes the staged profile afterwards.
+        state.set_link_director_profile({"profile_id": "normal"})
+
+        time.sleep(0.05)
+        holder: dict[str, object] = {}
+
+        def _read_batch_state() -> None:
+            holder["state"] = state.get_batch_state()
+
+        reader = threading.Thread(target=_read_batch_state, daemon=True)
+        reader.start()
+        reader.join(timeout=0.2)
+        self.assertFalse(reader.is_alive(), "get_batch_state() blocked during ALERT_ONLY batch")
+
+        deadline = time.monotonic() + 1.0
+        while time.monotonic() < deadline:
+            current = state.get_batch_state()
+            if current.get("status") == "done":
+                break
+            time.sleep(0.02)
+        else:
+            self.fail(f"alert-mode batch did not finish: {state.get_batch_state()}")
+
+        final_state = state.get_batch_state()
+        self.assertEqual(final_state["service_mode"], "ALERT_ONLY")
+        self.assertEqual(final_state["completed"], 3)
+        self.assertEqual(final_state["total"], 3)
+        self.assertEqual(final_state["success"], 0)
+        self.assertEqual(final_state["fallback"], 0)
+        self.assertIsNone(final_state["benchmark"])
+
+    def test_start_batch_inference_roi_mode_reduces_effective_count_and_completes(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        state.set_link_director_profile({"profile_id": "lossy"})
+        progress_calls: dict[str, int] = {}
+
+        def fake_run_demo_inference(
+            *,
+            variant: str,
+            image_index: int,
+            allow_preflight_degraded: bool = False,
+            max_inputs: int = server.DEFAULT_MAX_INPUTS,
+        ) -> dict[str, object]:
+            self.assertEqual(variant, "current")
+            self.assertEqual(image_index, 0)
+            self.assertTrue(allow_preflight_degraded)
+            self.assertEqual(max_inputs, 3)
+            return {
+                "status": "running",
+                "execution_mode": "live",
+                "request_state": "running",
+                "job_id": "roi-live-003",
+                "live_progress": {
+                    "completed_count": 0,
+                    "expected_count": 3,
+                },
+            }
+
+        def fake_peek_inference_progress(job_id: str) -> dict[str, object]:
+            calls = progress_calls.get(job_id, 0)
+            progress_calls[job_id] = calls + 1
+            if calls == 0:
+                return {
+                    "status": "running",
+                    "execution_mode": "live",
+                    "request_state": "running",
+                    "job_id": job_id,
+                    "live_progress": {
+                        "completed_count": 1,
+                        "expected_count": 3,
+                    },
+                }
+            return {
+                "status": "success",
+                "execution_mode": "live",
+                "request_state": "completed",
+                "job_id": job_id,
+                "source_label": "ROI_ONLY 降采样在线推进",
+                "message": "ROI_ONLY 模式下按 3:1 降采样完成在线推进。",
+                "artifact_sha": "sha-roi",
+                "sample": {"label": "sample-roi"},
+                "live_progress": {
+                    "completed_count": 3,
+                    "expected_count": 3,
+                },
+                "live_attempt": {
+                    "security": {
+                        "protocol": "mlkem_control",
+                        "handshake_ms": 9.5,
+                        "summary": "ROI_ONLY 降采样批量已完成。",
+                    },
+                },
+                "timings": {"payload_ms": 12.0, "total_ms": 18.0},
+            }
+
+        with (
+            patch.object(state, "run_demo_inference", side_effect=fake_run_demo_inference),
+            patch.object(state, "_peek_inference_progress", side_effect=fake_peek_inference_progress),
+        ):
+            payload = state.start_batch_inference(count=9)
+            self.assertEqual(payload["status"], "started")
+            self.assertEqual(payload["service_mode"], "ROI_ONLY")
+            self.assertEqual(payload["total"], 3)
+            deadline = time.monotonic() + 2.0
+            while time.monotonic() < deadline:
+                current = state.get_batch_state()
+                if current.get("status") == "done":
+                    break
+                time.sleep(0.02)
+            else:
+                self.fail(f"roi-only batch did not finish: {state.get_batch_state()}")
+
+        final_state = state.get_batch_state()
+        self.assertEqual(final_state["service_mode"], "ROI_ONLY")
+        self.assertEqual(final_state["completed"], 3)
+        self.assertEqual(final_state["total"], 3)
+        self.assertEqual(final_state["success"], 3)
+        self.assertEqual(final_state["fallback"], 0)
+        self.assertEqual(final_state["benchmark"]["handshake_ms"]["mean_ms"], 9.5)
+
+    def test_start_mnn_batch_inference_tracks_300_image_run(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+
+        mnn_summary = {
+            "status": "ok",
+            "variant": "current",
+            "selected_input_count": 300,
+            "processed_count": 300,
+            "sample_stats": {
+                "run_ms": {
+                    "count": 300,
+                    "min_ms": 120.0,
+                    "max_ms": 220.0,
+                    "mean_ms": 163.2,
+                    "median_ms": 161.9,
+                    "variance_ms2": 25.0,
+                },
+                "resize_ms": {
+                    "count": 300,
+                    "min_ms": 1.8,
+                    "max_ms": 16.4,
+                    "mean_ms": 8.4,
+                    "median_ms": 8.0,
+                    "variance_ms2": 3.0,
+                },
+                "total_ms": {
+                    "count": 300,
+                    "min_ms": 240.0,
+                    "max_ms": 410.0,
+                    "mean_ms": 331.0,
+                    "median_ms": 329.6,
+                    "variance_ms2": 42.0,
+                },
+            },
+        }
+
+        with patch.object(state, "_run_mnn_batch", return_value=mnn_summary):
+            payload = state.start_mnn_batch_inference(count=300)
+            self.assertEqual(payload["status"], "started")
+            self.assertEqual(payload["engine"], "mnn")
+            deadline = time.monotonic() + 2.0
+            while time.monotonic() < deadline:
+                current = state.get_batch_state()
+                if current.get("status") == "done":
+                    break
+                time.sleep(0.02)
+            else:
+                self.fail(f"mnn batch did not finish: {state.get_batch_state()}")
+
+        final_state = state.get_batch_state()
+        self.assertEqual(final_state["engine"], "mnn")
+        self.assertEqual(final_state["completed"], 300)
+        self.assertEqual(final_state["total"], 300)
+        self.assertEqual(final_state["success"], 300)
+        self.assertEqual(final_state["fallback"], 0)
+        self.assertEqual(final_state["benchmark"]["inference_ms"]["mean_ms"], 163.2)
+        self.assertEqual(final_state["benchmark"]["total_ms"]["mean_ms"], 331.0)
+
+    def test_start_mnn_batch_inference_updates_progress_while_running(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        progress_seen = threading.Event()
+        release_runner = threading.Event()
+
+        mnn_summary = {
+            "status": "ok",
+            "variant": "current",
+            "selected_input_count": 300,
+            "processed_count": 300,
+            "sample_stats": {
+                "run_ms": {"count": 300, "min_ms": 100.0, "max_ms": 200.0, "mean_ms": 150.0, "median_ms": 149.0},
+                "total_ms": {"count": 300, "min_ms": 220.0, "max_ms": 380.0, "mean_ms": 310.0, "median_ms": 308.0},
+            },
+        }
+
+        def fake_run_mnn_batch(*, count: int = 300, progress_callback=None) -> dict[str, object]:
+            self.assertEqual(count, 300)
+            self.assertIsNotNone(progress_callback)
+            progress_callback(120, 300)
+            progress_seen.set()
+            release_runner.wait(timeout=1.0)
+            return mnn_summary
+
+        with patch.object(state, "_run_mnn_batch", side_effect=fake_run_mnn_batch):
+            payload = state.start_mnn_batch_inference(count=300)
+            self.assertEqual(payload["status"], "started")
+            self.assertTrue(progress_seen.wait(timeout=1.0), "mnn progress callback was not observed")
+            mid_state = state.get_batch_state()
+            self.assertEqual(mid_state["status"], "running")
+            self.assertEqual(mid_state["engine"], "mnn")
+            self.assertEqual(mid_state["completed"], 120)
+            self.assertEqual(mid_state["total"], 300)
+            release_runner.set()
+            deadline = time.monotonic() + 2.0
+            while time.monotonic() < deadline:
+                current = state.get_batch_state()
+                if current.get("status") == "done":
+                    break
+                time.sleep(0.02)
+            else:
+                self.fail(f"mnn batch did not finish after progress update: {state.get_batch_state()}")
+
+    def test_run_mnn_batch_does_not_leak_torch_pythonpath_without_explicit_mnn_override(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env_path = Path(temp_dir) / "mnn.env"
+            env_path.write_text(
+                "\n".join(
+                    [
+                        "REMOTE_HOST=100.121.87.73",
+                        "REMOTE_USER=user",
+                        "REMOTE_PASS=user",
+                        "REMOTE_SSH_PORT=22",
+                        "REMOTE_MNN_PYTHON=/home/user/anaconda3/envs/MNN/bin/python",
+                        "REMOTE_INPUT_DIR=/home/user/Downloads/jscc-test/encoder_outputs",
+                        "REMOTE_OUTPUT_BASE=/home/user/Downloads/jscc-test/mnn_benchmark_outputs",
+                        "REMOTE_SNR_CURRENT=10",
+                        "MNN_FP32_MODEL=/home/user/Downloads/MNNversion/origin/model1.mnn",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            captured_env: dict[str, str] = {}
+            captured_cmd: list[str] = []
+
+            def fake_popen(*args, **kwargs):
+                if args:
+                    captured_cmd.extend(list(args[0]))
+                captured_env.update(kwargs.get("env") or {})
+                return FakePopen(
+                    stdout_lines=[
+                        json.dumps(
+                            {
+                                "status": "ok",
+                                "selected_input_count": 3,
+                                "processed_count": 3,
+                                "sample_stats": {},
+                                "errors": [],
+                            },
+                            ensure_ascii=False,
+                        )
+                    ]
+                )
+
+            with (
+                patch.object(server, "DEFAULT_MNN_BATCH_ENV_FILE", env_path),
+                patch("server.subprocess.Popen", side_effect=fake_popen),
+            ):
+                payload = state._run_mnn_batch(count=3)
+
+        self.assertEqual(payload["status"], "ok")
+        self.assertNotIn("REMOTE_TORCH_PYTHONPATH", captured_env)
+        self.assertNotIn("REMOTE_REAL_EXTRA_PYTHONPATH", captured_env)
+        self.assertIn("--warmup-inputs", captured_cmd)
+        self.assertEqual(captured_cmd[captured_cmd.index("--warmup-inputs") + 1], "0")
+
+    def test_post_run_mnn_batch_uses_dashboard_state_entrypoint(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+
+        with patch.object(
+            state,
+            "start_mnn_batch_inference",
+            return_value={"status": "started", "batch_job_id": "mnn-demo-300", "total": 300, "engine": "mnn"},
+        ) as start_mnn:
+            status, _, payload = request_json(
+                state,
+                "POST",
+                "/api/run-mnn-batch",
+                body=json.dumps({"count": 300}).encode("utf-8"),
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["status"], "started")
+        self.assertEqual(payload["engine"], "mnn")
+        start_mnn.assert_called_once_with(count=300)
 
     def test_run_demo_inference_with_crypto_uses_standard_live_job_with_security_context(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
@@ -1474,8 +1799,63 @@ class DashboardStateTest(unittest.TestCase):
         self.assertEqual(payload["enabled"], True)
         self.assertEqual(payload["board_configured"], True)
 
+    def test_get_crypto_status_reports_service_mode_unavailable_on_legacy_live(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        payload = state.get_crypto_status()
+
+        self.assertIn("service_mode", payload)
+        self.assertEqual(
+            payload["service_mode"],
+            {
+                "available": False,
+                "source": "not_available_on_live",
+                "current_mode": None,
+                "allowed_mode": None,
+                "payload_strategy": None,
+                "mode_transitions": 0,
+                "last_transition": None,
+                "note": "当前 live 固件仍是老控制协议；服务模式消息 (0x60-0x62) 尚未接入。",
+            },
+        )
+
+    def test_get_crypto_status_preserves_old_control_summary_when_service_mode_is_unavailable(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+
+        with patch.object(
+            state,
+            "_control_plane_summary",
+            return_value={
+                "control_guard_state": "READY",
+                "control_last_fault_code": "NONE",
+                "control_heartbeat_ok": 0,
+                "control_total_fault_count": 3,
+            },
+        ):
+            payload = state.get_crypto_status()
+
+        self.assertEqual(payload["control_guard_state"], "READY")
+        self.assertEqual(payload["control_last_fault_code"], "NONE")
+        self.assertEqual(payload["control_heartbeat_ok"], 0)
+        self.assertEqual(payload["control_total_fault_count"], 3)
+        self.assertFalse(payload["service_mode"]["available"])
+
 
 class ServerMainTest(unittest.TestCase):
+    def test_server_script_help_runs_without_manual_pythonpath(self) -> None:
+        env = dict(os.environ)
+        env.pop("PYTHONPATH", None)
+
+        result = subprocess.run(
+            [sys.executable, str(DEMO_ROOT / "server.py"), "--help"],
+            cwd=DEMO_ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("usage: server.py", result.stdout)
+
     def test_demo_startup_env_overrides_loads_aircraft_position_env_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             env_path = Path(tmpdir) / "aircraft_position.env"

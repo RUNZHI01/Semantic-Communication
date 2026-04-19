@@ -21,6 +21,19 @@ FORMAL_BASELINE_E2E_MS = 1850.0
 FORMAL_CURRENT_E2E_MS = 230.339
 
 
+class ServiceMode(IntEnum):
+    """Inner mode state machine: service level inside RUNNING state.
+
+    Governs how the data plane handles incoming payloads:
+    - FULL_FRAME:  complete latent → TVM fixed-shape reconstruction
+    - ROI_ONLY:    ROI-cropped latent → MNN dynamic-shape reconstruction
+    - ALERT_ONLY:  alert metadata only → no inference, direct display
+    """
+    FULL_FRAME = 0
+    ROI_ONLY = 1
+    ALERT_ONLY = 2
+
+
 class MessageType(IntEnum):
     JOB_REQ = 0x01
     JOB_ACK = 0x02
@@ -39,6 +52,10 @@ class MessageType(IntEnum):
     SIGNED_ADMISSION_COMMIT = 0x0F
     SIGNED_ADMISSION_ACK = 0x10
     ENCRYPTED_CTRL = 0x20
+    # --- task-level degradation messages ---
+    LINK_HEALTH = 0x60          # linux → guard: link quality report
+    MODE_DIRECTIVE = 0x61       # guard → linux: allowed service mode
+    MODE_ACK = 0x62             # linux → guard: mode switch confirmed
 
 
 class Decision(IntEnum):
@@ -64,6 +81,9 @@ class FaultCode(IntEnum):
     SIGNATURE_INVALID = 14
     KEY_SLOT_UNKNOWN = 15
     MANIFEST_CONTRACT_MISMATCH = 16
+    # --- task-level degradation fault codes ---
+    LINK_DEGRADED = 17          # informational: link quality below threshold
+    LINK_LOST = 18              # critical: RX lost lock, triggers SAFE_STOP
 
 
 class OrchestratorState(str, Enum):

@@ -3,6 +3,16 @@ import type { SystemStatusResponse } from '../../../api/types'
 import { Icons } from '../../icons'
 import s from './MinimalStatusPanel.module.css'
 
+function aircraftPositionStatusLabel(rawStatus: unknown): string {
+  const status = String(rawStatus ?? '').trim().toLowerCase()
+  if (status === 'live') return 'LIVE'
+  if (status === 'stale') return 'STALE'
+  if (status === 'stub') return 'STUB'
+  if (status === 'fallback') return 'FALLBACK'
+  if (status === 'absent') return 'ABSENT'
+  return status ? status.toUpperCase() : 'UNKNOWN'
+}
+
 function CircularGauge({ value, color, label }: { value: number, color: string, label: string }) {
   const radius = 14;
   const circumference = 2 * Math.PI * radius;
@@ -51,7 +61,7 @@ export function MinimalStatusPanel({ system }: MinimalStatusPanelProps) {
   const status = system.data
   const live = status?.live
   const sp = status?.safety_panel
-  const boardPositionApi = live?.board_position_api as Record<string, unknown> | undefined
+  const aircraftPosition = status?.aircraft_position as Record<string, unknown> | undefined
   const boardOnline = live?.board_online ?? false
   const telemetry = live?.telemetry
   const computeLabel = telemetry?.compute_label ?? 'CPU'
@@ -64,7 +74,7 @@ export function MinimalStatusPanel({ system }: MinimalStatusPanelProps) {
   const loadSummary = telemetry?.loadavg_1m != null
     ? `${telemetry.loadavg_1m.toFixed(2)}`
     : '—'
-  const boardPositionApiStatus = String(boardPositionApi?.status ?? 'unavailable')
+  const aircraftPositionStatus = aircraftPositionStatusLabel(aircraftPosition?.source_status)
 
   return (
     <div className={s.container}>
@@ -128,9 +138,9 @@ export function MinimalStatusPanel({ system }: MinimalStatusPanelProps) {
         </div>
 
         <div className={s.detailRow}>
-          <span className={s.detailLabel}>定位 API</span>
-          <span className={boardPositionApiStatus === 'live' ? s.detailValueAccent : s.detailValue}>
-            {boardPositionApiStatus.toUpperCase()}
+          <span className={s.detailLabel}>本机定位</span>
+          <span className={aircraftPositionStatus === 'LIVE' ? s.detailValueAccent : s.detailValue}>
+            {aircraftPositionStatus}
           </span>
         </div>
       </div>

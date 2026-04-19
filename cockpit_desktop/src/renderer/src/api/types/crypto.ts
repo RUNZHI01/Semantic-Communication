@@ -21,6 +21,30 @@ export type BatchBenchmark = {
   total_ms?: BenchmarkMetric | null
 }
 
+export type ServiceModeSnapshot = {
+  /** Whether the live path currently exposes service-mode state */
+  available: boolean
+  /** Source of the snapshot, e.g. mock/live/unavailable */
+  source: string
+  /** Current service mode, if available */
+  current_mode: string | null
+  /** Guard-advertised allowed mode, if available */
+  allowed_mode: string | null
+  /** Payload strategy label, if available */
+  payload_strategy: string | null
+  /** Total number of mode transitions since engine start */
+  mode_transitions: number
+  /** Last mode transition details, or null if none */
+  last_transition: {
+    from_mode: string
+    to_mode: string
+    reason: string
+    timestamp_ms: number
+  } | null
+  /** Human-readable operator note */
+  note: string
+}
+
 export type CryptoStatusResponse = {
   /** KEM backend name, e.g. "tongsuo-ML-KEM-768" or "liboqs-ML-KEM-768" */
   kem_backend: string
@@ -86,6 +110,8 @@ export type CryptoStatusResponse = {
   batch_completed?: number
   /** Total images in current/last batch */
   batch_total?: number
+  /** Task-level service-mode status, independent from the old control summary */
+  service_mode?: ServiceModeSnapshot | null
 }
 
 export type CryptoTestResult = {
@@ -101,11 +127,13 @@ export type BatchInferenceResponse = {
   batch_job_id?: string
   total?: number
   message?: string
+  engine?: string
 }
 
 export type BatchStateResponse = {
   status: string
   batch_job_id?: string
+  engine?: string
   total?: number
   completed?: number
   success?: number
@@ -114,4 +142,6 @@ export type BatchStateResponse = {
   started_at?: number
   finished_at?: number | null
   benchmark?: BatchBenchmark | null
+  /** Service mode active during this batch (FULL_FRAME / ROI_ONLY / ALERT_ONLY) */
+  service_mode?: string
 }

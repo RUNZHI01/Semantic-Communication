@@ -9,6 +9,7 @@ import {
   postBoardAccess,
   postJobManifestGatePreview,
   postRunInferenceBatch,
+  postRunMnnBatch,
 } from '../api/client'
 import { useAppStore } from '../stores/appStore'
 
@@ -97,6 +98,14 @@ export function useRunInferenceBatch() {
   const inv = useInvalidateOnSuccess()
   return useMutation({
     mutationFn: ({ count }: { count?: number } = {}) => postRunInferenceBatch(count ?? 300),
+    onSuccess: inv,
+  })
+}
+
+export function useRunMnnBatch() {
+  const inv = useInvalidateOnSuccess()
+  return useMutation({
+    mutationFn: ({ count }: { count?: number } = {}) => postRunMnnBatch(count ?? 300),
     onSuccess: inv,
   })
 }

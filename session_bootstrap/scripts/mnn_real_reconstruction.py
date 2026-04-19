@@ -13,6 +13,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
+from threading import Lock
 from typing import Any
 
 import numpy as np
@@ -51,6 +52,7 @@ except ImportError:
 
 
 LOGGER = logging.getLogger("mnn_real_reconstruction")
+PROGRESS_EMIT_LOCK = Lock()
 
 
 def configure_logging() -> None:
@@ -371,6 +373,20 @@ class WorkerContext:
             save_start = time.perf_counter()
             output_path = str(save_reconstruction(output, output_stem))
             save_ms = (time.perf_counter() - save_start) * 1000.0
+            with PROGRESS_EMIT_LOCK:
+                print(
+                    json.dumps(
+                        {
+                            "openamp_demo_progress": {
+                                "delta": 1,
+                                "input_path": str(path),
+                                "output_path": output_path,
+                            }
+                        },
+                        ensure_ascii=False,
+                    ),
+                    flush=True,
+                )
 
         total_ms = (time.perf_counter() - sample_start) * 1000.0
         return {

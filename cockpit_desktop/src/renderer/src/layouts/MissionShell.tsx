@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from 'react'
+import { useEffect, useRef } from 'react'
 import { Layout } from 'antd'
-import { Outlet } from 'react-router-dom'
+import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useHealth } from '../hooks/useHealth'
 import { useAppStore } from '../stores/appStore'
 import { Icons } from '../components/icons'
@@ -9,8 +9,8 @@ import s from './MissionShell.module.css'
 const { Header, Content } = Layout
 
 const NAV_TABS = [
-  { key: 'dashboard', label: '仪表盘' },
-  { key: 'session', label: 'Session' },
+  { key: '/', label: '仪表盘' },
+  { key: '/console', label: '控制台' },
 ] as const
 
 function SystemClock() {
@@ -33,7 +33,9 @@ function SystemClock() {
 export function MissionShell() {
   const appTitle = useAppStore((s) => s.appTitle)
   const health = useHealth()
-  const [activeTab, setActiveTab] = useState<string>('dashboard')
+  const location = useLocation()
+  const navigate = useNavigate()
+  const activeTab = location.pathname === '/console' ? '/console' : '/'
 
   const linkOk = health.isSuccess && health.data?.status === 'ok'
 
@@ -58,7 +60,7 @@ export function MissionShell() {
             <button
               key={tab.key}
               className={activeTab === tab.key ? s.navTabActive : s.navTab}
-              onClick={() => setActiveTab(tab.key)}
+              onClick={() => navigate(tab.key)}
               aria-current={activeTab === tab.key ? 'page' : undefined}
             >
               {tab.label}

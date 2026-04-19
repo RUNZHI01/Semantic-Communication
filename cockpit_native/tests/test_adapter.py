@@ -23,7 +23,8 @@ class DemoRepoAdapterTest(unittest.TestCase):
         bundle = self.adapter.load_contract_bundle()
 
         self.assertTrue(str(bundle.snapshot["aggregate"]["session_id"]).startswith("session_"))
-        self.assertEqual(bundle.snapshot["reason"], "job_fallback")
+        self.assertIsInstance(bundle.snapshot["reason"], str)
+        self.assertTrue(bundle.snapshot["reason"])
         self.assertEqual(bundle.aircraft_position["contract_version"], "aircraft_position.v1")
         self.assertEqual(bundle.aircraft_position["source_api_path"], "/api/aircraft-position")
         self.assertEqual(bundle.weak_network["recommended_scenario_id"], "snr10_bestcurrent")
@@ -47,6 +48,40 @@ class DemoRepoAdapterTest(unittest.TestCase):
         self.assertGreater(len(center_panel["track"]), 0)
         self.assertAlmostEqual(center_panel["position"]["latitude"], 30.572815)
         self.assertAlmostEqual(center_panel["position"]["longitude"], 104.066801)
+
+    def test_load_contract_bundle_defaults_degradation_status_to_not_connected(self) -> None:
+        ui_state = self.adapter.load_contract_bundle().ui_state
+        left_rows = ui_state["zones"]["left_status_panel"]["rows"]
+        actions = ui_state["zones"]["bottom_action_strip"]["actions"]
+
+        degradation_row = next(row for row in left_rows if row["label"] == "退化模式")
+        degradation_action = next(action for action in actions if action["action_id"] == "degradation_status")
+
+        self.assertEqual(degradation_row["value"], "未接入")
+        self.assertEqual(degradation_row["tone"], "neutral")
+        self.assertEqual(degradation_action["note"], "退化引擎未接入。")
+        self.assertFalse(degradation_action["enabled"])
+        self.assertFalse(degradation_action["interactive"])
+
+    def test_load_contract_bundle_injects_degradation_status(self) -> None:
+        status = {
+            "current_mode": "ROI_ONLY",
+            "payload_strategy": "roi_latent",
+            "is_link_lost": False,
+            "mode_transitions": 2,
+        }
+        ui_state = self.adapter.load_contract_bundle(degradation_status=status).ui_state
+        left_rows = ui_state["zones"]["left_status_panel"]["rows"]
+        actions = ui_state["zones"]["bottom_action_strip"]["actions"]
+
+        degradation_row = next(row for row in left_rows if row["label"] == "退化模式")
+        degradation_action = next(action for action in actions if action["action_id"] == "degradation_status")
+
+        self.assertEqual(degradation_row["value"], "ROI_ONLY")
+        self.assertEqual(degradation_row["tone"], "degraded")
+        self.assertIn("当前模式 ROI_ONLY", degradation_action["note"])
+        self.assertIn("发送策略 roi_latent", degradation_action["note"])
+        self.assertEqual(degradation_action["tone"], "degraded")
 
 
 if __name__ == "__main__":

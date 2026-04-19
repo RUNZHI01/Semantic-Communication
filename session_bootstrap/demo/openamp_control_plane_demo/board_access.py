@@ -502,6 +502,11 @@ class BoardAccessConfig:
         if not clean_overrides:
             return self
 
+        host_override = first_non_empty(clean_overrides, HOST_KEYS)
+        user_override = first_non_empty(clean_overrides, USER_KEYS)
+        password_override = first_non_empty(clean_overrides, PASSWORD_KEYS)
+        port_override = first_non_empty(clean_overrides, PORT_KEYS)
+
         env_values = dict(self.env_values)
         env_values.update(clean_overrides)
 
@@ -512,6 +517,10 @@ class BoardAccessConfig:
 
         return replace(
             self,
+            host=host_override or self.host,
+            user=user_override or self.user,
+            password=password_override or self.password,
+            port=normalize_port(port_override) if port_override else self.port,
             env_values=env_values,
             startup_env_values=startup_env_values,
             env_file_values=env_file_values,

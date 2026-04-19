@@ -8,6 +8,7 @@ from .protocol import (
     JobSpec,
     MessageType,
     OrchestratorState,
+    ServiceMode,
     build_message,
     fault_name,
     fault_tag,
@@ -26,6 +27,11 @@ class Orchestrator:
         self.last_status: dict[str, Any] | None = None
         self.safe_stop_payload: dict[str, Any] | None = None
         self._tx_seq = 0
+
+        # --- inner mode state machine tracking ---
+        self.current_service_mode = ServiceMode.FULL_FRAME
+        self.mode_history: list[dict[str, Any]] = []
+
         self._transition(OrchestratorState.IDLE, "orchestrator initialized", 0)
 
     def submit_job(
@@ -173,6 +179,9 @@ class Orchestrator:
         if msg_type is MessageType.STATUS_RESP:
             self.last_status = dict(message.payload)
             return
+        if msg_type is MessageType.MODE_DIRECTIVE:
+            self._handle_mode_directive(message, now_ms)
+            return
         if msg_type is MessageType.RESET_ACK:
             self.last_status = dict(message.payload)
             if self.state in (
@@ -230,3 +239,36 @@ class Orchestrator:
                 "orchestrator_state": self.state.value,
             }
         )
+
+    # ------------------------------------------------------------------
+    # Inner mode state machine: receive MODE_DIRECTIVE from guard
+    # ------------------------------------------------------------------
+
+    def _handle_mode_directive(
+        self, message, now_ms: int,
+    ) -> None:
+        """Process a MODE_DIRECTIVE from the guard."""
+        new_mode = ServiceMode(int(message.payload["allowed_mode"]))
+        old_mode = self.current_service_mode
+        self.current_service_mode = new_mode
+        self.mode_history.append({
+            "at_ms": now_ms,
+            "from_mode": old_mode.name,
+            "to_mode": new_mode.name,
+            "reason": message.payload.get("reason", ""),
+            "job_id": message.header.job_id,
+        })
+
+    @property
+    def payload_strategy(self) -> str:
+        """Return data-plane payload strategy based on current service mode.
+
+        - ``"full_latent"``: complete latent → TVM fixed-shape path
+        - ``"roi_latent"``:  ROI-cropped latent → MNN dynamic-shape path
+        - ``"alert_metadata"``: metadata only → no inference
+        """
+        if self.current_service_mode == ServiceMode.FULL_FRAME:
+            return "full_latent"
+        if self.current_service_mode == ServiceMode.ROI_ONLY:
+            return "roi_latent"
+        return "alert_metadata"

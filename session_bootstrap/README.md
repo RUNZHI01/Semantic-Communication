@@ -6,6 +6,7 @@
 ## 目录约定
 
 - `scripts/`：执行脚本（`run_quick.sh`、`run_full_placeholder.sh`、`run_hotspot_micro_benchmark.sh`、`summarize_to_daily.sh`、`check_rpc_readiness.sh`、`rpc_print_cmd_templates.sh`、`run_rpc_first_round.sh`、`rpc_tune.py`、`manage_rpc_services.sh`、`run_rpc_tune.sh`、`connect_phytium_pi.sh`、`run_phytium_baseline_style_current_rebuild.sh`）。
+- `docs/`：持续维护的设计文档（协议、架构、长期方案）。
 - `templates/`：统一模板（日报、实验记录）。  
 - `logs/`：运行日志（按日期或执行ID分文件）。  
 - `reports/`：结构化结果输出（对比表、结论）。  
@@ -32,6 +33,7 @@
 | 多 SNR 鲁棒性摘要（latest） | `reports/judge_snr_robustness_20260330_current_chunk4.md` |
 | trusted current payload 正式结论 | `reports/inference_compare_currentsafe_chunk4_refresh_20260313_1758.md` |
 | trusted current 真实端到端重建正式结论 | `reports/inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md` |
+| USRP latent 数据面方案（审查版） | `docs/design_usrp_latent_transport.md` |
 | 下一轮性能优化执行清单 | `runbooks/next_round_optimization_checklist.md` |
 | big.LITTLE 首次真机一键入口 | `scripts/run_big_little_first_real_attempt.sh` |
 | big.LITTLE 真机结论摘要（推荐入口） | `reports/big_little_real_run_summary_20260318.md` |

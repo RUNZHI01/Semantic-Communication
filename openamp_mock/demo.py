@@ -11,12 +11,14 @@ from .evidence import write_example_bundle
 from .crypto_guard import CryptoGuard
 from .crypto_transport import CryptoTransport
 from .guard import SafetyGuard
+from .link_health import LinkHealthSimulator
 from .orchestrator import Orchestrator
 from .protocol import (
     Decision,
     FORMAL_TRUSTED_CURRENT_SHA,
     FaultCode,
     JobSpec,
+    ServiceMode,
     fault_tag,
 )
 from .transport import MockTransport
@@ -75,6 +77,44 @@ SCENARIOS: dict[str, ScenarioSpec] = {
         injected_fault="合法作业启动后故意停止 heartbeat。",
         expected_result="guard 触发 SAFE_STOP(F003) 并进入 FAULT_LATCHED。",
         risk_item="主控失活风险",
+    ),
+    # --- task-level degradation scenarios (FIT-04 ~ FIT-07) ---
+    "degrade_full_to_roi": ScenarioSpec(
+        name="degrade_full_to_roi",
+        tc_id="TC-010",
+        fit_id="FIT-04",
+        description="持续低 SNR 触发 FULL→ROI 自动降级",
+        injected_fault="注入连续 3 窗口低于 5dB SNR 的链路健康度报告。",
+        expected_result="Guard 在第 3 窗口后下发 MODE_DIRECTIVE(ROI_ONLY)，"
+                        "Orchestrator 确认并切换到 roi_latent 策略。",
+        risk_item="弱网下的服务连续性",
+    ),
+    "degrade_roi_to_alert": ScenarioSpec(
+        name="degrade_roi_to_alert",
+        tc_id="TC-011",
+        fit_id="FIT-05",
+        description="高丢包率触发 ROI→ALERT 降级",
+        injected_fault="先降级到 ROI，再注入 PER > 20% 的链路健康度报告。",
+        expected_result="Guard 下发 MODE_DIRECTIVE(ALERT_ONLY)，数据面跳过推理。",
+        risk_item="极端弱网下的任务信息保底",
+    ),
+    "burst_loss_emergency": ScenarioSpec(
+        name="burst_loss_emergency",
+        tc_id="TC-012",
+        fit_id="FIT-06",
+        description="突发丢包紧急降级（跳过滞回）",
+        injected_fault="注入 burst_loss_max≥10 的单窗口链路健康度报告。",
+        expected_result="Guard 立即下发 MODE_DIRECTIVE(ALERT_ONLY)，不等 3 窗口滞回。",
+        risk_item="突发丢包下的快速响应",
+    ),
+    "recovery_roi_to_full": ScenarioSpec(
+        name="recovery_roi_to_full",
+        tc_id="TC-013",
+        fit_id="FIT-07",
+        description="链路恢复后 ROI→FULL 自动升级（5 窗口滞回验证）",
+        injected_fault="先降级到 ROI，再注入连续 5 窗口正常 SNR。",
+        expected_result="Guard 在第 5 个恢复窗口后下发 MODE_DIRECTIVE(FULL_FRAME)。",
+        risk_item="模式稳定性（防抖验证）",
     ),
 }
 
@@ -219,6 +259,126 @@ def run_timeout_scenario(*, use_crypto_transport: bool = False) -> tuple[MockSes
     return session, _result_from_session(spec, session)
 
 
+# --- task-level degradation scenario runners ---
+
+def _start_job_for_degradation(
+    *, job_id: int, use_crypto_transport: bool = False,
+) -> MockSession:
+    """Helper: start a valid job so the guard enters JOB_ACTIVE."""
+    session = MockSession(use_crypto_transport=use_crypto_transport)
+    job = JobSpec(job_id=job_id, expected_sha256=FORMAL_TRUSTED_CURRENT_SHA, flags="payload")
+    session.orchestrator.submit_job(job, session.now_ms, session.transport)
+    session.pump()
+    # send first heartbeat to enter RUNNING
+    session.advance(50)
+    session.orchestrator.send_heartbeat(
+        now_ms=session.now_ms, transport=session.transport,
+        elapsed_ms=50, completed_outputs=0, progress_x100=0,
+    )
+    session.pump()
+    return session
+
+
+def run_degrade_full_to_roi(*, use_crypto_transport: bool = False) -> tuple[MockSession, dict[str, object]]:
+    """FIT-04: 3 consecutive degraded windows trigger FULL → ROI."""
+    spec = SCENARIOS["degrade_full_to_roi"]
+    session = _start_job_for_degradation(job_id=2001, use_crypto_transport=use_crypto_transport)
+    sim = LinkHealthSimulator()
+    # Feed 3 degraded windows (should trigger after 3rd)
+    for _ in range(3):
+        report = sim.degraded()
+        session.advance(500)
+        session.guard.handle_link_health(report, session.now_ms, session.transport)
+        session.pump()
+        # keep heartbeat alive
+        session.orchestrator.send_heartbeat(
+            now_ms=session.now_ms, transport=session.transport,
+            elapsed_ms=session.now_ms, completed_outputs=0, progress_x100=3000,
+        )
+        session.pump()
+    session.orchestrator.request_status(session.now_ms, session.transport)
+    session.pump()
+    return session, _result_from_session(spec, session)
+
+
+def run_degrade_roi_to_alert(*, use_crypto_transport: bool = False) -> tuple[MockSession, dict[str, object]]:
+    """FIT-05: From ROI, 3 severe windows trigger ROI → ALERT."""
+    spec = SCENARIOS["degrade_roi_to_alert"]
+    session = _start_job_for_degradation(job_id=2002, use_crypto_transport=use_crypto_transport)
+    sim = LinkHealthSimulator()
+    # First degrade to ROI (3 degraded windows)
+    for _ in range(3):
+        session.advance(500)
+        session.guard.handle_link_health(sim.degraded(), session.now_ms, session.transport)
+        session.pump()
+        session.orchestrator.send_heartbeat(
+            now_ms=session.now_ms, transport=session.transport,
+            elapsed_ms=session.now_ms, completed_outputs=0, progress_x100=2000,
+        )
+        session.pump()
+    # Now escalate to ALERT (3 severe windows)
+    for _ in range(3):
+        session.advance(500)
+        session.guard.handle_link_health(sim.severe(), session.now_ms, session.transport)
+        session.pump()
+        session.orchestrator.send_heartbeat(
+            now_ms=session.now_ms, transport=session.transport,
+            elapsed_ms=session.now_ms, completed_outputs=0, progress_x100=2000,
+        )
+        session.pump()
+    session.orchestrator.request_status(session.now_ms, session.transport)
+    session.pump()
+    return session, _result_from_session(spec, session)
+
+
+def run_burst_loss_emergency(*, use_crypto_transport: bool = False) -> tuple[MockSession, dict[str, object]]:
+    """FIT-06: Single burst-loss spike bypasses hysteresis."""
+    spec = SCENARIOS["burst_loss_emergency"]
+    session = _start_job_for_degradation(job_id=2003, use_crypto_transport=use_crypto_transport)
+    sim = LinkHealthSimulator()
+    # Single burst loss window — should trigger immediate degrade
+    session.advance(500)
+    session.guard.handle_link_health(sim.burst_loss(), session.now_ms, session.transport)
+    session.pump()
+    session.orchestrator.request_status(session.now_ms, session.transport)
+    session.pump()
+    return session, _result_from_session(spec, session)
+
+
+def run_recovery_roi_to_full(*, use_crypto_transport: bool = False) -> tuple[MockSession, dict[str, object]]:
+    """FIT-07: After degrading to ROI, 5 normal windows trigger ROI → FULL."""
+    spec = SCENARIOS["recovery_roi_to_full"]
+    session = _start_job_for_degradation(job_id=2004, use_crypto_transport=use_crypto_transport)
+    sim = LinkHealthSimulator()
+    # First degrade to ROI
+    for _ in range(3):
+        session.advance(500)
+        session.guard.handle_link_health(sim.degraded(), session.now_ms, session.transport)
+        session.pump()
+        session.orchestrator.send_heartbeat(
+            now_ms=session.now_ms, transport=session.transport,
+            elapsed_ms=session.now_ms, completed_outputs=0, progress_x100=1000,
+        )
+        session.pump()
+    # Confirm we are in ROI
+    assert session.guard.current_mode == ServiceMode.ROI_ONLY, (
+        f"expected ROI_ONLY after degrade, got {session.guard.current_mode.name}"
+    )
+    # Now recover: 5 normal windows needed (asymmetric hysteresis)
+    for _ in range(5):
+        session.advance(500)
+        session.guard.handle_link_health(sim.normal(), session.now_ms, session.transport)
+        session.pump()
+        session.orchestrator.send_heartbeat(
+            now_ms=session.now_ms, transport=session.transport,
+            elapsed_ms=session.now_ms, completed_outputs=0, progress_x100=5000,
+        )
+        session.pump()
+    session.orchestrator.request_status(session.now_ms, session.transport)
+    session.pump()
+    return session, _result_from_session(spec, session)
+
+
 def run_named_scenarios(
     names: list[str],
     *,
@@ -229,6 +389,10 @@ def run_named_scenarios(
         "deny_sha": lambda: run_wrong_sha_deny_scenario(use_crypto_transport=use_crypto_transport),
         "deny_input": lambda: run_input_contract_deny_scenario(use_crypto_transport=use_crypto_transport),
         "timeout": lambda: run_timeout_scenario(use_crypto_transport=use_crypto_transport),
+        "degrade_full_to_roi": lambda: run_degrade_full_to_roi(use_crypto_transport=use_crypto_transport),
+        "degrade_roi_to_alert": lambda: run_degrade_roi_to_alert(use_crypto_transport=use_crypto_transport),
+        "burst_loss_emergency": lambda: run_burst_loss_emergency(use_crypto_transport=use_crypto_transport),
+        "recovery_roi_to_full": lambda: run_recovery_roi_to_full(use_crypto_transport=use_crypto_transport),
     }
     sessions: list[MockSession] = []
     results: list[dict[str, object]] = []
@@ -307,6 +471,32 @@ def _scenario_passed(name: str, session: MockSession) -> bool:
             session.orchestrator.state.value == "SAFE_STOPPED"
             and session.guard.last_fault_code == FaultCode.HEARTBEAT_TIMEOUT
             and session.guard.state.value == "FAULT_LATCHED"
+        )
+    # --- task-level degradation pass criteria ---
+    if name == "degrade_full_to_roi":
+        return (
+            session.guard.current_mode == ServiceMode.ROI_ONLY
+            and session.orchestrator.current_service_mode == ServiceMode.ROI_ONLY
+            and session.guard.state.value == "JOB_ACTIVE"  # outer FSM unchanged
+        )
+    if name == "degrade_roi_to_alert":
+        return (
+            session.guard.current_mode == ServiceMode.ALERT_ONLY
+            and session.orchestrator.current_service_mode == ServiceMode.ALERT_ONLY
+            and session.guard.state.value == "JOB_ACTIVE"
+        )
+    if name == "burst_loss_emergency":
+        return (
+            session.guard.current_mode == ServiceMode.ALERT_ONLY
+            and session.orchestrator.current_service_mode == ServiceMode.ALERT_ONLY
+            and len(session.guard.mode_log) >= 1
+            and session.guard.mode_log[-1]["reason"] == "burst loss emergency"
+        )
+    if name == "recovery_roi_to_full":
+        return (
+            session.guard.current_mode == ServiceMode.FULL_FRAME
+            and session.orchestrator.current_service_mode == ServiceMode.FULL_FRAME
+            and len(session.guard.mode_log) >= 2  # at least degrade + recover
         )
     return False
 

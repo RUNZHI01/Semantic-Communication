@@ -324,6 +324,17 @@ class DemoBoardAccessDefaultsTest(unittest.TestCase):
         self.assertEqual(access.build_env()["INFERENCE_CURRENT_EXPECTED_SHA256"], stale_sha)
         self.assertEqual(corrected.build_env()["INFERENCE_CURRENT_EXPECTED_SHA256"], trusted_sha)
 
+    def test_with_env_overrides_promotes_remote_pass_into_connection_state(self) -> None:
+        access = build_demo_default_board_access(None)
+
+        self.assertEqual(access.missing_connection_fields(), ["password"])
+        corrected = access.with_env_overrides({"REMOTE_PASS": "demo-pass"})
+
+        self.assertEqual(corrected.password, "demo-pass")
+        self.assertTrue(corrected.connection_ready)
+        self.assertEqual(corrected.missing_connection_fields(), [])
+        self.assertEqual(corrected.build_env()["REMOTE_PASS"], "demo-pass")
+
 
 if __name__ == "__main__":
     unittest.main()
