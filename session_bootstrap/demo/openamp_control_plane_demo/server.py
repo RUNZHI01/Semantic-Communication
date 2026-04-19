@@ -6605,6 +6605,74 @@ class DashboardState:
                 "guard_state": replay["guard_state"],
                 "last_fault_code": replay["last_fault_code"],
             }
+            # ── Replay: also update control status so the dashboard panel reflects the change ──
+            replay_control = dict(self._last_control_status or {})
+            replay_control["guard_state"] = replay["guard_state"]
+            replay_control["last_fault_code"] = replay["last_fault_code"]
+            replay_control["total_fault_count"] = self._safe_int(replay_control.get("total_fault_count"), default=0) + 1
+            if fault_type == "heartbeat_timeout":
+                replay_control["heartbeat_ok"] = self._safe_int(replay_control.get("heartbeat_ok"), default=0) + 1
+            self._last_control_status = replay_control
+            self._crypto_status_cache = None  # force instant refresh on next poll
+        # ── Replay: publish event_spine events so timeline and counters update ──
+        self._event_spine.publish(
+            "JOB_SUBMITTED",
+            source="fault",
+            plane="control",
+            mode_scope=CONTROL_MODE_SCOPE,
+            message=f"{fault_type} fault demo submitted (replay mode).",
+            data={"fault_type": fault_type, "execution_mode": "replay"},
+        )
+        if fault_type == "heartbeat_timeout":
+            self._event_spine.publish(
+                "JOB_ADMITTED",
+                source="fault",
+                plane="control",
+                mode_scope=CONTROL_MODE_SCOPE,
+                message="Heartbeat timeout FIT replay: job admitted before watchdog.",
+                data={"fault_type": fault_type},
+            )
+            self._event_spine.publish(
+                "HEARTBEAT_OK",
+                source="fault",
+                plane="control",
+                mode_scope=CONTROL_MODE_SCOPE,
+                message="Heartbeat ACK observed (replay).",
+                data={"fault_type": fault_type},
+            )
+            self._event_spine.publish(
+                "HEARTBEAT_LOST",
+                source="fault",
+                plane="control",
+                mode_scope=CONTROL_MODE_SCOPE,
+                message="Heartbeat watchdog timeout (replay).",
+                data={"fault_type": fault_type, "last_fault_code": replay["last_fault_code"]},
+            )
+            self._event_spine.publish(
+                "SAFE_STOP_TRIGGERED",
+                source="fault",
+                plane="control",
+                mode_scope=CONTROL_MODE_SCOPE,
+                message="SAFE_STOP triggered after heartbeat timeout (replay).",
+                data={"fault_type": fault_type},
+            )
+            self._event_spine.publish(
+                "SAFE_STOP_CLEARED",
+                source="fault",
+                plane="control",
+                mode_scope=CONTROL_MODE_SCOPE,
+                message="SAFE_STOP cleared, guard returned to READY (replay).",
+                data={"fault_type": fault_type},
+            )
+        else:
+            self._event_spine.publish(
+                "JOB_REJECTED",
+                source="fault",
+                plane="control",
+                mode_scope=CONTROL_MODE_SCOPE,
+                message=f"{fault_type} fault demo rejected as expected (replay).",
+                data={"fault_type": fault_type, "last_fault_code": replay["last_fault_code"]},
+            )
         return replay
 
     def recover_fault(self) -> dict[str, Any]:
@@ -6686,6 +6754,29 @@ class DashboardState:
                 "guard_state": replay["guard_state"],
                 "last_fault_code": replay["last_fault_code"],
             }
+            # ── Replay: update control status to reflect recovery ──
+            replay_control = dict(self._last_control_status or {})
+            replay_control["guard_state"] = replay["guard_state"]
+            replay_control["last_fault_code"] = replay["last_fault_code"]
+            self._last_control_status = replay_control
+            self._crypto_status_cache = None  # force instant refresh on next poll
+        # ── Replay: publish event_spine events for recovery ──
+        self._event_spine.publish(
+            "SAFE_STOP_TRIGGERED",
+            source="recover",
+            plane="control",
+            mode_scope=CONTROL_MODE_SCOPE,
+            message="Operator-triggered SAFE_STOP (replay).",
+            data={"reason": "manual_recover", "last_fault_code": replay["last_fault_code"]},
+        )
+        self._event_spine.publish(
+            "SAFE_STOP_CLEARED",
+            source="recover",
+            plane="control",
+            mode_scope=CONTROL_MODE_SCOPE,
+            message="SAFE_STOP returned guard to READY (replay).",
+            data={"reason": "manual_recover", "last_fault_code": replay["last_fault_code"]},
+        )
         return replay
 
 

@@ -160,6 +160,8 @@ export const Icons = {
   Sun: LucideIcons.Sun,
   Maximize: LucideIcons.Maximize,
   Minimize: LucideIcons.Minimize,
+  Sliders: LucideIcons.Sliders,
+  CheckSquare: LucideIcons.CheckSquare,
 };
 
 export default Icons;

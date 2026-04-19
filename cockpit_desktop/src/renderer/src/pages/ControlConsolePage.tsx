@@ -230,6 +230,7 @@ export function ControlConsolePage() {
       <AnimatedListItem>
         <div className={`${s.sectionCard} ${s.fullWidth}`}>
           <div className={s.sectionTitle}>
+            <Icons.Sliders size={16} className={s.titleIcon} />
             服务模式调度（切换后去「仪表盘」启动推理查看联动效果）
           </div>
           <div className={s.modeGrid}>
@@ -263,7 +264,10 @@ export function ControlConsolePage() {
           <AnimatedListItem>
             <div className={s.sectionCard}>
               <div className={s.sectionTitle} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span>控制面状态</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Icons.Shield size={16} className={s.titleIcon} />
+                  <span>控制面状态</span>
+                </div>
                 <button
                   className={s.btnTonal}
                   onClick={handleProbe}
@@ -274,24 +278,51 @@ export function ControlConsolePage() {
                   探活
                 </button>
               </div>
-              <div className={s.rowGrid}>
-                <span className={s.label}>Guard 状态</span>
-                <span className={s.mono}>{cryptoData?.control_guard_state ?? '—'}</span>
 
-                <span className={s.label}>最近故障</span>
-                <span className={s.mono}>{cryptoData?.control_last_fault_code ?? 'NONE'}</span>
+              <div className={s.statsGrid}>
+                {/* Micro-Dashboard blocks */}
+                <div className={s.statBlock}>
+                  <div className={s.statLabel}>Guard 状态</div>
+                  <div className={`${s.statValue} ${cryptoData?.control_guard_state === 'READY' ? s.textOk : s.textDanger}`}>
+                    {cryptoData?.control_guard_state ?? '—'}
+                  </div>
+                </div>
+                
+                <div className={s.statBlock}>
+                  <div className={s.statLabel}>最近故障代码</div>
+                  <div className={`${s.statValue} ${cryptoData?.control_last_fault_code === 'NONE' ? s.textOk : s.textDanger}`}>
+                    {cryptoData?.control_last_fault_code ?? 'NONE'}
+                  </div>
+                </div>
 
-                <span className={s.label}>心跳 / 故障计数</span>
-                <span className={s.mono}>
-                  {cryptoData?.control_heartbeat_ok ?? 0} / {cryptoData?.control_total_fault_count ?? 0}
-                </span>
+                <div className={s.statBlock}>
+                  <div className={s.statLabel}>心跳检测 / 故障触发总数</div>
+                  <div className={s.statValue}>
+                    <span className={cryptoData?.control_heartbeat_ok ? s.textOk : ''}>{cryptoData?.control_heartbeat_ok ?? 0}</span>
+                    <span className={s.statDivider}>/</span>
+                    <span className={cryptoData?.control_total_fault_count ? s.textDanger : ''}>
+                       {cryptoData?.control_total_fault_count ?? 0}
+                    </span>
+                  </div>
+                </div>
 
-                <span className={s.label}>JOB 统计</span>
-                <span className={s.mono}>
-                  REQ={cryptoData?.control_job_req_count ?? 0}{' '}
-                  ALLOW={cryptoData?.control_job_admit_count ?? 0}{' '}
-                  DENY={cryptoData?.control_job_reject_count ?? 0}
-                </span>
+                <div className={s.statBlock}>
+                  <div className={s.statLabel}>处理请求拦截统计 (JOB)</div>
+                  <div className={s.jobStatRow}>
+                    <div className={s.jobStatItem}>
+                      <span className={s.jobNum}>{cryptoData?.control_job_req_count ?? 0}</span>
+                      <span className={s.jobText}>REQ</span>
+                    </div>
+                    <div className={s.jobStatItem}>
+                      <span className={`${s.jobNum} ${s.textOk}`}>{cryptoData?.control_job_admit_count ?? 0}</span>
+                      <span className={s.jobText}>ALLOW</span>
+                    </div>
+                    <div className={s.jobStatItem}>
+                      <span className={`${s.jobNum} ${s.textDanger}`}>{cryptoData?.control_job_reject_count ?? 0}</span>
+                      <span className={s.jobText}>DENY</span>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </AnimatedListItem>
@@ -300,7 +331,10 @@ export function ControlConsolePage() {
           <AnimatedListItem>
             <div className={s.sectionCard}>
               <div className={s.fitTitleRow}>
-                <span className={s.sectionTitle} style={{ borderBottom: 'none', paddingBottom: 0 }}>FIT 故障注入测试</span>
+                <div className={s.sectionTitle} style={{ borderBottom: 'none', paddingBottom: 0, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Icons.Zap size={16} className={s.titleIcon} />
+                  <span>FIT 故障注入测试</span>
+                </div>
                 <span className={`${s.guardBadge} ${hasFault ? s.guardBadgeDanger : s.guardBadgeOk}`}>
                   <span className={`${s.guardDot} ${hasFault ? s.guardDotDanger : s.guardDotOk}`} />
                   guard={guardState}
@@ -383,7 +417,10 @@ export function ControlConsolePage() {
           {/* Protocol checklist */}
           <AnimatedListItem>
             <div className={s.sectionCard}>
-              <div className={s.sectionTitle}>协议能力矩阵</div>
+              <div className={s.sectionTitle} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Icons.CheckSquare size={16} className={s.titleIcon} />
+                <span>协议能力矩阵</span>
+              </div>
               <div className={s.checklistGrid}>
                 {PROTOCOL_CHECKLIST.map((item) => (
                   <div key={item.label} className={s.checkItem}>
@@ -401,33 +438,40 @@ export function ControlConsolePage() {
           <AnimatedListItem>
             <div className={`${s.sectionCard} ${s.timelineCard}`}>
               <div className={s.sectionTitle} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span>实时事件流</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Icons.Activity size={16} className={s.titleIcon} />
+                  <span>实时事件流</span>
+                </div>
                 <span className={s.eventCountBadge}>{eventCount} 事件</span>
               </div>
               <div className={s.timelineScroll} ref={timelineRef}>
+                <div className={s.timelineTrack} />
                 {events.length === 0 ? (
                   <div className={s.timelineEmpty}>
-                    <Icons.Activity size={20} style={{ opacity: 0.3 }} />
-                    <span>暂无事件 — 点击探活或注入故障生成事件</span>
+                    <Icons.Activity size={24} className={s.pulseIconEmpty} />
+                    <span>系统待机中... 等待控制平面事件</span>
                   </div>
                 ) : (
-                  events.map((evt: EventSpineEvent, i) => (
-                    <div key={`${evt.timestamp}-${i}`} className={s.timelineItem}>
-                      <div className={s.timelineDot} />
-                      <div className={s.timelineContent}>
-                        <div className={s.timelineHeader}>
-                          <span className={`${s.evtBadge} ${eventBadgeCls(evt.event_type ?? '')}`}>
-                            {evt.event_type}
-                          </span>
-                          <span className={s.timelineTime}>
-                            {evt.timestamp ? new Date(evt.timestamp).toLocaleTimeString('zh-CN', { hour12: false }) : '—'}
-                          </span>
+                  events.map((evt: EventSpineEvent, i) => {
+                    const isLatest = i === events.length - 1
+                    return (
+                      <div key={`${evt.timestamp}-${i}`} className={`${s.timelineItem} ${isLatest ? s.timelineItemLatest : ''}`}>
+                        <div className={`${s.timelineDot} ${isLatest ? s.timelineDotPulse : ''}`} />
+                        <div className={s.timelineContent}>
+                          <div className={s.timelineHeader}>
+                            <span className={`${s.evtBadge} ${eventBadgeCls(evt.event_type ?? '')}`}>
+                              {evt.event_type}
+                            </span>
+                            <span className={s.timelineTime}>
+                              {evt.timestamp ? new Date(evt.timestamp).toLocaleTimeString('zh-CN', { hour12: false }) : '—'}
+                            </span>
+                          </div>
+                          <div className={s.timelineMsg}>{evt.message}</div>
+                          {evt.source && <div className={s.timelineMeta}>source: {evt.source} · plane: {evt.plane ?? '—'}</div>}
                         </div>
-                        <div className={s.timelineMsg}>{evt.message}</div>
-                        {evt.source && <div className={s.timelineMeta}>source: {evt.source} · plane: {evt.plane ?? '—'}</div>}
                       </div>
-                    </div>
-                  ))
+                    )
+                  })
                 )}
               </div>
             </div>
