@@ -242,6 +242,7 @@ export type EventSpineResponse = {
     archive?: { enabled?: boolean }
   }
   events?: EventSpineEvent[]
+  recent_events?: EventSpineEvent[]
 }
 
 // ---------------------------------------------------------------------------

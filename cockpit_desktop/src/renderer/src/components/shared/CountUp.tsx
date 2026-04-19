@@ -1,6 +1,6 @@
 /**
  * CountUp animation component for numbers
- * Animates from 0 to target value with easing
+ * Animates from the last rendered value to the next target value with easing
  */
 import { useState, useEffect, useRef } from 'react'
 import { T } from '../../theme/tokens'
@@ -23,10 +23,22 @@ export function CountUp({
   const [current, setCurrent] = useState(0)
   const startTime = useRef<number>()
   const requestRef = useRef<number>()
+  const valueRef = useRef(0)
 
   useEffect(() => {
     if (end === null || end === undefined || Number.isNaN(end)) {
+      valueRef.current = 0
       setCurrent(0)
+      return
+    }
+
+    const startValue = valueRef.current
+    const delta = end - startValue
+
+    if (delta === 0) {
+      startTime.current = undefined
+      valueRef.current = end
+      setCurrent(end)
       return
     }
 
@@ -37,20 +49,29 @@ export function CountUp({
 
       // Easing: ease-out cubic
       const eased = 1 - Math.pow(1 - percent, 3)
+      const nextValue = startValue + delta * eased
 
-      setCurrent(eased * end)
+      valueRef.current = nextValue
+      setCurrent(nextValue)
 
       if (percent < 1) {
         requestRef.current = requestAnimationFrame(animate)
+      } else {
+        startTime.current = undefined
+        valueRef.current = end
+        setCurrent(end)
       }
     }
 
+    startTime.current = undefined
     requestRef.current = requestAnimationFrame(animate)
 
     return () => {
       if (requestRef.current) {
         cancelAnimationFrame(requestRef.current)
       }
+      requestRef.current = undefined
+      startTime.current = undefined
     }
   }, [end, duration])
 

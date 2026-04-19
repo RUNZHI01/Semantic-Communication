@@ -272,23 +272,113 @@
 }
 
 /* ────────────────────────────────────────────────
+   FIT title row with guard badge
+   ──────────────────────────────────────────────── */
+
+.fitTitleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--color-border-light);
+}
+
+.guardBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: var(--font-family-mono);
+  padding: 3px 10px;
+  border-radius: 100px;
+  white-space: nowrap;
+  transition: all 300ms ease;
+}
+
+.guardBadgeOk {
+  background: rgba(5, 150, 105, 0.08);
+  color: var(--color-success);
+  border: 1px solid rgba(5, 150, 105, 0.2);
+}
+
+.guardBadgeDanger {
+  background: rgba(239, 68, 68, 0.08);
+  color: var(--color-error);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  animation: guardPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes guardPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.15); }
+  50% { box-shadow: 0 0 8px 2px rgba(239, 68, 68, 0.25); }
+}
+
+.guardDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.guardDotOk {
+  background: var(--color-success);
+  box-shadow: 0 0 4px rgba(5, 150, 105, 0.5);
+}
+
+.guardDotDanger {
+  background: var(--color-error);
+  box-shadow: 0 0 4px rgba(239, 68, 68, 0.5);
+}
+
+/* ────────────────────────────────────────────────
    FIT cards
    ──────────────────────────────────────────────── */
 
 .fitGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  grid-template-columns: repeat(3, 1fr);
   gap: 10px;
 }
 
 .fitCard {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   padding: 12px;
   background: rgba(0, 0, 0, 0.015);
   border-radius: var(--radius-md);
   border: 1px solid var(--color-border-light);
+  transition: border-color 300ms, background 300ms, box-shadow 300ms;
+  min-height: 120px;
+}
+
+.fitCardTriggered {
+  border-color: rgba(239, 68, 68, 0.5);
+  background: rgba(239, 68, 68, 0.03);
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.1);
+  animation: fitFlash 400ms ease;
+}
+
+@keyframes fitFlash {
+  0% { background: rgba(239, 68, 68, 0.15); }
+  100% { background: rgba(239, 68, 68, 0.03); }
+}
+
+.fitCardTop {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.fitIcon {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+.fitCardTriggered .fitIcon {
+  color: var(--color-error);
 }
 
 .fitLabel {
@@ -300,7 +390,39 @@
 .fitDesc {
   font-size: 11px;
   color: var(--color-text-tertiary);
-  line-height: 1.5;
+  line-height: 1.4;
+  flex: 1;
+}
+
+/* FIT result display (replaces button after injection) */
+.fitResultBox {
+  margin-top: auto;
+  padding: 6px 8px;
+  background: rgba(239, 68, 68, 0.06);
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(239, 68, 68, 0.15);
+  animation: fadeInUp 300ms ease;
+}
+
+.fitResultLine {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-error);
+  font-family: var(--font-family-mono);
+  line-height: 1.6;
+}
+
+.fitResultIcon {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.fitResultGuard {
+  color: var(--color-text-secondary);
+  font-weight: 500;
 }
 
 /* ────────────────────────────────────────────────
@@ -316,13 +438,46 @@
   font-family: var(--font-family-mono);
   font-size: 11px;
   color: var(--color-text-secondary);
-  max-height: 100px;
+  max-height: 120px;
   overflow-y: auto;
 }
 
 .actionLogLine {
-  line-height: 1.6;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  line-height: 1.8;
   animation: fadeInUp 300ms ease;
+}
+
+.logTag {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.logTagDanger {
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--color-error);
+}
+
+.logTagSuccess {
+  background: rgba(5, 150, 105, 0.1);
+  color: var(--color-success);
+}
+
+.logTagInfo {
+  background: rgba(59, 130, 246, 0.1);
+  color: #3B82F6;
+}
+
+.logTagDefault {
+  background: rgba(0, 0, 0, 0.05);
+  color: var(--color-text-secondary);
 }
 
 @keyframes fadeInUp {
@@ -511,7 +666,7 @@
   background: var(--color-bg-secondary, rgba(0, 0, 0, 0.02));
   color: var(--color-text-primary);
   cursor: pointer;
-  transition: background 200ms, border-color 200ms;
+  transition: all 300ms ease;
   white-space: nowrap;
 }
 
@@ -523,6 +678,24 @@
 .btnRecover:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* Recover button pulses green when a fault is active */
+.btnRecoverActive {
+  border-color: rgba(5, 150, 105, 0.5);
+  background: rgba(5, 150, 105, 0.06);
+  color: var(--color-success);
+  animation: recoverPulse 2s ease-in-out infinite;
+}
+
+.btnRecoverActive:hover:not(:disabled) {
+  background: rgba(5, 150, 105, 0.12);
+  border-color: var(--color-success);
+}
+
+@keyframes recoverPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(5, 150, 105, 0.1); }
+  50% { box-shadow: 0 0 8px 2px rgba(5, 150, 105, 0.2); }
 }
 
 .spinner {

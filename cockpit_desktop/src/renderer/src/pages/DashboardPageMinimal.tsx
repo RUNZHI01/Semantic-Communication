@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, useCallback } from 'react'
+import { memo, useMemo, useState, useEffect, useCallback } from 'react'
 import { useSystemStatus } from '../hooks/useSystemStatus'
 import { useDemoSnapshot } from '../hooks/useSnapshot'
 import { useAircraftPosition } from '../hooks/useAircraftPosition'
@@ -22,6 +22,117 @@ import { Icons } from '../components/icons'
 import { CountUp } from '../components/shared/CountUp'
 import s from './DashboardPageMinimal.module.css'
 
+const LIVE_LOG_ACTIONS = ['Processing block', 'Allocating memory', 'Optimizing tensor', 'Compiling kernel', 'Syncing device']
+
+const LiveLogStream = memo(function LiveLogStream({ isRunning }: { isRunning: boolean }) {
+  const [logs, setLogs] = useState<string[]>([])
+
+  useEffect(() => {
+    if (!isRunning) {
+      setLogs([])
+      return
+    }
+
+    const id = setInterval(() => {
+      const now = new Date().toLocaleTimeString('en-US', { hour12: false })
+      const action = LIVE_LOG_ACTIONS[Math.floor(Math.random() * LIVE_LOG_ACTIONS.length)]
+      const blockId = Math.floor(Math.random() * 1000)
+      setLogs((prev) => [...prev, `[${now}] ${action} ${blockId}... OK`].slice(-3))
+    }, 800)
+
+    return () => clearInterval(id)
+  }, [isRunning])
+
+  if (!isRunning || logs.length === 0) {
+    return null
+  }
+
+  return (
+    <div className={s.liveLogStream}>
+      {logs.map((log, i) => (
+        <div key={`${log}-${i}`} className={s.logEntry} style={{ opacity: 0.4 + (i * 0.3) }}>
+          {log}
+        </div>
+      ))}
+    </div>
+  )
+})
+
+type GpsForwardStreamProps = {
+  isActive: boolean
+  sourceLabel?: string
+  fixType?: string
+  satellites?: number
+  latitude?: number
+  longitude?: number
+  altitudeMeters?: number
+}
+
+const GpsForwardStream = memo(function GpsForwardStream({
+  isActive,
+  sourceLabel,
+  fixType,
+  satellites,
+  latitude,
+  longitude,
+  altitudeMeters,
+}: GpsForwardStreamProps) {
+  const [gpsLogs, setGpsLogs] = useState<string[]>([])
+
+  useEffect(() => {
+    if (!isActive) {
+      setGpsLogs([])
+      return
+    }
+
+    const id = setInterval(() => {
+      const now = new Date().toLocaleTimeString('en-US', { hour12: false })
+      const lat = latitude ?? (30.5 + Math.random() * 0.01)
+      const lon = longitude ?? (114.3 + Math.random() * 0.01)
+      const alt = altitudeMeters ?? (500 + Math.random() * 10)
+      const seq = Math.floor(Math.random() * 65535)
+      setGpsLogs((prev) => {
+        const nextLog = `[${now}] COORD_FWD seq=${seq} lat=${lat.toFixed(6)} lon=${lon.toFixed(6)} alt=${alt.toFixed(1)}m → RTOS OK`
+        return [...prev, nextLog].slice(-5)
+      })
+    }, 600)
+
+    return () => clearInterval(id)
+  }, [isActive, latitude, longitude, altitudeMeters])
+
+  if (!isActive) {
+    return null
+  }
+
+  return (
+    <div className={`${s.sectionCard} ${s.alertModeCard}`} style={{ marginTop: '12px' }}>
+      <div className={s.alertModeHeader}>
+        <Icons.Navigation size={20} style={{ color: 'var(--color-error)' }} />
+        <div>
+          <div className={s.alertModeTitle}>北斗定位持续下发中</div>
+          <div className={s.alertModeSubtitle}>链路劣化，图像张量传输已挂起，仅向 RTOS 下发定位坐标</div>
+        </div>
+        <div className={s.progressBadge} style={{ marginLeft: 'auto' }}>
+          <span className={s.pulseDot} style={{ background: 'var(--color-error)' }} />
+          持续传输
+        </div>
+      </div>
+      <div className={s.liveLogStream} style={{ marginTop: '8px' }}>
+        {gpsLogs.length > 0 ? gpsLogs.map((log, i) => (
+          <div key={`gps-${i}`} className={s.logEntry} style={{ opacity: 0.3 + (i * 0.15), color: 'var(--color-error)' }}>
+            {log}
+          </div>
+        )) : (
+          <div className={s.logEntry} style={{ color: 'var(--color-text-muted)' }}>等待坐标下发日志...</div>
+        )}
+      </div>
+      <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '6px' }}>
+        定位源: {sourceLabel ?? '—'} · 定位类型: {fixType ?? '—'} · 卫星: {satellites ?? '—'}
+      </div>
+    </div>
+  )
+})
+
 export function DashboardPageMinimal() {
   const system = useSystemStatus()
   useDemoSnapshot()
@@ -34,53 +145,10 @@ export function DashboardPageMinimal() {
   const setChinaTheater = useAppStore((s) => s.setChinaTheater)
   const [boardPassword, setBoardPassword] = useState('')
   const [toasts, setToasts] = useState<{ id: number; text: string; type: 'success' | 'error' }[]>([])
-  const [logs, setLogs] = useState<string[]>([])
-  const [gpsLogs, setGpsLogs] = useState<string[]>([])
   const batch = batchState.isError ? undefined : batchState.data
 
   const { data: cryptoData } = useCryptoStatus()
   const currentMode = cryptoData?.service_mode?.current_mode
-
-  useEffect(() => {
-    if (batch?.status !== 'running') {
-      setLogs([])
-      return
-    }
-    
-    const id = setInterval(() => {
-      const now = new Date().toLocaleTimeString('en-US', { hour12: false })
-      const actions = ['Processing block', 'Allocating memory', 'Optimizing tensor', 'Compiling kernel', 'Syncing device']
-      const action = actions[Math.floor(Math.random() * actions.length)]
-      const blockId = Math.floor(Math.random() * 1000)
-      setLogs(prev => {
-        const newLogs = [...prev, `[${now}] ${action} ${blockId}... OK`]
-        return newLogs.slice(-3) // Keep last 3 logs
-      })
-    }, 800)
-    
-    return () => clearInterval(id)
-  }, [batch?.status])
-
-  // GPS coordinate forwarding log — runs continuously when ALERT_ONLY is active
-  useEffect(() => {
-    if (currentMode !== 'ALERT_ONLY') {
-      setGpsLogs([])
-      return
-    }
-    // Start generating GPS forwarding logs immediately when ALERT_ONLY
-    const id = setInterval(() => {
-      const now = new Date().toLocaleTimeString('en-US', { hour12: false })
-      const lat = aircraft.data?.position?.latitude ?? (30.5 + Math.random() * 0.01)
-      const lon = aircraft.data?.position?.longitude ?? (114.3 + Math.random() * 0.01)
-      const alt = aircraft.data?.kinematics?.altitude_m ?? (500 + Math.random() * 10)
-      const seq = Math.floor(Math.random() * 65535)
-      setGpsLogs(prev => {
-        const newLog = `[${now}] COORD_FWD seq=${seq} lat=${lat.toFixed(6)} lon=${lon.toFixed(6)} alt=${alt.toFixed(1)}m → RTOS OK`
-        return [...prev, newLog].slice(-5)
-      })
-    }, 600)
-    return () => clearInterval(id)
-  }, [currentMode, aircraft.data?.position?.latitude, aircraft.data?.position?.longitude, aircraft.data?.kinematics?.altitude_m])
 
   const probeMut = useProbeBoard()
   const batchMut = useRunInferenceBatch()
@@ -286,46 +354,18 @@ export function DashboardPageMinimal() {
                   当前阶段：{currentStage}
                 </div>
 
-                {isRunning && logs.length > 0 && (
-                  <div className={s.liveLogStream}>
-                    {logs.map((log, i) => (
-                      <div key={log} className={s.logEntry} style={{ opacity: 0.4 + (i * 0.3) }}>
-                        {log}
-                      </div>
-                    ))}
-                  </div>
-                )}
+                <LiveLogStream isRunning={isRunning} />
               </div>
 
-              {/* GPS coordinate forwarding log — visible when ALERT_ONLY */}
-              {currentMode === 'ALERT_ONLY' && (
-                <div className={`${s.sectionCard} ${s.alertModeCard}`} style={{ marginTop: '12px' }}>
-                  <div className={s.alertModeHeader}>
-                    <Icons.Navigation size={20} style={{ color: 'var(--color-error)' }} />
-                    <div>
-                      <div className={s.alertModeTitle}>北斗定位持续下发中</div>
-                      <div className={s.alertModeSubtitle}>链路劣化，图像张量传输已挂起，仅向 RTOS 下发定位坐标</div>
-                    </div>
-                    <div className={s.progressBadge} style={{ marginLeft: 'auto' }}>
-                      <span className={s.pulseDot} style={{ background: 'var(--color-error)' }} />
-                      持续传输
-                    </div>
-                  </div>
-                  {/* Live coordinate forwarding log stream */}
-                  <div className={s.liveLogStream} style={{ marginTop: '8px' }}>
-                    {gpsLogs.length > 0 ? gpsLogs.map((log, i) => (
-                      <div key={`gps-${i}`} className={s.logEntry} style={{ opacity: 0.3 + (i * 0.15), color: 'var(--color-error)' }}>
-                        {log}
-                      </div>
-                    )) : (
-                      <div className={s.logEntry} style={{ color: 'var(--color-text-muted)' }}>等待坐标下发日志...</div>
-                    )}
-                  </div>
-                  <div style={{ fontSize: '11px', color: 'var(--color-text-muted)', marginTop: '6px' }}>
-                    定位源: {aircraft.data?.source_label ?? '—'} · 定位类型: {aircraft.data?.fix?.type ?? '—'} · 卫星: {aircraft.data?.fix?.satellites ?? '—'}
-                  </div>
-                </div>
-              )}
+              <GpsForwardStream
+                isActive={currentMode === 'ALERT_ONLY'}
+                sourceLabel={aircraft.data?.source_label}
+                fixType={aircraft.data?.fix?.type}
+                satellites={aircraft.data?.fix?.satellites}
+                latitude={aircraft.data?.position?.latitude}
+                longitude={aircraft.data?.position?.longitude}
+                altitudeMeters={aircraft.data?.kinematics?.altitude_m}
+              />
             </AnimatedListItem>
 
             <AnimatedListItem>
