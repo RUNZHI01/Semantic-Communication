@@ -34,7 +34,7 @@ export function CryptoStatusPanel() {
 
   useEffect(() => {
     setTestResult(null)
-  }, [data?.data_transport, data?.radio_mode, enabled, boardConfigured])
+  }, [enabled, boardConfigured])
 
   async function handleToggle() {
     setTestResult(null)
@@ -201,6 +201,18 @@ export function CryptoStatusPanel() {
 
         <span className={s.label}>密码套件</span>
         <span className={s.mono}>{data.cipher_suite}</span>
+
+        {data.auth_enabled != null && <>
+          <span className={s.label}>认证面</span>
+          <span className={s.mono}>
+            {data.auth_enabled ? `已启用 / ${data.sig_policy || 'UNKNOWN'}` : '未启用'}
+          </span>
+        </>}
+
+        {data.auth_enabled && data.server_id && <>
+          <span className={s.label}>服务端标识</span>
+          <span className={s.mono}>{data.server_id}</span>
+        </>}
 
         {data.handshake_ms != null && <>
           <span className={s.label}>握手耗时</span>

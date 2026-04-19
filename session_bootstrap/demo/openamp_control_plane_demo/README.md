@@ -391,14 +391,14 @@ candidate auto-discovery:
 AIRCRAFT_POSITION_UPSTREAM_CANDIDATES_JSON='[
   "http://127.0.0.1:9000/gps",
   "http://127.0.0.1:9000/api/v1/position",
-  "http://127.0.0.1:9527/api/v1/position"
+  "http://127.0.0.1:8080/api/v1/position"
 ]'
 ```
 
 With that in place:
 
 - the backend probes common board-local endpoints after `board-access` is saved
-- the built-in defaults already cover common `/gps`, `/position`, `/location`, `/api/*`, and `/api/v1/*` paths on `9000`, `9527`, and `8080`
+- the built-in defaults already cover common `/gps`, `/position`, `/location`, `/api/*`, and `/api/v1/*` paths on `9000` and `8080`
 - `/api/system-status` exposes whether the bridge is `autodiscovered`, `upstream_not_found`, or `upstream_probe_error`
 - if one candidate responds with usable latitude/longitude, the backend injects the discovered URL and starts the bridge automatically
 

@@ -169,11 +169,59 @@ def discover_validated_inference_env(
     return None
 
 
+def _missing_required_inference_env_keys(values: dict[str, str]) -> list[str]:
+    missing: list[str] = []
+    for key in INFERENCE_SHARED_REQUIRED_KEYS:
+        if not str(values.get(key, "")).strip():
+            missing.append(key)
+    for variant in ("current", "baseline"):
+        for key in INFERENCE_VARIANT_REQUIRED_KEYS.get(variant, ()):
+            if not str(values.get(key, "")).strip() and key not in missing:
+                missing.append(key)
+    return missing
+
+
+def choose_preloaded_inference_env(
+    report_candidates: tuple[str, ...] = VALIDATED_INFERENCE_REPORT_CANDIDATES,
+    env_candidates: tuple[str, ...] = DEFAULT_INFERENCE_ENV_CANDIDATES,
+) -> Path | None:
+    ordered_candidates: list[Path] = []
+    seen: set[Path] = set()
+
+    discovered = discover_validated_inference_env(report_candidates)
+    if discovered is not None:
+        resolved = discovered.resolve()
+        ordered_candidates.append(resolved)
+        seen.add(resolved)
+
+    for raw_path in env_candidates:
+        candidate = resolve_existing_env(raw_path)
+        if candidate is None:
+            continue
+        resolved = candidate.resolve()
+        if resolved in seen:
+            continue
+        ordered_candidates.append(resolved)
+        seen.add(resolved)
+
+    first_existing: Path | None = None
+    for candidate in ordered_candidates:
+        if first_existing is None:
+            first_existing = candidate
+        try:
+            values = sanitize_env_values(load_env_path(candidate))
+        except OSError:
+            continue
+        if not _missing_required_inference_env_keys(values):
+            return candidate
+    return first_existing
+
+
 def discover_demo_default_inference_env() -> Path | None:
     preferred = first_existing_env(DEMO_PREFERRED_INFERENCE_ENV_CANDIDATES)
     if preferred is not None:
         return preferred
-    return discover_validated_inference_env() or first_existing_env(DEFAULT_INFERENCE_ENV_CANDIDATES)
+    return choose_preloaded_inference_env()
 
 
 def discover_validated_openamp_remote_project_root(

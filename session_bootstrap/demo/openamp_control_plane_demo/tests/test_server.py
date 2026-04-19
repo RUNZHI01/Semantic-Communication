@@ -1740,6 +1740,293 @@ class DashboardStateTest(unittest.TestCase):
         self.assertIn("pkill -f 'tcp_server.py' || true", captured)
         self.assertIn("echo restart-remote-server", captured)
 
+    def test_ensure_board_tcp_server_accepts_normalized_tvm_python_without_restart(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        board_access = server.build_board_access_config(
+            {
+                "host": "demo-board",
+                "user": "demo-user",
+                "password": "demo-pass",
+                "port": "22",
+            },
+            fallback=state._board_access.with_env_overrides(
+                {
+                    "MLKEM_REMOTE_SERVER_SCRIPT": "/home/demo-user/tcp_server.py",
+                    "REMOTE_TVM_PYTHON": "env FOO=1 /opt/tvm/bin/python",
+                }
+            ),
+        )
+        captured: list[str] = []
+
+        def fake_run_ssh_command(*, remote_command: str, **kwargs: object):
+            del kwargs
+            captured.append(remote_command)
+            if remote_command == "pgrep -af 'tcp_server.py' || true":
+                return server.subprocess.CompletedProcess(
+                    [],
+                    0,
+                    stdout=(
+                        "257019 /home/user/anaconda3/envs/mlkem/bin/python "
+                        "/home/user/tcp_server.py --tvm --tvm-python /opt/tvm/bin/python\n"
+                    ),
+                    stderr="",
+                )
+            return server.subprocess.CompletedProcess([], 0, stdout="", stderr="")
+
+        with (
+            patch(
+                "server.fetch_json_direct",
+                return_value={"cipher_suite": "sm4-gcm"},
+            ),
+            patch("server.resolve_local_crypto_server", return_value=(Path("/tmp/tcp_server.py"), [])),
+            patch.object(state, "_sync_remote_mlkem_server_assets", return_value={"updated": False}),
+            patch("server.run_ssh_command", side_effect=fake_run_ssh_command),
+            patch("server.build_remote_crypto_server_command", return_value="echo should-not-restart"),
+            patch("server.time.sleep", return_value=None),
+        ):
+            state._ensure_board_tcp_server(board_access)
+
+        self.assertIn("pgrep -af 'tcp_server.py' || true", captured)
+        self.assertNotIn("pkill -f 'tcp_server.py' || true", captured)
+        self.assertNotIn("echo should-not-restart", captured)
+
+    def test_ensure_board_tcp_server_restarts_when_running_process_lacks_status_port(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        board_access = server.build_board_access_config(
+            {
+                "host": "demo-board",
+                "user": "demo-user",
+                "password": "demo-pass",
+                "port": "22",
+            },
+            fallback=state._board_access.with_env_overrides(
+                {
+                    "MLKEM_REMOTE_SERVER_SCRIPT": "/home/demo-user/tcp_server.py",
+                    "MLKEM_STATUS_PORT": "18080",
+                }
+            ),
+        )
+        captured: list[str] = []
+
+        def fake_run_ssh_command(*, remote_command: str, **kwargs: object):
+            del kwargs
+            captured.append(remote_command)
+            if remote_command == "pgrep -af 'tcp_server.py' || true":
+                return server.subprocess.CompletedProcess(
+                    [],
+                    0,
+                    stdout=(
+                        "20174 /home/user/anaconda3/envs/mlkem/bin/python "
+                        "/home/user/tcp_server.py --host 0.0.0.0 --port 9527 --suite SM4_GCM --tvm\n"
+                    ),
+                    stderr="",
+                )
+            return server.subprocess.CompletedProcess([], 0, stdout="", stderr="")
+
+        with (
+            patch("server.fetch_json_direct", side_effect=RuntimeError("status down")),
+            patch("server.resolve_local_crypto_server", return_value=(Path("/tmp/tcp_server.py"), [])),
+            patch.object(state, "_sync_remote_mlkem_server_assets", return_value={"updated": False}),
+            patch("server.run_ssh_command", side_effect=fake_run_ssh_command),
+            patch("server.build_remote_crypto_server_command", return_value="echo restart-no-status-port"),
+            patch("server.time.sleep", return_value=None),
+        ):
+            state._ensure_board_tcp_server(board_access)
+
+        self.assertIn("pgrep -af 'tcp_server.py' || true", captured)
+        self.assertIn("pkill -f 'tcp_server.py' || true", captured)
+        self.assertIn("echo restart-no-status-port", captured)
+
+    def test_ensure_board_tcp_server_restarts_when_running_auth_config_mismatches(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        board_access = server.build_board_access_config(
+            {
+                "host": "demo-board",
+                "user": "demo-user",
+                "password": "demo-pass",
+                "port": "22",
+            },
+            fallback=state._board_access.with_env_overrides(
+                {
+                    "MLKEM_REMOTE_SERVER_SCRIPT": "/home/demo-user/tcp_server.py",
+                    "MLKEM_AUTH_ENABLED": "1",
+                    "MLKEM_AUTH_SIG_POLICY": "DUAL_REQUIRED",
+                    "MLKEM_AUTH_SERVER_ID": "phytium-board",
+                }
+            ),
+        )
+        captured: list[str] = []
+
+        def fake_run_ssh_command(*, remote_command: str, **kwargs: object):
+            del kwargs
+            captured.append(remote_command)
+            return server.subprocess.CompletedProcess([], 0, stdout="", stderr="")
+
+        prepared_env = {
+            **board_access.build_env(),
+            "MLKEM_AUTH_ENABLED": "1",
+            "MLKEM_AUTH_SIG_POLICY": "DUAL_REQUIRED",
+            "MLKEM_AUTH_SERVER_ID": "phytium-board",
+            "MLKEM_AUTH_PEER_SM2_PUB": "/tmp/server_sm2_identity.pub",
+            "MLKEM_AUTH_PEER_MLDSA_PUB": "/tmp/server_mldsa_identity.pub",
+        }
+
+        with (
+            patch.object(state, "_prepare_mlkem_auth_env", return_value=prepared_env),
+            patch(
+                "server.fetch_json_direct",
+                side_effect=[
+                    {
+                        "cipher_suite": "sm4-gcm",
+                        "auth_enabled": False,
+                        "sig_policy": "",
+                        "server_id": "",
+                    },
+                    {"cipher_suite": "sm4-gcm", "auth_enabled": True, "sig_policy": "DUAL_REQUIRED", "server_id": "phytium-board"},
+                ],
+            ),
+            patch("server.resolve_local_crypto_server", return_value=(Path("/tmp/tcp_server.py"), [])),
+            patch.object(state, "_sync_remote_mlkem_server_assets", return_value={"updated": False}),
+            patch("server.run_ssh_command", side_effect=fake_run_ssh_command),
+            patch("server.build_remote_crypto_server_command", return_value="echo restart-auth-server"),
+            patch("server.time.sleep", return_value=None),
+        ):
+            state._ensure_board_tcp_server(board_access)
+
+        self.assertIn("pkill -f 'tcp_server.py' || true", captured)
+        self.assertIn("echo restart-auth-server", captured)
+
+    def test_ensure_board_tcp_server_sets_default_remote_sig_bridge_when_auth_enabled(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        board_access = server.build_board_access_config(
+            {
+                "host": "demo-board",
+                "user": "demo-user",
+                "password": "demo-pass",
+                "port": "22",
+            },
+            fallback=state._board_access,
+        )
+        captured_env: dict[str, str] = {}
+
+        def fake_run_ssh_command(*, remote_command: str, **kwargs: object):
+            del kwargs
+            if 'printf %s "$HOME"' in remote_command:
+                return server.subprocess.CompletedProcess([], 0, stdout="/home/demo-user", stderr="")
+            return server.subprocess.CompletedProcess([], 0, stdout="", stderr="")
+
+        def fake_build_remote_crypto_server_command(env_values, *, local_server_script):
+            del local_server_script
+            captured_env.update(env_values)
+            return "echo restart-auth-server"
+
+        prepared_env = {
+            **board_access.build_env(),
+            "MLKEM_AUTH_ENABLED": "1",
+            "MLKEM_AUTH_SIG_POLICY": "DUAL_REQUIRED",
+            "MLKEM_AUTH_SERVER_ID": "phytium-board",
+            "MLKEM_AUTH_PEER_SM2_PUB": "/tmp/server_sm2_identity.pub",
+            "MLKEM_AUTH_PEER_MLDSA_PUB": "/tmp/server_mldsa_identity.pub",
+        }
+
+        with (
+            patch.object(state, "_prepare_mlkem_auth_env", return_value=prepared_env),
+            patch("server.fetch_json_direct", side_effect=RuntimeError("status down")),
+            patch("server.resolve_local_crypto_server", return_value=(Path("/tmp/tcp_server.py"), [])),
+            patch.object(state, "_sync_remote_mlkem_server_assets", return_value={"updated": True, "note": "assets refreshed"}),
+            patch("server.run_ssh_command", side_effect=fake_run_ssh_command),
+            patch("server.build_remote_crypto_server_command", side_effect=fake_build_remote_crypto_server_command),
+            patch("server.time.sleep", return_value=None),
+        ):
+            state._ensure_board_tcp_server(board_access)
+
+        self.assertEqual(
+            captured_env["MLKEM_REMOTE_TONGSUO_SIG_BRIDGE"],
+            "/home/demo-user/libtongsuo_sig_bridge.so",
+        )
+        self.assertEqual(
+            captured_env["MLKEM_REMOTE_OQS_INSTALL_PATH"],
+            "/home/demo-user/liboqs-dist",
+        )
+
+    def test_ensure_board_tcp_server_kills_old_process_before_launch_when_assets_changed_and_status_down(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        board_access = server.build_board_access_config(
+            {
+                "host": "demo-board",
+                "user": "demo-user",
+                "password": "demo-pass",
+                "port": "22",
+            },
+            fallback=state._board_access.with_env_overrides(
+                {
+                    "MLKEM_REMOTE_SERVER_SCRIPT": "/home/demo-user/tcp_server.py",
+                }
+            ),
+        )
+        captured: list[str] = []
+
+        def fake_run_ssh_command(*, remote_command: str, **kwargs: object):
+            del kwargs
+            captured.append(remote_command)
+            return server.subprocess.CompletedProcess([], 0, stdout="", stderr="")
+
+        with (
+            patch("server.fetch_json_direct", side_effect=RuntimeError("status down")),
+            patch("server.resolve_local_crypto_server", return_value=(Path("/tmp/tcp_server.py"), [])),
+            patch.object(state, "_sync_remote_mlkem_server_assets", return_value={"updated": True, "note": "assets refreshed"}),
+            patch("server.run_ssh_command", side_effect=fake_run_ssh_command),
+            patch("server.build_remote_crypto_server_command", return_value="echo restart-after-asset-sync"),
+            patch("server.time.sleep", return_value=None),
+        ):
+            state._ensure_board_tcp_server(board_access)
+
+        self.assertIn("pkill -f 'tcp_server.py' || true", captured)
+        self.assertIn("echo restart-after-asset-sync", captured)
+        self.assertLess(
+            captured.index("pkill -f 'tcp_server.py' || true"),
+            captured.index("echo restart-after-asset-sync"),
+        )
+
+    def test_prepare_mlkem_auth_env_fetches_missing_peer_public_keys_from_board(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        board_access = server.build_board_access_config(
+            {
+                "host": "demo-board",
+                "user": "demo-user",
+                "password": "demo-pass",
+                "port": "22",
+            },
+            fallback=state._board_access,
+        )
+        sm2_pub = b"demo-sm2-public-key"
+        mldsa_pub = b"demo-mldsa-public-key"
+        calls: list[str] = []
+
+        def fake_run_ssh_command(*, remote_command: str, **kwargs: object):
+            del kwargs
+            calls.append(remote_command)
+            if "server_sm2_identity.pub" in remote_command:
+                payload = server.base64.b64encode(sm2_pub).decode("ascii")
+            else:
+                payload = server.base64.b64encode(mldsa_pub).decode("ascii")
+            return server.subprocess.CompletedProcess([], 0, stdout=f"{payload}\n", stderr="")
+
+        with patch("server.run_ssh_command", side_effect=fake_run_ssh_command):
+            prepared = state._prepare_mlkem_auth_env(
+                board_access,
+                {
+                    "MLKEM_AUTH_ENABLED": "1",
+                    "MLKEM_AUTH_SIG_POLICY": "DUAL_REQUIRED",
+                },
+            )
+
+        self.assertEqual(prepared["MLKEM_AUTH_SERVER_SM2_KEY"], "/home/demo-user/keys/server_sm2_identity.key")
+        self.assertEqual(prepared["MLKEM_AUTH_SERVER_MLDSA_KEY"], "/home/demo-user/keys/server_mldsa_identity.key")
+        self.assertEqual(Path(prepared["MLKEM_AUTH_PEER_SM2_PUB"]).read_bytes(), sm2_pub)
+        self.assertEqual(Path(prepared["MLKEM_AUTH_PEER_MLDSA_PUB"]).read_bytes(), mldsa_pub)
+        self.assertEqual(len(calls), 2)
+
     def test_sync_remote_mlkem_server_assets_uploads_server_and_helper_once(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
         board_access = server.build_board_access_config(
@@ -1896,6 +2183,207 @@ class DashboardStateTest(unittest.TestCase):
 
         self.assertEqual(payload["control_guard_state"], "NOT_PROBED")
         self.assertEqual(payload["control_last_fault_code"], "NOT_PROBED")
+
+    def test_run_crypto_test_updates_status_cache_from_subprocess_metrics(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        state._crypto_enabled = True
+        state._board_access = server.build_board_access_config(
+            {
+                "host": "demo-board",
+                "user": "demo-user",
+                "password": "demo-pass",
+                "port": "22",
+            },
+            fallback=state._board_access,
+        )
+
+        stdout = "\n".join(
+            [
+                "密码套件:  SM4_GCM",
+                "KEM 后端:  mock-backend",
+                "握手完成: 9.0ms",
+                "身份认证:  已启用 (DUAL_REQUIRED)",
+                "服务端标识: phytium-board",
+                "加密发送: 49152B, 耗时 3.0ms",
+                "✓ 传输成功",
+                "  对端 SHA256 匹配: 是",
+                "  TVM 推理耗时: 21.0ms",
+                "  接收重建结果: 65536B, 耗时 4.0ms",
+            ]
+        )
+
+        with (
+            patch("server.resolve_local_crypto_client", return_value=(Path("/tmp/tcp_client.py"), [Path("/tmp/tcp_client.py")])),
+            patch(
+                "server.build_local_crypto_client_command",
+                side_effect=lambda env_values, *, host, input_path, client_script: (
+                    ["fake-python", str(client_script), "--host", host, "--input", str(input_path)],
+                    {},
+                ),
+            ),
+            patch.object(state, "_ensure_board_tcp_server", return_value=None),
+            patch.object(state, "_get_mlkem_session_manager", return_value=None),
+            patch(
+                "server.subprocess.run",
+                return_value=server.subprocess.CompletedProcess(
+                    ["fake-python", "tcp_client.py"],
+                    0,
+                    stdout=stdout,
+                    stderr="",
+                ),
+            ),
+        ):
+            result = state.run_crypto_test()
+
+        self.assertEqual(result["status"], "ok")
+        payload = state.get_crypto_status()
+        self.assertEqual(payload["channel_state"], "idle")
+        self.assertEqual(payload["kem_backend"], "mock-backend")
+        self.assertEqual(payload["cipher_suite"], "sm4-gcm")
+        self.assertEqual(payload["handshake_ms"], 9.0)
+        self.assertEqual(payload["encrypt_ms"], 3.0)
+        self.assertEqual(payload["decrypt_ms"], 4.0)
+        self.assertEqual(payload["inference_ms"], 21.0)
+        self.assertEqual(payload["bytes_sent"], 49152)
+        self.assertEqual(payload["bytes_received"], 65536)
+        self.assertEqual(payload["last_sha256_match"], True)
+        self.assertEqual(payload["session_count"], 1)
+        self.assertEqual(payload["auth_enabled"], True)
+        self.assertEqual(payload["sig_policy"], "DUAL_REQUIRED")
+        self.assertEqual(payload["server_id"], "phytium-board")
+        self.assertIsNone(payload["error"])
+
+    def test_get_crypto_status_reuses_last_successful_crypto_test_when_status_probe_is_unreachable(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        state._crypto_enabled = True
+        state._board_access = server.build_board_access_config(
+            {
+                "host": "100.121.87.73",
+                "user": "demo-user",
+                "password": "demo-pass",
+                "port": "22",
+            },
+            fallback=state._board_access.with_env_overrides(
+                {
+                    "MLKEM_STATUS_PORT": "18080",
+                    "TONGSUO_KEM_BRIDGE": "/tmp/libtongsuo_kem_bridge.so",
+                    "MLKEM_CIPHER_SUITE": "SM4_GCM",
+                }
+            ),
+        )
+
+        class FakeMgr:
+            def __init__(self) -> None:
+                self._handshake_ms = 12.3
+
+            def ensure_alive(self) -> None:
+                return None
+
+            def send_image(
+                self,
+                input_path: str,
+                job_id: str,
+                *,
+                run_tvm: bool = False,
+                expect_result: bool = False,
+            ) -> dict[str, object]:
+                del input_path, job_id, run_tvm, expect_result
+                return {
+                    "status": "ok",
+                    "sha256_match": True,
+                    "encrypt_ms": 7.0,
+                    "decrypt_ms": None,
+                    "inference_ms": None,
+                }
+
+        with (
+            patch("server.resolve_local_crypto_client", return_value=(Path("/tmp/tcp_client.py"), [Path("/tmp/tcp_client.py")])),
+            patch(
+                "server.build_local_crypto_client_command",
+                side_effect=lambda env_values, *, host, input_path, client_script: (
+                    ["fake-python", str(client_script), "--host", host, "--input", str(input_path)],
+                    {},
+                ),
+            ),
+            patch.object(state, "_ensure_board_tcp_server", return_value=None),
+            patch.object(state, "_get_mlkem_session_manager", return_value=FakeMgr()),
+        ):
+            result = state.run_crypto_test()
+
+        self.assertEqual(result["status"], "ok")
+        state._crypto_status_cache_ts = 0.0
+
+        with patch("server.fetch_json_direct", side_effect=server.URLError("[Errno 111] Connection refused")):
+            payload = state.get_crypto_status()
+
+        self.assertEqual(payload["channel_state"], "ready")
+        self.assertEqual(payload["kem_backend"], "tongsuo-ML-KEM-768")
+        self.assertEqual(payload["cipher_suite"], "sm4-gcm")
+        self.assertEqual(payload["handshake_ms"], 12.3)
+        self.assertEqual(payload["encrypt_ms"], 7.0)
+        self.assertTrue((payload["bytes_sent"] or 0) > 0)
+        self.assertEqual(payload["last_sha256_match"], True)
+        self.assertEqual(payload["session_count"], 1)
+        self.assertIn("board not reachable", str(payload["error"]))
+
+    def test_run_crypto_test_ensures_remote_tcp_server_before_reusing_session(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        state._crypto_enabled = True
+        state._board_access = server.build_board_access_config(
+            {
+                "host": "100.121.87.73",
+                "user": "demo-user",
+                "password": "demo-pass",
+                "port": "22",
+            },
+            fallback=state._board_access,
+        )
+
+        class FakeMgr:
+            def __init__(self) -> None:
+                self._handshake_ms = 15.4
+                self.job_ids: list[str] = []
+
+            def ensure_alive(self) -> None:
+                return None
+
+            def send_image(
+                self,
+                input_path: str,
+                job_id: str,
+                *,
+                run_tvm: bool = False,
+                expect_result: bool = False,
+            ) -> dict[str, object]:
+                del input_path, run_tvm, expect_result
+                self.job_ids.append(job_id)
+                return {
+                    "status": "ok",
+                    "sha256_match": True,
+                    "encrypt_ms": 5.0,
+                    "decrypt_ms": None,
+                    "inference_ms": None,
+                }
+
+        fake_mgr = FakeMgr()
+        with (
+            patch.object(state, "_ensure_board_tcp_server", return_value=None) as ensure_mock,
+            patch("server.resolve_local_crypto_client", return_value=(Path("/tmp/tcp_client.py"), [Path("/tmp/tcp_client.py")])),
+            patch(
+                "server.build_local_crypto_client_command",
+                side_effect=lambda env_values, *, host, input_path, client_script: (
+                    ["fake-python", str(client_script), "--host", host, "--input", str(input_path)],
+                    {},
+                ),
+            ),
+            patch.object(state, "_get_mlkem_session_manager", return_value=fake_mgr),
+        ):
+            result = state.run_crypto_test()
+
+        self.assertEqual(result["status"], "ok")
+        ensure_mock.assert_called_once_with(state._board_access)
+        self.assertEqual(len(fake_mgr.job_ids), 1)
+        self.assertTrue(fake_mgr.job_ids[0].startswith("crypto_test_"))
 
     def test_reset_crypto_channel_closes_session_and_schedules_remote_restart_for_tcp(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
@@ -4787,6 +5275,77 @@ class DemoHTTPServerTest(unittest.TestCase):
             run_recover_action.call_args.kwargs["trusted_sha"],
             "6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1",
         )
+
+    def test_recover_board_openamp_transport_runs_idempotent_bringup_steps(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        board_access = server.build_board_access_config(
+            {"host": "demo-board", "user": "demo-user", "password": "demo-pass", "port": "22"},
+            fallback=state._board_access,
+        )
+        stdout = "\n".join(
+            [
+                "__CODEX_REMOTEPROC_STATE__running",
+                "__CODEX_RPMSG__BEGIN__",
+                "/dev/rpmsg0",
+                "/dev/rpmsg_ctrl0",
+                "__CODEX_RPMSG__END__",
+            ]
+        )
+
+        with patch(
+            "server.run_ssh_command",
+            return_value=server.subprocess.CompletedProcess([], 0, stdout=stdout, stderr=""),
+        ) as run_ssh:
+            result = state._recover_board_openamp_transport(board_access)
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["remoteproc_state"], "running")
+        self.assertEqual(result["rpmsg_devices"], ["/dev/rpmsg0", "/dev/rpmsg_ctrl0"])
+        remote_command = run_ssh.call_args.kwargs["remote_command"]
+        self.assertIn("/sys/class/remoteproc/remoteproc0/state", remote_command)
+        self.assertIn("rpmsg-openamp-demo-channel", remote_command)
+        self.assertIn("rpmsg_char", remote_command)
+        self.assertIn("rpmsg-demo", remote_command)
+        self.assertIn("sudo -S -k bash -lc", remote_command)
+
+    def test_maybe_soft_recover_control_plane_prefers_openamp_bringup_before_safe_stop(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        board_access = server.build_board_access_config(
+            {"host": "demo-board", "user": "demo-user", "password": "demo-pass", "port": "22"},
+            fallback=state._board_access,
+        )
+
+        with (
+            patch.object(
+                state,
+                "_recover_board_openamp_transport",
+                return_value={"status": "success", "note": "OpenAMP transport ready"},
+            ) as openamp_recover,
+            patch(
+                "server.query_live_status",
+                side_effect=[
+                    {"status": "error", "message": "missing rpmsg", "logs": []},
+                    {"status": "success", "guard_state": "READY", "last_fault_code": "NONE", "logs": []},
+                ],
+            ) as query_status,
+            patch(
+                "server.run_recover_action",
+                return_value={"status": "success"},
+            ) as run_recover,
+        ):
+            result = state._maybe_soft_recover_control_plane(
+                board_access,
+                trusted_sha="6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1",
+                reason="test_preflight_failed",
+            )
+
+        openamp_recover.assert_called_once_with(board_access)
+        self.assertEqual(query_status.call_count, 2)
+        run_recover.assert_not_called()
+        self.assertEqual(result["openamp_recover_status"], "success")
+        self.assertEqual(result["recover_status"], "skipped")
+        self.assertEqual(result["probe_status"], "success")
+        self.assertIn("OpenAMP transport bring-up recovered", result["note"])
 
     def test_recover_endpoint_replay_preserves_latest_fault_code(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)

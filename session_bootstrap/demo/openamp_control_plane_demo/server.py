@@ -37,12 +37,15 @@ from crypto_runtime import (
     DEFAULT_CIPHER_SUITE,
     DEFAULT_CRYPTO_PORT,
     DEFAULT_STATUS_PORT,
+    LOCAL_TONGSUO_BRIDGE_KEYS,
+    OQS_INSTALL_KEYS,
     REMOTE_PROJECT_ROOT_KEYS,
     REMOTE_SERVER_SCRIPT_KEYS,
     REMOTE_TVM_PYTHON_KEYS,
     STATUS_PORT_KEYS,
     SUITE_KEYS,
     _derive_remote_server_script,
+    _detect_local_tongsuo_bridge,
     _normalize_remote_tvm_python,
     MlkemSessionManager,
     build_local_crypto_client_command,
@@ -52,6 +55,8 @@ from crypto_runtime import (
     local_crypto_transport_mode,
     parse_int_config,
     resolve_local_crypto_client,
+    resolve_local_mlkem_runtime_root,
+    resolve_local_oqs_install,
     resolve_local_crypto_server,
     run_ssh_command,
 )
@@ -98,12 +103,24 @@ BOARD_POSITION_API_TTL_SEC = 5.0
 AIRCRAFT_POSITION_UPSTREAM_DISCOVERY_TTL_SEC = 15.0
 DEFAULT_BOARD_POSITION_API_REMOTE_ROOT = "~/.openamp-demo/board_position_api_service"
 BOARD_POSITION_API_REMOTE_ROOT_KEYS = ("BOARD_POSITION_API_REMOTE_ROOT",)
+OPENAMP_REMOTE_ROOT_KEYS = ("OPENAMP_REMOTE_ROOT",)
+OPENAMP_SET_ENV_SCRIPT_KEYS = ("OPENAMP_SET_ENV_SCRIPT",)
+OPENAMP_RPMSG_DEMO_KEYS = ("OPENAMP_RPMSG_DEMO",)
+DEFAULT_OPENAMP_REMOTE_ROOT = "/home/user/open-amp"
+DEFAULT_OPENAMP_SET_ENV_SCRIPT = f"{DEFAULT_OPENAMP_REMOTE_ROOT}/set_env.sh"
+DEFAULT_OPENAMP_RPMSG_DEMO = f"{DEFAULT_OPENAMP_REMOTE_ROOT}/rpmsg-demo"
+DEFAULT_OPENAMP_RPMSG_WARMUP_TIMEOUT_SEC = 8
 BOARD_POSITION_API_SERVICE_NAME = "board-position-api.service"
 BOARD_POSITION_API_ENV_FILE_NAME = "board_position_api_service.env"
 BOARD_POSITION_API_SCRIPT_NAME = "board_position_api_service.py"
 BOARD_POSITION_API_RUNNER_NAME = "run_board_position_api_service.sh"
 BOARD_POSITION_API_LOG_NAME = "board_position_api_service.log"
 BOARD_POSITION_API_USER_SERVICE_PATH = f"~/.config/systemd/user/{BOARD_POSITION_API_SERVICE_NAME}"
+MLKEM_AUTH_ENABLED_KEYS = ("MLKEM_AUTH_ENABLED",)
+MLKEM_AUTH_SERVER_ID_KEYS = ("MLKEM_AUTH_SERVER_ID",)
+MLKEM_AUTH_SIG_POLICY_KEYS = ("MLKEM_AUTH_SIG_POLICY",)
+DEFAULT_MLKEM_AUTH_SERVER_ID = "phytium-board"
+DEFAULT_MLKEM_AUTH_SIG_POLICY = "DUAL_REQUIRED"
 BOARD_POSITION_API_RUNTIME_ENV_KEYS = (
     "BOARD_POSITION_API_BIND_HOST",
     "BOARD_POSITION_API_PORT",
@@ -179,7 +196,7 @@ AIRCRAFT_POSITION_RUNTIME_ENV_KEYS = (
 ) + tuple(
     f"AIRCRAFT_POSITION_{field_name.upper()}_PATH" for field_name in FIELD_PATH_CANDIDATES
 )
-DEFAULT_AIRCRAFT_POSITION_UPSTREAM_CANDIDATE_PORTS = (9000, 9527, 8080)
+DEFAULT_AIRCRAFT_POSITION_UPSTREAM_CANDIDATE_PORTS = (9000, 8080)
 DEFAULT_AIRCRAFT_POSITION_UPSTREAM_CANDIDATE_PATHS = (
     "/gps",
     "/position",
@@ -1991,6 +2008,7 @@ class DashboardState:
         }
         self._local_aircraft_bridge_thread_started = False
         self._crypto_enabled: bool = False
+        self._last_crypto_test_result: dict[str, Any] | None = None
         self._last_soft_recover_ts: float = 0.0
         self._soft_recover_cooldown_sec: float = 45.0
         self._last_soft_recover_result: dict[str, Any] | None = None
@@ -2454,6 +2472,7 @@ class DashboardState:
         如果 host / port / suite / client script / transport 发生变化会关闭旧管理器。
         找不到 tcp_client.py 时返回 None（回退到子进程模式）。
         """
+        env_values = self._prepare_mlkem_auth_env(board_access, env_values)
         if local_crypto_transport_mode(env_values) != "tcp":
             self._close_mlkem_session_manager()
             return None
@@ -3049,6 +3068,329 @@ class DashboardState:
             "note": "上位机守护进程已通过 0x60/0x62 服务协议接管动态调度。",
         }
 
+    @staticmethod
+    def _auth_enabled_for_env(env_values: dict[str, str]) -> bool:
+        raw_value = first_config_value(env_values, keys=MLKEM_AUTH_ENABLED_KEYS, default="")
+        return str(raw_value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    def _auth_sig_policy_for_env(env_values: dict[str, str]) -> str:
+        raw_value = first_config_value(
+            env_values,
+            keys=MLKEM_AUTH_SIG_POLICY_KEYS,
+            default=DEFAULT_MLKEM_AUTH_SIG_POLICY,
+        )
+        return str(raw_value or DEFAULT_MLKEM_AUTH_SIG_POLICY).strip().upper() or DEFAULT_MLKEM_AUTH_SIG_POLICY
+
+    def _auth_status_from_env(self, env_values: dict[str, str]) -> dict[str, Any]:
+        if not self._auth_enabled_for_env(env_values):
+            return {
+                "auth_enabled": False,
+                "sig_policy": "",
+                "server_id": "",
+            }
+        server_id = first_config_value(
+            env_values,
+            keys=MLKEM_AUTH_SERVER_ID_KEYS,
+            default=DEFAULT_MLKEM_AUTH_SERVER_ID,
+        )
+        return {
+            "auth_enabled": True,
+            "sig_policy": self._auth_sig_policy_for_env(env_values),
+            "server_id": str(server_id or DEFAULT_MLKEM_AUTH_SERVER_ID).strip() or DEFAULT_MLKEM_AUTH_SERVER_ID,
+        }
+
+    @staticmethod
+    def _resolve_local_runtime_path(raw_path: str) -> Path | None:
+        target = str(raw_path or "").strip()
+        if not target:
+            return None
+        path = Path(target).expanduser()
+        if not path.is_absolute():
+            path = (REPO_ROOT / path).resolve()
+        else:
+            path = path.resolve()
+        try:
+            exists = path.exists()
+        except OSError:
+            exists = False
+        return path if exists else None
+
+    @staticmethod
+    def _sanitize_cache_component(raw_value: str) -> str:
+        cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", str(raw_value or "").strip())
+        return cleaned or "default"
+
+    @staticmethod
+    def _default_remote_auth_paths(board_access: BoardAccessConfig) -> dict[str, str]:
+        remote_user = str(board_access.user or "user").strip() or "user"
+        remote_root = f"/home/{remote_user}/keys"
+        return {
+            "MLKEM_AUTH_SERVER_SM2_KEY": f"{remote_root}/server_sm2_identity.key",
+            "MLKEM_AUTH_SERVER_SM2_PUB": f"{remote_root}/server_sm2_identity.pub",
+            "MLKEM_AUTH_SERVER_MLDSA_KEY": f"{remote_root}/server_mldsa_identity.key",
+            "MLKEM_AUTH_SERVER_MLDSA_PUB": f"{remote_root}/server_mldsa_identity.pub",
+        }
+
+    @staticmethod
+    def _default_remote_sig_bridge_path(board_access: BoardAccessConfig) -> str:
+        remote_user = str(board_access.user or "user").strip() or "user"
+        return f"/home/{remote_user}/libtongsuo_sig_bridge.so"
+
+    @staticmethod
+    def _default_remote_oqs_install_path(board_access: BoardAccessConfig) -> str:
+        remote_user = str(board_access.user or "user").strip() or "user"
+        return f"/home/{remote_user}/liboqs-dist"
+
+    def _local_auth_cache_root(self) -> Path:
+        import tempfile
+
+        cache_root = Path(tempfile.gettempdir()) / "iccompetition2026-mlkem-auth"
+        cache_root.mkdir(parents=True, exist_ok=True)
+        return cache_root
+
+    def _read_remote_file_bytes(self, board_access: BoardAccessConfig, *, remote_path: str) -> bytes:
+        script = (
+            "import base64\n"
+            "from pathlib import Path\n"
+            f"path = Path({json.dumps(str(remote_path or ''))}).expanduser()\n"
+            "data = path.read_bytes()\n"
+            "print(base64.b64encode(data).decode('ascii'))\n"
+        )
+        proc = run_ssh_command(
+            host=board_access.host,
+            user=board_access.user,
+            password=board_access.password,
+            port=board_access.port or "22",
+            remote_command=f"/usr/bin/env python3 -c {shlex.quote(script)}",
+            timeout=12.0,
+        )
+        output = str(proc.stdout or "").strip()
+        if proc.returncode != 0:
+            error_output = (proc.stderr or output or "unknown error").strip()
+            raise RuntimeError(error_output)
+        if not output:
+            raise RuntimeError(f"remote file is empty: {remote_path}")
+        try:
+            return base64.b64decode(output, validate=True)
+        except Exception as exc:
+            raise RuntimeError(f"invalid base64 payload from remote file {remote_path}") from exc
+
+    def _cache_remote_auth_public_key(
+        self,
+        board_access: BoardAccessConfig,
+        *,
+        remote_path: str,
+        label: str,
+        content: bytes,
+    ) -> str:
+        cache_root = self._local_auth_cache_root()
+        filename = (
+            f"{self._sanitize_cache_component(board_access.host)}_"
+            f"{self._sanitize_cache_component(label)}_"
+            f"{self._sanitize_cache_component(Path(str(remote_path or label)).name or label)}"
+        )
+        target = cache_root / filename
+        try:
+            existing = target.read_bytes()
+        except OSError:
+            existing = b""
+        if existing != content:
+            target.write_bytes(content)
+        return str(target.resolve())
+
+    def _ensure_local_peer_auth_public_key(
+        self,
+        board_access: BoardAccessConfig,
+        *,
+        env_values: dict[str, str],
+        local_env_key: str,
+        remote_env_key: str,
+        label: str,
+    ) -> None:
+        local_path = self._resolve_local_runtime_path(first_config_value(env_values, keys=(local_env_key,), default=""))
+        if local_path is not None:
+            env_values[local_env_key] = str(local_path)
+            return
+
+        remote_path = str(first_config_value(env_values, keys=(remote_env_key,), default="")).strip()
+        if not remote_path:
+            raise RuntimeError(f"认证已启用，但缺少 {remote_env_key}")
+        content = self._read_remote_file_bytes(board_access, remote_path=remote_path)
+        env_values[local_env_key] = self._cache_remote_auth_public_key(
+            board_access,
+            remote_path=remote_path,
+            label=label,
+            content=content,
+        )
+
+    def _prepare_mlkem_auth_env(
+        self,
+        board_access: BoardAccessConfig,
+        env_values: dict[str, str],
+    ) -> dict[str, str]:
+        prepared = dict(env_values)
+        if not self._auth_enabled_for_env(prepared):
+            return prepared
+
+        prepared["MLKEM_AUTH_ENABLED"] = "1"
+        prepared["MLKEM_AUTH_SERVER_ID"] = str(
+            first_config_value(
+                prepared,
+                keys=MLKEM_AUTH_SERVER_ID_KEYS,
+                default=DEFAULT_MLKEM_AUTH_SERVER_ID,
+            )
+            or DEFAULT_MLKEM_AUTH_SERVER_ID
+        ).strip() or DEFAULT_MLKEM_AUTH_SERVER_ID
+        prepared["MLKEM_AUTH_SIG_POLICY"] = self._auth_sig_policy_for_env(prepared)
+
+        for key, remote_path in self._default_remote_auth_paths(board_access).items():
+            if not str(first_config_value(prepared, keys=(key,), default="")).strip():
+                prepared[key] = remote_path
+
+        if prepared["MLKEM_AUTH_SIG_POLICY"] != "MLDSA_ONLY":
+            self._ensure_local_peer_auth_public_key(
+                board_access,
+                env_values=prepared,
+                local_env_key="MLKEM_AUTH_PEER_SM2_PUB",
+                remote_env_key="MLKEM_AUTH_SERVER_SM2_PUB",
+                label="sm2_peer_pub",
+            )
+        if prepared["MLKEM_AUTH_SIG_POLICY"] != "SM2_ONLY":
+            self._ensure_local_peer_auth_public_key(
+                board_access,
+                env_values=prepared,
+                local_env_key="MLKEM_AUTH_PEER_MLDSA_PUB",
+                remote_env_key="MLKEM_AUTH_SERVER_MLDSA_PUB",
+                label="mldsa_peer_pub",
+            )
+        return prepared
+
+    @staticmethod
+    def _normalize_cipher_suite_label(raw_value: Any) -> str:
+        value = str(raw_value or "").strip()
+        if not value:
+            return "unknown"
+        return value.lower().replace("_", "-")
+
+    def _infer_local_kem_backend_label(
+        self,
+        env_values: dict[str, str],
+        *,
+        client_script: Path | None,
+    ) -> str:
+        explicit_tongsuo = first_config_value(env_values, keys=LOCAL_TONGSUO_BRIDGE_KEYS, default="")
+        if explicit_tongsuo:
+            return "tongsuo-ML-KEM-768"
+
+        extra_roots: tuple[Path, ...] = ()
+        if client_script is not None:
+            extra_roots = (client_script.parent.parent,)
+
+        runtime_root, _ = resolve_local_mlkem_runtime_root(env_values, extra_roots=extra_roots)
+        if _detect_local_tongsuo_bridge(runtime_root) is not None:
+            return "tongsuo-ML-KEM-768"
+
+        explicit_oqs = first_config_value(env_values, keys=OQS_INSTALL_KEYS, default="")
+        if explicit_oqs:
+            return "liboqs-ML-KEM-768"
+
+        oqs_root, _ = resolve_local_oqs_install(env_values, extra_roots=extra_roots)
+        if oqs_root is not None:
+            return "liboqs-ML-KEM-768"
+
+        return "ML-KEM-768"
+
+    @staticmethod
+    def _status_float(value: Any) -> float | None:
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _status_int(value: Any) -> int | None:
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _record_successful_crypto_test(
+        self,
+        *,
+        env_values: dict[str, str],
+        client_script: Path,
+        transport_mode: str,
+        metrics: dict[str, Any],
+        input_bytes: int,
+    ) -> dict[str, Any]:
+        suite = self._normalize_cipher_suite_label(
+            metrics.get("suite") or first_config_value(env_values, keys=SUITE_KEYS, default=DEFAULT_CIPHER_SUITE)
+        )
+        backend = str(metrics.get("backend") or "").strip() or self._infer_local_kem_backend_label(
+            env_values,
+            client_script=client_script,
+        )
+        last_sha256_match = metrics.get("sha256_match")
+        if last_sha256_match is not None:
+            last_sha256_match = bool(last_sha256_match)
+
+        current_ts = now_iso()
+        channel_state = "ready" if str(transport_mode).strip().lower() == "daemon" else "idle"
+        encrypt_bytes = self._status_int(metrics.get("bytes_sent"))
+        decrypt_bytes = self._status_int(metrics.get("bytes_received"))
+        auth_snapshot = self._auth_status_from_env(env_values)
+        if metrics.get("auth_enabled") is not None:
+            auth_snapshot["auth_enabled"] = bool(metrics.get("auth_enabled"))
+        if metrics.get("sig_policy"):
+            auth_snapshot["sig_policy"] = str(metrics.get("sig_policy") or "").strip()
+        if metrics.get("server_id"):
+            auth_snapshot["server_id"] = str(metrics.get("server_id") or "").strip()
+
+        with self._lock:
+            prev_status = dict(self._crypto_status_cache or {})
+            prev_test = dict(self._last_crypto_test_result or {})
+            prev_session_count = max(
+                int(prev_status.get("session_count") or 0),
+                int(prev_test.get("session_count") or 0),
+            )
+            prev_bytes_sent = max(
+                int(prev_status.get("bytes_sent") or 0),
+                int(prev_test.get("bytes_sent") or 0),
+            )
+            prev_bytes_received = max(
+                int(prev_status.get("bytes_received") or 0),
+                int(prev_test.get("bytes_received") or 0),
+            )
+
+            snapshot = {
+                "channel_state": channel_state,
+                "kem_backend": backend,
+                "cipher_suite": suite,
+                "handshake_ms": self._status_float(metrics.get("handshake_ms")),
+                "encrypt_ms": self._status_float(metrics.get("encrypt_ms")),
+                "decrypt_ms": self._status_float(metrics.get("decrypt_ms")),
+                "inference_ms": self._status_float(metrics.get("inference_ms")),
+                "bytes_sent": prev_bytes_sent + max(encrypt_bytes if encrypt_bytes is not None else input_bytes, 0),
+                "bytes_received": prev_bytes_received + max(decrypt_bytes or 0, 0),
+                "last_sha256_match": last_sha256_match,
+                "session_count": prev_session_count + 1,
+                "last_session_at": current_ts,
+                "error": None,
+                "enabled": True,
+                "board_configured": True,
+                **auth_snapshot,
+            }
+            self._last_crypto_test_result = dict(snapshot)
+            self._crypto_status_cache = dict(snapshot)
+            self._crypto_status_cache_ts = time.monotonic()
+
+        return snapshot
+
     def _get_crypto_status_core(self) -> dict[str, Any]:
         """Internal: crypto status without degradation overlay."""
         control_summary = self._control_plane_summary()
@@ -3068,6 +3410,9 @@ class DashboardState:
             "error": None,
             "enabled": False,
             "board_configured": False,
+            "auth_enabled": False,
+            "sig_policy": "",
+            "server_id": "",
             **control_summary,
         }
 
@@ -3078,6 +3423,7 @@ class DashboardState:
                 return {**_disabled, "board_configured": bc, "batch_benchmark": None}
             cached = self._crypto_status_cache
             cache_ts = self._crypto_status_cache_ts
+            last_test = self._last_crypto_test_result
             if cached is not None and (time.monotonic() - cache_ts) < 1.5:
                 batch = self._batch_state
                 bm = batch.get("benchmark") if batch else None
@@ -3095,6 +3441,11 @@ class DashboardState:
                 }
 
         board_configured = bool(board_access and board_access.connection_ready)
+        auth_summary = self._auth_status_from_env(board_access.build_env()) if board_access is not None else {
+            "auth_enabled": False,
+            "sig_policy": "",
+            "server_id": "",
+        }
 
         if not board_configured:
             return {
@@ -3117,6 +3468,7 @@ class DashboardState:
                 "batch_status": None,
                 "batch_completed": 0,
                 "batch_total": 0,
+                **auth_summary,
                 **control_summary,
             }
 
@@ -3131,6 +3483,9 @@ class DashboardState:
             data = fetch_json_direct(url, timeout=3)
             data["enabled"] = True
             data["board_configured"] = True
+            data.setdefault("auth_enabled", auth_summary["auth_enabled"])
+            data.setdefault("sig_policy", auth_summary["sig_policy"])
+            data.setdefault("server_id", auth_summary["server_id"])
             data.update(control_summary)
             with self._lock:
                 self._crypto_status_cache = data
@@ -3145,6 +3500,7 @@ class DashboardState:
             # 保留上次正常值，只更新 error
             with self._lock:
                 prev = self._crypto_status_cache
+                last_test = self._last_crypto_test_result
                 batch = self._batch_state
             if prev is not None:
                 fallback = {
@@ -3156,6 +3512,24 @@ class DashboardState:
                     "batch_status": batch.get("status") if batch else None,
                     "batch_completed": batch.get("completed", 0) if batch else 0,
                     "batch_total": batch.get("total", 0) if batch else 0,
+                    **auth_summary,
+                    **control_summary,
+                }
+                with self._lock:
+                    self._crypto_status_cache = fallback
+                    self._crypto_status_cache_ts = time.monotonic()
+                return fallback
+            if last_test is not None:
+                fallback = {
+                    **last_test,
+                    "enabled": True,
+                    "board_configured": True,
+                    "error": f"board not reachable: {exc}",
+                    "batch_benchmark": batch.get("benchmark") if batch else None,
+                    "batch_status": batch.get("status") if batch else None,
+                    "batch_completed": batch.get("completed", 0) if batch else 0,
+                    "batch_total": batch.get("total", 0) if batch else 0,
+                    **auth_summary,
                     **control_summary,
                 }
                 with self._lock:
@@ -3183,6 +3557,7 @@ class DashboardState:
                 "batch_status": None,
                 "batch_completed": 0,
                 "batch_total": 0,
+                **auth_summary,
                 **control_summary,
             }
             with self._lock:
@@ -3253,14 +3628,34 @@ class DashboardState:
             note = f"soft recover skipped by cooldown ({cooldown - elapsed:.1f}s left)"
             return {"attempted": False, "note": note}
 
-        recover_result = run_recover_action(board_access, trusted_sha=trusted_sha)
         status_probe = query_live_status(board_access, trusted_sha=trusted_sha)
+        openamp_recover = {"status": "skipped", "note": "openamp bring-up not attempted"}
+        recover_result: dict[str, Any]
+        if status_probe.get("status") == "success":
+            recover_result = {"status": "skipped", "message": "control plane already healthy"}
+        else:
+            openamp_recover = self._recover_board_openamp_transport(board_access)
+            status_probe = query_live_status(board_access, trusted_sha=trusted_sha)
+            if status_probe.get("status") == "success":
+                recover_result = {
+                    "status": "skipped",
+                    "message": "OpenAMP transport recovered before SAFE_STOP was needed",
+                }
+            else:
+                recover_result = run_recover_action(board_access, trusted_sha=trusted_sha)
+                status_probe = query_live_status(board_access, trusted_sha=trusted_sha)
         attempted = {
             "attempted": True,
             "reason": reason,
             "recover_status": str(recover_result.get("status") or ""),
             "probe_status": str(status_probe.get("status") or ""),
-            "note": "soft recover attempted before deciding to block",
+            "openamp_recover_status": str(openamp_recover.get("status") or ""),
+            "openamp_recover_note": str(openamp_recover.get("note") or ""),
+            "note": (
+                "OpenAMP transport bring-up recovered the control path before SAFE_STOP was needed"
+                if status_probe.get("status") == "success" and str(openamp_recover.get("status") or "") == "success"
+                else "soft recover attempted before deciding to block"
+            ),
         }
         with self._lock:
             self._last_soft_recover_ts = time.monotonic()
@@ -3271,7 +3666,116 @@ class DashboardState:
                 self._last_control_status = status_probe
         if status_probe.get("status") == "success":
             self._emit_status_observation_events(status_probe, source="soft_recover_retry")
-        return {**attempted, "recover_result": recover_result, "status_retry": status_probe}
+        return {
+            **attempted,
+            "openamp_recover_result": openamp_recover,
+            "recover_result": recover_result,
+            "status_retry": status_probe,
+        }
+
+    def _recover_board_openamp_transport(self, board_access: BoardAccessConfig) -> dict[str, Any]:
+        if not board_access.connection_ready:
+            return {"status": "skipped", "note": "board connection not ready"}
+
+        env_values = board_access.build_env()
+        remote_root = first_config_value(env_values, keys=OPENAMP_REMOTE_ROOT_KEYS, default=DEFAULT_OPENAMP_REMOTE_ROOT)
+        remote_root = str(remote_root or DEFAULT_OPENAMP_REMOTE_ROOT).rstrip("/")
+        set_env_script = first_config_value(
+            env_values,
+            keys=OPENAMP_SET_ENV_SCRIPT_KEYS,
+            default=f"{remote_root}/{Path(DEFAULT_OPENAMP_SET_ENV_SCRIPT).name}",
+        )
+        rpmsg_demo = first_config_value(
+            env_values,
+            keys=OPENAMP_RPMSG_DEMO_KEYS,
+            default=f"{remote_root}/{Path(DEFAULT_OPENAMP_RPMSG_DEMO).name}",
+        )
+        warmup_timeout = DEFAULT_OPENAMP_RPMSG_WARMUP_TIMEOUT_SEC
+        warmup_log = "/tmp/openamp_rpmsg_demo_warmup.log"
+        command = "\n".join(
+            [
+                "set -euo pipefail",
+                "shopt -s nullglob",
+                'STATE_FILE="/sys/class/remoteproc/remoteproc0/state"',
+                'if [[ ! -e "$STATE_FILE" ]]; then echo "missing remoteproc0 state file" >&2; exit 1; fi',
+                'STATE="$(cat "$STATE_FILE" 2>/dev/null || true)"',
+                'if [[ "$STATE" != "running" ]]; then echo start > "$STATE_FILE"; sleep 1; fi',
+                'for override in /sys/bus/rpmsg/devices/*/driver_override; do',
+                '  case "$override" in',
+                '    *rpmsg-openamp-demo-channel*/driver_override) printf \'%s\\n\' rpmsg_chrdev > "$override" ;;',
+                "  esac",
+                "done",
+                'if command -v modprobe >/dev/null 2>&1; then modprobe rpmsg_char >/dev/null 2>&1 || true; fi',
+                (
+                    "if [[ ! -e /dev/rpmsg_ctrl0 ]] && [[ -x {set_env} ]]; then "
+                    "{set_env} >/tmp/openamp_set_env.log 2>&1 || true; fi"
+                ).format(set_env=shlex.quote(set_env_script)),
+                (
+                    "if [[ ! -e /dev/rpmsg0 ]] && [[ -x {rpmsg_demo} ]]; then "
+                    "timeout {timeout}s {rpmsg_demo} > {warmup_log} 2>&1 || true; fi"
+                ).format(
+                    rpmsg_demo=shlex.quote(rpmsg_demo),
+                    timeout=warmup_timeout,
+                    warmup_log=shlex.quote(warmup_log),
+                ),
+                'printf "__CODEX_REMOTEPROC_STATE__%s\\n" "$(cat "$STATE_FILE" 2>/dev/null || true)"',
+                'printf "__CODEX_RPMSG__BEGIN__\\n"',
+                "ls -1 /dev/rpmsg* 2>/dev/null || true",
+                'printf "__CODEX_RPMSG__END__\\n"',
+            ]
+        )
+        proc = run_ssh_command(
+            host=board_access.host,
+            user=board_access.user,
+            password=board_access.password,
+            port=board_access.port or "22",
+            remote_command=_remote_sudo_bash_command(command, board_access.password),
+            timeout=20,
+        )
+        stdout = proc.stdout or ""
+        stderr = proc.stderr or ""
+        state_match = re.search(r"__CODEX_REMOTEPROC_STATE__(.+)", stdout)
+        remoteproc_state = state_match.group(1).strip() if state_match else ""
+        rpmsg_devices = [
+            line.strip()
+            for line in stdout.splitlines()
+            if line.strip().startswith("/dev/rpmsg")
+        ]
+        if proc.returncode != 0:
+            error_output = stderr.strip() or stdout.strip() or "unknown error"
+            return {
+                "status": "error",
+                "note": f"OpenAMP bring-up command failed: {error_output}",
+                "remoteproc_state": remoteproc_state,
+                "rpmsg_devices": rpmsg_devices,
+                "stdout": stdout,
+                "stderr": stderr,
+            }
+        if "/dev/rpmsg_ctrl0" in rpmsg_devices and "/dev/rpmsg0" in rpmsg_devices:
+            note = (
+                f"OpenAMP transport ready (remoteproc0={remoteproc_state or 'unknown'}, "
+                "rpmsg_ctrl0/rpmsg0 present)"
+            )
+            return {
+                "status": "success",
+                "note": note,
+                "remoteproc_state": remoteproc_state,
+                "rpmsg_devices": rpmsg_devices,
+                "stdout": stdout,
+                "stderr": stderr,
+            }
+        note = (
+            f"OpenAMP bring-up incomplete (remoteproc0={remoteproc_state or 'unknown'}, "
+            f"devices={','.join(rpmsg_devices) or 'none'})"
+        )
+        return {
+            "status": "partial",
+            "note": note,
+            "remoteproc_state": remoteproc_state,
+            "rpmsg_devices": rpmsg_devices,
+            "stdout": stdout,
+            "stderr": stderr,
+        }
 
     def set_crypto_toggle(self, enabled: bool) -> dict[str, Any]:
         """设置 ML-KEM 开关状态
@@ -3590,6 +4094,11 @@ class DashboardState:
         password = board_access.password
         ssh_port = board_access.port or "22"
         env_values = board_access.build_env()
+        try:
+            env_values = self._prepare_mlkem_auth_env(board_access, env_values)
+        except Exception as exc:
+            print(f"[ML-KEM auto-start] 板端认证运行时准备失败: {exc}")
+            return
         status_port = parse_int_config(
             first_config_value(env_values, keys=STATUS_PORT_KEYS),
             DEFAULT_STATUS_PORT,
@@ -3615,6 +4124,19 @@ class DashboardState:
             except Exception:
                 pass
 
+        if self._auth_enabled_for_env(env_values) and not str(
+            first_config_value(runtime_env_values, keys=("MLKEM_REMOTE_TONGSUO_SIG_BRIDGE",), default="")
+        ).strip():
+            runtime_env_values["MLKEM_REMOTE_TONGSUO_SIG_BRIDGE"] = self._default_remote_sig_bridge_path(
+                board_access
+            )
+        if self._auth_enabled_for_env(env_values) and not str(
+            first_config_value(runtime_env_values, keys=("MLKEM_REMOTE_OQS_INSTALL_PATH",), default="")
+        ).strip():
+            runtime_env_values["MLKEM_REMOTE_OQS_INSTALL_PATH"] = self._default_remote_oqs_install_path(
+                board_access
+            )
+
         local_server_script, _ = resolve_local_crypto_server(runtime_env_values)
         remote_asset_sync = self._sync_remote_mlkem_server_assets(
             board_access,
@@ -3626,25 +4148,41 @@ class DashboardState:
         expected_suite = first_config_value(env_values, keys=SUITE_KEYS, default=DEFAULT_CIPHER_SUITE).lower().replace("_", "-")
         expected_tvm_python_raw = first_config_value(env_values, keys=REMOTE_TVM_PYTHON_KEYS)
         expected_tvm_python = _normalize_remote_tvm_python(expected_tvm_python_raw)
+        expected_auth = self._auth_status_from_env(env_values)
         forced_restart = False
+        restart_reason = ""
         if remote_asset_sync.get("updated"):
             forced_restart = True
+            restart_reason = "检测到板端 helper 资产已更新"
             print(f"[ML-KEM auto-start] 已同步板端 helper 资产: {remote_asset_sync.get('note', 'remote assets refreshed')}")
         elif remote_asset_sync.get("error"):
             print(f"[ML-KEM auto-start] 板端 helper 同步失败，将继续尝试复用远端现有脚本: {remote_asset_sync.get('note', '')}")
         hotfix_result = self._apply_remote_mlkem_hotfixes(board_access)
         if hotfix_result.get("patched"):
             forced_restart = True
+            if not restart_reason:
+                restart_reason = "检测到板端 helper 热修已更新"
             print(f"[ML-KEM auto-start] 已应用板端热修: {hotfix_result.get('note', 'remote helper patched')}")
         # AES_256_GCM → aes-256-gcm, SM4_GCM → sm4-gcm
         try:
             status = fetch_json_direct(f"http://{host}:{status_port}/status", timeout=2)
             running_suite = str(status.get("cipher_suite") or "").lower()
-            restart_reason = ""
             if running_suite and running_suite != expected_suite:
                 restart_reason = (
                     f"套件不匹配 (running={running_suite}, expected={expected_suite})"
                 )
+            elif bool(status.get("auth_enabled")) != bool(expected_auth.get("auth_enabled")):
+                restart_reason = "检测到板端 tcp_server 的认证开关与当前期望配置不一致"
+            elif (
+                bool(expected_auth.get("auth_enabled"))
+                and str(status.get("sig_policy") or "").strip().upper() != str(expected_auth.get("sig_policy") or "").strip().upper()
+            ):
+                restart_reason = "检测到板端 tcp_server 的认证策略与当前期望配置不一致"
+            elif (
+                bool(expected_auth.get("auth_enabled"))
+                and str(status.get("server_id") or "").strip() != str(expected_auth.get("server_id") or "").strip()
+            ):
+                restart_reason = "检测到板端 tcp_server 的服务端标识与当前期望配置不一致"
             elif running_suite and expected_tvm_python_raw:
                 try:
                     pgrep_proc = run_ssh_command(
@@ -3656,7 +4194,8 @@ class DashboardState:
                         timeout=8,
                     )
                     running_cmdline = pgrep_proc.stdout or ""
-                    if running_cmdline and expected_tvm_python_raw not in running_cmdline:
+                    expected_tvm_cmd_fragment = expected_tvm_python or expected_tvm_python_raw
+                    if running_cmdline and expected_tvm_cmd_fragment and expected_tvm_cmd_fragment not in running_cmdline:
                         restart_reason = (
                             "检测到板端 tcp_server 的 --tvm-python 与当前期望运行时不一致"
                         )
@@ -3674,18 +4213,22 @@ class DashboardState:
 
             if running_suite and not restart_reason and not forced_restart:
                 return  # 已在运行且配置匹配
-            if restart_reason or forced_restart:
-                reason_text = restart_reason or "检测到板端 helper 资产已更新"
-                print(f"[ML-KEM auto-start] {reason_text}，重启板端 tcp_server")
-                forced_restart = True
-                run_ssh_command(
-                    host=host, user=user, password=password, port=ssh_port,
-                    remote_command="pkill -f 'tcp_server.py' || true",
-                    timeout=8,
-                )
-                import time as _time; _time.sleep(1)
         except Exception:
             pass  # 没运行，继续启动
+
+        if restart_reason or forced_restart:
+            reason_text = restart_reason or "检测到板端 helper 资产已更新"
+            print(f"[ML-KEM auto-start] {reason_text}，重启板端 tcp_server")
+            forced_restart = True
+            run_ssh_command(
+                host=host,
+                user=user,
+                password=password,
+                port=ssh_port,
+                remote_command="pkill -f 'tcp_server.py' || true",
+                timeout=8,
+            )
+            import time as _time; _time.sleep(1)
 
         # 1b) 若进程已在运行但 status 不通，等一下再试
         if not forced_restart:
@@ -3698,13 +4241,31 @@ class DashboardState:
                     remote_command="pgrep -af 'tcp_server.py' || true",
                     timeout=8,
                 )
-                if pgrep_proc.returncode == 0 and (pgrep_proc.stdout or "").strip():
-                    for _ in range(4):
-                        try:
-                            fetch_json_direct(f"http://{host}:{status_port}/status", timeout=2)
-                            return
-                        except Exception:
-                            time.sleep(0.8)
+                running_cmdline = pgrep_proc.stdout or ""
+                if pgrep_proc.returncode == 0 and running_cmdline.strip():
+                    status_port_pattern = re.compile(rf"--status-port(?:=|\s+){status_port}(?:\s|$)")
+                    if not status_port_pattern.search(running_cmdline):
+                        print(
+                            "[ML-KEM auto-start] 检测到板端 tcp_server 缺少 "
+                            f"--status-port {status_port}，重启板端 tcp_server"
+                        )
+                        run_ssh_command(
+                            host=host,
+                            user=user,
+                            password=password,
+                            port=ssh_port,
+                            remote_command="pkill -f 'tcp_server.py' || true",
+                            timeout=8,
+                        )
+                        time.sleep(1)
+                        forced_restart = True
+                    else:
+                        for _ in range(4):
+                            try:
+                                fetch_json_direct(f"http://{host}:{status_port}/status", timeout=2)
+                                return
+                            except Exception:
+                                time.sleep(0.8)
             except Exception:
                 pass
 
@@ -3841,6 +4402,18 @@ class DashboardState:
 
         host = board_access.host
         env_values = board_access.build_env()
+        try:
+            env_values = self._prepare_mlkem_auth_env(board_access, env_values)
+        except Exception as exc:
+            return {
+                "status": "error",
+                "message": f"认证运行时准备失败: {exc}",
+            }
+
+        # crypto-test 也需要先校准板端 runtime，否则会直接复用过时的
+        # ~/tcp_server.py，导致状态口/认证配置与当前 demo 期望不一致。
+        self._ensure_board_tcp_server(board_access)
+
         tcp_client, searched_paths = resolve_local_crypto_client(env_values)
         if tcp_client is None:
             searched_text = ", ".join(str(path) for path in searched_paths[:5]) or "no candidate paths"
@@ -3852,6 +4425,7 @@ class DashboardState:
 
         # 生成测试输入：兼容新版 batch client 与旧版单图 client。
         tmp_path = self._create_mlkem_input_file(tcp_client)
+        test_job_id = f"crypto_test_{tmp_path.stem}"
 
         cmd, env = build_local_crypto_client_command(
             env_values,
@@ -3859,6 +4433,11 @@ class DashboardState:
             input_path=tmp_path,
             client_script=tcp_client,
         )
+        transport_mode = local_crypto_transport_mode(env_values)
+        try:
+            test_input_bytes = int(tmp_path.stat().st_size)
+        except OSError:
+            test_input_bytes = 0
 
         # ── 尝试 daemon 模式（复用已有 session，省握手开销）──
         mgr = self._get_mlkem_session_manager(board_access, env_values)
@@ -3868,19 +4447,36 @@ class DashboardState:
                 t0 = time.monotonic()
                 daemon_result = mgr.send_image(
                     str(tmp_path),
-                    "crypto_test",
+                    test_job_id,
                     run_tvm=False,
                     expect_result=False,
                 )
                 wall_ms = round((time.monotonic() - t0) * 1000, 1)
                 tmp_path.unlink()
-                return {
+                result = {
                     "status": "ok" if daemon_result.get("status") == "ok" else "error",
                     "wall_ms": wall_ms,
                     "handshake_ms": round(mgr._handshake_ms, 1),
                     "sha256_match": daemon_result.get("sha256_match", False),
                     "transport_mode": "daemon",
                 }
+                if result["status"] == "ok":
+                    daemon_metrics = {
+                        "handshake_ms": result.get("handshake_ms"),
+                        "encrypt_ms": daemon_result.get("encrypt_ms"),
+                        "decrypt_ms": daemon_result.get("decrypt_ms"),
+                        "inference_ms": daemon_result.get("inference_ms"),
+                        "sha256_match": daemon_result.get("sha256_match"),
+                        "suite": first_config_value(env_values, keys=SUITE_KEYS, default=DEFAULT_CIPHER_SUITE),
+                    }
+                    self._record_successful_crypto_test(
+                        env_values=env_values,
+                        client_script=tcp_client,
+                        transport_mode="daemon",
+                        metrics=daemon_metrics,
+                        input_bytes=test_input_bytes,
+                    )
+                return result
             except Exception:
                 pass  # 回退到子进程模式
 
@@ -3904,16 +4500,24 @@ class DashboardState:
 
             # 解析 stdout 中关键指标
             stdout = proc.stdout
-            result: dict[str, Any] = {"status": "ok", "wall_ms": wall_ms}
+            metrics = self._parse_mlkem_client_metrics(stdout)
+            result: dict[str, Any] = {
+                "status": "ok",
+                "wall_ms": wall_ms,
+                "transport_mode": transport_mode,
+            }
+            if metrics.get("handshake_ms") is not None:
+                result["handshake_ms"] = float(metrics["handshake_ms"])
+            if metrics.get("sha256_match") is not None:
+                result["sha256_match"] = bool(metrics["sha256_match"])
 
-            for line in stdout.splitlines():
-                if "握手完成" in line:
-                    # 提取耗时
-                    m = re.search(r"([\d.]+)\s*ms", line)
-                    if m:
-                        result["handshake_ms"] = float(m.group(1))
-                if "SHA256 匹配" in line or "对端 SHA256 匹配: 是" in line or "✓ 传输成功" in line:
-                    result["sha256_match"] = True
+            self._record_successful_crypto_test(
+                env_values=env_values,
+                client_script=tcp_client,
+                transport_mode=transport_mode,
+                metrics=metrics,
+                input_bytes=test_input_bytes,
+            )
 
             return result
 
@@ -4899,8 +5503,13 @@ class DashboardState:
             "result_recv_ms": None,
             "sha256_match": None,
             "result_received": None,
+            "bytes_sent": None,
+            "bytes_received": None,
             "suite": "",
             "backend": "",
+            "auth_enabled": None,
+            "sig_policy": "",
+            "server_id": "",
         }
         for line in stdout.splitlines():
             text = str(line).strip()
@@ -4915,10 +5524,16 @@ class DashboardState:
                 if m:
                     metrics["handshake_ms"] = float(m.group(1))
             elif "加密发送" in text:
+                m = re.search(r"(\d+)\s*B", text)
+                if m:
+                    metrics["bytes_sent"] = int(m.group(1))
                 m = re.search(r"耗时\s*([\d.]+)\s*ms", text)
                 if m:
                     metrics["encrypt_ms"] = float(m.group(1))
             elif "接收重建结果" in text:
+                m = re.search(r"(\d+)\s*B", text)
+                if m:
+                    metrics["bytes_received"] = int(m.group(1))
                 m = re.search(r"耗时\s*([\d.]+)\s*ms", text)
                 if m:
                     metrics["result_recv_ms"] = float(m.group(1))
@@ -4928,6 +5543,13 @@ class DashboardState:
                 m = re.search(r"([\d.]+)\s*ms", text)
                 if m:
                     metrics["inference_ms"] = float(m.group(1))
+            elif text.startswith("身份认证:"):
+                metrics["auth_enabled"] = "已启用" in text
+                m = re.search(r"\(([^)]+)\)", text)
+                if m:
+                    metrics["sig_policy"] = m.group(1).strip()
+            elif text.startswith("服务端标识:"):
+                metrics["server_id"] = text.split(":", 1)[1].strip()
             elif "板端重建结果:" in text:
                 if "已回传" in text:
                     metrics["result_received"] = True
@@ -5220,6 +5842,19 @@ class DashboardState:
             )
 
         env_values = board_access.build_env()
+        try:
+            env_values = self._prepare_mlkem_auth_env(board_access, env_values)
+        except Exception as exc:
+            return None, self._build_blocked_inference_payload(
+                variant=variant,
+                image_index=image_index,
+                status_category="auth_prepare_failed",
+                source_label="认证材料未就绪，回退展示（归档样例）",
+                message="ML-DSA / SM2 认证材料未就绪，本次无法建立 ML-KEM 安全协议。",
+                detail=str(exc),
+                diagnostics={"crypto_enabled": True},
+                expected_count=expected_count,
+            )
         self._ensure_board_tcp_server(board_access)
         mgr = self._get_mlkem_session_manager(board_access, env_values)
         if mgr is None:
@@ -5595,6 +6230,19 @@ class DashboardState:
 
         # ── Preflight：daemon 存活时跳过 SSH 查询（O-1 优化） ──
         env_values = board_access.build_env()
+        try:
+            env_values = self._prepare_mlkem_auth_env(board_access, env_values)
+        except Exception as exc:
+            return self._build_blocked_inference_payload(
+                variant=variant,
+                image_index=image_index,
+                status_category="auth_prepare_failed",
+                source_label="认证材料未就绪，回退展示（归档样例）",
+                message="ML-DSA / SM2 认证材料未就绪，本次无法发起 ML-KEM 推理。",
+                detail=str(exc),
+                diagnostics={"board_configured": True},
+                expected_count=max_inputs,
+            )
         mgr_early = self._get_mlkem_session_manager(board_access, env_values)
         daemon_alive = mgr_early is not None and mgr_early.is_alive
 

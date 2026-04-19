@@ -52,6 +52,12 @@ export type CryptoStatusResponse = {
   cipher_suite: string
   /** Channel state */
   channel_state: CryptoChannelState
+  /** Whether ML-DSA / SM2 authentication is enabled for the channel */
+  auth_enabled?: boolean
+  /** Active authentication signature policy */
+  sig_policy?: string
+  /** Claimed remote server identity used by authenticated handshake */
+  server_id?: string
   /** Last handshake duration in ms */
   handshake_ms?: number
   /** Last encrypt+send duration in ms */

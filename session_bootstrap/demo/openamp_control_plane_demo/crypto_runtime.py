@@ -42,7 +42,9 @@ REMOTE_ACTIVATE_KEYS = ("MLKEM_REMOTE_ACTIVATE",)
 REMOTE_CONDA_SH_KEYS = ("MLKEM_REMOTE_CONDA_SH",)
 REMOTE_CONDA_ENV_KEYS = ("MLKEM_REMOTE_CONDA_ENV",)
 REMOTE_LD_LIBRARY_KEYS = ("MLKEM_REMOTE_LD_LIBRARY_PATH",)
+REMOTE_OQS_INSTALL_KEYS = ("MLKEM_REMOTE_OQS_INSTALL_PATH",)
 REMOTE_TONGSUO_BRIDGE_KEYS = ("MLKEM_REMOTE_TONGSUO_KEM_BRIDGE",)
+REMOTE_TONGSUO_SIG_BRIDGE_KEYS = ("MLKEM_REMOTE_TONGSUO_SIG_BRIDGE",)
 REMOTE_PRELUDE_KEYS = ("MLKEM_REMOTE_PRELUDE", "MLKEM_REMOTE_EXTRA_ENV")
 REMOTE_PYTHON_KEYS = ("MLKEM_REMOTE_PYTHON",)
 REMOTE_ARTIFACT_KEYS = ("REMOTE_CURRENT_ARTIFACT",)
@@ -57,6 +59,14 @@ REMOTE_LOG_PATH_KEYS = ("MLKEM_REMOTE_LOG_PATH",)
 REMOTE_SNR_KEYS = ("MLKEM_SNR", "REMOTE_SNR_CURRENT")
 
 LOCAL_PYTHON_KEYS = ("COCKPIT_PYTHON", "PYTHON")
+AUTH_COMMON_KEYS = ("MLKEM_AUTH_ENABLED", "MLKEM_AUTH_SERVER_ID", "MLKEM_AUTH_SIG_POLICY")
+LOCAL_AUTH_CLIENT_KEYS = ("MLKEM_AUTH_PEER_SM2_PUB", "MLKEM_AUTH_PEER_MLDSA_PUB")
+REMOTE_AUTH_SERVER_KEYS = (
+    "MLKEM_AUTH_SERVER_SM2_KEY",
+    "MLKEM_AUTH_SERVER_SM2_PUB",
+    "MLKEM_AUTH_SERVER_MLDSA_KEY",
+    "MLKEM_AUTH_SERVER_MLDSA_PUB",
+)
 
 _LOCAL_CRYPTO_CLIENT_CAP_CACHE: dict[Path, dict[str, bool]] = {}
 _LOCAL_CRYPTO_SERVER_CAP_CACHE: dict[Path, dict[str, bool]] = {}
@@ -243,12 +253,16 @@ def resolve_local_crypto_client(
     *,
     extra_roots: Sequence[Path | str] = (),
 ) -> tuple[Path | None, list[Path]]:
+    runtime_root, _ = resolve_local_mlkem_runtime_root(env_values, extra_roots=extra_roots)
+    prioritized_roots: tuple[Path | str, ...] = (
+        ((runtime_root,) + tuple(extra_roots)) if runtime_root is not None else tuple(extra_roots)
+    )
     return resolve_local_asset(
         "scripts/tcp_client.py",
         env_values=env_values,
         explicit_path_keys=LOCAL_CLIENT_SCRIPT_KEYS,
         explicit_root_keys=(*LOCAL_REPO_ROOT_KEYS, *LOCAL_SCRIPT_ROOT_KEYS),
-        extra_roots=extra_roots,
+        extra_roots=prioritized_roots,
     )
 
 
@@ -257,12 +271,16 @@ def resolve_local_crypto_server(
     *,
     extra_roots: Sequence[Path | str] = (),
 ) -> tuple[Path | None, list[Path]]:
+    runtime_root, _ = resolve_local_mlkem_runtime_root(env_values, extra_roots=extra_roots)
+    prioritized_roots: tuple[Path | str, ...] = (
+        ((runtime_root,) + tuple(extra_roots)) if runtime_root is not None else tuple(extra_roots)
+    )
     return resolve_local_asset(
         "scripts/tcp_server.py",
         env_values=env_values,
         explicit_path_keys=LOCAL_SERVER_SCRIPT_KEYS,
         explicit_root_keys=(*LOCAL_REPO_ROOT_KEYS, *LOCAL_SCRIPT_ROOT_KEYS),
-        extra_roots=extra_roots,
+        extra_roots=prioritized_roots,
     )
 
 
@@ -382,6 +400,24 @@ def _prepend_env_path(env: dict[str, str], key: str, path_value: str) -> None:
     env[key] = os.pathsep.join([value, *existing]) if existing else value
 
 
+def _config_env_pairs(
+    env_values: Mapping[str, str] | None,
+    keys: Sequence[str],
+) -> list[tuple[str, str]]:
+    pairs: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for mapping in _sources(env_values):
+        for key in keys:
+            if key in seen or key not in mapping:
+                continue
+            value = str(mapping.get(key, "")).strip()
+            if not value:
+                continue
+            pairs.append((key, value))
+            seen.add(key)
+    return pairs
+
+
 def _detect_local_python_command(
     env_values: Mapping[str, str] | None,
     *,
@@ -455,6 +491,9 @@ def _build_local_crypto_env(
             _prepend_env_path(env, "LD_LIBRARY_PATH", segment)
     elif bridge_path is not None:
         _prepend_env_path(env, "LD_LIBRARY_PATH", str(bridge_path.parent))
+
+    for key, value in _config_env_pairs(env_values, (*AUTH_COMMON_KEYS, *LOCAL_AUTH_CLIENT_KEYS)):
+        env[key] = value
 
     return env
 
@@ -582,6 +621,10 @@ def build_local_crypto_daemon_fingerprint(
         resolved_runtime_root = str(runtime_root.resolve())
     except OSError:
         resolved_runtime_root = str(runtime_root)
+    auth_parts = tuple(
+        f"{key}={value}"
+        for key, value in _config_env_pairs(env_values, (*AUTH_COMMON_KEYS, *LOCAL_AUTH_CLIENT_KEYS))
+    )
     return (
         transport_mode,
         str(host).strip(),
@@ -589,6 +632,7 @@ def build_local_crypto_daemon_fingerprint(
         str(suite).strip().upper(),
         resolved_client,
         resolved_runtime_root,
+        *auth_parts,
     )
 
 
@@ -966,19 +1010,35 @@ def build_remote_crypto_server_command(
                 f'eval "$(conda shell.bash hook)" >/dev/null 2>&1 && conda activate {shlex_quote(conda_env)}; fi'
             )
 
+    remote_oqs_install = first_config_value(env_values, keys=REMOTE_OQS_INSTALL_KEYS)
+    if remote_oqs_install:
+        command_steps.append(f"export OQS_INSTALL_PATH={shlex_quote(remote_oqs_install)}")
+
     ld_library_path = first_config_value(env_values, keys=REMOTE_LD_LIBRARY_KEYS)
     if ld_library_path:
         command_steps.append(
             f"export LD_LIBRARY_PATH={shlex_quote(ld_library_path)}${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}"
+        )
+    elif remote_oqs_install:
+        remote_oqs_lib = f"{remote_oqs_install.rstrip('/')}/lib"
+        command_steps.append(
+            f"export LD_LIBRARY_PATH={shlex_quote(remote_oqs_lib)}${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}"
         )
 
     tongsuo_bridge = first_config_value(env_values, keys=REMOTE_TONGSUO_BRIDGE_KEYS)
     if tongsuo_bridge:
         command_steps.append(f"export TONGSUO_KEM_BRIDGE={shlex_quote(tongsuo_bridge)}")
 
+    tongsuo_sig_bridge = first_config_value(env_values, keys=REMOTE_TONGSUO_SIG_BRIDGE_KEYS)
+    if tongsuo_sig_bridge:
+        command_steps.append(f"export TONGSUO_SIG_BRIDGE={shlex_quote(tongsuo_sig_bridge)}")
+
     remote_prelude = first_config_value(env_values, keys=REMOTE_PRELUDE_KEYS)
     if remote_prelude:
         command_steps.append(remote_prelude)
+
+    for key, value in _config_env_pairs(env_values, (*AUTH_COMMON_KEYS, *REMOTE_AUTH_SERVER_KEYS)):
+        command_steps.append(f"export {key}={shlex_quote(value)}")
 
     server_command = " ".join(shlex_quote(str(arg)) for arg in server_argv)
     command_steps.append(f"nohup {server_command} </dev/null >> {shlex_quote(log_path)} 2>&1 &")
