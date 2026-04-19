@@ -1889,6 +1889,61 @@ class DashboardStateTest(unittest.TestCase):
         self.assertEqual(payload["control_total_fault_count"], 3)
         self.assertFalse(payload["service_mode"]["available"])
 
+    def test_get_crypto_status_reports_not_probed_without_cached_control_status(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+
+        payload = state.get_crypto_status()
+
+        self.assertEqual(payload["control_guard_state"], "NOT_PROBED")
+        self.assertEqual(payload["control_last_fault_code"], "NOT_PROBED")
+
+    def test_reset_crypto_channel_closes_session_and_schedules_remote_restart_for_tcp(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        fake_mgr = Mock()
+        fake_board_access = Mock()
+        fake_board_access.connection_ready = True
+        fake_board_access.build_env.return_value = {"MLKEM_TRANSPORT_MODE": "tcp"}
+
+        state._crypto_enabled = True
+        state._board_access = fake_board_access
+        state._mlkem_session_mgr = fake_mgr
+        state._crypto_status_cache = {"status": "ready"}
+        state._crypto_status_cache_ts = 1.0
+        state._last_crypto_test_result = {"status": "ok"}
+
+        with patch.object(threading, "Thread") as mock_thread:
+            payload = state.reset_crypto_channel()
+
+        fake_mgr.close.assert_called_once()
+        self.assertEqual(state._mlkem_session_mgr, None)
+        self.assertEqual(state._crypto_status_cache, None)
+        self.assertEqual(state._crypto_status_cache_ts, 0.0)
+        self.assertEqual(state._last_crypto_test_result, None)
+        self.assertEqual(payload["status"], "ok")
+        self.assertTrue(payload["session_closed"])
+        self.assertTrue(payload["remote_restart_scheduled"])
+        mock_thread.assert_called_once()
+
+    def test_crypto_reset_endpoint_returns_reset_payload(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+
+        with patch.object(
+            state,
+            "reset_crypto_channel",
+            return_value={"status": "ok", "message": "reset ok", "session_closed": True},
+        ) as mock_reset:
+            status, _headers, payload = request_json(
+                state,
+                "POST",
+                "/api/crypto-reset",
+                body=json.dumps({"restart_remote_server": False}).encode("utf-8"),
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["message"], "reset ok")
+        mock_reset.assert_called_once_with(restart_remote_server=False)
+
 
 class ServerMainTest(unittest.TestCase):
     def test_server_script_help_runs_without_manual_pythonpath(self) -> None:

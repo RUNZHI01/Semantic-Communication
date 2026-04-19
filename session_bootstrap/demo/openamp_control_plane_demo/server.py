@@ -49,6 +49,7 @@ from crypto_runtime import (
     build_remote_crypto_server_command,
     first_config_value,
     inspect_local_crypto_client_capabilities,
+    local_crypto_transport_mode,
     parse_int_config,
     resolve_local_crypto_client,
     resolve_local_crypto_server,
@@ -2143,15 +2144,80 @@ class DashboardState:
             name="local-aircraft-position-bridge",
         ).start()
 
+    def _detach_mlkem_session_manager(self) -> MlkemSessionManager | None:
+        with self._lock:
+            mgr = self._mlkem_session_mgr
+            self._mlkem_session_mgr = None
+        return mgr
+
+    def _close_mlkem_session_manager(self, mgr: MlkemSessionManager | None = None) -> bool:
+        if mgr is None:
+            mgr = self._detach_mlkem_session_manager()
+        if mgr is None:
+            return False
+        try:
+            mgr.close()
+        except Exception:
+            pass
+        return True
+
+    def reset_crypto_channel(self, *, restart_remote_server: bool = True) -> dict[str, Any]:
+        with self._lock:
+            board_access = self._board_access
+            crypto_enabled = self._crypto_enabled
+            self._crypto_status_cache = None
+            self._crypto_status_cache_ts = 0.0
+            self._last_crypto_test_result = None
+            mgr_to_close = self._mlkem_session_mgr
+            self._mlkem_session_mgr = None
+
+        session_closed = self._close_mlkem_session_manager(mgr_to_close)
+        remote_restart_scheduled = False
+        if (
+            restart_remote_server
+            and crypto_enabled
+            and board_access
+            and board_access.connection_ready
+            and local_crypto_transport_mode(board_access.build_env()) == "tcp"
+        ):
+            threading.Thread(
+                target=self._ensure_board_tcp_server,
+                args=(board_access,),
+                daemon=True,
+                name="tcp-server-reset",
+            ).start()
+            remote_restart_scheduled = True
+
+        message = "安全信道本地会话已重置，状态缓存已清空。"
+        if remote_restart_scheduled:
+            message += " 板端 tcp_server 将重新探测并按需拉起。"
+        return {
+            "status": "ok",
+            "message": message,
+            "session_closed": session_closed,
+            "remote_restart_scheduled": remote_restart_scheduled,
+        }
+
     def set_board_access(self, payload: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
             fallback = self._board_access
         config = build_board_access_config(payload, fallback=fallback)
+        mgr_to_close: MlkemSessionManager | None = None
         with self._lock:
             self._board_access = config
             resolved_current_sha = self._resolve_current_trusted_sha(config)
             if resolved_current_sha:
                 self._trusted_current_sha = resolved_current_sha
+            self._crypto_status_cache = None
+            self._crypto_status_cache_ts = 0.0
+            self._last_control_status = None
+            self._last_inference_result = None
+            self._recent_inference_results = {}
+            self._last_crypto_test_result = None
+            self._last_fault_result = None
+            self._last_soft_recover_ts = 0.0
+            self._last_soft_recover_result = None
+            self._batch_state = None
             self._board_telemetry_cache = None
             self._board_telemetry_cache_ts = 0.0
             self._board_telemetry_refreshing = False
@@ -2160,7 +2226,17 @@ class DashboardState:
             self._board_position_api_refreshing = False
             self._aircraft_position_upstream_probe_cache = None
             self._aircraft_position_upstream_probe_cache_ts = 0.0
+            self._event_spine = DemoEventSpine(self._event_archive_root)
+            if self._mlkem_session_mgr is not None:
+                mgr_to_close = self._mlkem_session_mgr
+                self._mlkem_session_mgr = None
+            self._mlkem_remote_asset_signatures = {}
             crypto_enabled = self._crypto_enabled
+        if mgr_to_close is not None:
+            try:
+                mgr_to_close.close()
+            except Exception:
+                pass
         # 密码录入后立即在后台尝试启动板端 tcp_server，无需等待 toggle ON 或首次推理
         if config.connection_ready:
             threading.Thread(
@@ -2375,22 +2451,38 @@ class DashboardState:
     ) -> MlkemSessionManager | None:
         """获取或创建持久化 ML-KEM 会话管理器
 
-        如果 host 发生变化会关闭旧管理器。
+        如果 host / port / suite / client script / transport 发生变化会关闭旧管理器。
         找不到 tcp_client.py 时返回 None（回退到子进程模式）。
         """
-        with self._lock:
-            if self._mlkem_session_mgr is not None:
-                if self._mlkem_session_mgr._host == board_access.host:
-                    return self._mlkem_session_mgr
-                else:
-                    self._mlkem_session_mgr.close()
-                    self._mlkem_session_mgr = None
+        if local_crypto_transport_mode(env_values) != "tcp":
+            self._close_mlkem_session_manager()
+            return None
 
         tcp_client, _ = resolve_local_crypto_client(env_values)
         if tcp_client is None:
+            self._close_mlkem_session_manager()
             return None
         if not inspect_local_crypto_client_capabilities(tcp_client).get("supports_daemon"):
+            self._close_mlkem_session_manager()
             return None
+
+        mgr_to_close: MlkemSessionManager | None = None
+        with self._lock:
+            existing = self._mlkem_session_mgr
+            if existing is not None:
+                match_fn = getattr(existing, "matches_config", None)
+                if callable(match_fn):
+                    try:
+                        if bool(match_fn(env_values, host=board_access.host, client_script=tcp_client)):
+                            return existing
+                    except Exception:
+                        pass
+                elif getattr(existing, "_host", None) == board_access.host:
+                    return existing
+                self._mlkem_session_mgr = None
+                mgr_to_close = existing
+
+        self._close_mlkem_session_manager(mgr_to_close)
 
         mgr = MlkemSessionManager(
             env_values, host=board_access.host, client_script=tcp_client)
@@ -3112,6 +3204,24 @@ class DashboardState:
         heartbeat_lost_events = self._safe_int(event_counters.get("HEARTBEAT_LOST"), default=0)
         safe_stop_triggered_events = self._safe_int(event_counters.get("SAFE_STOP_TRIGGERED"), default=0)
         safe_stop_cleared_events = self._safe_int(event_counters.get("SAFE_STOP_CLEARED"), default=0)
+        if not control_status:
+            return {
+                "control_guard_state": "NOT_PROBED",
+                "control_last_fault_code": "NOT_PROBED",
+                "control_heartbeat_ok": 0,
+                "control_total_fault_count": 0,
+                "control_job_req_count": self._safe_int(event_counters.get("JOB_SUBMITTED"), default=0),
+                "control_job_admit_count": self._safe_int(event_counters.get("JOB_ADMITTED"), default=0),
+                "control_job_reject_count": self._safe_int(event_counters.get("JOB_REJECTED"), default=0),
+                "control_heartbeat_event_count": heartbeat_ok_events + heartbeat_lost_events,
+                "control_heartbeat_lost_count": heartbeat_lost_events,
+                "control_safe_stop_triggered_count": safe_stop_triggered_events,
+                "control_safe_stop_cleared_count": safe_stop_cleared_events,
+                "control_recover_attempted": bool(soft_recover),
+                "control_recover_note": str(soft_recover.get("note") or ""),
+                "status_source": "not_probed",
+                "status_note": "尚未获取当前链路的控制面状态。",
+            }
         return {
             "control_guard_state": str(control_status.get("guard_state") or "UNKNOWN"),
             "control_last_fault_code": str(control_status.get("last_fault_code") or "UNKNOWN"),
@@ -3785,9 +3895,10 @@ class DashboardState:
                 pass
 
             if proc.returncode != 0:
+                error_message = ((proc.stderr or "").strip() or (proc.stdout or "").strip() or "unknown error")[-500:]
                 return {
                     "status": "error",
-                    "message": proc.stderr[-500:] if proc.stderr else "unknown error",
+                    "message": error_message,
                     "wall_ms": wall_ms,
                 }
 
@@ -7039,6 +7150,13 @@ class DemoRequestHandler(SimpleHTTPRequestHandler):
                 enabled = bool(body.get("enabled", False))
                 payload = self.server.app_state.set_crypto_toggle(enabled)
                 self.respond_json(HTTPStatus.OK, {"status": "ok", **payload})
+                return
+            if parsed.path == "/api/crypto-reset":
+                restart_remote_server = bool(body.get("restart_remote_server", True))
+                payload = self.server.app_state.reset_crypto_channel(
+                    restart_remote_server=restart_remote_server,
+                )
+                self.respond_json(HTTPStatus.OK, payload)
                 return
             if parsed.path == "/api/crypto-test":
                 payload = self.server.app_state.run_crypto_test()

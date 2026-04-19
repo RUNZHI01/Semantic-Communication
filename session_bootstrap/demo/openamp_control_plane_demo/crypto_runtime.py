@@ -51,6 +51,7 @@ REMOTE_TVM_ENABLE_KEYS = ("MLKEM_ENABLE_TVM", "MLKEM_REMOTE_ENABLE_TVM")
 REMOTE_PORT_KEYS = ("MLKEM_PORT", "MLKEM_SERVER_PORT", "MLKEM_DATA_PORT", "MLKEM_TCP_PORT")
 STATUS_PORT_KEYS = ("MLKEM_STATUS_PORT", "MLKEM_REMOTE_STATUS_PORT")
 SUITE_KEYS = ("MLKEM_CIPHER_SUITE", "MLKEM_SUITE")
+TRANSPORT_MODE_KEYS = ("MLKEM_TRANSPORT_MODE", "MLKEM_DATA_TRANSPORT", "MLKEM_TRANSPORT")
 REMOTE_OUTPUT_DIR_KEYS = ("MLKEM_OUTPUT_DIR",)
 REMOTE_LOG_PATH_KEYS = ("MLKEM_REMOTE_LOG_PATH",)
 REMOTE_SNR_KEYS = ("MLKEM_SNR", "REMOTE_SNR_CURRENT")
@@ -98,6 +99,14 @@ def parse_bool_config(raw_value: str, default: bool) -> bool:
     if value in {"0", "false", "no", "off"}:
         return False
     return default
+
+
+def local_crypto_transport_mode(env_values: Mapping[str, str] | None) -> str:
+    raw_value = first_config_value(env_values, keys=TRANSPORT_MODE_KEYS, default="tcp")
+    normalized = str(raw_value or "").strip().lower()
+    if normalized in {"usrp", "ota", "wireless"}:
+        return "usrp"
+    return "tcp"
 
 
 def _resolve_existing_path(raw_path: str, *, base_dir: Path | None = None) -> Path | None:
@@ -548,6 +557,41 @@ def build_local_crypto_daemon_command(
     return command, env
 
 
+def build_local_crypto_daemon_fingerprint(
+    env_values: Mapping[str, str] | None,
+    *,
+    host: str,
+    client_script: Path,
+) -> tuple[str, ...]:
+    """Build a daemon reuse fingerprint tied to the effective runtime config."""
+    runtime_root, _ = resolve_local_mlkem_runtime_root(
+        env_values,
+        extra_roots=(client_script.parent.parent,),
+    )
+    transport_mode = local_crypto_transport_mode(env_values)
+    suite = first_config_value(env_values, keys=SUITE_KEYS, default=DEFAULT_CIPHER_SUITE)
+    crypto_port = parse_int_config(
+        first_config_value(env_values, keys=REMOTE_PORT_KEYS),
+        DEFAULT_CRYPTO_PORT,
+    )
+    try:
+        resolved_client = str(client_script.resolve())
+    except OSError:
+        resolved_client = str(client_script)
+    try:
+        resolved_runtime_root = str(runtime_root.resolve())
+    except OSError:
+        resolved_runtime_root = str(runtime_root)
+    return (
+        transport_mode,
+        str(host).strip(),
+        str(crypto_port),
+        str(suite).strip().upper(),
+        resolved_client,
+        resolved_runtime_root,
+    )
+
+
 class MlkemSessionManager:
     """管理持久化的 tcp_client.py --daemon 子进程
 
@@ -573,6 +617,11 @@ class MlkemSessionManager:
         self._env_values = env_values
         self._host = host
         self._client_script = client_script
+        self._config_fingerprint = build_local_crypto_daemon_fingerprint(
+            env_values,
+            host=host,
+            client_script=client_script,
+        )
         self._startup_timeout = startup_timeout
         self._io_timeout = io_timeout
         self._lock = threading.Lock()
@@ -584,6 +633,19 @@ class MlkemSessionManager:
     @property
     def is_alive(self) -> bool:
         return self._alive and self._proc is not None and self._proc.poll() is None
+
+    def matches_config(
+        self,
+        env_values: Mapping[str, str] | None,
+        *,
+        host: str,
+        client_script: Path,
+    ) -> bool:
+        return self._config_fingerprint == build_local_crypto_daemon_fingerprint(
+            env_values,
+            host=host,
+            client_script=client_script,
+        )
 
     def ensure_alive(self) -> None:
         """启动 daemon（如未运行）"""
@@ -719,6 +781,9 @@ class MlkemSessionManager:
             "timed out",
             "timeout",
             "daemon link lost",
+            "帧过大",
+            "frame too large",
+            "invalid json",
         )
         return any(token in text for token in retry_tokens)
 

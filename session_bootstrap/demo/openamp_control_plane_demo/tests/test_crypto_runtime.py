@@ -372,6 +372,32 @@ class CryptoRuntimeTest(unittest.TestCase):
         self.assertEqual(restart_count["count"], 1)
         self.assertEqual(manager._images_sent, 1)
 
+    def test_build_local_crypto_daemon_fingerprint_changes_with_suite_and_port(self) -> None:
+        client = Path("/tmp/tcp_client.py")
+        fp_a = crypto_runtime.build_local_crypto_daemon_fingerprint(
+            {"MLKEM_CIPHER_SUITE": "SM4_GCM", "MLKEM_PORT": "9527"},
+            host="127.0.0.1",
+            client_script=client,
+        )
+        fp_b = crypto_runtime.build_local_crypto_daemon_fingerprint(
+            {"MLKEM_CIPHER_SUITE": "AES_256_GCM", "MLKEM_PORT": "9527"},
+            host="127.0.0.1",
+            client_script=client,
+        )
+        fp_c = crypto_runtime.build_local_crypto_daemon_fingerprint(
+            {"MLKEM_CIPHER_SUITE": "SM4_GCM", "MLKEM_PORT": "9530"},
+            host="127.0.0.1",
+            client_script=client,
+        )
+
+        self.assertNotEqual(fp_a, fp_b)
+        self.assertNotEqual(fp_a, fp_c)
+
+    def test_mlkem_session_manager_retryable_send_error_matches_frame_too_large(self) -> None:
+        self.assertTrue(crypto_runtime.MlkemSessionManager._is_retryable_send_error("frame too large"))
+        self.assertTrue(crypto_runtime.MlkemSessionManager._is_retryable_send_error("帧过大"))
+        self.assertTrue(crypto_runtime.MlkemSessionManager._is_retryable_send_error("invalid json"))
+
 
 if __name__ == "__main__":
     unittest.main()

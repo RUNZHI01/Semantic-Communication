@@ -672,6 +672,12 @@ def build_demo_default_board_access(
     if not str(startup_env_values.get("MLKEM_REMOTE_PYTHON") or "").strip():
         # Prefer the board-side conda mlkem runtime for ML-KEM control/data plane helpers.
         startup_env_values["MLKEM_REMOTE_PYTHON"] = "/home/user/anaconda3/envs/mlkem/bin/python"
+    if not any(
+        str(source.get("MLKEM_TRANSPORT_MODE") or "").strip()
+        for source in (startup_env_values, ssh_env_values, inference_env_values)
+    ):
+        # Default to the TCP/Tailscale path; USRP remains an explicit opt-in.
+        startup_env_values["MLKEM_TRANSPORT_MODE"] = "tcp"
     remote_project_root = discover_validated_openamp_remote_project_root()
     if (
         remote_project_root

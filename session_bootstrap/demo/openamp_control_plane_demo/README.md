@@ -22,6 +22,24 @@ The UI keeps the system story explicit:
 - explicit mode split for the operator: `4-core Linux performance mode` vs `3-core Linux + RTOS demo mode`
 - operator launch commands and source-of-truth document links
 
+## Current Integration Notes
+
+Current local integration is kept on top of the team lead's latest `origin/master` demo baseline. The crypto-side overlay is intentionally thin:
+
+- default ML-KEM control/data transport prefers `Tailscale/TCP`
+- the Crypto card exposes `重置安全信道` via `POST /api/crypto-reset`
+- board/session reconfiguration clears stale crypto, control, and batch caches
+- control-plane unknown state is rendered as `未探测` instead of hard `UNKNOWN / UNKNOWN`
+
+Repo-root launch remains:
+
+```bash
+cd /home/zhangzw0170/Lab/ICCompetition2026
+./start.sh
+```
+
+The repo-root `./tui_start.sh` is still kept as a documentation/screenshot helper, not the main competition demo surface.
+
 ## Launch
 
 Default local dashboard:

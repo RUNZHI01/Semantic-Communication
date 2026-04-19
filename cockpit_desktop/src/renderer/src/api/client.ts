@@ -168,6 +168,15 @@ export async function postCryptoTest(): Promise<CryptoTestResult> {
   return postJson<CryptoTestResult>('/api/crypto-test', {})
 }
 
+export async function postCryptoReset(restartRemoteServer = true): Promise<{
+  status: string
+  message?: string
+  session_closed?: boolean
+  remote_restart_scheduled?: boolean
+}> {
+  return postJson('/api/crypto-reset', { restart_remote_server: restartRemoteServer })
+}
+
 export async function postRunInferenceBatch(count = 300): Promise<BatchInferenceResponse> {
   return postJson<BatchInferenceResponse>('/api/run-inference-batch', { count, allow_preflight_degraded: true })
 }

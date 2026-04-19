@@ -1,7 +1,7 @@
 import { useCryptoStatus } from '../../../hooks/useCryptoStatus'
-import { postCryptoToggle, postCryptoTest } from '../../../api/client'
+import { postCryptoReset, postCryptoTest, postCryptoToggle } from '../../../api/client'
 import s from './CryptoStatusPanel.module.css'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 const STATE_LABEL: Record<string, { label: string; tone: string }> = {
   idle: { label: '空闲', tone: 'neutral' },
@@ -11,15 +11,33 @@ const STATE_LABEL: Record<string, { label: string; tone: string }> = {
   disabled: { label: '未启用', tone: 'off' },
 }
 
+function controlPlaneDisplay(rawValue: string | undefined): string {
+  const value = String(rawValue || '').trim()
+  const normalized = value.toUpperCase()
+  if (!normalized || normalized === 'UNKNOWN' || normalized === 'NOT_PROBED') {
+    return '未探测'
+  }
+  if (normalized === 'NONE') {
+    return 'NONE'
+  }
+  return value
+}
+
 export function CryptoStatusPanel() {
   const { data, isLoading, isError, refetch } = useCryptoStatus()
   const [testing, setTesting] = useState(false)
+  const [resetting, setResetting] = useState(false)
   const [testResult, setTestResult] = useState<{ ok: boolean; msg: string } | null>(null)
 
   const enabled = data?.enabled ?? false
   const boardConfigured = data?.board_configured ?? false
 
+  useEffect(() => {
+    setTestResult(null)
+  }, [data?.data_transport, data?.radio_mode, enabled, boardConfigured])
+
   async function handleToggle() {
+    setTestResult(null)
     try {
       await postCryptoToggle(!enabled)
       refetch()
@@ -37,13 +55,27 @@ export function CryptoStatusPanel() {
           msg: `握手 ${r.handshake_ms?.toFixed(1) ?? '?'}ms | 总耗时 ${r.wall_ms?.toFixed(0) ?? '?'}ms`,
         })
       } else {
-        setTestResult({ ok: false, msg: r.message ?? 'unknown error' })
+        setTestResult({ ok: false, msg: r.message?.trim() || 'unknown error' })
       }
       refetch()
     } catch (e) {
       setTestResult({ ok: false, msg: String(e) })
     } finally {
       setTesting(false)
+    }
+  }
+
+  async function handleReset() {
+    setResetting(true)
+    setTestResult(null)
+    try {
+      const r = await postCryptoReset(true)
+      setTestResult({ ok: true, msg: r.message?.trim() || '安全信道已重置' })
+      refetch()
+    } catch (e) {
+      setTestResult({ ok: false, msg: String(e) })
+    } finally {
+      setResetting(false)
     }
   }
 
@@ -195,7 +227,7 @@ export function CryptoStatusPanel() {
         {(data.control_guard_state || data.control_last_fault_code) && <>
           <span className={s.label}>控制面</span>
           <span className={s.mono}>
-            {data.control_guard_state ?? 'UNKNOWN'} / {data.control_last_fault_code ?? 'UNKNOWN'}
+            {controlPlaneDisplay(data.control_guard_state)} / {controlPlaneDisplay(data.control_last_fault_code)}
           </span>
         </>}
 
@@ -296,13 +328,22 @@ export function CryptoStatusPanel() {
       })()}
 
       <div className={s.testSection}>
-        <button
-          className={s.testBtn}
-          onClick={handleTest}
-          disabled={testing}
-        >
-          {testing ? <span className={s.spinner} /> : '测试加密通道'}
-        </button>
+        <div className={s.actionRow}>
+          <button
+            className={s.testBtn}
+            onClick={handleTest}
+            disabled={testing || resetting}
+          >
+            {testing ? <span className={s.spinner} /> : '测试加密通道'}
+          </button>
+          <button
+            className={s.secondaryBtn}
+            onClick={handleReset}
+            disabled={testing || resetting}
+          >
+            {resetting ? <span className={s.spinner} /> : '重置安全信道'}
+          </button>
+        </div>
         {testResult && (
           <span className={testResult.ok ? s.ok : s.fail}>
             {testResult.msg}

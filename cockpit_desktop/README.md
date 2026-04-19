@@ -16,6 +16,16 @@ npm run dev
 - 主机至少需要 `python3` 或 `python`
 - 真机链路相关流程依赖 `bash`、`ssh`；若有 `sshpass` 会优先使用，没有也会退回到 `SSH_ASKPASS`
 
+## 当前集成说明
+
+- 当前推荐从仓库根目录用 `./start.sh` 启动，而不是只在本目录手动拉起
+- 当前 UI 底座跟随队长最新 `Semantic-Communication origin/master`
+- 当前这边只保留薄补丁：
+  - 默认优先 `Tailscale/TCP`
+  - `CryptoStatusPanel` 增加 `重置安全信道`
+  - 未探测控制面显示为 `未探测`
+  - 切换板端会话时会清旧 crypto/control/batch 状态
+
 ## 常用环境变量
 
 - `COCKPIT_REPO_ROOT`: 显式指定仓库根目录
