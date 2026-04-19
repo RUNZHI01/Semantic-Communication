@@ -27,6 +27,7 @@ from openamp_signed_manifest import load_signed_manifest_bundle, verify_signed_m
 REMOTE_RECONSTRUCTION_SCRIPT = (
     PROJECT_ROOT / "session_bootstrap" / "scripts" / "run_remote_current_real_reconstruction.sh"
 )
+BIG_LITTLE_PIPELINE_SCRIPT = PROJECT_ROOT / "session_bootstrap" / "scripts" / "run_big_little_pipeline.sh"
 REMOTE_LEGACY_COMPAT_SCRIPT = PROJECT_ROOT / "session_bootstrap" / "scripts" / "run_remote_legacy_tvm_compat.sh"
 REMOTE_PYTORCH_REFERENCE_SCRIPT = (
     PROJECT_ROOT / "session_bootstrap" / "scripts" / "run_remote_pytorch_reference_reconstruction.sh"
@@ -1224,14 +1225,66 @@ def default_runner_command(variant: str) -> str:
     return shlex.join(["bash", str(REMOTE_RECONSTRUCTION_SCRIPT), "--variant", variant])
 
 
+def _strip_runner_option(parts: list[str], flag: str) -> list[str]:
+    stripped: list[str] = []
+    index = 0
+    while index < len(parts):
+        token = parts[index]
+        if token == flag:
+            index += 2
+            continue
+        if token.startswith(f"{flag}="):
+            index += 1
+            continue
+        stripped.append(token)
+        index += 1
+    return stripped
+
+
+def _normalize_current_runner_command(command: str, *, max_inputs: int, seed: int) -> str:
+    command_text = str(command or "").strip()
+    if not command_text:
+        return ""
+    parts = shlex.split(command_text)
+    script_index: int | None = None
+    script_path: Path | None = None
+    for index, token in enumerate(parts):
+        token_name = Path(token).name
+        if token_name == REMOTE_LEGACY_COMPAT_SCRIPT.name:
+            return ""
+        if token_name == REMOTE_RECONSTRUCTION_SCRIPT.name:
+            script_index = index
+            script_path = REMOTE_RECONSTRUCTION_SCRIPT
+            break
+        if token_name == BIG_LITTLE_PIPELINE_SCRIPT.name:
+            script_index = index
+            script_path = BIG_LITTLE_PIPELINE_SCRIPT
+            break
+    if script_index is None or script_path is None:
+        return ""
+
+    parts[script_index] = str(script_path)
+    parts = _strip_runner_option(parts, "--max-inputs")
+    parts = _strip_runner_option(parts, "--seed")
+    parts.extend(["--max-inputs", str(max_inputs), "--seed", str(seed)])
+    return shlex.join(parts)
+
+
 def supports_max_inputs_arg(command: str) -> bool:
     command_text = str(command or "")
-    return REMOTE_RECONSTRUCTION_SCRIPT.name in command_text or REMOTE_LEGACY_COMPAT_SCRIPT.name in command_text
+    return any(
+        script.name in command_text
+        for script in (
+            REMOTE_RECONSTRUCTION_SCRIPT,
+            REMOTE_LEGACY_COMPAT_SCRIPT,
+            BIG_LITTLE_PIPELINE_SCRIPT,
+        )
+    )
 
 
 def supports_seed_arg(command: str) -> bool:
     command_text = str(command or "")
-    return REMOTE_RECONSTRUCTION_SCRIPT.name in command_text
+    return any(script.name in command_text for script in (REMOTE_RECONSTRUCTION_SCRIPT, BIG_LITTLE_PIPELINE_SCRIPT))
 
 
 def append_runner_options(command: str, *, max_inputs: int, seed: int) -> str:
@@ -1293,8 +1346,13 @@ def build_runner_command(
     seed: int,
 ) -> str:
     if variant == "current":
-        # Demo live mode pins Current to the reconstruction runner so stale env files
-        # cannot drag the UI back onto old single-image or compat semantics.
+        configured = _normalize_current_runner_command(
+            configured_runner_command(access, variant),
+            max_inputs=max_inputs,
+            seed=seed,
+        )
+        if configured:
+            return configured
         return build_current_live_runner_command(max_inputs=max_inputs, seed=seed)
     if variant == "baseline":
         # The baseline slot is now the real PyTorch execution path. Ignore stale

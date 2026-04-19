@@ -434,8 +434,8 @@ export function ControlConsolePage() {
         </StaggeredList>
 
         {/* ─── Right: Live event timeline ─── */}
-        <StaggeredList staggerDelay={0.04}>
-          <AnimatedListItem>
+        <StaggeredList staggerDelay={0.04} className={s.timelineCol}>
+          <AnimatedListItem className={s.timelineColInner}>
             <div className={`${s.sectionCard} ${s.timelineCard}`}>
               <div className={s.sectionTitle} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -445,33 +445,35 @@ export function ControlConsolePage() {
                 <span className={s.eventCountBadge}>{eventCount} 事件</span>
               </div>
               <div className={s.timelineScroll} ref={timelineRef}>
-                <div className={s.timelineTrack} />
                 {events.length === 0 ? (
                   <div className={s.timelineEmpty}>
                     <Icons.Activity size={24} className={s.pulseIconEmpty} />
                     <span>系统待机中... 等待控制平面事件</span>
                   </div>
                 ) : (
-                  events.map((evt: EventSpineEvent, i) => {
-                    const isLatest = i === events.length - 1
-                    return (
-                      <div key={`${evt.timestamp}-${i}`} className={`${s.timelineItem} ${isLatest ? s.timelineItemLatest : ''}`}>
-                        <div className={`${s.timelineDot} ${isLatest ? s.timelineDotPulse : ''}`} />
-                        <div className={s.timelineContent}>
-                          <div className={s.timelineHeader}>
-                            <span className={`${s.evtBadge} ${eventBadgeCls(evt.event_type ?? '')}`}>
-                              {evt.event_type}
-                            </span>
-                            <span className={s.timelineTime}>
-                              {evt.timestamp ? new Date(evt.timestamp).toLocaleTimeString('zh-CN', { hour12: false }) : '—'}
-                            </span>
+                  <div className={s.timelineInner}>
+                    <div className={s.timelineTrack} />
+                    {events.map((evt: EventSpineEvent, i) => {
+                      const isLatest = i === events.length - 1
+                      return (
+                        <div key={`${evt.timestamp}-${i}`} className={`${s.timelineItem} ${isLatest ? s.timelineItemLatest : ''}`}>
+                          <div className={`${s.timelineDot} ${isLatest ? s.timelineDotPulse : ''}`} />
+                          <div className={s.timelineContent}>
+                            <div className={s.timelineHeader}>
+                              <span className={`${s.evtBadge} ${eventBadgeCls(evt.event_type ?? '')}`}>
+                                {evt.event_type}
+                              </span>
+                              <span className={s.timelineTime}>
+                                {evt.timestamp ? new Date(evt.timestamp).toLocaleTimeString('zh-CN', { hour12: false }) : '—'}
+                              </span>
+                            </div>
+                            <div className={s.timelineMsg}>{evt.message}</div>
+                            {evt.source && <div className={s.timelineMeta}>source: {evt.source} · plane: {evt.plane ?? '—'}</div>}
                           </div>
-                          <div className={s.timelineMsg}>{evt.message}</div>
-                          {evt.source && <div className={s.timelineMeta}>source: {evt.source} · plane: {evt.plane ?? '—'}</div>}
                         </div>
-                      </div>
-                    )
-                  })
+                      )
+                    })}
+                  </div>
                 )}
               </div>
             </div>

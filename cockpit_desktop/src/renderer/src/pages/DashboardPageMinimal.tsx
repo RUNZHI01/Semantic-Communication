@@ -420,7 +420,7 @@ export function DashboardPageMinimal() {
               </div>
             </AnimatedListItem>
 
-            <AnimatedListItem>
+            <AnimatedListItem className={s.flex1Item}>
               {/* Result Comparison — uses flex:1 to fill remaining space */}
               <div className={`${s.resultCard} ${speedup != null && speedup > 0 ? s.cardSuccessGlow : ''}`} style={{ flex: 1 }}>
                 <div className={s.sectionTitle}>推理结果对比</div>

@@ -140,6 +140,12 @@
   min-height: 0;
 }
 
+.flex1Item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
 /* ===== Section Card — premium light glassmorphism ===== */
 .sectionCard {
   display: flex;
@@ -902,7 +908,7 @@
 /* ===== Map Section — refined ===== */
 .mapSection {
   flex: 1;
-  min-height: 0;
+  min-height: 380px;
   border-radius: var(--radius-lg);
   overflow: hidden;
   background: var(--color-bg-card);

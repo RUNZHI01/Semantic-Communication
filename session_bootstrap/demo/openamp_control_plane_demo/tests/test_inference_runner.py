@@ -484,12 +484,33 @@ class RunRemoteReconstructionTest(unittest.TestCase):
         self.assertEqual(
             command,
             (
-                f"bash {REMOTE_RECONSTRUCTION_SCRIPT} --variant current --max-inputs 3 --seed 7"
+                f"bash {REMOTE_RECONSTRUCTION_SCRIPT} --variant current --profile-ops --max-inputs 3 --seed 7"
             ),
         )
-        self.assertNotIn("--profile-ops", command)
         self.assertNotIn("--max-inputs 1", command)
         self.assertNotIn("--seed 99", command)
+
+    def test_build_runner_command_for_current_uses_configured_big_little_pipeline_cmd(self) -> None:
+        access = make_access(
+            {
+                "INFERENCE_CURRENT_CMD": (
+                    "bash ./session_bootstrap/scripts/run_big_little_pipeline.sh "
+                    "--variant current --max-inputs 300 --execution-mode pipeline"
+                ),
+            }
+        )
+
+        command = inference_runner.build_runner_command(access, variant="current", max_inputs=120, seed=7)
+
+        self.assertEqual(
+            command,
+            (
+                "bash "
+                f"{PROJECT_ROOT / 'session_bootstrap' / 'scripts' / 'run_big_little_pipeline.sh'} "
+                "--variant current --execution-mode pipeline --max-inputs 120 --seed 7"
+            ),
+        )
+        self.assertNotIn("--max-inputs 300", command)
 
     def test_build_runner_command_for_current_ignores_legacy_current_cmd_residue(self) -> None:
         access = make_access(

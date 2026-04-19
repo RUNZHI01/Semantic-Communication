@@ -407,21 +407,39 @@ class DashboardStateTest(unittest.TestCase):
 
         with patch.object(state, "run_demo_inference", side_effect=IndexError("invalid image_index")):
             payload = state.start_batch_inference(count=3)
-            self.assertEqual(payload["status"], "started")
-            deadline = time.monotonic() + 2.0
-            while time.monotonic() < deadline:
-                current = state.get_batch_state()
-                if current.get("status") == "done":
-                    break
-                time.sleep(0.02)
-            else:
-                self.fail(f"batch state did not finish after worker error: {state.get_batch_state()}")
+            self.assertEqual(payload["status"], "error")
+            self.assertEqual(payload["message"], "IndexError: invalid image_index")
 
-        final_state = state.get_batch_state()
-        self.assertEqual(final_state["completed"], 0)
-        self.assertEqual(final_state["success"], 0)
-        self.assertEqual(final_state["fallback"], 0)
-        self.assertEqual(final_state["error"], "IndexError: invalid image_index")
+        self.assertEqual(state.get_batch_state(), {"status": "idle"})
+
+    def test_start_batch_inference_returns_blocked_without_running_batch_when_launch_falls_back(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+
+        with patch.object(
+            state,
+            "run_demo_inference",
+            return_value={
+                "status": "fallback",
+                "execution_mode": "prerecorded",
+                "request_state": "completed",
+                "status_category": "config_error",
+                "source_label": "配置不完整，回退展示（归档样例）",
+                "message": "远端推理配置不完整或不可用，请检查连接信息和推理环境参数。 当前已回退到预录结果。",
+                "live_progress": {
+                    "completed_count": 0,
+                    "expected_count": 3,
+                },
+            },
+        ) as run_demo_inference:
+            payload = state.start_batch_inference(count=3)
+
+        self.assertEqual(payload["status"], "blocked")
+        self.assertEqual(payload["status_category"], "config_error")
+        self.assertEqual(payload["engine"], "tvm")
+        self.assertEqual(payload["service_mode"], "FULL_FRAME")
+        self.assertIn("远端推理配置不完整或不可用", payload["message"])
+        self.assertEqual(state.get_batch_state(), {"status": "idle"})
+        run_demo_inference.assert_called_once()
 
     def test_start_batch_inference_alert_mode_keeps_batch_state_accessible_and_completes(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
@@ -766,7 +784,7 @@ class DashboardStateTest(unittest.TestCase):
         with (
             patch.object(state, "_live_board_access_for_variant", return_value=FakeVariantAccess()),
             patch("server.expected_sha_for_variant", return_value="abcd" * 16),
-            patch("server.describe_demo_variant_support", return_value={"mode": "legacy_runner"}),
+            patch("server.describe_demo_variant_support", return_value={"mode": "signed_manifest_v1"}),
             patch.object(state, "_arm_mlkem_security_context", return_value=(security_context, None)),
             patch.object(state, "run_mlkem_inference", side_effect=AssertionError("legacy ML-KEM data path should not be used")),
             patch("server.launch_remote_reconstruction_job", return_value=fake_live_job) as launch_job,
@@ -781,6 +799,38 @@ class DashboardStateTest(unittest.TestCase):
         security = payload.get("live_attempt", {}).get("security", {})
         self.assertEqual(security.get("protocol"), "mlkem_control")
         self.assertEqual(security.get("handshake_ms"), 12.3)
+
+    def test_run_demo_inference_blocks_nontrusted_current_when_admission_stays_legacy_sha(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        state._board_access = Mock(configured=True, probe_ready=False, connection_ready=True)
+        state._trusted_current_sha = "6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1"
+
+        class FakeVariantAccess:
+            def missing_inference_fields(self, variant: str) -> list[str]:
+                del variant
+                return []
+
+        with (
+            patch.object(state, "_live_board_access_for_variant", return_value=FakeVariantAccess()),
+            patch(
+                "server.expected_sha_for_variant",
+                return_value="bf255cd4bb29408b30b50bce2ad8713a260c5e45efc2d0e831bd293eec9edecb",
+            ),
+            patch(
+                "server.describe_demo_variant_support",
+                return_value={"mode": "legacy_sha", "label": "Current live 仍走 legacy SHA", "launch_allowed": True},
+            ),
+            patch("server.launch_remote_reconstruction_job") as launch_job,
+            patch("server.query_live_status") as status_probe,
+        ):
+            payload = state.run_demo_inference(variant="current", image_index=0)
+
+        self.assertEqual(payload["status"], "fallback")
+        self.assertEqual(payload["status_category"], "config_error")
+        self.assertIn("signed-manifest admission", str(payload["message"]))
+        self.assertIn("legacy SHA allowlist", str(payload["message"]))
+        launch_job.assert_not_called()
+        status_probe.assert_not_called()
 
     def test_run_mlkem_inference_subprocess_failure_completes_as_fallback(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)

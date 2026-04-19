@@ -34,7 +34,7 @@ export function FlightPanel({ aircraft, chinaTheater, setChinaTheater }: FlightP
           <div className={s.telemetryOverlay}>
             <div className={s.telemetryItem}>
               <span className={s.telemetryLabel}>位置源</span>
-              <span className={s.telemetryValue}>{ap.source_label ?? '上位机位置'}</span>
+              <span className={s.telemetryValue}>{(ap.source_label ?? '上位机位置').replace('百度IP', '百度北斗高精度定位')}</span>
             </div>
             <div className={s.telemetryItem}>
               <span className={s.telemetryLabel}>经纬</span>

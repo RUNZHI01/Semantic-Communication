@@ -87,6 +87,14 @@ class BoardSnapshotDualProtocolSourceTest(unittest.TestCase):
             ),
         )
 
+    def test_snapshot_tracks_mean4_v7_trusted_sha_and_key_slot(self) -> None:
+        self.assertIn(
+            "0xbf, 0x25, 0x5c, 0xd4, 0xbb, 0x29, 0x40, 0x8b,",
+            self.source,
+        )
+        self.assertIn('"mean4-v7-dev-20260420"', self.source)
+        self.assertIn('"openamp-demo-current"', self.source)
+
 
 if __name__ == "__main__":
     unittest.main()

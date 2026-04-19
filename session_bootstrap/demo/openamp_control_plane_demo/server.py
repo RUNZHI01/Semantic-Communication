@@ -2014,7 +2014,25 @@ class DashboardState:
     def _live_board_access_for_variant(self, board_access: BoardAccessConfig, *, variant: str) -> BoardAccessConfig:
         if variant != "current" or not self._trusted_current_sha:
             return board_access
+        current_expected_sha = expected_sha_for_variant(board_access, "current")
+        if current_expected_sha:
+            return board_access
         return board_access.with_env_overrides({"INFERENCE_CURRENT_EXPECTED_SHA256": self._trusted_current_sha})
+
+    def _nontrusted_current_requires_signed_admission(
+        self,
+        *,
+        variant: str,
+        variant_expected_sha: str,
+        variant_support: dict[str, Any],
+    ) -> bool:
+        if variant != "current":
+            return False
+        expected_sha = str(variant_expected_sha or "").strip().lower()
+        trusted_sha = str(self._trusted_current_sha or "").strip().lower()
+        if not expected_sha or not trusted_sha or expected_sha == trusted_sha:
+            return False
+        return str(variant_support.get("mode") or "").strip().lower() != "signed_manifest_v1"
 
     def _local_aircraft_position_bridge_config(self) -> tuple[dict[str, Any], Any] | None:
         with self._lock:
@@ -5225,7 +5243,7 @@ class DashboardState:
 
             batch_job_id = f"batch-{int(time.time())}-{effective_count}"
             self._batch_state = {
-                "status": "running",
+                "status": "launching",
                 "batch_job_id": batch_job_id,
                 "engine": "tvm",
                 "total": effective_count,
@@ -5257,55 +5275,98 @@ class DashboardState:
                 data={"service_mode": "ROI_ONLY", "effective_count": effective_count, "original_count": count},
             )
 
+        try:
+            initial_result = self.run_demo_inference(
+                variant="current",
+                image_index=0,
+                allow_preflight_degraded=allow_preflight_degraded,
+                max_inputs=effective_count,
+            )
+        except Exception as exc:
+            with self._lock:
+                state = self._batch_state
+                if (
+                    state is not None
+                    and state.get("batch_job_id") == batch_job_id
+                    and state.get("status") == "launching"
+                ):
+                    self._batch_state = None
+            return {
+                "status": "error",
+                "batch_job_id": batch_job_id,
+                "service_mode": current_mode,
+                "engine": "tvm",
+                "message": f"{type(exc).__name__}: {exc}",
+            }
+
+        if initial_result.get("request_state") != "running" or not initial_result.get("job_id"):
+            with self._lock:
+                state = self._batch_state
+                if (
+                    state is not None
+                    and state.get("batch_job_id") == batch_job_id
+                    and state.get("status") == "launching"
+                ):
+                    self._batch_state = None
+            return {
+                "status": "blocked",
+                "batch_job_id": batch_job_id,
+                "service_mode": current_mode,
+                "engine": "tvm",
+                "message": str(initial_result.get("message") or "TVM 推理未启动"),
+                "status_category": str(initial_result.get("status_category") or ""),
+                "execution_mode": str(initial_result.get("execution_mode") or ""),
+                "source_label": str(initial_result.get("source_label") or ""),
+            }
+
+        live_job_id = str(initial_result["job_id"])
+        with self._lock:
+            state = self._batch_state
+            if state is None or state.get("batch_job_id") != batch_job_id:
+                return {"status": "already_running", "batch_job_id": batch_job_id}
+            self._batch_state = {
+                **state,
+                "status": "running",
+            }
+
         def _worker() -> None:
             worker_error = ""
-            last_result: dict[str, Any] | None = None
+            last_result: dict[str, Any] | None = initial_result
             try:
-                result = self.run_demo_inference(
-                    variant="current",
-                    image_index=0,
-                    allow_preflight_degraded=allow_preflight_degraded,
-                    max_inputs=effective_count,
-                )
-                last_result = result
-
-                if result.get("request_state") == "running" and result.get("job_id"):
-                    deadline = time.monotonic() + max(120.0, effective_count * 10.0)
-                    while True:
-                        result = self._peek_inference_progress(str(result["job_id"]))
-                        last_result = result
-                        progress = result.get("live_progress") if isinstance(result.get("live_progress"), dict) else {}
-                        with self._lock:
-                            state = self._batch_state
-                            if state is None or state.get("status") != "running":
-                                return
-                            state["completed"] = int(progress.get("completed_count") or 0)
-                            state["total"] = max(1, int(progress.get("expected_count") or effective_count))
-                            if result.get("request_state") != "running":
-                                break
-                        if time.monotonic() >= deadline:
-                            result = {
-                                "status": "fallback",
-                                "execution_mode": "fallback",
-                                "request_state": "completed",
-                                "message": "Current 在线推进等待完成超时",
-                                "live_progress": {
-                                    "completed_count": int(progress.get("completed_count") or 0),
-                                    "expected_count": max(1, int(progress.get("expected_count") or effective_count)),
-                                },
-                                "live_attempt": {
-                                    "diagnostics": {"reason": "batch_wait_timeout"},
-                                    "security": (
-                                        (last_result.get("live_attempt") or {}).get("security")
-                                        if isinstance(last_result.get("live_attempt"), dict)
-                                        else {}
-                                    ),
-                                },
-                                "timings": {},
-                            }
-                            last_result = result
+                deadline = time.monotonic() + max(120.0, effective_count * 10.0)
+                while True:
+                    progress = last_result.get("live_progress") if isinstance(last_result.get("live_progress"), dict) else {}
+                    with self._lock:
+                        state = self._batch_state
+                        if state is None or state.get("status") != "running":
+                            return
+                        state["completed"] = int(progress.get("completed_count") or 0)
+                        state["total"] = max(1, int(progress.get("expected_count") or effective_count))
+                        if last_result.get("request_state") != "running":
                             break
-                        time.sleep(0.05)
+                    if time.monotonic() >= deadline:
+                        last_result = {
+                            "status": "fallback",
+                            "execution_mode": "fallback",
+                            "request_state": "completed",
+                            "message": "Current 在线推进等待完成超时",
+                            "live_progress": {
+                                "completed_count": int(progress.get("completed_count") or 0),
+                                "expected_count": max(1, int(progress.get("expected_count") or effective_count)),
+                            },
+                            "live_attempt": {
+                                "diagnostics": {"reason": "batch_wait_timeout"},
+                                "security": (
+                                    (last_result.get("live_attempt") or {}).get("security")
+                                    if isinstance(last_result.get("live_attempt"), dict)
+                                    else {}
+                                ),
+                            },
+                            "timings": {},
+                        }
+                        break
+                    time.sleep(0.05)
+                    last_result = self._peek_inference_progress(live_job_id)
 
                 assert last_result is not None
                 progress = last_result.get("live_progress") if isinstance(last_result.get("live_progress"), dict) else {}
@@ -6264,6 +6325,43 @@ class DashboardState:
                 status_category="config_error",
                 message=str(payload.get("message") or "Live job request rejected in demo spine."),
                 diagnostics={"missing_fields": missing_inference_fields},
+            )
+            return payload
+
+        if self._nontrusted_current_requires_signed_admission(
+            variant=variant,
+            variant_expected_sha=variant_expected_sha,
+            variant_support=variant_support,
+        ):
+            payload = self._build_blocked_inference_payload(
+                variant=variant,
+                image_index=image_index,
+                status_category="config_error",
+                source_label="Current live 需 signed-manifest admission",
+                message=(
+                    "当前 Current 工件 SHA 与 OpenAMP 固件内置 legacy SHA allowlist 不一致；"
+                    "如需跑这条最新链路，请切到 signed-manifest admission。"
+                ),
+                detail=(
+                    f"legacy SHA allowlist={self._trusted_current_sha[:12]}... "
+                    f"current expected_sha={variant_expected_sha[:12]}..."
+                ),
+                diagnostics={
+                    "trusted_current_sha": self._trusted_current_sha,
+                    "current_expected_sha": variant_expected_sha,
+                    "admission_mode": str(variant_support.get("mode") or ""),
+                },
+                expected_count=max_inputs,
+            )
+            payload["live_attempt"]["status"] = "config_error"
+            with self._lock:
+                self._update_last_inference_summary(payload, variant)
+            self._emit_inference_rejection_events(
+                variant=variant,
+                image_index=image_index,
+                status_category="config_error",
+                message=str(payload.get("message") or "Current live requires signed-manifest admission."),
+                diagnostics=dict(payload.get("diagnostics") or {}),
             )
             return payload
 

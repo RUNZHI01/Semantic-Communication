@@ -1,5 +1,4 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { Typography } from 'antd'
 import { T } from '../../theme/tokens'
 import { createProjection } from './projection'
 import { drawBaseLayer } from './drawBaseLayer'
@@ -7,8 +6,6 @@ import { drawTrackLayer, type TrackPoint } from './drawTrackLayer'
 import { drawSweepLayer } from './drawSweepLayer'
 import type { GeoRingPath } from './geoJson'
 import { loadGeoJsonPaths } from './geoJson'
-
-const { Text } = Typography
 
 const MAP_INSET = 18
 
@@ -79,7 +76,6 @@ export function WorldMapStage({ aircraft, chinaTheater = false, landingMode = fa
   const [size, setSize] = useState({ w: 640, h: typeof height === 'number' ? height : 420 })
   const [worldPaths, setWorldPaths] = useState<GeoRingPath[] | null>(null)
   const [chinaPaths, setChinaPaths] = useState<GeoRingPath[] | null>(null)
-  const [geoError, setGeoError] = useState<string | null>(null)
 
   const sweepDegRef = useRef(0)
   const rafRef = useRef<number>(0)
@@ -96,7 +92,6 @@ export function WorldMapStage({ aircraft, chinaTheater = false, landingMode = fa
 
   useEffect(() => {
     let cancelled = false
-    setGeoError(null)
     const load = async () => {
       try {
         if (chinaTheater) {
@@ -114,7 +109,6 @@ export function WorldMapStage({ aircraft, chinaTheater = false, landingMode = fa
         }
       } catch (e) {
         if (!cancelled) {
-          setGeoError(e instanceof Error ? e.message : String(e))
           setWorldPaths(null)
           setChinaPaths(null)
         }
@@ -236,11 +230,6 @@ export function WorldMapStage({ aircraft, chinaTheater = false, landingMode = fa
     }
   }, [hasPoint, size.w, size.h, chinaTheater, track])
 
-  const subtitle =
-    aircraft?.mission_call_sign && aircraft?.source_label
-      ? `${aircraft.mission_call_sign} · ${aircraft.source_label}`
-      : aircraft?.source_label ?? '—'
-
   return (
     <div
       ref={containerRef}
@@ -249,31 +238,6 @@ export function WorldMapStage({ aircraft, chinaTheater = false, landingMode = fa
       <canvas ref={baseRef} style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }} />
       <canvas ref={trackRef} style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }} />
       <canvas ref={sweepRef} style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }} />
-
-      <div
-        style={{
-          position: 'absolute',
-          left: 12,
-          bottom: 10,
-          padding: '8px 12px',
-          borderRadius: T.radiusMd,
-          background: T.glassBg,
-          border: `1px solid ${T.borderBase}`,
-          maxWidth: '72%',
-          backdropFilter: 'blur(10px)',
-          boxShadow: T.glassShadow,
-        }}
-      >
-        <Text style={{ color: T.accentBlue, fontSize: 10, letterSpacing: 0.6, fontWeight: 600 }}>CENTER STAGE / CANVAS (Qt parity)</Text>
-        <div>
-          <Text style={{ color: T.textPrimary, fontSize: 12, fontWeight: 500 }}>{subtitle}</Text>
-        </div>
-        <Text type="secondary" style={{ fontSize: 11 }}>
-          {chinaTheater ? '中国战区 · GeoJSON' : '全球 · Natural Earth 50m'}
-          {geoError ? ` · 加载失败: ${geoError}` : worldPaths?.length ? ` · ${worldPaths.length} paths` : ''}
-          {chinaPaths?.length ? ` · ${chinaPaths.length} paths` : ''}
-        </Text>
-      </div>
     </div>
   )
 }
