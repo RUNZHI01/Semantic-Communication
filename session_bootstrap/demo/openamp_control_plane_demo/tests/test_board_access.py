@@ -16,6 +16,7 @@ from board_access import (  # noqa: E402
     apply_trusted_current_artifact_binding,
     build_board_access_config,
     build_demo_default_board_access,
+    discover_demo_default_inference_env,
     discover_trusted_baseline_expected_sha,
     discover_trusted_current_artifact_binding,
     discover_trusted_current_local_artifact_source,
@@ -183,7 +184,7 @@ class DemoBoardAccessDefaultsTest(unittest.TestCase):
 
     def test_demo_defaults_prefill_real_repo_files_without_password(self) -> None:
         access = build_demo_default_board_access(None)
-        expected_inference_env = discover_validated_inference_env() or first_existing_env(DEFAULT_INFERENCE_ENV_CANDIDATES)
+        expected_inference_env = discover_demo_default_inference_env()
         expected_remote_project_root = discover_validated_openamp_remote_project_root()
         expected_torch_pythonpath = str(access.env_file_values.get("REMOTE_TORCH_PYTHONPATH") or "").strip()
 
@@ -210,14 +211,15 @@ class DemoBoardAccessDefaultsTest(unittest.TestCase):
             "3afcebc7471695a23bba9448dbc96bf4c07eee84d2ddf5f808501cb583e87763",
         )
         self.assertEqual(
-            access.build_env().get("LOCAL_CURRENT_ARTIFACT_SOURCE", ""),
-            str(
-                (
-                    DEMO_ROOT.parents[2]
-                    / "session_bootstrap/tmp/phytium_baseline_seeded_warm_start_current_incremental_chunk4_20260313_131545/optimized_model.so"
-                ).resolve()
-            ),
+            access.build_env().get("INFERENCE_CURRENT_EXPECTED_SHA256", ""),
+            "bf255cd4bb29408b30b50bce2ad8713a260c5e45efc2d0e831bd293eec9edecb",
         )
+        self.assertEqual(access.build_env().get("OPENAMP_DEMO_ADMISSION_MODE", ""), "signed_manifest_v1")
+        self.assertEqual(
+            access.build_env().get("INFERENCE_CURRENT_CMD", ""),
+            "bash ./session_bootstrap/scripts/run_big_little_pipeline.sh --variant current --max-inputs 300",
+        )
+        self.assertEqual(access.build_env().get("LOCAL_CURRENT_ARTIFACT_SOURCE", ""), "")
         self.assertTrue(expected_torch_pythonpath)
         self.assertEqual(access.build_env().get("REMOTE_TORCH_PYTHONPATH", ""), expected_torch_pythonpath)
 

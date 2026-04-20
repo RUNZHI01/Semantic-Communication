@@ -2789,6 +2789,8 @@ class DemoHTTPServerTest(unittest.TestCase):
             "expected-SHA admission (legacy_sha)",
             payload["live"]["variant_support"]["baseline"]["note"],
         )
+        self.assertEqual(payload["live"]["variant_support"]["current"]["mode"], "signed_manifest_v1")
+        self.assertIn("signed-admission", payload["live"]["variant_support"]["current"]["note"])
         self.assertTrue(payload["live"]["variant_support"]["baseline"]["launch_allowed"])
         self.assertFalse(payload["active_inference"]["running"])
         self.assertEqual(payload["active_inference"]["queue_depth"], 0)
@@ -3891,6 +3893,33 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertTrue(payload["board_access"]["inference_ready_variants"]["baseline"])
         self.assertEqual(payload["board_access"]["field_sources"]["password"], "session")
 
+    def test_board_access_env_switch_refreshes_current_trusted_sha_runtime(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        legacy_env = "session_bootstrap/tmp/inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.env"
+
+        status, _, payload = request_json(
+            state,
+            "POST",
+            "/api/session/board-access",
+            body=json.dumps({"password": "demo-pass", "env_file": legacy_env}).encode("utf-8"),
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["board_access"]["env_file"], legacy_env)
+        self.assertEqual(state._trusted_current_sha, "6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1")
+
+        status, _, system_payload = request_json(state, "GET", "/api/system-status")
+
+        self.assertEqual(status, 200)
+        self.assertEqual(
+            system_payload["live"]["trusted_sha"],
+            "6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1",
+        )
+        self.assertEqual(
+            system_payload["live"]["admission"]["artifact_sha256"],
+            "6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1",
+        )
+
     def test_probe_board_endpoint_updates_snapshot_after_success(self) -> None:
         success = live_probe_payload("2026-03-15T12:00:00+0800", "board reachable")
         state = DashboardState(None, 30.0, probe_cache_path=None)
@@ -4043,14 +4072,14 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(payload["request_state"], "running")
         self.assertEqual(payload["job_id"], live_job.job_id)
         access = launch_job.call_args.args[0]
-        self.assertIsNot(access, saved_access)
+        self.assertIs(access, saved_access)
         self.assertEqual(access.host, "100.121.87.73")
         self.assertEqual(access.user, "user")
         self.assertEqual(access.password, "demo-pass")
         self.assertEqual(access.env_file, saved_access.env_file)
         self.assertEqual(
             access.build_env()["INFERENCE_CURRENT_EXPECTED_SHA256"],
-            "6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1",
+            "bf255cd4bb29408b30b50bce2ad8713a260c5e45efc2d0e831bd293eec9edecb",
         )
 
     def test_run_inference_endpoint_blocks_when_demo_already_has_running_live_job(self) -> None:
@@ -4283,15 +4312,7 @@ class DemoHTTPServerTest(unittest.TestCase):
             state,
             "POST",
             "/api/session/board-access",
-            body=json.dumps(
-                {
-                    "host": "demo-board",
-                    "user": "demo-user",
-                    "password": "demo-pass",
-                    "port": "22",
-                    "env_file": "session_bootstrap/config/inference_tvm310_safe.2026-03-10.phytium_pi.env",
-                }
-            ).encode("utf-8"),
+            body=json.dumps({"password": "demo-pass"}).encode("utf-8"),
         )
         live_job = FakeInferenceJob(
             [
@@ -4373,7 +4394,7 @@ class DemoHTTPServerTest(unittest.TestCase):
         access = launch_job.call_args.args[0]
         self.assertEqual(
             access.build_env()["INFERENCE_CURRENT_EXPECTED_SHA256"],
-            "6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1",
+            "bf255cd4bb29408b30b50bce2ad8713a260c5e45efc2d0e831bd293eec9edecb",
         )
 
     def test_inference_progress_endpoint_returns_not_found_for_unknown_job(self) -> None:
@@ -4595,6 +4616,42 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(payload["fit_id"], "FIT-01")
         self.assertIn("回放", payload["source_label"])
 
+    def test_inject_fault_endpoint_uses_updated_current_sha_after_env_switch(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        request_json(
+            state,
+            "POST",
+            "/api/session/board-access",
+            body=json.dumps(
+                {
+                    "password": "placeholder-pass",
+                    "env_file": "session_bootstrap/tmp/inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.env",
+                }
+            ).encode("utf-8"),
+        )
+
+        with patch(
+            "server.run_fault_action",
+            return_value={
+                "status": "parse_error",
+                "status_category": "auth_error",
+                "message": "远端故障注入认证失败，请检查板卡用户名、密码或 SSH 端口设置。",
+                "diagnostics": {"stderr": "Permission denied (publickey,password).", "returncode": 255},
+                "logs": [],
+            },
+        ) as run_fault_action:
+            request_json(
+                state,
+                "POST",
+                "/api/inject-fault",
+                body=json.dumps({"fault_type": "wrong_sha"}).encode("utf-8"),
+            )
+
+        self.assertEqual(
+            run_fault_action.call_args.kwargs["trusted_sha"],
+            "6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1",
+        )
+
     def test_recover_endpoint_keeps_retained_fault_visible_on_live_safe_stop(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
         request_json(
@@ -4639,6 +4696,42 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(payload["last_fault_code"], "HEARTBEAT_TIMEOUT")
         self.assertEqual(payload["status_lamp"], "yellow")
         self.assertIn("不宣称已清零", payload["message"])
+
+    def test_recover_endpoint_uses_updated_current_sha_after_env_switch(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        request_json(
+            state,
+            "POST",
+            "/api/session/board-access",
+            body=json.dumps(
+                {
+                    "password": "placeholder-pass",
+                    "env_file": "session_bootstrap/tmp/inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.env",
+                }
+            ).encode("utf-8"),
+        )
+
+        with patch(
+            "server.run_recover_action",
+            return_value={
+                "status": "parse_error",
+                "status_category": "auth_error",
+                "message": "远端恢复认证失败，请检查板卡用户名、密码或 SSH 端口设置。",
+                "diagnostics": {"stderr": "Permission denied (publickey,password).", "returncode": 255},
+                "logs": [],
+            },
+        ) as run_recover_action:
+            request_json(
+                state,
+                "POST",
+                "/api/recover",
+                body=json.dumps({}).encode("utf-8"),
+            )
+
+        self.assertEqual(
+            run_recover_action.call_args.kwargs["trusted_sha"],
+            "6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1",
+        )
 
     def test_recover_endpoint_replay_preserves_latest_fault_code(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)

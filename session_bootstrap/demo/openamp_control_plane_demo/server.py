@@ -2006,10 +2006,20 @@ class DashboardState:
             self._last_live_probe = None
 
         initial_snapshot = build_snapshot(self._last_live_probe, aircraft_position=self._aircraft_position)
-        self._trusted_current_sha = initial_snapshot["project"]["trusted_current_sha"]
+        self._trusted_current_sha = (
+            self._resolve_current_trusted_sha(self._board_access)
+            or initial_snapshot["project"]["trusted_current_sha"]
+        )
         self._target_label = "cortex-a72 + neon"
         self._runtime_label = "tvm"
         self._ensure_local_aircraft_position_bridge_thread()
+
+    def _resolve_current_trusted_sha(self, board_access: BoardAccessConfig) -> str:
+        return str(expected_sha_for_variant(board_access, "current") or "").strip().lower()
+
+    def _current_trusted_sha(self, board_access: BoardAccessConfig | None = None) -> str:
+        access = board_access if board_access is not None else self._board_access
+        return self._resolve_current_trusted_sha(access) or str(self._trusted_current_sha or "").strip().lower()
 
     def _live_board_access_for_variant(self, board_access: BoardAccessConfig, *, variant: str) -> BoardAccessConfig:
         if variant != "current" or not self._trusted_current_sha:
@@ -2139,6 +2149,9 @@ class DashboardState:
         config = build_board_access_config(payload, fallback=fallback)
         with self._lock:
             self._board_access = config
+            resolved_current_sha = self._resolve_current_trusted_sha(config)
+            if resolved_current_sha:
+                self._trusted_current_sha = resolved_current_sha
             self._board_telemetry_cache = None
             self._board_telemetry_cache_ts = 0.0
             self._board_telemetry_refreshing = False
@@ -2823,7 +2836,7 @@ class DashboardState:
             support=support,
             active_inference=active_inference,
             control_status=effective_control_status,
-            trusted_sha=self._trusted_current_sha,
+            trusted_sha=self._current_trusted_sha(variant_access),
             variant=variant,
             status_probe=status_probe,
         )
@@ -4105,7 +4118,7 @@ class DashboardState:
             "last_fault_code": last_fault_code,
             "active_job_id": active_job_id,
             "total_fault_count": total_fault_count,
-            "trusted_sha": snapshot["project"]["trusted_current_sha"],
+            "trusted_sha": self._current_trusted_sha(current_board_access),
             "target": self._target_label,
             "runtime": self._runtime_label,
             "admission": admission,
@@ -4134,7 +4147,7 @@ class DashboardState:
             support=current_support,
             active_inference=active_inference,
             control_status=control_status,
-            trusted_sha=self._trusted_current_sha,
+            trusted_sha=self._current_trusted_sha(current_board_access),
             variant="current",
         )
         operator_cue = build_operator_cue(
@@ -6595,7 +6608,7 @@ class DashboardState:
             live_result = run_fault_action(
                 board_access,
                 fault_type=fault_type,
-                trusted_sha=self._trusted_current_sha,
+                trusted_sha=self._current_trusted_sha(board_access),
             )
             if live_result.get("status") == "success":
                 response = {
@@ -6786,7 +6799,7 @@ class DashboardState:
             retained_fault_code = str(control_status.get("last_fault_code") or "")
 
         if board_access.probe_ready:
-            live_result = run_recover_action(board_access, trusted_sha=self._trusted_current_sha)
+            live_result = run_recover_action(board_access, trusted_sha=self._current_trusted_sha(board_access))
             if live_result.get("status") == "success":
                 guard_state = live_result.get("guard_state", "UNKNOWN")
                 last_fault_code = live_result.get("last_fault_code", "UNKNOWN")

@@ -33,6 +33,9 @@ DEFAULT_INFERENCE_ENV_CANDIDATES = (
     "session_bootstrap/config/inference_real_reconstruction_compare.2026-03-11.phytium_pi.env",
     "session_bootstrap/config/inference_tvm310_safe.2026-03-10.phytium_pi.env",
 )
+DEMO_PREFERRED_INFERENCE_ENV_CANDIDATES = (
+    "session_bootstrap/tmp/openamp_3core_handwritten_mean4_v7_payload_cmp_20260406.env",
+)
 VALIDATED_INFERENCE_REPORT_CANDIDATES = (
     "session_bootstrap/reports/inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.md",
 )
@@ -164,6 +167,13 @@ def discover_validated_inference_env(
         if env_path is not None:
             return env_path
     return None
+
+
+def discover_demo_default_inference_env() -> Path | None:
+    preferred = first_existing_env(DEMO_PREFERRED_INFERENCE_ENV_CANDIDATES)
+    if preferred is not None:
+        return preferred
+    return discover_validated_inference_env() or first_existing_env(DEFAULT_INFERENCE_ENV_CANDIDATES)
 
 
 def discover_validated_openamp_remote_project_root(
@@ -648,7 +658,7 @@ def build_demo_default_board_access(
     startup_env_overrides: dict[str, str] | None = None,
 ) -> BoardAccessConfig:
     ssh_env_path = resolve_existing_env(probe_env) or first_existing_env(DEFAULT_SSH_ENV_CANDIDATES)
-    inference_env_path = discover_validated_inference_env() or first_existing_env(DEFAULT_INFERENCE_ENV_CANDIDATES)
+    inference_env_path = discover_demo_default_inference_env()
 
     ssh_env_values = sanitize_env_values(load_env_path(ssh_env_path)) if ssh_env_path else {}
     inference_env_values = sanitize_env_values(load_env_path(inference_env_path)) if inference_env_path else {}
