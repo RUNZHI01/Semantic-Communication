@@ -2199,6 +2199,13 @@ class DashboardStateTest(unittest.TestCase):
                 "  接收重建结果: 65536B, 耗时 4.0ms",
             ]
         )
+        control_probe = {
+            "status": "success",
+            "guard_state": "READY",
+            "last_fault_code": "NONE",
+            "heartbeat_ok": 1,
+            "total_fault_count": 0,
+        }
 
         with (
             patch("server.resolve_local_crypto_client", return_value=(Path("/tmp/tcp_client.py"), [Path("/tmp/tcp_client.py")])),
@@ -2220,10 +2227,12 @@ class DashboardStateTest(unittest.TestCase):
                     stderr="",
                 ),
             ),
+            patch("server.query_live_status", return_value=control_probe) as query_status,
         ):
             result = state.run_crypto_test()
 
         self.assertEqual(result["status"], "ok")
+        query_status.assert_called_once()
         payload = state.get_crypto_status()
         self.assertEqual(payload["channel_state"], "idle")
         self.assertEqual(payload["kem_backend"], "mock-backend")
@@ -2239,6 +2248,10 @@ class DashboardStateTest(unittest.TestCase):
         self.assertEqual(payload["auth_enabled"], True)
         self.assertEqual(payload["sig_policy"], "DUAL_REQUIRED")
         self.assertEqual(payload["server_id"], "phytium-board")
+        self.assertEqual(payload["control_guard_state"], "READY")
+        self.assertEqual(payload["control_last_fault_code"], "NONE")
+        self.assertEqual(payload["control_heartbeat_ok"], 1)
+        self.assertEqual(payload["control_total_fault_count"], 0)
         self.assertIsNone(payload["error"])
 
     def test_get_crypto_status_reflects_configured_auth_when_crypto_toggle_is_off(self) -> None:
@@ -2324,6 +2337,7 @@ class DashboardStateTest(unittest.TestCase):
             ),
             patch.object(state, "_ensure_board_tcp_server", return_value=None),
             patch.object(state, "_get_mlkem_session_manager", return_value=FakeMgr()),
+            patch("server.query_live_status", side_effect=RuntimeError("control probe failed")),
         ):
             result = state.run_crypto_test()
 
@@ -2341,6 +2355,8 @@ class DashboardStateTest(unittest.TestCase):
         self.assertTrue((payload["bytes_sent"] or 0) > 0)
         self.assertEqual(payload["last_sha256_match"], True)
         self.assertEqual(payload["session_count"], 1)
+        self.assertEqual(payload["control_guard_state"], "NOT_PROBED")
+        self.assertEqual(payload["control_last_fault_code"], "NOT_PROBED")
         self.assertIn("board not reachable", str(payload["error"]))
 
     def test_run_crypto_test_ensures_remote_tcp_server_before_reusing_session(self) -> None:

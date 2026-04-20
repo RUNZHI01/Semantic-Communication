@@ -3647,6 +3647,30 @@ class DashboardState:
             "control_recover_note": str(soft_recover.get("note") or ""),
         }
 
+    def _refresh_control_plane_status(
+        self,
+        board_access: BoardAccessConfig,
+        *,
+        variant: str = "current",
+        source: str,
+        job_id: str = "",
+    ) -> dict[str, Any] | None:
+        if not board_access.probe_ready:
+            return None
+
+        variant_access = self._live_board_access_for_variant(board_access, variant=variant)
+        trusted_sha = expected_sha_for_variant(variant_access, variant) or self._current_trusted_sha(variant_access)
+        try:
+            status_probe = query_live_status(board_access, trusted_sha=trusted_sha)
+        except Exception as exc:
+            return {"status": "error", "message": str(exc)}
+
+        if status_probe.get("status") == "success":
+            with self._lock:
+                self._last_control_status = status_probe
+            self._emit_status_observation_events(status_probe, source=source, job_id=job_id)
+        return status_probe
+
     def _maybe_soft_recover_control_plane(
         self,
         board_access: BoardAccessConfig,
@@ -4510,6 +4534,11 @@ class DashboardState:
                         metrics=daemon_metrics,
                         input_bytes=test_input_bytes,
                     )
+                    self._refresh_control_plane_status(
+                        board_access,
+                        source="crypto_test_probe",
+                        job_id=test_job_id,
+                    )
                 return result
             except Exception:
                 pass  # 回退到子进程模式
@@ -4551,6 +4580,11 @@ class DashboardState:
                 transport_mode=transport_mode,
                 metrics=metrics,
                 input_bytes=test_input_bytes,
+            )
+            self._refresh_control_plane_status(
+                board_access,
+                source="crypto_test_probe",
+                job_id=test_job_id,
             )
 
             return result
