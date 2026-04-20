@@ -34,6 +34,7 @@ DEFAULT_INFERENCE_ENV_CANDIDATES = (
     "session_bootstrap/config/inference_tvm310_safe.2026-03-10.phytium_pi.env",
 )
 DEMO_PREFERRED_INFERENCE_ENV_CANDIDATES = (
+    "session_bootstrap/config/inference_demo_openamp_mean4_v7.2026-04-20.phytium_pi.env",
     "session_bootstrap/tmp/openamp_3core_handwritten_mean4_v7_payload_cmp_20260406.env",
 )
 VALIDATED_INFERENCE_REPORT_CANDIDATES = (
