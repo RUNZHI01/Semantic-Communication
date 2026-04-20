@@ -1998,6 +1998,7 @@ class DashboardState:
             startup_env_overrides=demo_startup_env_overrides,
         )
         self._last_control_status: dict[str, Any] | None = None
+        self._last_control_probe_error: dict[str, Any] | None = None
         self._last_inference_result: dict[str, Any] | None = None
         self._recent_inference_results: dict[str, dict[str, Any]] = {}
         self._last_fault_result: dict[str, Any] | None = None
@@ -2202,6 +2203,7 @@ class DashboardState:
             self._crypto_status_cache = None
             self._crypto_status_cache_ts = 0.0
             self._last_crypto_test_result = None
+            self._last_control_probe_error = None
             mgr_to_close = self._mlkem_session_mgr
             self._mlkem_session_mgr = None
 
@@ -2248,6 +2250,7 @@ class DashboardState:
             self._crypto_status_cache = None
             self._crypto_status_cache_ts = 0.0
             self._last_control_status = None
+            self._last_control_probe_error = None
             self._last_inference_result = None
             self._recent_inference_results = {}
             self._last_crypto_test_result = None
@@ -3617,6 +3620,7 @@ class DashboardState:
     def _control_plane_summary(self) -> dict[str, Any]:
         with self._lock:
             control_status = dict(self._last_control_status or {})
+            control_probe_error = dict(self._last_control_probe_error or {})
             soft_recover = dict(self._last_soft_recover_result or {})
         event_summary = self._event_spine.summary(limit=1)
         aggregate = event_summary.get("aggregate") if isinstance(event_summary, dict) else {}
@@ -3629,6 +3633,24 @@ class DashboardState:
         safe_stop_triggered_events = self._safe_int(event_counters.get("SAFE_STOP_TRIGGERED"), default=0)
         safe_stop_cleared_events = self._safe_int(event_counters.get("SAFE_STOP_CLEARED"), default=0)
         if not control_status:
+            if control_probe_error:
+                return {
+                    "control_guard_state": str(control_probe_error.get("guard_state") or "NOT_PROBED"),
+                    "control_last_fault_code": str(control_probe_error.get("last_fault_code") or "NOT_PROBED"),
+                    "control_heartbeat_ok": self._safe_int(control_probe_error.get("heartbeat_ok"), default=0),
+                    "control_total_fault_count": self._safe_int(control_probe_error.get("total_fault_count"), default=0),
+                    "control_job_req_count": self._safe_int(event_counters.get("JOB_SUBMITTED"), default=0),
+                    "control_job_admit_count": self._safe_int(event_counters.get("JOB_ADMITTED"), default=0),
+                    "control_job_reject_count": self._safe_int(event_counters.get("JOB_REJECTED"), default=0),
+                    "control_heartbeat_event_count": heartbeat_ok_events + heartbeat_lost_events,
+                    "control_heartbeat_lost_count": heartbeat_lost_events,
+                    "control_safe_stop_triggered_count": safe_stop_triggered_events,
+                    "control_safe_stop_cleared_count": safe_stop_cleared_events,
+                    "control_recover_attempted": bool(soft_recover),
+                    "control_recover_note": str(soft_recover.get("note") or ""),
+                    "status_source": str(control_probe_error.get("status_source") or "probe_error"),
+                    "status_note": str(control_probe_error.get("message") or "控制面探测失败。"),
+                }
             return {
                 "control_guard_state": "NOT_PROBED",
                 "control_last_fault_code": "NOT_PROBED",
@@ -3660,6 +3682,8 @@ class DashboardState:
             "control_safe_stop_cleared_count": safe_stop_cleared_events,
             "control_recover_attempted": bool(soft_recover),
             "control_recover_note": str(soft_recover.get("note") or ""),
+            "status_source": "live_control",
+            "status_note": "已缓存最近一次 RPMsg 控制面读数。",
         }
 
     def _refresh_control_plane_status(
@@ -3678,12 +3702,34 @@ class DashboardState:
         try:
             status_probe = query_live_status(board_access, trusted_sha=trusted_sha)
         except Exception as exc:
-            return {"status": "error", "message": str(exc)}
+            error_payload = {
+                "status": "error",
+                "message": str(exc),
+                "status_source": "probe_error",
+                "guard_state": "NOT_PROBED",
+                "last_fault_code": "NOT_PROBED",
+            }
+            with self._lock:
+                self._last_control_probe_error = error_payload
+            return error_payload
 
         if status_probe.get("status") == "success":
             with self._lock:
                 self._last_control_status = status_probe
+                self._last_control_probe_error = None
             self._emit_status_observation_events(status_probe, source=source, job_id=job_id)
+        else:
+            error_payload = {
+                "status": str(status_probe.get("status") or "error"),
+                "message": str(status_probe.get("message") or "控制面探测失败。"),
+                "status_source": "probe_error",
+                "guard_state": str(status_probe.get("guard_state") or "UNKNOWN"),
+                "last_fault_code": str(status_probe.get("last_fault_code") or "UNKNOWN"),
+                "heartbeat_ok": self._safe_int(status_probe.get("heartbeat_ok"), default=0),
+                "total_fault_count": self._safe_int(status_probe.get("total_fault_count"), default=0),
+            }
+            with self._lock:
+                self._last_control_probe_error = error_payload
         return status_probe
 
     def _maybe_soft_recover_control_plane(

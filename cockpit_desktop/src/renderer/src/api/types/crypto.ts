@@ -108,6 +108,10 @@ export type CryptoStatusResponse = {
   control_recover_attempted?: boolean
   /** Soft recover note for operator context */
   control_recover_note?: string
+  /** Control-plane probe source label for the current summary */
+  status_source?: string
+  /** Human-readable control-plane status note */
+  status_note?: string
   /** Batch inference benchmark results (populated after batch completes) */
   batch_benchmark?: BatchBenchmark | null
   /** Batch inference run status: 'running' | 'done' | null */

@@ -2171,6 +2171,58 @@ class DashboardStateTest(unittest.TestCase):
 
         self.assertEqual(payload["control_guard_state"], "NOT_PROBED")
         self.assertEqual(payload["control_last_fault_code"], "NOT_PROBED")
+        self.assertEqual(payload["status_source"], "not_probed")
+        self.assertIn("尚未获取", payload["status_note"])
+
+    def test_get_crypto_status_reports_cached_control_probe_error_without_overwriting_success(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+
+        state._last_control_probe_error = {
+            "status": "error",
+            "message": "board status probe failed",
+            "status_source": "probe_error",
+        }
+        payload = state.get_crypto_status()
+        self.assertEqual(payload["control_guard_state"], "NOT_PROBED")
+        self.assertEqual(payload["control_last_fault_code"], "NOT_PROBED")
+        self.assertEqual(payload["status_source"], "probe_error")
+        self.assertEqual(payload["status_note"], "board status probe failed")
+
+        state._last_control_status = {
+            "status": "success",
+            "guard_state": "READY",
+            "last_fault_code": "NONE",
+            "heartbeat_ok": 2,
+            "total_fault_count": 0,
+        }
+        payload = state.get_crypto_status()
+        self.assertEqual(payload["control_guard_state"], "READY")
+        self.assertEqual(payload["control_last_fault_code"], "NONE")
+        self.assertEqual(payload["status_source"], "live_control")
+        self.assertIn("最近一次 RPMsg", payload["status_note"])
+
+    def test_refresh_control_plane_status_caches_probe_error(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        board_access = server.build_board_access_config(
+            {
+                "host": "demo-board",
+                "user": "demo-user",
+                "password": "demo-pass",
+                "port": "22",
+            },
+            fallback=state._board_access,
+        )
+
+        with patch("server.query_live_status", side_effect=RuntimeError("rpmsg bridge unavailable")):
+            payload = state._refresh_control_plane_status(
+                board_access,
+                source="unit_test_probe",
+            )
+
+        self.assertEqual(payload["status"], "error")
+        self.assertEqual(payload["message"], "rpmsg bridge unavailable")
+        self.assertEqual(state._last_control_probe_error["status_source"], "probe_error")
+        self.assertEqual(state._last_control_probe_error["message"], "rpmsg bridge unavailable")
 
     def test_run_crypto_test_updates_status_cache_from_subprocess_metrics(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
@@ -2357,6 +2409,8 @@ class DashboardStateTest(unittest.TestCase):
         self.assertEqual(payload["session_count"], 1)
         self.assertEqual(payload["control_guard_state"], "NOT_PROBED")
         self.assertEqual(payload["control_last_fault_code"], "NOT_PROBED")
+        self.assertEqual(payload["status_source"], "probe_error")
+        self.assertEqual(payload["status_note"], "control probe failed")
         self.assertIn("board not reachable", str(payload["error"]))
 
     def test_run_crypto_test_ensures_remote_tcp_server_before_reusing_session(self) -> None:

@@ -45,6 +45,13 @@ export function CryptoStatusPanel() {
     setTestResult(null)
   }, [enabled, boardConfigured])
 
+  function errorMessage(error: unknown): string {
+    if (error instanceof Error) {
+      return error.message
+    }
+    return String(error)
+  }
+
   async function handleToggle() {
     setTestResult(null)
     try {
@@ -68,7 +75,7 @@ export function CryptoStatusPanel() {
       }
       refetch()
     } catch (e) {
-      setTestResult({ ok: false, msg: String(e) })
+      setTestResult({ ok: false, msg: errorMessage(e) })
     } finally {
       setTesting(false)
     }
@@ -82,7 +89,7 @@ export function CryptoStatusPanel() {
       setTestResult({ ok: true, msg: r.message?.trim() || '安全信道已重置' })
       refetch()
     } catch (e) {
-      setTestResult({ ok: false, msg: String(e) })
+      setTestResult({ ok: false, msg: errorMessage(e) })
     } finally {
       setResetting(false)
     }
@@ -293,6 +300,14 @@ export function CryptoStatusPanel() {
       label: '恢复说明',
       value: data.control_recover_note,
       tone: 'muted',
+      wide: true,
+    })
+  }
+  if (data.status_note) {
+    infoItems.push({
+      label: data.status_source === 'probe_error' ? '控制面探测' : '控制面说明',
+      value: data.status_note,
+      tone: data.status_source === 'probe_error' ? 'fail' : 'muted',
       wide: true,
     })
   }
