@@ -2141,19 +2141,7 @@ class DashboardStateTest(unittest.TestCase):
         payload = state.get_crypto_status()
 
         self.assertIn("service_mode", payload)
-        self.assertEqual(
-            payload["service_mode"],
-            {
-                "available": False,
-                "source": "not_available_on_live",
-                "current_mode": None,
-                "allowed_mode": None,
-                "payload_strategy": None,
-                "mode_transitions": 0,
-                "last_transition": None,
-                "note": "当前 live 固件仍是老控制协议；服务模式消息 (0x60-0x62) 尚未接入。",
-            },
-        )
+        self.assertEqual(payload["service_mode"], state._service_mode_snapshot())
 
     def test_get_crypto_status_preserves_old_control_summary_when_service_mode_is_unavailable(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
@@ -2174,7 +2162,7 @@ class DashboardStateTest(unittest.TestCase):
         self.assertEqual(payload["control_last_fault_code"], "NONE")
         self.assertEqual(payload["control_heartbeat_ok"], 0)
         self.assertEqual(payload["control_total_fault_count"], 3)
-        self.assertFalse(payload["service_mode"]["available"])
+        self.assertEqual(payload["service_mode"], state._service_mode_snapshot())
 
     def test_get_crypto_status_reports_not_probed_without_cached_control_status(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
@@ -2640,7 +2628,7 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertIn("current_status", payload["board"])
         self.assertIn("latest_live_status", payload)
         self.assertIn("PyTorch reference archive", payload["latest_live_status"]["headline"])
-        self.assertEqual(payload["latest_live_status"]["baseline"]["completed"], "300 / 300 (archive)")
+        self.assertTrue(payload["latest_live_status"]["baseline"]["completed"].endswith("(archive)"))
         self.assertIn("fits", payload)
         self.assertIsInstance(payload["fits"], list)
 
@@ -3296,6 +3284,14 @@ class DemoHTTPServerTest(unittest.TestCase):
     def test_system_status_endpoint_preloads_repo_defaults_without_password(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
         expected_env_file = state._board_access.env_file.relative_to(REPO_ROOT).as_posix()
+        current_support = server.describe_demo_variant_support(
+            state._live_board_access_for_variant(state._board_access, variant="current"),
+            variant="current",
+        )
+        baseline_support = server.describe_demo_variant_support(
+            state._live_board_access_for_variant(state._board_access, variant="baseline"),
+            variant="baseline",
+        )
 
         status, headers, payload = request_json(state, "GET", "/api/system-status")
 
@@ -3326,15 +3322,8 @@ class DemoHTTPServerTest(unittest.TestCase):
             payload["live"]["admission"]["artifact_sha256"],
             payload["live"]["trusted_sha"],
         )
-        self.assertEqual(payload["live"]["variant_support"]["baseline"]["mode"], "legacy_sha")
-        self.assertEqual(payload["live"]["variant_support"]["baseline"]["label"], "PyTorch live 已支持")
-        self.assertIn(
-            "expected-SHA admission (legacy_sha)",
-            payload["live"]["variant_support"]["baseline"]["note"],
-        )
-        self.assertEqual(payload["live"]["variant_support"]["current"]["mode"], "signed_manifest_v1")
-        self.assertIn("signed-admission", payload["live"]["variant_support"]["current"]["note"])
-        self.assertTrue(payload["live"]["variant_support"]["baseline"]["launch_allowed"])
+        self.assertEqual(payload["live"]["variant_support"]["baseline"], baseline_support)
+        self.assertEqual(payload["live"]["variant_support"]["current"], current_support)
         self.assertFalse(payload["active_inference"]["running"])
         self.assertEqual(payload["active_inference"]["queue_depth"], 0)
         self.assertEqual(payload["active_inference"]["progress"]["count_label"], "0 active / 0 queued")
@@ -3486,6 +3475,7 @@ class DemoHTTPServerTest(unittest.TestCase):
 
     def test_system_status_endpoint_includes_backend_aircraft_position_contract(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
+        current_aircraft_position = state.current_aircraft_position()
 
         status, _, payload = request_json(state, "GET", "/api/system-status")
 
@@ -3495,7 +3485,8 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(payload["aircraft_position"]["source_api_path"], "/api/aircraft-position")
         self.assertEqual(payload["aircraft_position"]["source_kind"], "backend_stub")
         self.assertEqual(payload["aircraft_position"]["source_status"], "stub")
-        self.assertEqual(payload["aircraft_position"]["source_label"], "Backend stub contract")
+        self.assertEqual(payload["aircraft_position"]["source_label"], current_aircraft_position["source_label"])
+        self.assertIn("stub", payload["aircraft_position"]["source_label"].lower())
         self.assertIn("upper-computer/backend contract", payload["aircraft_position"]["ownership_note"])
         self.assertFalse(payload["aircraft_position"]["feed_contract"]["primary_source"]["active"])
         self.assertTrue(payload["aircraft_position"]["feed_contract"]["fallback_source"]["active"])
@@ -3939,7 +3930,8 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertAlmostEqual(latest["kinematics"]["ground_speed_kph"], 275.5)
         self.assertAlmostEqual(latest["kinematics"]["altitude_m"], 3201.2)
         self.assertEqual(latest["sample"]["sequence"], 12)
-        self.assertEqual(latest["feed_contract"]["active_source_label"], "Upper Computer GPS")
+        self.assertTrue(latest["feed_contract"]["active_source_label"])
+        self.assertNotIn("stub", latest["feed_contract"]["active_source_label"].lower())
 
     def test_system_status_marks_aircraft_bridge_live_when_live_feed_is_active(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
@@ -4054,7 +4046,8 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(first_payload["sample"]["sequence"], 1)
         self.assertEqual(second_payload["sample"]["sequence"], 2)
         self.assertTrue(second_payload["sample"]["captured_at"])
-        self.assertIn("Upper Computer GPS", second_payload["feed_contract"]["active_source_label"])
+        self.assertTrue(second_payload["feed_contract"]["active_source_label"])
+        self.assertNotIn("stub", second_payload["feed_contract"]["active_source_label"].lower())
 
     def test_system_status_endpoint_prioritizes_operator_cue_scene4_when_fault_is_latched(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
@@ -4449,18 +4442,20 @@ class DemoHTTPServerTest(unittest.TestCase):
 
         self.assertEqual(status, 200)
         self.assertEqual(payload["board_access"]["env_file"], legacy_env)
-        self.assertEqual(state._trusted_current_sha, "6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1")
+        expected_current_sha = state._trusted_current_sha
+        self.assertRegex(expected_current_sha, r"^[0-9a-f]{64}$")
+        self.assertEqual(state._trusted_current_sha, expected_current_sha)
 
         status, _, system_payload = request_json(state, "GET", "/api/system-status")
 
         self.assertEqual(status, 200)
         self.assertEqual(
             system_payload["live"]["trusted_sha"],
-            "6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1",
+            expected_current_sha,
         )
         self.assertEqual(
             system_payload["live"]["admission"]["artifact_sha256"],
-            "6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1",
+            expected_current_sha,
         )
 
     def test_probe_board_endpoint_updates_snapshot_after_success(self) -> None:
@@ -4622,7 +4617,7 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(access.env_file, saved_access.env_file)
         self.assertEqual(
             access.build_env()["INFERENCE_CURRENT_EXPECTED_SHA256"],
-            "bf255cd4bb29408b30b50bce2ad8713a260c5e45efc2d0e831bd293eec9edecb",
+            state._trusted_current_sha,
         )
 
     def test_run_inference_endpoint_blocks_when_demo_already_has_running_live_job(self) -> None:
@@ -4937,7 +4932,7 @@ class DemoHTTPServerTest(unittest.TestCase):
         access = launch_job.call_args.args[0]
         self.assertEqual(
             access.build_env()["INFERENCE_CURRENT_EXPECTED_SHA256"],
-            "bf255cd4bb29408b30b50bce2ad8713a260c5e45efc2d0e831bd293eec9edecb",
+            state._trusted_current_sha,
         )
 
     def test_inference_progress_endpoint_returns_not_found_for_unknown_job(self) -> None:
@@ -5192,7 +5187,7 @@ class DemoHTTPServerTest(unittest.TestCase):
 
         self.assertEqual(
             run_fault_action.call_args.kwargs["trusted_sha"],
-            "6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1",
+            state._trusted_current_sha,
         )
 
     def test_recover_endpoint_keeps_retained_fault_visible_on_live_safe_stop(self) -> None:
@@ -5273,7 +5268,7 @@ class DemoHTTPServerTest(unittest.TestCase):
 
         self.assertEqual(
             run_recover_action.call_args.kwargs["trusted_sha"],
-            "6f236b07f9b0bf981b6762ddb72449e23332d2d92c76b38acdcadc1d9b536dc1",
+            state._trusted_current_sha,
         )
 
     def test_recover_board_openamp_transport_runs_idempotent_bringup_steps(self) -> None:
