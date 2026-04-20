@@ -121,6 +121,7 @@ MLKEM_AUTH_SERVER_ID_KEYS = ("MLKEM_AUTH_SERVER_ID",)
 MLKEM_AUTH_SIG_POLICY_KEYS = ("MLKEM_AUTH_SIG_POLICY",)
 DEFAULT_MLKEM_AUTH_SERVER_ID = "phytium-board"
 DEFAULT_MLKEM_AUTH_SIG_POLICY = "DUAL_REQUIRED"
+SUPPORTED_MLKEM_AUTH_SIG_POLICIES = ("DUAL_REQUIRED", "SM2_ONLY", "MLDSA_ONLY")
 BOARD_POSITION_API_RUNTIME_ENV_KEYS = (
     "BOARD_POSITION_API_BIND_HOST",
     "BOARD_POSITION_API_PORT",
@@ -2220,6 +2221,9 @@ class DashboardState:
         with self._lock:
             fallback = self._board_access
         config = build_board_access_config(payload, fallback=fallback)
+        auth_overrides = self._board_access_auth_overrides_from_payload(payload)
+        if auth_overrides:
+            config = config.with_env_overrides(auth_overrides)
         mgr_to_close: MlkemSessionManager | None = None
         with self._lock:
             self._board_access = config
@@ -3074,6 +3078,36 @@ class DashboardState:
         return str(raw_value or "").strip().lower() in {"1", "true", "yes", "on"}
 
     @staticmethod
+    def _coerce_payload_bool(value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+    def _board_access_auth_overrides_from_payload(self, payload: dict[str, Any]) -> dict[str, str]:
+        overrides: dict[str, str] = {}
+        auth_enabled_present = "auth_enabled" in payload
+        auth_enabled = self._coerce_payload_bool(payload.get("auth_enabled")) if auth_enabled_present else False
+
+        raw_policy = str(payload.get("auth_sig_policy") or "").strip().upper()
+        if raw_policy:
+            if raw_policy not in SUPPORTED_MLKEM_AUTH_SIG_POLICIES:
+                supported = ", ".join(SUPPORTED_MLKEM_AUTH_SIG_POLICIES)
+                raise ValueError(f"unsupported auth_sig_policy: {raw_policy}; expected one of {supported}")
+            overrides["MLKEM_AUTH_SIG_POLICY"] = raw_policy
+
+        raw_server_id = str(payload.get("auth_server_id") or "").strip()
+        if raw_server_id:
+            overrides["MLKEM_AUTH_SERVER_ID"] = raw_server_id
+
+        if auth_enabled_present:
+            overrides["MLKEM_AUTH_ENABLED"] = "1" if auth_enabled else "0"
+            if auth_enabled:
+                overrides.setdefault("MLKEM_AUTH_SIG_POLICY", DEFAULT_MLKEM_AUTH_SIG_POLICY)
+                overrides.setdefault("MLKEM_AUTH_SERVER_ID", DEFAULT_MLKEM_AUTH_SERVER_ID)
+
+        return overrides
+
+    @staticmethod
     def _auth_sig_policy_for_env(env_values: dict[str, str]) -> str:
         raw_value = first_config_value(
             env_values,
@@ -3418,9 +3452,14 @@ class DashboardState:
 
         with self._lock:
             board_access = self._board_access
+            auth_summary = self._auth_status_from_env(board_access.build_env()) if board_access is not None else {
+                "auth_enabled": False,
+                "sig_policy": "",
+                "server_id": "",
+            }
             if not self._crypto_enabled:
                 bc = bool(board_access and board_access.connection_ready)
-                return {**_disabled, "board_configured": bc, "batch_benchmark": None}
+                return {**_disabled, "board_configured": bc, "batch_benchmark": None, **auth_summary}
             cached = self._crypto_status_cache
             cache_ts = self._crypto_status_cache_ts
             last_test = self._last_crypto_test_result
@@ -3441,11 +3480,6 @@ class DashboardState:
                 }
 
         board_configured = bool(board_access and board_access.connection_ready)
-        auth_summary = self._auth_status_from_env(board_access.build_env()) if board_access is not None else {
-            "auth_enabled": False,
-            "sig_policy": "",
-            "server_id": "",
-        }
 
         if not board_configured:
             return {

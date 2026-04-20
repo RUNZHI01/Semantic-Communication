@@ -24,6 +24,28 @@ import s from './DashboardPageMinimal.module.css'
 
 const LIVE_LOG_ACTIONS = ['Processing block', 'Allocating memory', 'Optimizing tensor', 'Compiling kernel', 'Syncing device']
 
+type AuthSigPolicy = 'DUAL_REQUIRED' | 'SM2_ONLY' | 'MLDSA_ONLY'
+
+const AUTH_POLICY_OPTIONS: { value: AuthSigPolicy; label: string }[] = [
+  { value: 'DUAL_REQUIRED', label: '双因子: SM2 + ML-DSA' },
+  { value: 'SM2_ONLY', label: '仅 SM2' },
+  { value: 'MLDSA_ONLY', label: '仅 ML-DSA' },
+]
+
+const AUTH_POLICY_HINTS: Record<AuthSigPolicy, string> = {
+  DUAL_REQUIRED: '同时校验 SM2 与 ML-DSA 标识，最接近当前完整认证链路。',
+  SM2_ONLY: '仅保留国密签名身份校验，便于单独验证 SM2 链路。',
+  MLDSA_ONLY: '仅保留后量子签名身份校验，便于单独验证 ML-DSA 链路。',
+}
+
+function normalizeAuthSigPolicy(rawValue: string | undefined): AuthSigPolicy {
+  const normalized = String(rawValue || '').trim().toUpperCase()
+  if (normalized === 'SM2_ONLY' || normalized === 'MLDSA_ONLY') {
+    return normalized
+  }
+  return 'DUAL_REQUIRED'
+}
+
 const LiveLogStream = memo(function LiveLogStream({ isRunning }: { isRunning: boolean }) {
   const [logs, setLogs] = useState<string[]>([])
 
@@ -144,6 +166,9 @@ export function DashboardPageMinimal() {
   const chinaTheater = useAppStore((s) => s.chinaTheater)
   const setChinaTheater = useAppStore((s) => s.setChinaTheater)
   const [boardPassword, setBoardPassword] = useState('')
+  const [authEnabled, setAuthEnabled] = useState(false)
+  const [authSigPolicy, setAuthSigPolicy] = useState<AuthSigPolicy>('DUAL_REQUIRED')
+  const [authDirty, setAuthDirty] = useState(false)
   const [toasts, setToasts] = useState<{ id: number; text: string; type: 'success' | 'error' }[]>([])
   const batch = batchState.isError ? undefined : batchState.data
 
@@ -165,6 +190,12 @@ export function DashboardPageMinimal() {
     setToasts((prev) => [...prev, { id, text, type }])
     setTimeout(() => removeToast(id), 3000)
   }, [removeToast])
+
+  useEffect(() => {
+    if (authDirty) return
+    setAuthEnabled(Boolean(cryptoData?.auth_enabled))
+    setAuthSigPolicy(normalizeAuthSigPolicy(cryptoData?.sig_policy))
+  }, [cryptoData?.auth_enabled, cryptoData?.sig_policy, authDirty])
 
   const handleRunInference = useMemo(
     () => () => {
@@ -225,6 +256,27 @@ export function DashboardPageMinimal() {
     [boardPassword, boardAccessMut, showToast],
   )
 
+  const handleSaveAuth = useMemo(
+    () => () => {
+      boardAccessMut.mutate(
+        {
+          auth_enabled: authEnabled,
+          auth_sig_policy: authSigPolicy,
+        },
+        {
+          onSuccess: () => {
+            setAuthDirty(false)
+            showToast(authEnabled ? `认证策略已保存: ${authSigPolicy}` : '认证面已关闭', 'success')
+          },
+          onError: (error) => {
+            showToast(`保存认证设置失败: ${error.message}`, 'error')
+          },
+        },
+      )
+    },
+    [authEnabled, authSigPolicy, boardAccessMut, showToast],
+  )
+
   // Derived data
   const status = system.data
   const results = status?.recent_results
@@ -275,6 +327,12 @@ export function DashboardPageMinimal() {
       : `${totalImages} 张 TVM 图像在线推进`
   const progressSuffix = isRunning ? '处理中' : isDone ? '已完成' : '待启动'
   const boardOnline = status?.live?.board_online ?? false
+  const authHint = authEnabled
+    ? AUTH_POLICY_HINTS[authSigPolicy]
+    : '当前只保留 ML-KEM + SM4，会跳过 ML-DSA / SM2 身份认证。'
+  const authStatusLabel = cryptoData?.auth_enabled
+    ? `已保存: ${normalizeAuthSigPolicy(cryptoData?.sig_policy)}`
+    : '已保存: 未启用'
 
   return (
     <PageTransition className={s.root}>
@@ -517,6 +575,55 @@ export function DashboardPageMinimal() {
                   >
                     {boardAccessMut.isPending ? '保存中...' : '保存'}
                   </button>
+                </div>
+                <div className={s.settingGroup}>
+                  <div className={s.settingRow}>
+                    <div className={s.settingMeta}>
+                      <div className={s.settingLabel}>认证面配置</div>
+                      <div className={s.settingCaption}>控制当前 ML-KEM 信道是否叠加 ML-DSA / SM2 身份认证。</div>
+                    </div>
+                    <label className={s.authCheck}>
+                      <input
+                        type="checkbox"
+                        checked={authEnabled}
+                        onChange={(e) => {
+                          setAuthEnabled(e.target.checked)
+                          setAuthDirty(true)
+                        }}
+                      />
+                      <span>启用认证</span>
+                    </label>
+                  </div>
+                  <div className={s.settingStack}>
+                    <label className={s.formLabel} htmlFor="auth-sig-policy">认证策略</label>
+                    <select
+                      id="auth-sig-policy"
+                      className={s.selectInput}
+                      value={authSigPolicy}
+                      disabled={!authEnabled || boardAccessMut.isPending}
+                      onChange={(e) => {
+                        setAuthSigPolicy(normalizeAuthSigPolicy(e.target.value))
+                        setAuthDirty(true)
+                      }}
+                    >
+                      {AUTH_POLICY_OPTIONS.map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className={s.settingCaption}>{authHint}</div>
+                  <div className={s.settingStatus}>{authStatusLabel}</div>
+                  <div className={s.settingActions}>
+                    <button
+                      className={s.btnFilledSm}
+                      onClick={handleSaveAuth}
+                      disabled={boardAccessMut.isPending}
+                    >
+                      {boardAccessMut.isPending ? '保存中...' : '保存认证设置'}
+                    </button>
+                  </div>
                 </div>
               </div>
             </AnimatedListItem>

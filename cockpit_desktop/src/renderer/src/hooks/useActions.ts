@@ -19,6 +19,7 @@ function useInvalidateOnSuccess() {
     void qc.invalidateQueries({ queryKey: ['system-status'] })
     void qc.invalidateQueries({ queryKey: ['snapshot'] })
     void qc.invalidateQueries({ queryKey: ['aircraft-position'] })
+    void qc.invalidateQueries({ queryKey: ['crypto-status'] })
   }
 }
 

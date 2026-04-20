@@ -2241,6 +2241,35 @@ class DashboardStateTest(unittest.TestCase):
         self.assertEqual(payload["server_id"], "phytium-board")
         self.assertIsNone(payload["error"])
 
+    def test_get_crypto_status_reflects_configured_auth_when_crypto_toggle_is_off(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+
+        status, _, payload = request_json(
+            state,
+            "POST",
+            "/api/session/board-access",
+            body=json.dumps(
+                {
+                    "password": "demo-pass",
+                    "auth_enabled": True,
+                    "auth_sig_policy": "MLDSA_ONLY",
+                }
+            ).encode("utf-8"),
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(state._board_access.build_env()["MLKEM_AUTH_ENABLED"], "1")
+        self.assertEqual(state._board_access.build_env()["MLKEM_AUTH_SIG_POLICY"], "MLDSA_ONLY")
+        self.assertEqual(state._board_access.build_env()["MLKEM_AUTH_SERVER_ID"], "phytium-board")
+        self.assertTrue(payload["board_access"]["connection_ready"])
+
+        crypto_payload = state.get_crypto_status()
+
+        self.assertEqual(crypto_payload["channel_state"], "disabled")
+        self.assertEqual(crypto_payload["auth_enabled"], True)
+        self.assertEqual(crypto_payload["sig_policy"], "MLDSA_ONLY")
+        self.assertEqual(crypto_payload["server_id"], "phytium-board")
+
     def test_get_crypto_status_reuses_last_successful_crypto_test_when_status_probe_is_unreachable(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
         state._crypto_enabled = True
@@ -4428,6 +4457,20 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertTrue(payload["board_access"]["inference_ready_variants"]["current"])
         self.assertTrue(payload["board_access"]["inference_ready_variants"]["baseline"])
         self.assertEqual(payload["board_access"]["field_sources"]["password"], "session")
+
+    def test_board_access_endpoint_rejects_unsupported_auth_policy(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+
+        status, _, payload = request_json(
+            state,
+            "POST",
+            "/api/session/board-access",
+            body=json.dumps({"password": "demo-pass", "auth_enabled": True, "auth_sig_policy": "RSA_ONLY"}).encode("utf-8"),
+        )
+
+        self.assertEqual(status, 400)
+        self.assertEqual(payload["status"], "error")
+        self.assertIn("unsupported auth_sig_policy", str(payload["message"]))
 
     def test_board_access_env_switch_refreshes_current_trusted_sha_runtime(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
