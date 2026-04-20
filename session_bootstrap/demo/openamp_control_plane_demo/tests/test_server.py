@@ -1906,6 +1906,32 @@ class ServerMainTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertIn("usage: server.py", result.stdout)
 
+    def test_demo_startup_env_overrides_uses_default_baidu_position_config_without_env_file(self) -> None:
+        args = Namespace(
+            aircraft_position_env="",
+            demo_admission_mode="",
+            signed_manifest_file="",
+            signed_manifest_public_key="",
+            baseline_admission_mode="",
+            baseline_signed_manifest_file="",
+            baseline_signed_manifest_public_key="",
+        )
+
+        with patch.dict(
+            os.environ,
+            {key: "" for key in server.AIRCRAFT_POSITION_RUNTIME_ENV_KEYS},
+            clear=False,
+        ):
+            overrides = server.demo_startup_env_overrides(args)
+
+        self.assertEqual(overrides["AIRCRAFT_POSITION_EXECUTION_MODE"], "local")
+        self.assertEqual(
+            overrides["AIRCRAFT_POSITION_UPSTREAM_URL"],
+            server.DEFAULT_DEMO_AIRCRAFT_POSITION_LOCAL_OVERRIDES["AIRCRAFT_POSITION_UPSTREAM_URL"],
+        )
+        self.assertEqual(overrides["AIRCRAFT_POSITION_LATITUDE_PATH"], "content.point.y")
+        self.assertEqual(overrides["AIRCRAFT_POSITION_LONGITUDE_PATH"], "content.point.x")
+
     def test_demo_startup_env_overrides_loads_aircraft_position_env_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             env_path = Path(tmpdir) / "aircraft_position.env"
