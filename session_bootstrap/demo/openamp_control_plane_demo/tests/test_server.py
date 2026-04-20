@@ -2560,6 +2560,7 @@ class ServerMainTest(unittest.TestCase):
         events: list[str] = []
         fake_app_state = Mock()
         fake_server = Mock()
+        expected_startup_env = server.demo_startup_env_overrides(args)
 
         def build_state(
             probe_env: str,
@@ -2572,7 +2573,7 @@ class ServerMainTest(unittest.TestCase):
             events.append("state_init")
             self.assertEqual(probe_env, args.probe_env)
             self.assertEqual(probe_timeout_sec, args.probe_timeout_sec)
-            self.assertEqual(demo_startup_env_overrides, {})
+            self.assertEqual(demo_startup_env_overrides, expected_startup_env)
             self.assertEqual(event_archive_root, server.default_event_archive_root())
             self.assertEqual(bind_host, args.host)
             self.assertEqual(bind_port, args.port)
@@ -2598,7 +2599,7 @@ class ServerMainTest(unittest.TestCase):
         state_cls.assert_called_once_with(
             args.probe_env,
             args.probe_timeout_sec,
-            demo_startup_env_overrides={},
+            demo_startup_env_overrides=expected_startup_env,
             event_archive_root=server.default_event_archive_root(),
             bind_host=args.host,
             bind_port=args.port,
@@ -2634,6 +2635,7 @@ class ServerMainTest(unittest.TestCase):
         events: list[str] = []
         fake_app_state = Mock()
         fake_server = Mock()
+        expected_startup_env = server.demo_startup_env_overrides(args)
 
         def build_state(
             probe_env: str,
@@ -2646,7 +2648,7 @@ class ServerMainTest(unittest.TestCase):
             events.append("state_init")
             self.assertEqual(probe_env, args.probe_env)
             self.assertEqual(probe_timeout_sec, args.probe_timeout_sec)
-            self.assertEqual(demo_startup_env_overrides, {})
+            self.assertEqual(demo_startup_env_overrides, expected_startup_env)
             self.assertEqual(event_archive_root, server.default_event_archive_root())
             self.assertEqual(bind_host, args.host)
             self.assertEqual(bind_port, args.port)
@@ -2673,7 +2675,7 @@ class ServerMainTest(unittest.TestCase):
         state_cls.assert_called_once_with(
             args.probe_env,
             args.probe_timeout_sec,
-            demo_startup_env_overrides={},
+            demo_startup_env_overrides=expected_startup_env,
             event_archive_root=server.default_event_archive_root(),
             bind_host=args.host,
             bind_port=args.port,
