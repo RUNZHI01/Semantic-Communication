@@ -338,7 +338,7 @@ export function CryptoStatusPanel() {
 
       <div className={s.subSection}>
         <div className={s.subSectionTitle}>配置项</div>
-        <div className={s.metricGrid}>
+        <div className={`${s.metricGrid} ${s.settingsGrid}`}>
           {settingsItems.map((item) => (
             <div
               key={item.label}

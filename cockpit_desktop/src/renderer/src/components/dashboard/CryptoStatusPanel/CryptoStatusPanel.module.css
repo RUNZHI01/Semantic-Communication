@@ -48,6 +48,10 @@
   row-gap: 8px;
 }
 
+.settingsGrid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .metricCard {
   display: flex;
   flex-direction: column;
@@ -366,7 +370,14 @@
   white-space: nowrap;
 }
 
+@media (max-width: 1080px) {
+  .settingsGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 720px) {
+  .settingsGrid,
   .metricGrid,
   .actionRow {
     grid-template-columns: minmax(0, 1fr);
