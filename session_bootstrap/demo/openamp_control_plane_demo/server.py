@@ -7717,6 +7717,46 @@ class DashboardState:
         )
         return replay
 
+    def bringup_openamp_transport(self) -> dict[str, Any]:
+        with self._lock:
+            board_access = self._board_access
+
+        if not board_access.connection_ready:
+            return {
+                "status": "skipped",
+                "source_label": "OpenAMP transport bring-up",
+                "message": "board connection not ready",
+                "details": {"status": "skipped", "note": "board connection not ready"},
+            }
+
+        bringup = self._recover_board_openamp_transport(board_access)
+        status_probe: dict[str, Any] | None = None
+        if bringup.get("status") == "success":
+            status_probe = self._refresh_control_plane_status(
+                board_access,
+                source="openamp_bringup_probe",
+            )
+
+        response: dict[str, Any] = {
+            "status": str(bringup.get("status") or "error"),
+            "source_label": "OpenAMP transport bring-up",
+            "message": str(bringup.get("note") or "OpenAMP transport bring-up finished."),
+            "remoteproc_state": str(bringup.get("remoteproc_state") or ""),
+            "rpmsg_devices": list(bringup.get("rpmsg_devices") or []),
+            "details": bringup,
+        }
+        if status_probe is not None:
+            response["status_probe"] = status_probe
+            if status_probe.get("status") == "success":
+                response["control_guard_state"] = str(status_probe.get("guard_state") or "UNKNOWN")
+                response["control_last_fault_code"] = str(status_probe.get("last_fault_code") or "UNKNOWN")
+            else:
+                if response["status"] == "success":
+                    response["status"] = "degraded"
+                probe_message = str(status_probe.get("message") or "STATUS_REQ probe failed after bring-up")
+                response["message"] = f"{response['message']} STATUS_REQ probe: {probe_message}"
+        return response
+
 
 class DemoHTTPServer(ThreadingHTTPServer):
     def __init__(self, server_address: tuple[str, int], handler: type["DemoRequestHandler"], app_state: DashboardState) -> None:
@@ -7953,6 +7993,10 @@ class DemoRequestHandler(SimpleHTTPRequestHandler):
                 return
             if parsed.path == "/api/recover":
                 payload = self.server.app_state.recover_fault()
+                self.respond_json(HTTPStatus.OK, payload)
+                return
+            if parsed.path == "/api/openamp-bringup":
+                payload = self.server.app_state.bringup_openamp_transport()
                 self.respond_json(HTTPStatus.OK, payload)
                 return
             self.send_error(HTTPStatus.NOT_FOUND)

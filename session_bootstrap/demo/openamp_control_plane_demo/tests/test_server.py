@@ -5330,6 +5330,63 @@ class DemoHTTPServerTest(unittest.TestCase):
             state._trusted_current_sha,
         )
 
+    def test_openamp_bringup_endpoint_refreshes_control_status_after_transport_recovery(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        request_json(
+            state,
+            "POST",
+            "/api/session/board-access",
+            body=json.dumps(
+                {
+                    "host": "demo-board",
+                    "user": "demo-user",
+                    "password": "placeholder-pass",
+                    "port": "22",
+                }
+            ).encode("utf-8"),
+        )
+
+        with (
+            patch.object(
+                state,
+                "_recover_board_openamp_transport",
+                return_value={
+                    "status": "success",
+                    "note": "OpenAMP transport ready (remoteproc0=running, rpmsg_ctrl0/rpmsg0 present)",
+                    "remoteproc_state": "running",
+                    "rpmsg_devices": ["/dev/rpmsg0", "/dev/rpmsg_ctrl0"],
+                },
+            ) as bringup_openamp,
+            patch(
+                "server.query_live_status",
+                return_value={
+                    "status": "success",
+                    "guard_state": "READY",
+                    "last_fault_code": "NONE",
+                    "heartbeat_ok": 1,
+                    "total_fault_count": 0,
+                    "logs": [],
+                },
+            ) as query_status,
+        ):
+            status, _, payload = request_json(
+                state,
+                "POST",
+                "/api/openamp-bringup",
+                body=json.dumps({}).encode("utf-8"),
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["status"], "success")
+        self.assertEqual(payload["remoteproc_state"], "running")
+        self.assertEqual(payload["rpmsg_devices"], ["/dev/rpmsg0", "/dev/rpmsg_ctrl0"])
+        self.assertEqual(payload["control_guard_state"], "READY")
+        self.assertEqual(payload["control_last_fault_code"], "NONE")
+        bringup_openamp.assert_called_once()
+        query_status.assert_called_once()
+        self.assertEqual(state._last_control_status["guard_state"], "READY")
+        self.assertEqual(state._last_control_status["last_fault_code"], "NONE")
+
     def test_recover_board_openamp_transport_runs_idempotent_bringup_steps(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
         board_access = server.build_board_access_config(
