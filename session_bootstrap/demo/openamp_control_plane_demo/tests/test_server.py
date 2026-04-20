@@ -2012,20 +2012,68 @@ class DashboardStateTest(unittest.TestCase):
                 payload = server.base64.b64encode(mldsa_pub).decode("ascii")
             return server.subprocess.CompletedProcess([], 0, stdout=f"{payload}\n", stderr="")
 
-        with patch("server.run_ssh_command", side_effect=fake_run_ssh_command):
-            prepared = state._prepare_mlkem_auth_env(
-                board_access,
-                {
-                    "MLKEM_AUTH_ENABLED": "1",
-                    "MLKEM_AUTH_SIG_POLICY": "DUAL_REQUIRED",
-                },
-            )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with (
+                patch.object(state, "_local_auth_cache_root", return_value=Path(temp_dir)),
+                patch("server.run_ssh_command", side_effect=fake_run_ssh_command),
+            ):
+                prepared = state._prepare_mlkem_auth_env(
+                    board_access,
+                    {
+                        "MLKEM_AUTH_ENABLED": "1",
+                        "MLKEM_AUTH_SIG_POLICY": "DUAL_REQUIRED",
+                    },
+                )
+                sm2_local = Path(prepared["MLKEM_AUTH_PEER_SM2_PUB"]).read_bytes()
+                mldsa_local = Path(prepared["MLKEM_AUTH_PEER_MLDSA_PUB"]).read_bytes()
 
         self.assertEqual(prepared["MLKEM_AUTH_SERVER_SM2_KEY"], "/home/demo-user/keys/server_sm2_identity.key")
         self.assertEqual(prepared["MLKEM_AUTH_SERVER_MLDSA_KEY"], "/home/demo-user/keys/server_mldsa_identity.key")
-        self.assertEqual(Path(prepared["MLKEM_AUTH_PEER_SM2_PUB"]).read_bytes(), sm2_pub)
-        self.assertEqual(Path(prepared["MLKEM_AUTH_PEER_MLDSA_PUB"]).read_bytes(), mldsa_pub)
+        self.assertEqual(sm2_local, sm2_pub)
+        self.assertEqual(mldsa_local, mldsa_pub)
         self.assertEqual(len(calls), 2)
+
+    def test_prepare_mlkem_auth_env_reuses_cached_peer_public_keys_without_ssh(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        board_access = server.build_board_access_config(
+            {
+                "host": "demo-board",
+                "user": "demo-user",
+                "password": "demo-pass",
+                "port": "22",
+            },
+            fallback=state._board_access,
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            cache_root = Path(temp_dir)
+            with patch.object(state, "_local_auth_cache_root", return_value=cache_root):
+                sm2_cached = state._cached_remote_auth_public_key_path(
+                    board_access,
+                    remote_path="/home/demo-user/keys/server_sm2_identity.pub",
+                    label="sm2_peer_pub",
+                )
+                mldsa_cached = state._cached_remote_auth_public_key_path(
+                    board_access,
+                    remote_path="/home/demo-user/keys/server_mldsa_identity.pub",
+                    label="mldsa_peer_pub",
+                )
+                sm2_cached.write_bytes(b"cached-sm2-public-key")
+                mldsa_cached.write_bytes(b"cached-mldsa-public-key")
+                with patch("server.run_ssh_command") as run_ssh_command:
+                    prepared = state._prepare_mlkem_auth_env(
+                        board_access,
+                        {
+                            "MLKEM_AUTH_ENABLED": "1",
+                            "MLKEM_AUTH_SIG_POLICY": "DUAL_REQUIRED",
+                        },
+                    )
+                    sm2_local = Path(prepared["MLKEM_AUTH_PEER_SM2_PUB"]).read_bytes()
+                    mldsa_local = Path(prepared["MLKEM_AUTH_PEER_MLDSA_PUB"]).read_bytes()
+
+        self.assertEqual(sm2_local, b"cached-sm2-public-key")
+        self.assertEqual(mldsa_local, b"cached-mldsa-public-key")
+        run_ssh_command.assert_not_called()
 
     def test_sync_remote_mlkem_server_assets_uploads_server_and_helper_once(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
@@ -2411,7 +2459,7 @@ class DashboardStateTest(unittest.TestCase):
         self.assertEqual(payload["control_last_fault_code"], "NOT_PROBED")
         self.assertEqual(payload["status_source"], "probe_error")
         self.assertEqual(payload["status_note"], "control probe failed")
-        self.assertIn("board not reachable", str(payload["error"]))
+        self.assertIn("board status endpoint unavailable", str(payload["error"]))
 
     def test_run_crypto_test_ensures_remote_tcp_server_before_reusing_session(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)

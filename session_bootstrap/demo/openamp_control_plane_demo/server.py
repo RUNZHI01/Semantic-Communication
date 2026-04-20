@@ -3173,6 +3173,20 @@ class DashboardState:
         cleaned = re.sub(r"[^A-Za-z0-9._-]+", "_", str(raw_value or "").strip())
         return cleaned or "default"
 
+    def _cached_remote_auth_public_key_path(
+        self,
+        board_access: BoardAccessConfig,
+        *,
+        remote_path: str,
+        label: str,
+    ) -> Path:
+        filename = (
+            f"{self._sanitize_cache_component(board_access.host)}_"
+            f"{self._sanitize_cache_component(label)}_"
+            f"{self._sanitize_cache_component(Path(str(remote_path or label)).name or label)}"
+        )
+        return self._local_auth_cache_root() / filename
+
     @staticmethod
     def _default_remote_auth_paths(board_access: BoardAccessConfig) -> dict[str, str]:
         remote_user = str(board_access.user or "user").strip() or "user"
@@ -3236,13 +3250,11 @@ class DashboardState:
         label: str,
         content: bytes,
     ) -> str:
-        cache_root = self._local_auth_cache_root()
-        filename = (
-            f"{self._sanitize_cache_component(board_access.host)}_"
-            f"{self._sanitize_cache_component(label)}_"
-            f"{self._sanitize_cache_component(Path(str(remote_path or label)).name or label)}"
+        target = self._cached_remote_auth_public_key_path(
+            board_access,
+            remote_path=remote_path,
+            label=label,
         )
-        target = cache_root / filename
         try:
             existing = target.read_bytes()
         except OSError:
@@ -3268,6 +3280,17 @@ class DashboardState:
         remote_path = str(first_config_value(env_values, keys=(remote_env_key,), default="")).strip()
         if not remote_path:
             raise RuntimeError(f"认证已启用，但缺少 {remote_env_key}")
+        cached_path = self._cached_remote_auth_public_key_path(
+            board_access,
+            remote_path=remote_path,
+            label=label,
+        )
+        try:
+            if cached_path.is_file() and cached_path.stat().st_size > 0:
+                env_values[local_env_key] = str(cached_path.resolve())
+                return
+        except OSError:
+            pass
         content = self._read_remote_file_bytes(board_access, remote_path=remote_path)
         env_values[local_env_key] = self._cache_remote_auth_public_key(
             board_access,
@@ -3275,6 +3298,19 @@ class DashboardState:
             label=label,
             content=content,
         )
+
+    @staticmethod
+    def _format_board_status_error(exc: Exception) -> str:
+        reason = exc
+        if isinstance(exc, URLError) and getattr(exc, "reason", None) is not None:
+            reason = exc.reason  # type: ignore[assignment]
+        reason_text = str(reason or exc).strip()
+        lowered = reason_text.lower()
+        if "timed out" in lowered:
+            return f"board status probe timed out: {exc}"
+        if "connection refused" in lowered:
+            return f"board status endpoint unavailable: {exc}"
+        return f"board status unavailable: {exc}"
 
     def _prepare_mlkem_auth_env(
         self,
@@ -3549,6 +3585,7 @@ class DashboardState:
             data["batch_total"] = batch.get("total", 0) if batch else 0
             return data
         except (URLError, OSError, json.JSONDecodeError, TimeoutError) as exc:
+            error_text = self._format_board_status_error(exc)
             # 保留上次正常值，只更新 error
             with self._lock:
                 prev = self._crypto_status_cache
@@ -3559,7 +3596,7 @@ class DashboardState:
                     **prev,
                     "enabled": True,
                     "board_configured": True,
-                    "error": f"board not reachable: {exc}",
+                    "error": error_text,
                     "batch_benchmark": batch.get("benchmark") if batch else None,
                     "batch_status": batch.get("status") if batch else None,
                     "batch_completed": batch.get("completed", 0) if batch else 0,
@@ -3576,7 +3613,7 @@ class DashboardState:
                     **last_test,
                     "enabled": True,
                     "board_configured": True,
-                    "error": f"board not reachable: {exc}",
+                    "error": error_text,
                     "batch_benchmark": batch.get("benchmark") if batch else None,
                     "batch_status": batch.get("status") if batch else None,
                     "batch_completed": batch.get("completed", 0) if batch else 0,
@@ -3602,7 +3639,7 @@ class DashboardState:
                 "last_sha256_match": None,
                 "session_count": 0,
                 "last_session_at": None,
-                "error": f"board not reachable: {exc}",
+                "error": error_text,
                 "enabled": True,
                 "board_configured": True,
                 "batch_benchmark": None,
