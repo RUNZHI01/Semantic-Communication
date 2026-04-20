@@ -214,6 +214,21 @@ DEFAULT_AIRCRAFT_POSITION_UPSTREAM_CANDIDATES = tuple(
     for port in DEFAULT_AIRCRAFT_POSITION_UPSTREAM_CANDIDATE_PORTS
     for path in DEFAULT_AIRCRAFT_POSITION_UPSTREAM_CANDIDATE_PATHS
 )
+DEFAULT_DEMO_AIRCRAFT_POSITION_LOCAL_OVERRIDES: dict[str, str] = {
+    "AIRCRAFT_POSITION_EXECUTION_MODE": "local",
+    "AIRCRAFT_POSITION_UPSTREAM_URL": (
+        "https://api.map.baidu.com/location/ip?coor=bd09ll&output=json"
+        "&ak=3D0tEY1XnQ3upQjcLR1f3OtvJRe4RlbS"
+    ),
+    "AIRCRAFT_POSITION_SOURCE_LABEL": "上位机位置（百度IP）",
+    "AIRCRAFT_POSITION_SOURCE_NOTE": "当前演示使用上位机本机公网出口 IP 调用百度服务端定位。",
+    "AIRCRAFT_POSITION_PRODUCER_ID": "baidu-ip-location-bridge",
+    "AIRCRAFT_POSITION_TRANSPORT": "baidu_http_get",
+    "AIRCRAFT_POSITION_INTERVAL_SEC": "5.0",
+    "AIRCRAFT_POSITION_TIMEOUT_SEC": "3.0",
+    "AIRCRAFT_POSITION_LATITUDE_PATH": "content.point.y",
+    "AIRCRAFT_POSITION_LONGITUDE_PATH": "content.point.x",
+}
 
 
 def fetch_json_direct(url: str, *, timeout: float) -> dict[str, Any]:
@@ -7775,6 +7790,10 @@ def demo_startup_env_overrides(args: argparse.Namespace) -> dict[str, str]:
         env_value = str(os.environ.get(env_name, "") or "").strip()
         if env_value:
             overrides[env_name] = env_value
+
+    for env_name, default_value in DEFAULT_DEMO_AIRCRAFT_POSITION_LOCAL_OVERRIDES.items():
+        if env_name not in overrides:
+            overrides[env_name] = default_value
 
     env_or_arg_pairs = (
         (DEMO_ADMISSION_MODE_ENV, str(getattr(args, "demo_admission_mode", "") or "").strip()),
