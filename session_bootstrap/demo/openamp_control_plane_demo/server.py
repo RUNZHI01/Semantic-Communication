@@ -101,6 +101,8 @@ MLKEM_LEGACY_INPUT_BYTES = 1 * 3 * 64 * 64 * 4
 BOARD_TELEMETRY_TTL_SEC = 5.0
 BOARD_POSITION_API_TTL_SEC = 5.0
 AIRCRAFT_POSITION_UPSTREAM_DISCOVERY_TTL_SEC = 15.0
+CONTROL_STATUS_TTL_SEC = 5.0
+CONTROL_STATUS_REFRESH_COOLDOWN_SEC = 2.0
 DEFAULT_BOARD_POSITION_API_REMOTE_ROOT = "~/.openamp-demo/board_position_api_service"
 BOARD_POSITION_API_REMOTE_ROOT_KEYS = ("BOARD_POSITION_API_REMOTE_ROOT",)
 OPENAMP_REMOTE_ROOT_KEYS = ("OPENAMP_REMOTE_ROOT",)
@@ -1998,6 +2000,10 @@ class DashboardState:
             startup_env_overrides=demo_startup_env_overrides,
         )
         self._last_control_status: dict[str, Any] | None = None
+        self._last_control_status_ts: float = 0.0
+        self._last_control_status_at: str = ""
+        self._control_status_refreshing: bool = False
+        self._control_status_refresh_started_ts: float = 0.0
         self._last_control_probe_error: dict[str, Any] | None = None
         self._last_inference_result: dict[str, Any] | None = None
         self._recent_inference_results: dict[str, dict[str, Any]] = {}
@@ -2249,7 +2255,7 @@ class DashboardState:
                 self._trusted_current_sha = resolved_current_sha
             self._crypto_status_cache = None
             self._crypto_status_cache_ts = 0.0
-            self._last_control_status = None
+            self._set_last_control_status_locked(None)
             self._last_control_probe_error = None
             self._last_inference_result = None
             self._recent_inference_results = {}
@@ -2576,6 +2582,95 @@ class DashboardState:
             },
         }
 
+    def _set_last_control_status_locked(self, payload: dict[str, Any] | None) -> None:
+        if payload is None:
+            self._last_control_status = None
+            self._last_control_status_ts = 0.0
+            self._last_control_status_at = ""
+            return
+        self._last_control_status = json.loads(json.dumps(payload, ensure_ascii=False))
+        self._last_control_status_ts = time.monotonic()
+        self._last_control_status_at = now_iso()
+
+    def _cached_control_status_snapshot(self) -> tuple[dict[str, Any], dict[str, Any]]:
+        with self._lock:
+            control_status = json.loads(json.dumps(self._last_control_status, ensure_ascii=False)) if self._last_control_status else {}
+            observed_at = self._last_control_status_at
+            cache_ts = self._last_control_status_ts
+        age_sec = max(0.0, time.monotonic() - cache_ts) if cache_ts > 0 else None
+        stale = bool(control_status) and age_sec is not None and age_sec > CONTROL_STATUS_TTL_SEC
+        return control_status, {
+            "observed_at": observed_at,
+            "age_sec": age_sec,
+            "stale": stale,
+            "fresh": bool(control_status) and not stale,
+        }
+
+    def _start_control_plane_refresh(
+        self,
+        board_access: BoardAccessConfig,
+        *,
+        variant: str = "current",
+        source: str = "control_status_background",
+    ) -> None:
+        now = time.monotonic()
+        with self._lock:
+            if self._control_status_refreshing:
+                return
+            if (
+                self._control_status_refresh_started_ts > 0
+                and (now - self._control_status_refresh_started_ts) < CONTROL_STATUS_REFRESH_COOLDOWN_SEC
+            ):
+                return
+            self._control_status_refreshing = True
+            self._control_status_refresh_started_ts = now
+
+        def worker() -> None:
+            try:
+                self._refresh_control_plane_status(
+                    board_access,
+                    variant=variant,
+                    source=source,
+                )
+            except Exception:
+                return
+            finally:
+                with self._lock:
+                    self._control_status_refreshing = False
+
+        threading.Thread(
+            target=worker,
+            daemon=True,
+            name="control-plane-refresh",
+        ).start()
+
+    def _maybe_start_control_plane_refresh(
+        self,
+        *,
+        missing: bool,
+        stale: bool,
+        probe_error: bool,
+        variant: str = "current",
+        source: str = "control_status_background",
+    ) -> bool:
+        with self._lock:
+            board_access = self._board_access
+            refreshing = self._control_status_refreshing
+            refresh_started_ts = self._control_status_refresh_started_ts
+        if not board_access.probe_ready:
+            return refreshing
+        if not (missing or stale or probe_error):
+            return refreshing
+        if refreshing:
+            return True
+        if (
+            refresh_started_ts > 0
+            and (time.monotonic() - refresh_started_ts) < CONTROL_STATUS_REFRESH_COOLDOWN_SEC
+        ):
+            return True
+        self._start_control_plane_refresh(board_access, variant=variant, source=source)
+        return True
+
     def _active_inference_summary(self) -> dict[str, Any]:
         record = self._running_inference_job_record()
         if record is not None:
@@ -2593,9 +2688,9 @@ class DashboardState:
                 "progress": progress,
             }
 
-        with self._lock:
-            control_status = dict(self._last_control_status or {})
-
+        control_status, freshness = self._cached_control_status_snapshot()
+        if not freshness["fresh"]:
+            return self._idle_active_inference_summary()
         guard_state = str(control_status.get("guard_state") or "").upper()
         if guard_state != "JOB_ACTIVE":
             return self._idle_active_inference_summary()
@@ -2955,7 +3050,9 @@ class DashboardState:
     ) -> dict[str, Any]:
         with self._lock:
             board_access = self._board_access
-            control_status = dict(self._last_control_status or {}) if self._last_control_status else None
+        control_status, freshness = self._cached_control_status_snapshot()
+        if not freshness["fresh"]:
+            control_status = None
         active_inference = self._active_inference_summary()
         variant_access = self._live_board_access_for_variant(board_access, variant=variant)
         admission = describe_demo_admission(variant_access, variant=variant)
@@ -2985,7 +3082,7 @@ class DashboardState:
             status_probe = query_live_status(board_access, trusted_sha=trusted_sha)
             if status_probe.get("status") == "success":
                 with self._lock:
-                    self._last_control_status = status_probe
+                    self._set_last_control_status_locked(status_probe)
 
         gate = self.current_job_manifest_gate_status(variant=variant, status_probe=status_probe)
         preview_job_id = self._next_manifest_preview_job_id(variant=variant)
@@ -3655,15 +3752,26 @@ class DashboardState:
             return cold
 
     def _control_plane_summary(self) -> dict[str, Any]:
+        control_status, freshness = self._cached_control_status_snapshot()
         with self._lock:
-            control_status = dict(self._last_control_status or {})
             control_probe_error = dict(self._last_control_probe_error or {})
             soft_recover = dict(self._last_soft_recover_result or {})
+        refreshing = self._maybe_start_control_plane_refresh(
+            missing=not bool(control_status),
+            stale=bool(freshness["stale"]),
+            probe_error=bool(control_probe_error),
+            source="control_status_poll",
+        )
         event_summary = self._event_spine.summary(limit=1)
         aggregate = event_summary.get("aggregate") if isinstance(event_summary, dict) else {}
         event_counters = aggregate.get("event_counters") if isinstance(aggregate, dict) else {}
         if not isinstance(event_counters, dict):
             event_counters = {}
+        freshness_payload = {
+            "control_status_observed_at": freshness["observed_at"] or None,
+            "control_status_age_sec": freshness["age_sec"],
+            "control_status_stale": bool(freshness["stale"]),
+        }
 
         heartbeat_ok_events = self._safe_int(event_counters.get("HEARTBEAT_OK"), default=0)
         heartbeat_lost_events = self._safe_int(event_counters.get("HEARTBEAT_LOST"), default=0)
@@ -3686,7 +3794,12 @@ class DashboardState:
                     "control_recover_attempted": bool(soft_recover),
                     "control_recover_note": str(soft_recover.get("note") or ""),
                     "status_source": str(control_probe_error.get("status_source") or "probe_error"),
-                    "status_note": str(control_probe_error.get("message") or "控制面探测失败。"),
+                    "status_note": (
+                        f"{str(control_probe_error.get('message') or '控制面探测失败。')} 已在后台重试。"
+                        if refreshing
+                        else str(control_probe_error.get("message") or "控制面探测失败。")
+                    ),
+                    **freshness_payload,
                 }
             return {
                 "control_guard_state": "NOT_PROBED",
@@ -3703,8 +3816,24 @@ class DashboardState:
                 "control_recover_attempted": bool(soft_recover),
                 "control_recover_note": str(soft_recover.get("note") or ""),
                 "status_source": "not_probed",
-                "status_note": "尚未获取当前链路的控制面状态。",
+                "status_note": "尚未获取当前链路的控制面状态，后台刷新已启动。" if refreshing else "尚未获取当前链路的控制面状态。",
+                **freshness_payload,
             }
+        if freshness["stale"]:
+            status_source = "stale_control"
+            if refreshing:
+                status_note = (
+                    f"最近一次 RPMsg 控制面读数已超过 {int(CONTROL_STATUS_TTL_SEC)}s，"
+                    "当前展示缓存镜像，后台刷新中。"
+                )
+            else:
+                status_note = (
+                    f"最近一次 RPMsg 控制面读数已超过 {int(CONTROL_STATUS_TTL_SEC)}s，"
+                    "当前仅展示缓存镜像。"
+                )
+        else:
+            status_source = "live_control"
+            status_note = "已缓存最近一次 RPMsg 控制面读数。"
         return {
             "control_guard_state": str(control_status.get("guard_state") or "UNKNOWN"),
             "control_last_fault_code": str(control_status.get("last_fault_code") or "UNKNOWN"),
@@ -3719,8 +3848,9 @@ class DashboardState:
             "control_safe_stop_cleared_count": safe_stop_cleared_events,
             "control_recover_attempted": bool(soft_recover),
             "control_recover_note": str(soft_recover.get("note") or ""),
-            "status_source": "live_control",
-            "status_note": "已缓存最近一次 RPMsg 控制面读数。",
+            "status_source": status_source,
+            "status_note": status_note,
+            **freshness_payload,
         }
 
     def _refresh_control_plane_status(
@@ -3752,7 +3882,7 @@ class DashboardState:
 
         if status_probe.get("status") == "success":
             with self._lock:
-                self._last_control_status = status_probe
+                self._set_last_control_status_locked(status_probe)
                 self._last_control_probe_error = None
             self._emit_status_observation_events(status_probe, source=source, job_id=job_id)
         else:
@@ -3817,9 +3947,9 @@ class DashboardState:
             self._last_soft_recover_ts = time.monotonic()
             self._last_soft_recover_result = attempted
             if recover_result.get("status") == "success":
-                self._last_control_status = recover_result
+                self._set_last_control_status_locked(recover_result)
             if status_probe.get("status") == "success":
-                self._last_control_status = status_probe
+                self._set_last_control_status_locked(status_probe)
         if status_probe.get("status") == "success":
             self._emit_status_observation_events(status_probe, source="soft_recover_retry")
         return {
@@ -4887,12 +5017,18 @@ class DashboardState:
         with self._lock:
             live_probe = self._last_live_probe
             board_access = self._board_access
-            control_status = self._last_control_status
             last_inference = self._last_inference_result
             recent_inference_results = dict(self._recent_inference_results)
             last_fault = self._last_fault_result
             aircraft_position = self._aircraft_position
             local_aircraft_bridge_state = json.loads(json.dumps(self._local_aircraft_bridge_state, ensure_ascii=False))
+        control_status, control_freshness = self._cached_control_status_snapshot()
+        control_refreshing = self._maybe_start_control_plane_refresh(
+            missing=not bool(control_status),
+            stale=bool(control_freshness["stale"]),
+            probe_error=False,
+            source="system_status_poll",
+        )
 
         snapshot = build_snapshot(live_probe=live_probe, aircraft_position=aircraft_position)
         aircraft_position_payload = snapshot["aircraft_position"]
@@ -4931,15 +5067,29 @@ class DashboardState:
         rpmsg_devices = live_details.get("rpmsg_devices", [])
         rpmsg_device = rpmsg_devices[0] if rpmsg_devices else evidence_status["transport"].get("rpmsg_dev", "unknown")
 
-        board_online = bool(live_probe and live_probe.get("reachable"))
+        live_probe_loaded_from_cache = bool(live_probe and live_probe.get("_loaded_from_cache"))
+        board_online = bool(live_probe and live_probe.get("reachable") and not live_probe_loaded_from_cache)
 
         if control_status and control_status.get("status") == "success":
             guard_state = control_status.get("guard_state", "UNKNOWN")
             last_fault_code = control_status.get("last_fault_code", "UNKNOWN")
             active_job_id = control_status.get("active_job_id", 0)
             total_fault_count = control_status.get("total_fault_count", 0)
-            status_source = "live_control"
-            status_note = "已缓存最近一次 RPMsg 控制面读数。"
+            if control_freshness["stale"]:
+                status_source = "stale_control"
+                if control_refreshing:
+                    status_note = (
+                        f"最近一次 RPMsg 控制面读数已超过 {int(CONTROL_STATUS_TTL_SEC)}s，"
+                        "当前展示缓存镜像，后台刷新中。"
+                    )
+                else:
+                    status_note = (
+                        f"最近一次 RPMsg 控制面读数已超过 {int(CONTROL_STATUS_TTL_SEC)}s，"
+                        "当前仅展示缓存镜像。"
+                    )
+            else:
+                status_source = "live_control"
+                status_note = "已缓存最近一次 RPMsg 控制面读数。"
         else:
             fallback_timeout = evidence_status["timeout_ready_state"]
             guard_state = fallback_timeout.get("guard_state", "UNKNOWN")
@@ -4947,14 +5097,24 @@ class DashboardState:
             active_job_id = fallback_timeout.get("active_job_id", 0)
             total_fault_count = fallback_timeout.get("total_fault_count", 0)
             status_source = "evidence"
-            status_note = "当前 guard_state / fault_code 仍以正式证据包为准。"
+            status_note = (
+                "当前 guard_state / fault_code 仍以正式证据包为准，后台正在刷新控制面状态。"
+                if control_refreshing
+                else "当前 guard_state / fault_code 仍以正式证据包为准。"
+            )
 
         if str(guard_state or "").upper() == "JOB_ACTIVE":
             active_job_text = f" active_job_id={active_job_id}。" if active_job_id else ""
-            status_note = (
-                "板端当前 guard_state=JOB_ACTIVE；demo 会保守阻断新的 live launch，"
-                f"不会自动 SAFE_STOP。{active_job_text}请等待现有作业完成，或由操作员手动 SAFE_STOP 后再重试。"
-            )
+            if status_source == "stale_control":
+                status_note = (
+                    "最近一次控制面缓存曾报告 guard_state=JOB_ACTIVE，"
+                    f"但该镜像已过期。{active_job_text}请重新探测板端在线状态后再判断是否仍被占用。"
+                )
+            else:
+                status_note = (
+                    "板端当前 guard_state=JOB_ACTIVE；demo 会保守阻断新的 live launch，"
+                    f"不会自动 SAFE_STOP。{active_job_text}请等待现有作业完成，或由操作员手动 SAFE_STOP 后再重试。"
+                )
 
         live_telemetry = self._board_telemetry_snapshot(
             board_access=board_access,
@@ -5342,7 +5502,7 @@ class DashboardState:
                 )
                 if status_payload.get("status") == "success":
                     with self._lock:
-                        self._last_control_status = status_payload
+                        self._set_last_control_status_locked(status_payload)
                     self._emit_status_observation_events(status_payload, source="probe_status")
                 result["control_status"] = status_payload
             self._archive_event_snapshot(
@@ -6414,8 +6574,9 @@ class DashboardState:
 
         if daemon_alive:
             # daemon 已与板端建立 ML-KEM 会话，板卡 TCP 通道畅通，无需 SSH 预检
-            with self._lock:
-                preflight = self._last_control_status
+            preflight, freshness = self._cached_control_status_snapshot()
+            if not freshness["fresh"]:
+                preflight = None
             if not preflight or preflight.get("status") not in ("success", "degraded"):
                 preflight = {
                     "status": "degraded",
@@ -6467,7 +6628,7 @@ class DashboardState:
                         )
 
         with self._lock:
-            self._last_control_status = preflight
+            self._set_last_control_status_locked(preflight)
         self._emit_status_observation_events(preflight, source="mlkem_preflight")
 
         guard_state = str(preflight.get("guard_state") or "UNKNOWN").upper()
@@ -7330,7 +7491,7 @@ class DashboardState:
                 status_payload = query_live_status(board_access, trusted_sha=variant_expected_sha)
                 if status_payload.get("status") == "success":
                     with self._lock:
-                        self._last_control_status = status_payload
+                        self._set_last_control_status_locked(status_payload)
                     self._emit_status_observation_events(status_payload, source="status_preflight")
                     guard_state = str(status_payload.get("guard_state") or "UNKNOWN").upper()
                     if guard_state == "JOB_ACTIVE":
@@ -7551,7 +7712,7 @@ class DashboardState:
                     "details": live_result,
                 }
                 with self._lock:
-                    self._last_control_status = live_result
+                    self._set_last_control_status_locked(live_result)
                     self._last_fault_result = {
                         "fault_type": fault_type,
                         "status": response["status"],
@@ -7648,7 +7809,7 @@ class DashboardState:
             replay_control["total_fault_count"] = self._safe_int(replay_control.get("total_fault_count"), default=0) + 1
             if fault_type == "heartbeat_timeout":
                 replay_control["heartbeat_ok"] = self._safe_int(replay_control.get("heartbeat_ok"), default=0) + 1
-            self._last_control_status = replay_control
+            self._set_last_control_status_locked(replay_control)
             self._crypto_status_cache = None  # force instant refresh on next poll
         # ── Replay: publish event_spine events so timeline and counters update ──
         self._event_spine.publish(
@@ -7742,7 +7903,7 @@ class DashboardState:
                     "details": live_result,
                 }
                 with self._lock:
-                    self._last_control_status = live_result
+                    self._set_last_control_status_locked(live_result)
                     self._last_fault_result = {
                         "fault_type": "recover",
                         "status": response["status"],
@@ -7794,7 +7955,7 @@ class DashboardState:
             replay_control = dict(self._last_control_status or {})
             replay_control["guard_state"] = replay["guard_state"]
             replay_control["last_fault_code"] = replay["last_fault_code"]
-            self._last_control_status = replay_control
+            self._set_last_control_status_locked(replay_control)
             self._crypto_status_cache = None  # force instant refresh on next poll
         # ── Replay: publish event_spine events for recovery ──
         self._event_spine.publish(

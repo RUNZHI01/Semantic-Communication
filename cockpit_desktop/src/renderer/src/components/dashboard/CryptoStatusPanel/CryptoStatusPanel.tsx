@@ -192,6 +192,7 @@ export function CryptoStatusPanel() {
 
   // 5) Toggle ON — normal display
   const st = STATE_LABEL[data.channel_state] ?? { label: data.channel_state, tone: 'neutral' }
+  const controlSnapshotStale = Boolean(data.control_status_stale) || data.status_source === 'stale_control'
   const settingsItems: MetricItem[] = [
     { label: 'KEM 后端', value: data.kem_backend, tone: 'mono' },
     { label: '密码套件', value: data.cipher_suite, tone: 'mono' },
@@ -238,7 +239,7 @@ export function CryptoStatusPanel() {
   }
   if (data.control_guard_state || data.control_last_fault_code) {
     runtimeItems.push({
-      label: '控制面',
+      label: controlSnapshotStale ? '控制面(缓存)' : '控制面',
       value: `${controlPlaneDisplay(data.control_guard_state)} / ${controlPlaneDisplay(data.control_last_fault_code)}`,
       tone: 'mono',
     })
@@ -304,10 +305,16 @@ export function CryptoStatusPanel() {
     })
   }
   if (data.status_note) {
+    const infoLabel = data.status_source === 'probe_error'
+      ? '控制面探测'
+      : data.status_source === 'stale_control'
+        ? '控制面缓存'
+        : '控制面说明'
+    const infoTone = data.status_source === 'probe_error' ? 'fail' : 'muted'
     infoItems.push({
-      label: data.status_source === 'probe_error' ? '控制面探测' : '控制面说明',
+      label: infoLabel,
       value: data.status_note,
-      tone: data.status_source === 'probe_error' ? 'fail' : 'muted',
+      tone: infoTone,
       wide: true,
     })
   }

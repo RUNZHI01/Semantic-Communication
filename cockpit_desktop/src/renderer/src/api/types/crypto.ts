@@ -112,6 +112,12 @@ export type CryptoStatusResponse = {
   status_source?: string
   /** Human-readable control-plane status note */
   status_note?: string
+  /** ISO timestamp for the last cached control-plane snapshot */
+  control_status_observed_at?: string | null
+  /** Age in seconds for the last cached control-plane snapshot */
+  control_status_age_sec?: number | null
+  /** Whether the cached control-plane snapshot is stale */
+  control_status_stale?: boolean
   /** Batch inference benchmark results (populated after batch completes) */
   batch_benchmark?: BatchBenchmark | null
   /** Batch inference run status: 'running' | 'done' | null */

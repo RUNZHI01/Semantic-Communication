@@ -2249,6 +2249,95 @@ class DashboardStateTest(unittest.TestCase):
         self.assertEqual(payload["status_source"], "live_control")
         self.assertIn("最近一次 RPMsg", payload["status_note"])
 
+    def test_get_crypto_status_marks_expired_control_snapshot_as_stale(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+
+        with state._lock:
+            state._set_last_control_status_locked(
+                {
+                    "status": "success",
+                    "guard_state": "READY",
+                    "last_fault_code": "NONE",
+                    "heartbeat_ok": 3,
+                    "total_fault_count": 0,
+                }
+            )
+            state._last_control_status_ts = time.monotonic() - server.CONTROL_STATUS_TTL_SEC - 1.0
+
+        payload = state.get_crypto_status()
+
+        self.assertEqual(payload["control_guard_state"], "READY")
+        self.assertEqual(payload["status_source"], "stale_control")
+        self.assertTrue(payload["control_status_stale"])
+        self.assertGreater(payload["control_status_age_sec"], server.CONTROL_STATUS_TTL_SEC)
+        self.assertIn("缓存镜像", payload["status_note"])
+
+    def test_get_crypto_status_starts_background_refresh_when_control_snapshot_is_stale(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        state._board_access = server.build_board_access_config(
+            {
+                "host": "demo-board",
+                "user": "demo-user",
+                "password": "demo-pass",
+                "port": "22",
+            },
+            fallback=state._board_access,
+        )
+
+        with state._lock:
+            state._set_last_control_status_locked(
+                {
+                    "status": "success",
+                    "guard_state": "READY",
+                    "last_fault_code": "NONE",
+                }
+            )
+            state._last_control_status_ts = time.monotonic() - server.CONTROL_STATUS_TTL_SEC - 1.0
+
+        with patch.object(state, "_start_control_plane_refresh") as refresh_mock:
+            payload = state.get_crypto_status()
+
+        self.assertEqual(payload["status_source"], "stale_control")
+        refresh_mock.assert_called_once()
+
+    def test_get_crypto_status_starts_background_refresh_when_control_status_not_probed(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        state._board_access = server.build_board_access_config(
+            {
+                "host": "demo-board",
+                "user": "demo-user",
+                "password": "demo-pass",
+                "port": "22",
+            },
+            fallback=state._board_access,
+        )
+
+        with patch.object(state, "_start_control_plane_refresh") as refresh_mock:
+            payload = state.get_crypto_status()
+
+        self.assertEqual(payload["status_source"], "not_probed")
+        refresh_mock.assert_called_once()
+        self.assertIn("后台刷新", payload["status_note"])
+
+    def test_active_inference_summary_ignores_stale_job_active_snapshot(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+
+        with state._lock:
+            state._set_last_control_status_locked(
+                {
+                    "status": "success",
+                    "guard_state": "JOB_ACTIVE",
+                    "last_fault_code": "NONE",
+                    "active_job_id": 7301,
+                }
+            )
+            state._last_control_status_ts = time.monotonic() - server.CONTROL_STATUS_TTL_SEC - 1.0
+
+        payload = state._active_inference_summary()
+
+        self.assertFalse(payload["running"])
+        self.assertEqual(payload["status_category"], "idle")
+
     def test_refresh_control_plane_status_caches_probe_error(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
         board_access = server.build_board_access_config(
@@ -2458,7 +2547,7 @@ class DashboardStateTest(unittest.TestCase):
         self.assertEqual(payload["control_guard_state"], "NOT_PROBED")
         self.assertEqual(payload["control_last_fault_code"], "NOT_PROBED")
         self.assertEqual(payload["status_source"], "probe_error")
-        self.assertEqual(payload["status_note"], "control probe failed")
+        self.assertIn("control probe failed", payload["status_note"])
         self.assertIn("board status endpoint unavailable", str(payload["error"]))
 
     def test_run_crypto_test_ensures_remote_tcp_server_before_reusing_session(self) -> None:
@@ -3610,6 +3699,47 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(payload["safety_panel"]["recover_action"]["label"], "SAFE_STOP 收口")
         self.assertIn("不会自动 SAFE_STOP", payload["safety_panel"]["status_note"])
 
+    def test_system_status_endpoint_does_not_treat_cached_probe_as_current_online(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        state._last_live_probe = {
+            **live_probe_payload("2026-03-19T18:45:00+0800", "board reachable"),
+            "_loaded_from_cache": True,
+        }
+
+        status, _, payload = request_json(state, "GET", "/api/system-status")
+
+        self.assertEqual(status, 200)
+        self.assertFalse(payload["live"]["board_online"])
+        self.assertEqual(payload["safety_panel"]["status_source"], "evidence")
+
+    def test_system_status_endpoint_starts_background_refresh_when_control_status_is_stale(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        state._board_access = server.build_board_access_config(
+            {
+                "host": "demo-board",
+                "user": "demo-user",
+                "password": "demo-pass",
+                "port": "22",
+            },
+            fallback=state._board_access,
+        )
+        with state._lock:
+            state._set_last_control_status_locked(
+                {
+                    "status": "success",
+                    "guard_state": "READY",
+                    "last_fault_code": "NONE",
+                }
+            )
+            state._last_control_status_ts = time.monotonic() - server.CONTROL_STATUS_TTL_SEC - 1.0
+
+        with patch.object(state, "_start_control_plane_refresh") as refresh_mock:
+            status, _, payload = request_json(state, "GET", "/api/system-status")
+
+        self.assertEqual(status, 200)
+        refresh_mock.assert_called_once()
+        self.assertEqual(payload["live"]["status_source"], "stale_control")
+
     def test_system_status_endpoint_advances_operator_cue_to_compare_after_current_live_result(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
         request_json(
@@ -3919,8 +4049,14 @@ class DemoHTTPServerTest(unittest.TestCase):
         }
         state._board_telemetry_cache_ts = time.monotonic() - (server.BOARD_TELEMETRY_TTL_SEC + 1.0)
 
-        fake_thread = Mock()
-        fake_thread.start = Mock()
+        thread_instances: list[Mock] = []
+
+        def build_fake_thread(*args, **kwargs) -> Mock:
+            del args, kwargs
+            fake_thread = Mock()
+            fake_thread.start = Mock()
+            thread_instances.append(fake_thread)
+            return fake_thread
 
         with (
             patch.object(
@@ -3942,7 +4078,7 @@ class DemoHTTPServerTest(unittest.TestCase):
                     "note": "板端定位 API 服务已启动，但当前没有拿到有效位置样本。",
                 },
             ),
-            patch("server.threading.Thread", return_value=fake_thread) as thread_cls,
+            patch("server.threading.Thread", side_effect=build_fake_thread) as thread_cls,
         ):
             status, _, payload = request_json(state, "GET", "/api/system-status")
 
@@ -3950,8 +4086,9 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(payload["live"]["telemetry"]["status"], "stale")
         self.assertAlmostEqual(payload["live"]["telemetry"]["memory_pct"], 61.2)
         self.assertIn("后台刷新中", payload["live"]["telemetry"]["note"])
-        thread_cls.assert_called_once()
-        fake_thread.start.assert_called_once()
+        self.assertTrue(any(call.kwargs.get("name") == "board-telemetry-refresh" for call in thread_cls.call_args_list))
+        self.assertTrue(thread_instances)
+        self.assertTrue(any(thread.start.call_count == 1 for thread in thread_instances))
 
     def test_board_position_api_snapshot_reuses_cached_payload_while_refreshing(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
