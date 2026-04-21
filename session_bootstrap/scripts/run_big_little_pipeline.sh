@@ -622,12 +622,9 @@ SH
 TMP_OUTPUT="$(mktemp)"
 PIPELINE_JSON_FILE="$(mktemp)"
 set +e
-run_pipeline_remote >"$TMP_OUTPUT" 2>&1
-RUN_RC=$?
+run_pipeline_remote 2>&1 | tee "$TMP_OUTPUT" >(cat >>"$RAW_OUTPUT_FILE") >(cat >>"$LOG_FILE")
+RUN_RC=${PIPESTATUS[0]}
 set -e
-
-cat "$TMP_OUTPUT" >>"$RAW_OUTPUT_FILE"
-cat "$TMP_OUTPUT" >>"$LOG_FILE"
 
 if parse_last_json_line "$TMP_OUTPUT" >"$PIPELINE_JSON_FILE"; then
   WRAPPER_STDOUT="$(render_wrapper_report "$PIPELINE_JSON_FILE" "$REPORT_JSON" "$REPORT_MD" "$RUN_ID" "${ENV_FILE:-}" "$VARIANT" "$REMOTE_MODE" "$LOG_FILE")"

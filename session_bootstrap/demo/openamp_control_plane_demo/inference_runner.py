@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import re
 import secrets
@@ -22,6 +23,7 @@ SCRIPTS_ROOT = PROJECT_ROOT / "session_bootstrap" / "scripts"
 if str(SCRIPTS_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_ROOT))
 
+from openamp_control_wrapper import jsonl_append, parse_response  # noqa: E402
 from openamp_signed_manifest import load_signed_manifest_bundle, verify_signed_manifest_bundle  # noqa: E402
 
 REMOTE_RECONSTRUCTION_SCRIPT = (
@@ -80,6 +82,10 @@ def parse_json_stdout(raw: str) -> dict[str, Any]:
     raise ValueError("runner produced no JSON payload")
 
 
+def now_iso() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%S%z")
+
+
 def sanitize_wrapper_stdout_for_classification(raw: str) -> str:
     retained: list[str] = []
     for line in raw.splitlines():
@@ -122,6 +128,16 @@ def count_completed_images_from_runner_log(path: Path) -> int:
         except (TypeError, ValueError):
             continue
     return completed
+
+
+def count_completed_images_from_output_dir(output_dir: Path) -> int:
+    reconstructions_dir = output_dir / "reconstructions"
+    if not reconstructions_dir.exists():
+        return 0
+    try:
+        return sum(1 for path in reconstructions_dir.iterdir() if path.is_file() and not path.name.startswith("."))
+    except OSError:
+        return 0
 
 
 def read_runner_log_tail(path: Path, *, max_lines: int = RUNNER_LOG_TAIL_LINES) -> str:
@@ -632,12 +648,21 @@ def build_completion_counts(
     if summary_processed is not None:
         completed_count = summary_processed
         count_source = "runner_summary.processed_count"
-    elif runner_log_path.exists():
-        completed_count = count_completed_images_from_runner_log(runner_log_path)
-        count_source = "runner_log.sample_latency_lines"
     else:
-        completed_count = 0
-        count_source = "runner_log.missing"
+        runner_log_completed = count_completed_images_from_runner_log(runner_log_path) if runner_log_path.exists() else 0
+        output_dir_completed = count_completed_images_from_output_dir(runner_log_path.parent)
+        if output_dir_completed > runner_log_completed:
+            completed_count = output_dir_completed
+            count_source = "output_dir.reconstruction_files"
+        elif runner_log_path.exists():
+            completed_count = runner_log_completed
+            count_source = "runner_log.sample_latency_lines"
+        elif output_dir_completed > 0:
+            completed_count = output_dir_completed
+            count_source = "output_dir.reconstruction_files"
+        else:
+            completed_count = 0
+            count_source = "runner_log.missing"
 
     expected_count = (
         normalize_positive_int(summary.get("input_count"))
@@ -1424,6 +1449,8 @@ class LiveRemoteReconstructionJob:
         self._control_transport = (
             CONTROL_TRANSPORT_HOOK if control_transport_uses_hook(control_transport) else CONTROL_TRANSPORT_NONE
         )
+        self._hook_cmd = ""
+        self._hook_timeout_sec = live_control_hook_timeout_sec(timeout_sec)
         self._control_preflight = dict(control_preflight) if isinstance(control_preflight, dict) else None
         self._output_dir = Path(tempfile.mkdtemp(prefix="openamp_demo_live_", dir="/tmp"))
         self._trace_path = self._output_dir / "control_trace.jsonl"
@@ -1544,7 +1571,8 @@ class LiveRemoteReconstructionJob:
 
         runner_cmd = build_runner_command(access, variant=variant, max_inputs=max_inputs, seed=seed)
         hook_cmd = self._build_hook_command(access) if self._control_transport == CONTROL_TRANSPORT_HOOK else ""
-        hook_timeout_sec = live_control_hook_timeout_sec(timeout_sec)
+        hook_timeout_sec = self._hook_timeout_sec
+        self._hook_cmd = hook_cmd
         command = [
             "python3",
             str(OPENAMP_CONTROL_WRAPPER_SCRIPT),
@@ -1649,6 +1677,65 @@ class LiveRemoteReconstructionJob:
             command.extend(["--remote-jscc-dir", remote_jscc_dir])
         return shlex.join(command)
 
+    def _emit_compensating_hook_event(self, *, phase: str, payload: dict[str, Any]) -> dict[str, Any]:
+        if not control_transport_uses_hook(getattr(self, "_control_transport", CONTROL_TRANSPORT_HOOK)):
+            return {}
+        hook_cmd = str(getattr(self, "_hook_cmd", "") or "").strip()
+        if not hook_cmd:
+            return {}
+
+        event = {
+            "at": now_iso(),
+            "phase": phase,
+            "payload": payload,
+        }
+        env = os.environ.copy()
+        env["OPENAMP_PHASE"] = phase
+        env["OPENAMP_JOB_ID"] = str(payload.get("job_id") or "")
+        timeout_sec = float(getattr(self, "_hook_timeout_sec", DEFAULT_LIVE_CONTROL_HOOK_TIMEOUT_SEC) or 0.0)
+        started_at = time.monotonic()
+        try:
+            result = subprocess.run(
+                ["bash", "-lc", hook_cmd],
+                check=False,
+                input=json.dumps(event, ensure_ascii=False),
+                text=True,
+                capture_output=True,
+                cwd=PROJECT_ROOT,
+                env=env,
+                timeout=timeout_sec if timeout_sec > 0 else None,
+            )
+        except subprocess.TimeoutExpired as exc:
+            stdout = str(exc.stdout or exc.output or "")
+            stderr = str(exc.stderr or "")
+            hook_result = {
+                "returncode": None,
+                "stdout": stdout,
+                "stderr": stderr,
+                "response": {
+                    "phase": phase,
+                    "transport_status": "hook_timeout",
+                    "protocol_semantics": "not_verified",
+                    "note": f"{phase} control hook timed out after {timeout_sec:.1f}s.",
+                },
+                "timed_out": True,
+                "timeout_sec": timeout_sec,
+                "duration_ms": int((time.monotonic() - started_at) * 1000),
+            }
+        else:
+            hook_result = {
+                "returncode": result.returncode,
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+                "response": parse_response(result.stdout),
+                "timed_out": False,
+                "timeout_sec": timeout_sec,
+                "duration_ms": int((time.monotonic() - started_at) * 1000),
+            }
+        event["hook_result"] = hook_result
+        jsonl_append(self._trace_path, event)
+        return hook_result
+
     def _wait_for_completion(self) -> None:
         assert self._process is not None
         timed_out = False
@@ -1672,9 +1759,33 @@ class LiveRemoteReconstructionJob:
                 wrapper_summary = {}
 
         trace_events = load_trace_events(self._trace_path)
+        if (
+            control_transport_uses_hook(getattr(self, "_control_transport", CONTROL_TRANSPORT_HOOK))
+            and not timed_out
+            and (self._process.returncode or 0) == 0
+            and last_event_by_phase(trace_events, "JOB_DONE") is None
+        ):
+            runner_summary_for_repair: dict[str, Any] = {}
+            try:
+                runner_summary_for_repair = parse_runner_summary_from_log(self._runner_log_path)
+            except (OSError, ValueError, json.JSONDecodeError):
+                runner_summary_for_repair = {}
+            self._emit_compensating_hook_event(
+                phase="JOB_DONE",
+                payload={
+                    "job_id": int(self.job_id),
+                    "result_code": 0,
+                    "runner_exit_code": self._process.returncode,
+                    "timed_out": False,
+                    "output_count": int(runner_summary_for_repair.get("processed_count") or 0),
+                },
+            )
+            trace_events = load_trace_events(self._trace_path)
+
         handshake = control_handshake_summary(trace_events) if trace_events else {}
         transport_timeout_message = build_transport_timeout_handshake_message(handshake)
         last_hook_response = latest_hook_response(trace_events)
+        job_done_response = hook_response_for_event(last_event_by_phase(trace_events, "JOB_DONE"))
         hook_error_text = control_hook_error_text(last_hook_response)
         control_hook_stats = build_control_hook_stats(trace_events)
         classify_stdout = sanitize_wrapper_stdout_for_classification(stdout)
@@ -1717,23 +1828,48 @@ class LiveRemoteReconstructionJob:
                 message = build_inference_message(status_category, variant=self.variant, include_fallback=True)
                 performance_diag = {}
             else:
-                status = "success"
-                status_category = "success"
-                performance_diag = detect_current_live_slowdown(
-                    variant=self.variant,
-                    runner_summary=runner_summary,
-                    control_hook_stats=control_hook_stats,
-                )
-                if not control_transport_uses_hook(control_transport):
-                    message = build_runner_only_live_message(variant=self.variant, admission=admission)
-                elif performance_diag:
-                    message = build_current_live_slowdown_message(performance_diag)
-                elif control_hook_stats.get("timeout_count", 0) > 0:
+                if control_transport_uses_hook(control_transport) and hook_transport_failed(job_done_response):
+                    status = "error"
+                    status_category = (
+                        hook_status_category(job_done_response)
+                        or classify_status_category(
+                            status="error",
+                            stdout=classify_stdout,
+                            stderr=stderr,
+                            error="\n".join(
+                                part
+                                for part in (
+                                    control_hook_error_text(job_done_response),
+                                    "JOB_DONE cleanup did not complete.",
+                                    runner_log_tail,
+                                )
+                                if part
+                            ),
+                        )
+                    )
+                    performance_diag = {}
                     message = (
-                        "板端执行已完成；控制 hook 超时已记录，界面不再将其误报为 runner timeout。"
+                        "板端 runner 已结束，但 OpenAMP JOB_DONE 收口未完成；"
+                        "当前不会把这次任务视为已安全收口。"
                     )
                 else:
-                    message = "OpenAMP 控制面已完成作业下发、板端执行与结果回收。"
+                    status = "success"
+                    status_category = "success"
+                    performance_diag = detect_current_live_slowdown(
+                        variant=self.variant,
+                        runner_summary=runner_summary,
+                        control_hook_stats=control_hook_stats,
+                    )
+                    if not control_transport_uses_hook(control_transport):
+                        message = build_runner_only_live_message(variant=self.variant, admission=admission)
+                    elif performance_diag:
+                        message = build_current_live_slowdown_message(performance_diag)
+                    elif control_hook_stats.get("timeout_count", 0) > 0:
+                        message = (
+                            "板端执行已完成；控制 hook 超时已记录，界面不再将其误报为 runner timeout。"
+                        )
+                    else:
+                        message = "OpenAMP 控制面已完成作业下发、板端执行与结果回收。"
         else:
             status = "error"
             status_category = (

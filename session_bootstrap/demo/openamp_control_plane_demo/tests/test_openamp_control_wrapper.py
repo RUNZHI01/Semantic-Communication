@@ -216,6 +216,32 @@ class OpenAMPControlWrapperTest(unittest.TestCase):
         )
         self.assertTrue(event["hook_result"]["timed_out"])
 
+    def test_emit_event_records_hook_exception_instead_of_dropping_phase(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            trace_path = Path(temp_dir) / "control_trace.jsonl"
+
+            with patch(
+                "openamp_control_wrapper.subprocess.run",
+                side_effect=RuntimeError("hook proxy crashed"),
+            ):
+                result = openamp_control_wrapper.emit_event(
+                    trace_path=trace_path,
+                    phase="JOB_DONE",
+                    payload={"job_id": 2026, "result_code": 0},
+                    transport="hook",
+                    hook_cmd="echo hook",
+                    hook_timeout_sec=5.0,
+                )
+            event = json.loads(trace_path.read_text(encoding="utf-8").strip())
+
+        self.assertEqual(result["returncode"], -1)
+        self.assertFalse(result["timed_out"])
+        self.assertEqual(result["response"]["phase"], "JOB_DONE")
+        self.assertEqual(result["response"]["transport_status"], "hook_error")
+        self.assertIn("hook proxy crashed", result["response"]["note"])
+        self.assertEqual(event["phase"], "JOB_DONE")
+        self.assertEqual(event["hook_result"]["response"]["transport_status"], "hook_error")
+
     def test_main_keeps_duplicate_job_id_denial_visible_without_retrying(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             output_dir = Path(temp_dir)

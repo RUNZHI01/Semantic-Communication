@@ -22,8 +22,32 @@ import type { BatchInferenceResponse, BatchStateResponse, CryptoStatusResponse, 
 const runtimeBackendUrl = window.cockpit?.backendUrl?.replace(/\/+$/, '') ?? ''
 const API_PREFIX = import.meta.env.DEV ? '' : runtimeBackendUrl || 'http://127.0.0.1:8079'
 
+function summarizeResponseText(text: string): string {
+  const raw = String(text || '').trim()
+  if (!raw) return ''
+  const stripped = raw
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  return (stripped || raw).slice(0, 400)
+}
+
 async function readJson<T>(response: Response): Promise<T> {
-  return (await response.json()) as T
+  const text = await response.text()
+  if (!text.trim()) {
+    return {} as T
+  }
+  try {
+    return JSON.parse(text) as T
+  } catch {
+    const summary = summarizeResponseText(text)
+    if (!response.ok) {
+      return { message: summary || `HTTP ${response.status}` } as T
+    }
+    throw new Error(summary || '后端返回了非 JSON 响应')
+  }
 }
 
 function throwIfNotOk(response: Response, body: unknown): void {
@@ -166,6 +190,15 @@ export async function postCryptoToggle(enabled: boolean): Promise<{ status: stri
 
 export async function postCryptoTest(): Promise<CryptoTestResult> {
   return postJson<CryptoTestResult>('/api/crypto-test', {})
+}
+
+export async function postCryptoReset(restartRemoteServer = true): Promise<{
+  status: string
+  message?: string
+  session_closed?: boolean
+  remote_restart_scheduled?: boolean
+}> {
+  return postJson('/api/crypto-reset', { restart_remote_server: restartRemoteServer })
 }
 
 export async function postRunInferenceBatch(count = 300): Promise<BatchInferenceResponse> {

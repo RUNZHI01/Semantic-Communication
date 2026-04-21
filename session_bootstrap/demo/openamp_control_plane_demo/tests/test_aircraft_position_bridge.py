@@ -227,6 +227,16 @@ class AircraftPositionBridgeTest(unittest.TestCase):
         self.assertEqual(config.path_overrides["latitude"], "gps.lat")
         self.assertEqual(config.path_overrides["longitude"], "gps.lon")
 
+    def test_build_config_from_env_values_uses_conservative_default_interval(self) -> None:
+        config = bridge.build_config_from_env_values(
+            {
+                "AIRCRAFT_POSITION_UPSTREAM_URL": "http://board.local:9000/gps",
+            }
+        )
+
+        self.assertEqual(config.upstream_url, "http://board.local:9000/gps")
+        self.assertAlmostEqual(config.interval_sec, 30.0)
+
     def test_config_from_args_uses_candidate_list_when_explicit_upstream_missing(self) -> None:
         with patch.dict(
             "os.environ",

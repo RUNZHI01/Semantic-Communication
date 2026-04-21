@@ -313,6 +313,18 @@ class RunFaultActionTest(unittest.TestCase):
         completed = [
             subprocess.CompletedProcess(
                 ["python3", "openamp_remote_hook_proxy.py"],
+                0,
+                stdout=status_response(
+                    guard="JOB_ACTIVE",
+                    last_fault="HEARTBEAT_TIMEOUT",
+                    active_job_id=4200192063,
+                    total_fault_count=1,
+                )
+                + "\n",
+                stderr="",
+            ),
+            subprocess.CompletedProcess(
+                ["python3", "openamp_remote_hook_proxy.py"],
                 2,
                 stdout=safe_stop_response(
                     last_fault="HEARTBEAT_TIMEOUT",
@@ -341,6 +353,56 @@ class RunFaultActionTest(unittest.TestCase):
         self.assertEqual(payload["guard_state"], "READY")
         self.assertEqual(payload["last_fault_code"], "HEARTBEAT_TIMEOUT")
         self.assertEqual(payload["board_response"]["decision"], "ACK")
+
+    def test_recover_targets_active_job_id_from_status_before_safe_stop(self) -> None:
+        access = make_access()
+        observed: list[dict[str, object]] = []
+
+        def fake_run(command, **kwargs):  # type: ignore[no-untyped-def]
+            event = json.loads(kwargs["input"])
+            observed.append(event)
+            phase = event["phase"]
+            if phase == "STATUS_REQ" and len(observed) == 1:
+                return subprocess.CompletedProcess(
+                    command,
+                    0,
+                    stdout=status_response(
+                        guard="JOB_ACTIVE",
+                        last_fault="NONE",
+                        active_job_id=4200192063,
+                        total_fault_count=0,
+                    )
+                    + "\n",
+                    stderr="",
+                )
+            if phase == "SAFE_STOP":
+                return subprocess.CompletedProcess(
+                    command,
+                    0,
+                    stdout=safe_stop_response(last_fault="MANUAL_SAFE_STOP") + "\n",
+                    stderr="",
+                )
+            if phase == "STATUS_REQ" and len(observed) == 3:
+                return subprocess.CompletedProcess(
+                    command,
+                    0,
+                    stdout=status_response(
+                        guard="READY",
+                        last_fault="MANUAL_SAFE_STOP",
+                        active_job_id=0,
+                        total_fault_count=1,
+                    )
+                    + "\n",
+                    stderr="",
+                )
+            raise AssertionError(f"unexpected phase order: {phase}, observed={observed!r}")
+
+        with patch("fault_injector.subprocess.run", side_effect=fake_run):
+            payload = run_recover_action(access, trusted_sha="a" * 64, timeout_sec=8.0)
+
+        self.assertEqual(payload["status"], "success")
+        self.assertEqual([event["phase"] for event in observed], ["STATUS_REQ", "SAFE_STOP", "STATUS_REQ"])
+        self.assertEqual(observed[1]["payload"]["job_id"], 4200192063)
 
     def test_recover_treats_bridge_launch_failure_as_error_even_with_json_stdout(self) -> None:
         access = make_access()

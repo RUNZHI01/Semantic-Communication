@@ -468,7 +468,7 @@ def build_config_from_env_values(
         upstream_url=upstream_url,
         upstream_candidates=upstream_candidates,
         backend_base_url=_mapping_text(env_values, f"{ENV_PREFIX}BACKEND_BASE_URL") or backend_base_url_default,
-        interval_sec=max(float(_mapping_text(env_values, f"{ENV_PREFIX}INTERVAL_SEC") or "1.0"), 0.1),
+        interval_sec=max(float(_mapping_text(env_values, f"{ENV_PREFIX}INTERVAL_SEC") or "30.0"), 0.1),
         timeout_sec=max(float(_mapping_text(env_values, f"{ENV_PREFIX}TIMEOUT_SEC") or "3.0"), 0.1),
         upstream_headers=_parse_header_json(_mapping_text(env_values, f"{ENV_PREFIX}UPSTREAM_HEADERS_JSON")),
         backend_headers=_parse_header_json(_mapping_text(env_values, f"{ENV_PREFIX}BACKEND_HEADERS_JSON")),
@@ -558,7 +558,7 @@ def _config_from_args(args: argparse.Namespace) -> BridgeConfig:
         upstream_candidates=upstream_candidates,
         backend_base_url=backend_base_url,
         interval_sec=max(
-            float(args.interval_sec) if args.interval_sec is not None else _env_float(f"{ENV_PREFIX}INTERVAL_SEC", 1.0),
+            float(args.interval_sec) if args.interval_sec is not None else _env_float(f"{ENV_PREFIX}INTERVAL_SEC", 30.0),
             0.1,
         ),
         timeout_sec=max(

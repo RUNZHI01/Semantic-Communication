@@ -12,6 +12,7 @@ import {
   postRunMnnBatch,
 } from '../api/client'
 import { useAppStore } from '../stores/appStore'
+import { isCompletedInferenceResult, shouldTrackInferenceJob } from './inferenceStateMachine'
 
 function useInvalidateOnSuccess() {
   const qc = useQueryClient()
@@ -19,6 +20,7 @@ function useInvalidateOnSuccess() {
     void qc.invalidateQueries({ queryKey: ['system-status'] })
     void qc.invalidateQueries({ queryKey: ['snapshot'] })
     void qc.invalidateQueries({ queryKey: ['aircraft-position'] })
+    void qc.invalidateQueries({ queryKey: ['crypto-status'] })
   }
 }
 
@@ -37,10 +39,12 @@ export function useRunInference() {
     onSuccess: (data) => {
       inv()
       // ML-KEM 同步完成时 request_state=completed，直接持久化结果
-      if (data.request_state === 'completed') {
+      if (isCompletedInferenceResult(data)) {
         setLastCompletedInference(data)
+        setActiveJobId(null)
+        return
       }
-      if (data.job_id) setActiveJobId(data.job_id)
+      if (shouldTrackInferenceJob(data)) setActiveJobId(data.job_id ?? null)
     },
   })
 }
@@ -96,16 +100,24 @@ export function useGatePreview() {
 
 export function useRunInferenceBatch() {
   const inv = useInvalidateOnSuccess()
+  const qc = useQueryClient()
   return useMutation({
     mutationFn: ({ count }: { count?: number } = {}) => postRunInferenceBatch(count ?? 300),
-    onSuccess: inv,
+    onSuccess: () => {
+      inv()
+      void qc.invalidateQueries({ queryKey: ['batch-state'] })
+    },
   })
 }
 
 export function useRunMnnBatch() {
   const inv = useInvalidateOnSuccess()
+  const qc = useQueryClient()
   return useMutation({
     mutationFn: ({ count }: { count?: number } = {}) => postRunMnnBatch(count ?? 300),
-    onSuccess: inv,
+    onSuccess: () => {
+      inv()
+      void qc.invalidateQueries({ queryKey: ['batch-state'] })
+    },
   })
 }

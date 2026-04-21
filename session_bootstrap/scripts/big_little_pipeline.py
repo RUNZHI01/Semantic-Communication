@@ -60,6 +60,24 @@ def configure_logging() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 
+def emit_demo_progress(*, completed_count: int, expected_count: int, input_path: str = "", output_path: str = "") -> None:
+    print(
+        json.dumps(
+            {
+                "openamp_demo_progress": {
+                    "delta": 1,
+                    "completed_count": completed_count,
+                    "expected_count": expected_count,
+                    "input_path": input_path,
+                    "output_path": output_path,
+                }
+            },
+            ensure_ascii=False,
+        ),
+        flush=True,
+    )
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -509,6 +527,7 @@ def postprocessor_worker(
     little_cores: list[int],
     allow_missing_affinity: bool,
     backend: str,
+    expected_count: int,
     output_queue,
     stats_queue,
 ) -> None:
@@ -530,6 +549,12 @@ def postprocessor_worker(
             save_samples_ms.append((save_t1 - save_t0) * 1000.0)
             saved_count += 1
             last_output_path = str(save_path)
+            emit_demo_progress(
+                completed_count=saved_count,
+                expected_count=expected_count,
+                input_path=str(item.get("input_file") or ""),
+                output_path=last_output_path,
+            )
         result.update(
             {
                 "output_count": saved_count,
@@ -687,6 +712,12 @@ def run_serial(args: argparse.Namespace) -> dict[str, Any]:
         output = mock_infer(noisy, args.mock_infer_ms)
         run_t1 = time.perf_counter()
         save_reconstruction(output, reconstructions_dir / f"{base_name}_recon")
+        emit_demo_progress(
+            completed_count=processed_count + 1,
+            expected_count=len(input_files),
+            input_path=str(input_path),
+            output_path=str((reconstructions_dir / f"{base_name}_recon").with_suffix(".png" if Image is not None else ".npy")),
+        )
         save_t1 = time.perf_counter()
         load_samples_ms.append((load_t1 - load_t0) * 1000.0)
         awgn_samples_ms.append((load_t2 - load_t1) * 1000.0)
@@ -865,6 +896,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
                     "little_cores": little_cores,
                     "allow_missing_affinity": args.allow_missing_affinity,
                     "backend": args.backend,
+                    "expected_count": len(input_files),
                     "output_queue": output_queue,
                     "stats_queue": stats_queue,
                 },
@@ -917,6 +949,7 @@ def run_pipeline(args: argparse.Namespace) -> dict[str, Any]:
                     "little_cores": little_cores,
                     "allow_missing_affinity": args.allow_missing_affinity,
                     "backend": args.backend,
+                    "expected_count": len(input_files),
                     "output_queue": output_queue,
                     "stats_queue": stats_queue,
                 },

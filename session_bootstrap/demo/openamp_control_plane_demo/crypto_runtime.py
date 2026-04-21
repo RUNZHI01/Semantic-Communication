@@ -42,7 +42,9 @@ REMOTE_ACTIVATE_KEYS = ("MLKEM_REMOTE_ACTIVATE",)
 REMOTE_CONDA_SH_KEYS = ("MLKEM_REMOTE_CONDA_SH",)
 REMOTE_CONDA_ENV_KEYS = ("MLKEM_REMOTE_CONDA_ENV",)
 REMOTE_LD_LIBRARY_KEYS = ("MLKEM_REMOTE_LD_LIBRARY_PATH",)
+REMOTE_OQS_INSTALL_KEYS = ("MLKEM_REMOTE_OQS_INSTALL_PATH",)
 REMOTE_TONGSUO_BRIDGE_KEYS = ("MLKEM_REMOTE_TONGSUO_KEM_BRIDGE",)
+REMOTE_TONGSUO_SIG_BRIDGE_KEYS = ("MLKEM_REMOTE_TONGSUO_SIG_BRIDGE",)
 REMOTE_PRELUDE_KEYS = ("MLKEM_REMOTE_PRELUDE", "MLKEM_REMOTE_EXTRA_ENV")
 REMOTE_PYTHON_KEYS = ("MLKEM_REMOTE_PYTHON",)
 REMOTE_ARTIFACT_KEYS = ("REMOTE_CURRENT_ARTIFACT",)
@@ -51,11 +53,20 @@ REMOTE_TVM_ENABLE_KEYS = ("MLKEM_ENABLE_TVM", "MLKEM_REMOTE_ENABLE_TVM")
 REMOTE_PORT_KEYS = ("MLKEM_PORT", "MLKEM_SERVER_PORT", "MLKEM_DATA_PORT", "MLKEM_TCP_PORT")
 STATUS_PORT_KEYS = ("MLKEM_STATUS_PORT", "MLKEM_REMOTE_STATUS_PORT")
 SUITE_KEYS = ("MLKEM_CIPHER_SUITE", "MLKEM_SUITE")
+TRANSPORT_MODE_KEYS = ("MLKEM_TRANSPORT_MODE", "MLKEM_DATA_TRANSPORT", "MLKEM_TRANSPORT")
 REMOTE_OUTPUT_DIR_KEYS = ("MLKEM_OUTPUT_DIR",)
 REMOTE_LOG_PATH_KEYS = ("MLKEM_REMOTE_LOG_PATH",)
 REMOTE_SNR_KEYS = ("MLKEM_SNR", "REMOTE_SNR_CURRENT")
 
 LOCAL_PYTHON_KEYS = ("COCKPIT_PYTHON", "PYTHON")
+AUTH_COMMON_KEYS = ("MLKEM_AUTH_ENABLED", "MLKEM_AUTH_SERVER_ID", "MLKEM_AUTH_SIG_POLICY")
+LOCAL_AUTH_CLIENT_KEYS = ("MLKEM_AUTH_PEER_SM2_PUB", "MLKEM_AUTH_PEER_MLDSA_PUB")
+REMOTE_AUTH_SERVER_KEYS = (
+    "MLKEM_AUTH_SERVER_SM2_KEY",
+    "MLKEM_AUTH_SERVER_SM2_PUB",
+    "MLKEM_AUTH_SERVER_MLDSA_KEY",
+    "MLKEM_AUTH_SERVER_MLDSA_PUB",
+)
 
 _LOCAL_CRYPTO_CLIENT_CAP_CACHE: dict[Path, dict[str, bool]] = {}
 _LOCAL_CRYPTO_SERVER_CAP_CACHE: dict[Path, dict[str, bool]] = {}
@@ -98,6 +109,14 @@ def parse_bool_config(raw_value: str, default: bool) -> bool:
     if value in {"0", "false", "no", "off"}:
         return False
     return default
+
+
+def local_crypto_transport_mode(env_values: Mapping[str, str] | None) -> str:
+    raw_value = first_config_value(env_values, keys=TRANSPORT_MODE_KEYS, default="tcp")
+    normalized = str(raw_value or "").strip().lower()
+    if normalized in {"usrp", "ota", "wireless"}:
+        return "usrp"
+    return "tcp"
 
 
 def _resolve_existing_path(raw_path: str, *, base_dir: Path | None = None) -> Path | None:
@@ -234,12 +253,71 @@ def resolve_local_crypto_client(
     *,
     extra_roots: Sequence[Path | str] = (),
 ) -> tuple[Path | None, list[Path]]:
+    explicit_locator = False
+    for mapping in _sources(env_values):
+        for key in (*LOCAL_CLIENT_SCRIPT_KEYS, *LOCAL_REPO_ROOT_KEYS, *LOCAL_SCRIPT_ROOT_KEYS):
+            if str(mapping.get(key, "")).strip():
+                explicit_locator = True
+                break
+        if explicit_locator:
+            break
+
+    runtime_root, _ = resolve_local_mlkem_runtime_root(env_values, extra_roots=extra_roots)
+    prioritized_roots: tuple[Path | str, ...] = (
+        ((runtime_root,) + tuple(extra_roots)) if runtime_root is not None else tuple(extra_roots)
+    )
+    if explicit_locator:
+        return resolve_local_asset(
+            "scripts/tcp_client.py",
+            env_values=env_values,
+            explicit_path_keys=LOCAL_CLIENT_SCRIPT_KEYS,
+            explicit_root_keys=(*LOCAL_REPO_ROOT_KEYS, *LOCAL_SCRIPT_ROOT_KEYS),
+            extra_roots=prioritized_roots,
+        )
+
+    searched: list[Path] = []
+    seen: set[Path] = set()
+    candidates: list[Path] = []
+
+    for root in (
+        PROJECT_ROOT,
+        Path.cwd(),
+        runtime_root,
+        *tuple(extra_roots),
+    ):
+        if root is None:
+            continue
+        candidate = _resolve_existing_path(str(Path(root) / "scripts" / "tcp_client.py"))
+        _append_unique(searched, seen, candidate)
+        if candidate is not None:
+            candidates.append(candidate.resolve())
+
+    if candidates:
+        project_root_resolved = PROJECT_ROOT.resolve()
+
+        def _score(candidate: Path) -> tuple[int, int, int, int, int]:
+            capabilities = inspect_local_crypto_client_capabilities(candidate)
+            try:
+                candidate_root = candidate.parents[1].resolve()
+            except OSError:
+                candidate_root = candidate.parents[1]
+            return (
+                1 if capabilities.get("supports_daemon") else 0,
+                1 if capabilities.get("supports_batch_summary") else 0,
+                1 if capabilities.get("supports_expect_result") else 0,
+                1 if capabilities.get("supports_output") else 0,
+                1 if candidate_root == project_root_resolved else 0,
+            )
+
+        best = max(candidates, key=_score)
+        return best, searched
+
     return resolve_local_asset(
         "scripts/tcp_client.py",
         env_values=env_values,
         explicit_path_keys=LOCAL_CLIENT_SCRIPT_KEYS,
         explicit_root_keys=(*LOCAL_REPO_ROOT_KEYS, *LOCAL_SCRIPT_ROOT_KEYS),
-        extra_roots=extra_roots,
+        extra_roots=prioritized_roots,
     )
 
 
@@ -248,12 +326,16 @@ def resolve_local_crypto_server(
     *,
     extra_roots: Sequence[Path | str] = (),
 ) -> tuple[Path | None, list[Path]]:
+    runtime_root, _ = resolve_local_mlkem_runtime_root(env_values, extra_roots=extra_roots)
+    prioritized_roots: tuple[Path | str, ...] = (
+        ((runtime_root,) + tuple(extra_roots)) if runtime_root is not None else tuple(extra_roots)
+    )
     return resolve_local_asset(
         "scripts/tcp_server.py",
         env_values=env_values,
         explicit_path_keys=LOCAL_SERVER_SCRIPT_KEYS,
         explicit_root_keys=(*LOCAL_REPO_ROOT_KEYS, *LOCAL_SCRIPT_ROOT_KEYS),
-        extra_roots=extra_roots,
+        extra_roots=prioritized_roots,
     )
 
 
@@ -373,6 +455,24 @@ def _prepend_env_path(env: dict[str, str], key: str, path_value: str) -> None:
     env[key] = os.pathsep.join([value, *existing]) if existing else value
 
 
+def _config_env_pairs(
+    env_values: Mapping[str, str] | None,
+    keys: Sequence[str],
+) -> list[tuple[str, str]]:
+    pairs: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for mapping in _sources(env_values):
+        for key in keys:
+            if key in seen or key not in mapping:
+                continue
+            value = str(mapping.get(key, "")).strip()
+            if not value:
+                continue
+            pairs.append((key, value))
+            seen.add(key)
+    return pairs
+
+
 def _detect_local_python_command(
     env_values: Mapping[str, str] | None,
     *,
@@ -446,6 +546,9 @@ def _build_local_crypto_env(
             _prepend_env_path(env, "LD_LIBRARY_PATH", segment)
     elif bridge_path is not None:
         _prepend_env_path(env, "LD_LIBRARY_PATH", str(bridge_path.parent))
+
+    for key, value in _config_env_pairs(env_values, (*AUTH_COMMON_KEYS, *LOCAL_AUTH_CLIENT_KEYS)):
+        env[key] = value
 
     return env
 
@@ -548,6 +651,46 @@ def build_local_crypto_daemon_command(
     return command, env
 
 
+def build_local_crypto_daemon_fingerprint(
+    env_values: Mapping[str, str] | None,
+    *,
+    host: str,
+    client_script: Path,
+) -> tuple[str, ...]:
+    """Build a daemon reuse fingerprint tied to the effective runtime config."""
+    runtime_root, _ = resolve_local_mlkem_runtime_root(
+        env_values,
+        extra_roots=(client_script.parent.parent,),
+    )
+    transport_mode = local_crypto_transport_mode(env_values)
+    suite = first_config_value(env_values, keys=SUITE_KEYS, default=DEFAULT_CIPHER_SUITE)
+    crypto_port = parse_int_config(
+        first_config_value(env_values, keys=REMOTE_PORT_KEYS),
+        DEFAULT_CRYPTO_PORT,
+    )
+    try:
+        resolved_client = str(client_script.resolve())
+    except OSError:
+        resolved_client = str(client_script)
+    try:
+        resolved_runtime_root = str(runtime_root.resolve()) if runtime_root is not None else ""
+    except OSError:
+        resolved_runtime_root = str(runtime_root) if runtime_root is not None else ""
+    auth_parts = tuple(
+        f"{key}={value}"
+        for key, value in _config_env_pairs(env_values, (*AUTH_COMMON_KEYS, *LOCAL_AUTH_CLIENT_KEYS))
+    )
+    return (
+        transport_mode,
+        str(host).strip(),
+        str(crypto_port),
+        str(suite).strip().upper(),
+        resolved_client,
+        resolved_runtime_root,
+        *auth_parts,
+    )
+
+
 class MlkemSessionManager:
     """管理持久化的 tcp_client.py --daemon 子进程
 
@@ -573,6 +716,11 @@ class MlkemSessionManager:
         self._env_values = env_values
         self._host = host
         self._client_script = client_script
+        self._config_fingerprint = build_local_crypto_daemon_fingerprint(
+            env_values,
+            host=host,
+            client_script=client_script,
+        )
         self._startup_timeout = startup_timeout
         self._io_timeout = io_timeout
         self._lock = threading.Lock()
@@ -584,6 +732,19 @@ class MlkemSessionManager:
     @property
     def is_alive(self) -> bool:
         return self._alive and self._proc is not None and self._proc.poll() is None
+
+    def matches_config(
+        self,
+        env_values: Mapping[str, str] | None,
+        *,
+        host: str,
+        client_script: Path,
+    ) -> bool:
+        return self._config_fingerprint == build_local_crypto_daemon_fingerprint(
+            env_values,
+            host=host,
+            client_script=client_script,
+        )
 
     def ensure_alive(self) -> None:
         """启动 daemon（如未运行）"""
@@ -719,6 +880,9 @@ class MlkemSessionManager:
             "timed out",
             "timeout",
             "daemon link lost",
+            "帧过大",
+            "frame too large",
+            "invalid json",
         )
         return any(token in text for token in retry_tokens)
 
@@ -901,19 +1065,35 @@ def build_remote_crypto_server_command(
                 f'eval "$(conda shell.bash hook)" >/dev/null 2>&1 && conda activate {shlex_quote(conda_env)}; fi'
             )
 
+    remote_oqs_install = first_config_value(env_values, keys=REMOTE_OQS_INSTALL_KEYS)
+    if remote_oqs_install:
+        command_steps.append(f"export OQS_INSTALL_PATH={shlex_quote(remote_oqs_install)}")
+
     ld_library_path = first_config_value(env_values, keys=REMOTE_LD_LIBRARY_KEYS)
     if ld_library_path:
         command_steps.append(
             f"export LD_LIBRARY_PATH={shlex_quote(ld_library_path)}${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}"
+        )
+    elif remote_oqs_install:
+        remote_oqs_lib = f"{remote_oqs_install.rstrip('/')}/lib"
+        command_steps.append(
+            f"export LD_LIBRARY_PATH={shlex_quote(remote_oqs_lib)}${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}"
         )
 
     tongsuo_bridge = first_config_value(env_values, keys=REMOTE_TONGSUO_BRIDGE_KEYS)
     if tongsuo_bridge:
         command_steps.append(f"export TONGSUO_KEM_BRIDGE={shlex_quote(tongsuo_bridge)}")
 
+    tongsuo_sig_bridge = first_config_value(env_values, keys=REMOTE_TONGSUO_SIG_BRIDGE_KEYS)
+    if tongsuo_sig_bridge:
+        command_steps.append(f"export TONGSUO_SIG_BRIDGE={shlex_quote(tongsuo_sig_bridge)}")
+
     remote_prelude = first_config_value(env_values, keys=REMOTE_PRELUDE_KEYS)
     if remote_prelude:
         command_steps.append(remote_prelude)
+
+    for key, value in _config_env_pairs(env_values, (*AUTH_COMMON_KEYS, *REMOTE_AUTH_SERVER_KEYS)):
+        command_steps.append(f"export {key}={shlex_quote(value)}")
 
     server_command = " ".join(shlex_quote(str(arg)) for arg in server_argv)
     command_steps.append(f"nohup {server_command} </dev/null >> {shlex_quote(log_path)} 2>&1 &")

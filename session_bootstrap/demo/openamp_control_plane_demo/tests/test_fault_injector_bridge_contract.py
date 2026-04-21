@@ -231,6 +231,18 @@ class FaultInjectorBridgeContractTest(unittest.TestCase):
         completed = [
             subprocess.CompletedProcess(
                 ["python3", "openamp_remote_hook_proxy.py"],
+                0,
+                stdout=status_response(
+                    guard="JOB_ACTIVE",
+                    last_fault="HEARTBEAT_TIMEOUT",
+                    active_job_id=4200192063,
+                    total_fault_count=1,
+                )
+                + "\n",
+                stderr="",
+            ),
+            subprocess.CompletedProcess(
+                ["python3", "openamp_remote_hook_proxy.py"],
                 2,
                 stdout=safe_stop_response(
                     last_fault="HEARTBEAT_TIMEOUT",

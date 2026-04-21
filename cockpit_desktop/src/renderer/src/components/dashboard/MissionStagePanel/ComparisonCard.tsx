@@ -4,6 +4,7 @@ import { Icons } from '../../icons'
 import { SkeletonCard } from '../../loading'
 import { UseQueryResult } from '@tanstack/react-query'
 import type { SystemStatusResponse } from '../../../api/types'
+import { useAppStore } from '../../../stores/appStore'
 import s from './ComparisonCard.module.css'
 
 const { Text } = Typography
@@ -15,7 +16,13 @@ interface ComparisonCardProps {
 export function ComparisonCard({ system }: ComparisonCardProps) {
   const status = system.data
   const results = status?.recent_results
-  const current = results?.['current']
+  const lastCompletedInference = useAppStore((s) => s.lastCompletedInference)
+  const currentFromStatus = results?.['current']
+  const current = (
+    lastCompletedInference?.variant === 'current'
+    && lastCompletedInference?.execution_mode === 'live'
+    && lastCompletedInference?.status === 'success'
+  ) ? lastCompletedInference : currentFromStatus
   const baseline = results?.['baseline']
 
   if (system.isPending) {

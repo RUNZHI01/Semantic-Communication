@@ -272,6 +272,24 @@ class RunRemoteReconstructionTest(unittest.TestCase):
 
         self.assertEqual(completed, 3)
 
+    def test_count_completed_images_from_runner_log_uses_openamp_demo_progress_json(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            runner_log = Path(temp_dir) / "runner.log"
+            runner_log.write_text(
+                "\n".join(
+                    [
+                        '{"openamp_demo_progress":{"completed_count":1,"expected_count":300}}',
+                        '{"openamp_demo_progress":{"completed_count":4,"expected_count":300}}',
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            completed = inference_runner.count_completed_images_from_runner_log(runner_log)
+
+        self.assertEqual(completed, 4)
+
     def test_build_completion_counts_marks_missing_runner_log_source(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             runner_log = Path(temp_dir) / "runner.log"
@@ -285,6 +303,34 @@ class RunRemoteReconstructionTest(unittest.TestCase):
         self.assertEqual(counts["expected_count"], inference_runner.DEFAULT_MAX_INPUTS)
         self.assertEqual(counts["count_label"], f"0 / {inference_runner.DEFAULT_MAX_INPUTS}")
         self.assertEqual(counts["count_source"], "runner_log.missing")
+
+    def test_build_completion_counts_uses_reconstruction_outputs_when_runner_log_has_no_progress(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+            runner_log = output_dir / "runner.log"
+            runner_log.write_text(
+                "\n".join(
+                    [
+                        "[2026-04-20T10:00:00+0800] openamp wrapper start",
+                        "{\"phase\": \"HEARTBEAT\", \"note\": \"still running\"}",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            reconstructions_dir = output_dir / "reconstructions"
+            reconstructions_dir.mkdir(parents=True, exist_ok=True)
+            for index in range(3):
+                (reconstructions_dir / f"sample_{index:03d}_recon.png").write_bytes(b"demo")
+
+            counts = inference_runner.build_completion_counts(
+                runner_log_path=runner_log,
+                expected_outputs=inference_runner.DEFAULT_MAX_INPUTS,
+            )
+
+        self.assertEqual(counts["completed_count"], 3)
+        self.assertEqual(counts["count_source"], "output_dir.reconstruction_files")
+        self.assertEqual(counts["count_label"], f"3 / {inference_runner.DEFAULT_MAX_INPUTS}")
 
     def test_running_snapshot_reports_real_completed_count_from_runner_log(self) -> None:
         with tempfile.TemporaryDirectory(dir=PROJECT_ROOT) as temp_dir:
@@ -337,6 +383,58 @@ class RunRemoteReconstructionTest(unittest.TestCase):
         self.assertEqual(snapshot["progress"]["count_label"], f"2 / {inference_runner.DEFAULT_MAX_INPUTS}")
         self.assertEqual(snapshot["progress"]["count_source"], "runner_log.sample_latency_lines")
         self.assertEqual(snapshot["progress"]["percent"], 1)
+
+    def test_running_snapshot_reports_completed_count_from_reconstruction_outputs(self) -> None:
+        with tempfile.TemporaryDirectory(dir=PROJECT_ROOT) as temp_dir:
+            output_dir = Path(temp_dir)
+            runner_log_path = output_dir / "runner.log"
+            runner_log_path.write_text(
+                "\n".join(
+                    [
+                        "[2026-04-20T11:00:00+0800] openamp wrapper start",
+                        '{"phase":"HEARTBEAT","payload":{"elapsed_ms":1200}}',
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            reconstructions_dir = output_dir / "reconstructions"
+            reconstructions_dir.mkdir(parents=True, exist_ok=True)
+            for index in range(4):
+                (reconstructions_dir / f"sample_{index:03d}_recon.png").write_bytes(b"demo")
+            trace_path = output_dir / "control_trace.jsonl"
+            trace_path.write_text(
+                json.dumps(
+                    {
+                        "at": "2026-04-20T11:00:01+0800",
+                        "phase": "JOB_ACK",
+                        "payload": {"job_id": 4242, "decision": "ALLOW", "guard_state_name": "JOB_ACTIVE"},
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            job = LiveRemoteReconstructionJob.__new__(LiveRemoteReconstructionJob)
+            job.job_id = "4242"
+            job.variant = "current"
+            job._timeout_sec = 10.0
+            job._expected_outputs = inference_runner.DEFAULT_MAX_INPUTS
+            job._output_dir = output_dir
+            job._trace_path = trace_path
+            job._summary_path = output_dir / "wrapper_summary.json"
+            job._runner_log_path = runner_log_path
+            job._lock = Lock()
+            job._final_snapshot = None
+            job._process = None
+
+            snapshot = job.snapshot()
+
+        self.assertEqual(snapshot["request_state"], "running")
+        self.assertEqual(snapshot["progress"]["completed_count"], 4)
+        self.assertEqual(snapshot["progress"]["count_source"], "output_dir.reconstruction_files")
+        self.assertEqual(snapshot["progress"]["count_label"], f"4 / {inference_runner.DEFAULT_MAX_INPUTS}")
 
     def test_missing_required_config_returns_operator_friendly_config_error(self) -> None:
         access = make_access(
@@ -1945,16 +2043,143 @@ class RunRemoteReconstructionTest(unittest.TestCase):
 
             snapshot = job._final_snapshot
             assert snapshot is not None
+
+    def test_wait_for_completion_repairs_missing_job_done_via_hook(self) -> None:
+        with tempfile.TemporaryDirectory(dir=PROJECT_ROOT) as temp_dir:
+            output_dir = Path(temp_dir)
+            trace_path = output_dir / "control_trace.jsonl"
+            runner_log_path = output_dir / "runner.log"
+
+            trace_events = [
+                {
+                    "at": "2026-04-21T13:45:22+0800",
+                    "phase": "STATUS_REQ",
+                    "payload": {"job_id": 501},
+                    "hook_result": {
+                        "returncode": 0,
+                        "stdout": "",
+                        "stderr": "",
+                        "response": {
+                            "phase": "STATUS_REQ",
+                            "transport_status": "status_resp_received",
+                            "protocol_semantics": "implemented",
+                        },
+                        "timed_out": False,
+                        "timeout_sec": 30.0,
+                        "duration_ms": 10,
+                    },
+                },
+                {
+                    "at": "2026-04-21T13:45:24+0800",
+                    "phase": "JOB_REQ",
+                    "payload": {"job_id": 501, "expected_sha256": "a" * 64},
+                    "hook_result": {
+                        "returncode": 0,
+                        "stdout": "",
+                        "stderr": "",
+                        "response": {
+                            "phase": "JOB_REQ",
+                            "decision": "ALLOW",
+                            "fault_name": "NONE",
+                            "guard_state_name": "JOB_ACTIVE",
+                            "transport_status": "job_ack_received",
+                            "protocol_semantics": "implemented",
+                        },
+                        "timed_out": False,
+                        "timeout_sec": 30.0,
+                        "duration_ms": 10,
+                    },
+                },
+                {
+                    "at": "2026-04-21T13:45:24+0800",
+                    "phase": "JOB_ACK",
+                    "payload": {
+                        "job_id": 501,
+                        "decision": "ALLOW",
+                        "fault_name": "NONE",
+                        "guard_state_name": "JOB_ACTIVE",
+                        "transport_status": "job_ack_received",
+                        "protocol_semantics": "implemented",
+                    },
+                },
+            ]
+            trace_path.write_text(
+                "\n".join(json.dumps(event, ensure_ascii=False) for event in trace_events) + "\n",
+                encoding="utf-8",
+            )
+            runner_log_path.write_text(
+                json.dumps(
+                    {
+                        "load_ms": 10.0,
+                        "vm_init_ms": 20.0,
+                        "run_median_ms": 30.0,
+                        "processed_count": 1,
+                        "input_count": 1,
+                        "artifact_sha256": "b" * 64,
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            job = LiveRemoteReconstructionJob.__new__(LiveRemoteReconstructionJob)
+            job.job_id = "501"
+            job.variant = "current"
+            job._timeout_sec = 10.0
+            job._output_dir = output_dir
+            job._trace_path = trace_path
+            job._summary_path = output_dir / "wrapper_summary.json"
+            job._runner_log_path = runner_log_path
+            job._lock = Lock()
+            job._final_snapshot = None
+            job._expected_outputs = 1
+            job._control_transport = inference_runner.CONTROL_TRANSPORT_HOOK
+            job._hook_cmd = "python3 fake_hook.py"
+            job._hook_timeout_sec = 30.0
+            job._control_preflight = None
+            job._admission = {"mode": "legacy_sha"}
+
+            fake_process = Mock()
+            fake_process.communicate.return_value = ("", "")
+            fake_process.returncode = 0
+            job._process = fake_process
+
+            repair_response = {
+                "phase": "JOB_DONE",
+                "transport_status": "job_done_status_received",
+                "protocol_semantics": "implemented",
+                "note": "Received STATUS_RESP after JOB_DONE and firmware reported the active job as cleared.",
+                "guard_state_name": "READY",
+            }
+
+            with patch(
+                "inference_runner.subprocess.run",
+                return_value=Mock(returncode=0, stdout=json.dumps(repair_response, ensure_ascii=False), stderr=""),
+            ) as hook_run:
+                job._wait_for_completion()
+
+            snapshot = job._final_snapshot
+            assert snapshot is not None
             self.assertEqual(snapshot["status"], "success")
             self.assertEqual(snapshot["execution_mode"], "live")
-            self.assertEqual(snapshot["control_transport"], "none")
-            self.assertFalse(snapshot["control_handshake_complete"])
-            self.assertIn("SSH 兼容模式", snapshot["message"])
-            self.assertIn("signed-manifest", snapshot["message"])
-            self.assertEqual(snapshot["diagnostics"]["control_preflight"]["status"], "timeout")
-            self.assertEqual(snapshot["progress"]["label"], "真实在线执行（控制面降级）")
-            self.assertEqual(snapshot["progress"]["stages"][0]["detail"], "已跳过 RPMsg STATUS_REQ/RESP；当前以 SSH 兼容模式保持 demo 可用。")
-            self.assertEqual(snapshot["progress"]["event_log"][0], "[10:00:00] STATUS_REQ -> skipped (compat mode)")
+            phases = [
+                json.loads(line)["phase"]
+                for line in trace_path.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            self.assertEqual(phases[-1], "JOB_DONE")
+            self.assertEqual(phases.count("JOB_DONE"), 1)
+            hook_run.assert_called_once()
+            self.assertEqual(snapshot["status"], "success")
+            self.assertEqual(snapshot["execution_mode"], "live")
+            self.assertEqual(snapshot["control_transport"], "hook")
+            self.assertTrue(snapshot["control_handshake_complete"])
+            self.assertEqual(snapshot["message"], "OpenAMP 控制面已完成作业下发、板端执行与结果回收。")
+            self.assertEqual(snapshot["diagnostics"]["control_hook"]["transport_status"], "job_done_status_received")
+            self.assertEqual(snapshot["progress"]["label"], "真实在线推进")
+            self.assertEqual(snapshot["progress"]["stages"][0]["detail"], "STATUS_RESP: status_resp_received / fault=UNKNOWN")
+            self.assertIn("STATUS_REQ -> guard=", snapshot["progress"]["event_log"][0])
 
 
 if __name__ == "__main__":

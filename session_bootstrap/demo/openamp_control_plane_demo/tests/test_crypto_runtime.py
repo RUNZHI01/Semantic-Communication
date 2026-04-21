@@ -32,6 +32,13 @@ class CryptoRuntimeTest(unittest.TestCase):
         secure_channel_mod.SecureChannel = object
         session_mod = types.ModuleType("mlkem_link.session")
         session_mod.SessionRole = object
+        auth_mod = types.ModuleType("mlkem_link.auth")
+        auth_mod.IdentityConfig = object
+        auth_mod.SigPolicy = SimpleNamespace(
+            DUAL_REQUIRED=SimpleNamespace(value="DUAL_REQUIRED"),
+            SM2_ONLY=SimpleNamespace(value="SM2_ONLY"),
+            MLDSA_ONLY=SimpleNamespace(value="MLDSA_ONLY"),
+        )
 
         injected_modules = {
             "mlkem_link": package,
@@ -39,6 +46,7 @@ class CryptoRuntimeTest(unittest.TestCase):
             "mlkem_link.kem": kem_mod,
             "mlkem_link.secure_channel": secure_channel_mod,
             "mlkem_link.session": session_mod,
+            "mlkem_link.auth": auth_mod,
         }
         previous = {name: sys.modules.get(name) for name in injected_modules}
         try:
@@ -75,6 +83,71 @@ class CryptoRuntimeTest(unittest.TestCase):
         self.assertEqual(resolved, client_script.resolve())
         self.assertIn(client_script.resolve(), searched)
 
+    def test_resolve_local_crypto_client_prefers_runtime_repo_over_legacy_current_repo_script(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            current_repo = temp_root / "Semantic-Communication"
+            sibling_repo = temp_root / "ICCompetition2026"
+            (current_repo / "scripts").mkdir(parents=True)
+            (current_repo / "session_bootstrap").mkdir(parents=True)
+            (sibling_repo / "scripts").mkdir(parents=True)
+            (sibling_repo / "mlkem_link").mkdir(parents=True)
+
+            legacy_client = current_repo / "scripts" / "tcp_client.py"
+            legacy_client.write_text("# legacy client without auth\n", encoding="utf-8")
+            runtime_client = sibling_repo / "scripts" / "tcp_client.py"
+            runtime_client.write_text(
+                "#!/usr/bin/env python3\n"
+                "parser.add_argument('--daemon')\n"
+                "parser.add_argument('--count')\n"
+                "parser.add_argument('--json-summary')\n",
+                encoding="utf-8",
+            )
+
+            with (
+                patch.object(crypto_runtime, "PROJECT_ROOT", current_repo),
+                patch.object(crypto_runtime.Path, "cwd", return_value=current_repo),
+            ):
+                resolved, searched = crypto_runtime.resolve_local_crypto_client({})
+
+        self.assertEqual(resolved, runtime_client.resolve())
+        self.assertIn(runtime_client.resolve(), searched)
+
+    def test_resolve_local_crypto_client_prefers_current_repo_modern_client_over_sibling_legacy_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            current_repo = temp_root / "Semantic-Communication"
+            sibling_repo = temp_root / "ICCompetition2026"
+            (current_repo / "scripts").mkdir(parents=True)
+            (current_repo / "session_bootstrap").mkdir(parents=True)
+            (sibling_repo / "scripts").mkdir(parents=True)
+            (sibling_repo / "mlkem_link").mkdir(parents=True)
+
+            modern_client = current_repo / "scripts" / "tcp_client.py"
+            modern_client.write_text(
+                "#!/usr/bin/env python3\n"
+                "parser.add_argument('--daemon')\n"
+                "parser.add_argument('--count')\n"
+                "parser.add_argument('--json-summary')\n"
+                "parser.add_argument('--expect-result')\n",
+                encoding="utf-8",
+            )
+            legacy_runtime_client = sibling_repo / "scripts" / "tcp_client.py"
+            legacy_runtime_client.write_text(
+                "#!/usr/bin/env python3\n"
+                "parser.add_argument('--input')\n",
+                encoding="utf-8",
+            )
+
+            with (
+                patch.object(crypto_runtime, "PROJECT_ROOT", current_repo),
+                patch.object(crypto_runtime.Path, "cwd", return_value=current_repo),
+            ):
+                resolved, searched = crypto_runtime.resolve_local_crypto_client({})
+
+        self.assertEqual(resolved, modern_client.resolve())
+        self.assertIn(modern_client.resolve(), searched)
+
     def test_build_remote_crypto_server_command_uses_env_overrides(self) -> None:
         env_values = {
             "MLKEM_REMOTE_PROJECT_ROOT": "/opt/semantic",
@@ -105,6 +178,32 @@ class CryptoRuntimeTest(unittest.TestCase):
         self.assertIn("--suite SM4_GCM", command)
         self.assertIn("nohup", command)
         self.assertIn("export EXTRA_FLAG=1", command)
+
+    def test_build_remote_crypto_server_command_exports_auth_env(self) -> None:
+        command = crypto_runtime.build_remote_crypto_server_command(
+            {
+                "MLKEM_REMOTE_SERVER_SCRIPT": "/home/user/tcp_server.py",
+                "MLKEM_AUTH_ENABLED": "1",
+                "MLKEM_AUTH_SERVER_ID": "phytium-board",
+                "MLKEM_AUTH_SIG_POLICY": "DUAL_REQUIRED",
+                "MLKEM_AUTH_SERVER_SM2_KEY": "/home/user/keys/server_sm2_identity.key",
+                "MLKEM_AUTH_SERVER_SM2_PUB": "/home/user/keys/server_sm2_identity.pub",
+                "MLKEM_AUTH_SERVER_MLDSA_KEY": "/home/user/keys/server_mldsa_identity.key",
+                "MLKEM_AUTH_SERVER_MLDSA_PUB": "/home/user/keys/server_mldsa_identity.pub",
+                "MLKEM_REMOTE_TONGSUO_SIG_BRIDGE": "/home/user/libtongsuo_sig_bridge.so",
+                "MLKEM_REMOTE_OQS_INSTALL_PATH": "/home/user/liboqs-dist",
+            },
+            local_server_script=Path("/tmp/local/scripts/tcp_server.py"),
+        )
+
+        self.assertIn("export MLKEM_AUTH_ENABLED=1", command)
+        self.assertIn("export MLKEM_AUTH_SERVER_ID=phytium-board", command)
+        self.assertIn("export MLKEM_AUTH_SIG_POLICY=DUAL_REQUIRED", command)
+        self.assertIn("export MLKEM_AUTH_SERVER_SM2_KEY=/home/user/keys/server_sm2_identity.key", command)
+        self.assertIn("export MLKEM_AUTH_SERVER_MLDSA_PUB=/home/user/keys/server_mldsa_identity.pub", command)
+        self.assertIn("export TONGSUO_SIG_BRIDGE=/home/user/libtongsuo_sig_bridge.so", command)
+        self.assertIn("export OQS_INSTALL_PATH=/home/user/liboqs-dist", command)
+        self.assertIn("export LD_LIBRARY_PATH=/home/user/liboqs-dist/lib", command)
 
     def test_build_remote_crypto_server_command_omits_status_port_when_server_script_lacks_support(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -371,6 +470,46 @@ class CryptoRuntimeTest(unittest.TestCase):
         self.assertEqual(send_attempts["count"], 2)
         self.assertEqual(restart_count["count"], 1)
         self.assertEqual(manager._images_sent, 1)
+
+    def test_build_local_crypto_daemon_fingerprint_changes_with_suite_and_port(self) -> None:
+        client = Path("/tmp/tcp_client.py")
+        fp_a = crypto_runtime.build_local_crypto_daemon_fingerprint(
+            {"MLKEM_CIPHER_SUITE": "SM4_GCM", "MLKEM_PORT": "9527"},
+            host="127.0.0.1",
+            client_script=client,
+        )
+        fp_b = crypto_runtime.build_local_crypto_daemon_fingerprint(
+            {"MLKEM_CIPHER_SUITE": "AES_256_GCM", "MLKEM_PORT": "9527"},
+            host="127.0.0.1",
+            client_script=client,
+        )
+        fp_c = crypto_runtime.build_local_crypto_daemon_fingerprint(
+            {"MLKEM_CIPHER_SUITE": "SM4_GCM", "MLKEM_PORT": "9530"},
+            host="127.0.0.1",
+            client_script=client,
+        )
+
+        self.assertNotEqual(fp_a, fp_b)
+        self.assertNotEqual(fp_a, fp_c)
+
+    def test_build_local_crypto_daemon_fingerprint_tolerates_missing_runtime_root(self) -> None:
+        with patch.object(
+            crypto_runtime,
+            "resolve_local_mlkem_runtime_root",
+            return_value=(None, []),
+        ):
+            fingerprint = crypto_runtime.build_local_crypto_daemon_fingerprint(
+                {"MLKEM_CIPHER_SUITE": "SM4_GCM"},
+                host="127.0.0.1",
+                client_script=Path("/tmp/tcp_client.py"),
+            )
+
+        self.assertIn("SM4_GCM", fingerprint)
+
+    def test_mlkem_session_manager_retryable_send_error_matches_frame_too_large(self) -> None:
+        self.assertTrue(crypto_runtime.MlkemSessionManager._is_retryable_send_error("frame too large"))
+        self.assertTrue(crypto_runtime.MlkemSessionManager._is_retryable_send_error("帧过大"))
+        self.assertTrue(crypto_runtime.MlkemSessionManager._is_retryable_send_error("invalid json"))
 
 
 if __name__ == "__main__":

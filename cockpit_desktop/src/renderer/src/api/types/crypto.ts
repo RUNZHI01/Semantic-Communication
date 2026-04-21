@@ -52,6 +52,12 @@ export type CryptoStatusResponse = {
   cipher_suite: string
   /** Channel state */
   channel_state: CryptoChannelState
+  /** Whether ML-DSA / SM2 authentication is enabled for the channel */
+  auth_enabled?: boolean
+  /** Active authentication signature policy */
+  sig_policy?: string
+  /** Claimed remote server identity used by authenticated handshake */
+  server_id?: string
   /** Last handshake duration in ms */
   handshake_ms?: number
   /** Last encrypt+send duration in ms */
@@ -102,6 +108,16 @@ export type CryptoStatusResponse = {
   control_recover_attempted?: boolean
   /** Soft recover note for operator context */
   control_recover_note?: string
+  /** Control-plane probe source label for the current summary */
+  status_source?: string
+  /** Human-readable control-plane status note */
+  status_note?: string
+  /** ISO timestamp for the last cached control-plane snapshot */
+  control_status_observed_at?: string | null
+  /** Age in seconds for the last cached control-plane snapshot */
+  control_status_age_sec?: number | null
+  /** Whether the cached control-plane snapshot is stale */
+  control_status_stale?: boolean
   /** Batch inference benchmark results (populated after batch completes) */
   batch_benchmark?: BatchBenchmark | null
   /** Batch inference run status: 'running' | 'done' | null */

@@ -3,6 +3,7 @@ import type { SystemStatusResponse } from '../../../api/types'
 import type { BatchStateResponse } from '../../../api/types/crypto'
 import { Icons } from '../../icons'
 import { CountUp } from '../../shared/CountUp'
+import { useAppStore } from '../../../stores/appStore'
 import s from './HeroMetrics.module.css'
 
 function Sparkline({ data, color }: { data: number[], color: string }) {
@@ -12,6 +13,14 @@ function Sparkline({ data, color }: { data: number[], color: string }) {
   const range = max - min || 1;
   const width = 48;
   const height = 16;
+
+  if (data.length === 1) {
+    return (
+      <svg width={width} height={height} className={s.sparkline} viewBox={`0 -2 ${width} ${height + 4}`}>
+        <circle cx={width / 2} cy={height / 2} r={2.5} fill={color} />
+      </svg>
+    );
+  }
   
   const points = data.map((d, i) => {
     const x = (i / (data.length - 1)) * width;
@@ -35,7 +44,13 @@ interface HeroMetricsProps {
 export function HeroMetrics({ system, inferenceProgress, batchState }: HeroMetricsProps) {
   const status = system.data
   const results = status?.recent_results
-  const current = results?.['current']
+  const lastCompletedInference = useAppStore((s) => s.lastCompletedInference)
+  const currentFromStatus = results?.['current']
+  const current = (
+    lastCompletedInference?.variant === 'current'
+    && lastCompletedInference?.execution_mode === 'live'
+    && lastCompletedInference?.status === 'success'
+  ) ? lastCompletedInference : currentFromStatus
   const baseline = results?.['baseline']
   const live = status?.live
   const boardOnline = live?.board_online ?? false

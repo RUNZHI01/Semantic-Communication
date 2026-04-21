@@ -49,6 +49,7 @@ from crypto_runtime import (
     build_remote_crypto_server_command,
     first_config_value,
     inspect_local_crypto_client_capabilities,
+    local_crypto_transport_mode,
     parse_int_config,
     resolve_local_crypto_client,
     resolve_local_crypto_server,
@@ -92,6 +93,12 @@ DEFAULT_MNN_BATCH_ENV_FILE = REPO_ROOT / "session_bootstrap" / "config" / "mnn_b
 REMOTE_MNN_RECONSTRUCTION_SCRIPT = REPO_ROOT / "session_bootstrap" / "scripts" / "run_remote_mnn_reconstruction.sh"
 MLKEM_MODERN_INPUT_BYTES = 1 * 32 * 32 * 32 * 4
 MLKEM_LEGACY_INPUT_BYTES = 1 * 3 * 64 * 64 * 4
+MLKEM_AUTH_ENABLED_KEYS = ("MLKEM_AUTH_ENABLED",)
+MLKEM_AUTH_SERVER_ID_KEYS = ("MLKEM_AUTH_SERVER_ID",)
+MLKEM_AUTH_SIG_POLICY_KEYS = ("MLKEM_AUTH_SIG_POLICY",)
+DEFAULT_MLKEM_AUTH_SERVER_ID = "phytium-board"
+DEFAULT_MLKEM_AUTH_SIG_POLICY = "DUAL_REQUIRED"
+SUPPORTED_MLKEM_AUTH_SIG_POLICIES = ("DUAL_REQUIRED", "SM2_ONLY", "MLDSA_ONLY")
 BOARD_TELEMETRY_TTL_SEC = 5.0
 BOARD_POSITION_API_TTL_SEC = 5.0
 AIRCRAFT_POSITION_UPSTREAM_DISCOVERY_TTL_SEC = 15.0
@@ -205,7 +212,9 @@ DEFAULT_DEMO_AIRCRAFT_POSITION_LOCAL_OVERRIDES: dict[str, str] = {
     "AIRCRAFT_POSITION_SOURCE_NOTE": "当前演示使用上位机本机公网出口 IP 调用百度服务端定位。",
     "AIRCRAFT_POSITION_PRODUCER_ID": "baidu-ip-location-bridge",
     "AIRCRAFT_POSITION_TRANSPORT": "baidu_http_get",
-    "AIRCRAFT_POSITION_INTERVAL_SEC": "5.0",
+    # Keep the public-IP positioning bridge conservative by default so the demo
+    # does not burn through upstream quota while the UI polls cached samples.
+    "AIRCRAFT_POSITION_INTERVAL_SEC": "30.0",
     "AIRCRAFT_POSITION_TIMEOUT_SEC": "3.0",
     "AIRCRAFT_POSITION_LATITUDE_PATH": "content.point.y",
     "AIRCRAFT_POSITION_LONGITUDE_PATH": "content.point.x",
@@ -1925,6 +1934,10 @@ def _parse_json_stdout_payload(raw: str) -> dict[str, Any]:
     raise ValueError("runner produced no JSON payload")
 
 
+def _json_safe_copy(value: Any) -> Any:
+    return json.loads(json.dumps(value, ensure_ascii=False, default=str))
+
+
 def _metric_from_summary_stat(raw: dict[str, Any] | None) -> dict[str, Any] | None:
     if not isinstance(raw, dict):
         return None
@@ -2158,15 +2171,77 @@ class DashboardState:
             name="local-aircraft-position-bridge",
         ).start()
 
+    def _detach_mlkem_session_manager(self) -> MlkemSessionManager | None:
+        with self._lock:
+            mgr = self._mlkem_session_mgr
+            self._mlkem_session_mgr = None
+        return mgr
+
+    def _close_mlkem_session_manager(self, mgr: MlkemSessionManager | None = None) -> bool:
+        if mgr is None:
+            mgr = self._detach_mlkem_session_manager()
+        if mgr is None:
+            return False
+        try:
+            mgr.close()
+        except Exception:
+            pass
+        return True
+
+    def reset_crypto_channel(self, *, restart_remote_server: bool = True) -> dict[str, Any]:
+        with self._lock:
+            board_access = self._board_access
+            crypto_enabled = self._crypto_enabled
+            self._crypto_status_cache = None
+            self._crypto_status_cache_ts = 0.0
+            mgr_to_close = self._mlkem_session_mgr
+            self._mlkem_session_mgr = None
+
+        session_closed = self._close_mlkem_session_manager(mgr_to_close)
+        remote_restart_scheduled = False
+        if (
+            restart_remote_server
+            and crypto_enabled
+            and board_access
+            and board_access.connection_ready
+            and local_crypto_transport_mode(board_access.build_env()) == "tcp"
+        ):
+            threading.Thread(
+                target=self._ensure_board_tcp_server,
+                args=(board_access,),
+                daemon=True,
+                name="tcp-server-reset",
+            ).start()
+            remote_restart_scheduled = True
+
+        message = "安全信道本地会话已重置，状态缓存已清空。"
+        if remote_restart_scheduled:
+            message += " 板端 tcp_server 将重新探测并按需拉起。"
+        return {
+            "status": "ok",
+            "message": message,
+            "session_closed": session_closed,
+            "remote_restart_scheduled": remote_restart_scheduled,
+        }
+
     def set_board_access(self, payload: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
             fallback = self._board_access
         config = build_board_access_config(payload, fallback=fallback)
+        auth_overrides = self._board_access_auth_overrides_from_payload(payload)
+        if auth_overrides:
+            config = config.with_env_overrides(auth_overrides)
+        mgr_to_close: MlkemSessionManager | None = None
         with self._lock:
             self._board_access = config
             resolved_current_sha = self._resolve_current_trusted_sha(config)
             if resolved_current_sha:
                 self._trusted_current_sha = resolved_current_sha
+            self._crypto_status_cache = None
+            self._crypto_status_cache_ts = 0.0
+            if self._mlkem_session_mgr is not None:
+                mgr_to_close = self._mlkem_session_mgr
+                self._mlkem_session_mgr = None
             self._board_telemetry_cache = None
             self._board_telemetry_cache_ts = 0.0
             self._board_telemetry_refreshing = False
@@ -2176,6 +2251,8 @@ class DashboardState:
             self._aircraft_position_upstream_probe_cache = None
             self._aircraft_position_upstream_probe_cache_ts = 0.0
             crypto_enabled = self._crypto_enabled
+        if mgr_to_close is not None:
+            self._close_mlkem_session_manager(mgr_to_close)
         # 密码录入后立即在后台尝试启动板端 tcp_server，无需等待 toggle ON 或首次推理
         if config.connection_ready:
             threading.Thread(
@@ -2390,22 +2467,38 @@ class DashboardState:
     ) -> MlkemSessionManager | None:
         """获取或创建持久化 ML-KEM 会话管理器
 
-        如果 host 发生变化会关闭旧管理器。
+        如果 host / port / suite / client script / transport 发生变化会关闭旧管理器。
         找不到 tcp_client.py 时返回 None（回退到子进程模式）。
         """
-        with self._lock:
-            if self._mlkem_session_mgr is not None:
-                if self._mlkem_session_mgr._host == board_access.host:
-                    return self._mlkem_session_mgr
-                else:
-                    self._mlkem_session_mgr.close()
-                    self._mlkem_session_mgr = None
+        if local_crypto_transport_mode(env_values) != "tcp":
+            self._close_mlkem_session_manager()
+            return None
 
         tcp_client, _ = resolve_local_crypto_client(env_values)
         if tcp_client is None:
+            self._close_mlkem_session_manager()
             return None
         if not inspect_local_crypto_client_capabilities(tcp_client).get("supports_daemon"):
+            self._close_mlkem_session_manager()
             return None
+
+        mgr_to_close: MlkemSessionManager | None = None
+        with self._lock:
+            existing = self._mlkem_session_mgr
+            if existing is not None:
+                match_fn = getattr(existing, "matches_config", None)
+                if callable(match_fn):
+                    try:
+                        if bool(match_fn(env_values, host=board_access.host, client_script=tcp_client)):
+                            return existing
+                    except Exception:
+                        pass
+                elif getattr(existing, "_host", None) == board_access.host:
+                    return existing
+                self._mlkem_session_mgr = None
+                mgr_to_close = existing
+
+        self._close_mlkem_session_manager(mgr_to_close)
 
         mgr = MlkemSessionManager(
             env_values, host=board_access.host, client_script=tcp_client)
@@ -2972,9 +3065,72 @@ class DashboardState:
             "note": "上位机守护进程已通过 0x60/0x62 服务协议接管动态调度。",
         }
 
+    @staticmethod
+    def _auth_enabled_for_env(env_values: dict[str, str]) -> bool:
+        raw_value = first_config_value(env_values, keys=MLKEM_AUTH_ENABLED_KEYS, default="")
+        return str(raw_value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+    @staticmethod
+    def _coerce_payload_bool(value: Any) -> bool:
+        if isinstance(value, bool):
+            return value
+        return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+    def _board_access_auth_overrides_from_payload(self, payload: dict[str, Any]) -> dict[str, str]:
+        overrides: dict[str, str] = {}
+        auth_enabled_present = "auth_enabled" in payload
+        auth_enabled = self._coerce_payload_bool(payload.get("auth_enabled")) if auth_enabled_present else False
+
+        raw_policy = str(payload.get("auth_sig_policy") or "").strip().upper()
+        if raw_policy:
+            if raw_policy not in SUPPORTED_MLKEM_AUTH_SIG_POLICIES:
+                supported = ", ".join(SUPPORTED_MLKEM_AUTH_SIG_POLICIES)
+                raise ValueError(f"unsupported auth_sig_policy: {raw_policy}; expected one of {supported}")
+            overrides["MLKEM_AUTH_SIG_POLICY"] = raw_policy
+
+        raw_server_id = str(payload.get("auth_server_id") or "").strip()
+        if raw_server_id:
+            overrides["MLKEM_AUTH_SERVER_ID"] = raw_server_id
+
+        if auth_enabled_present:
+            overrides["MLKEM_AUTH_ENABLED"] = "1" if auth_enabled else "0"
+            if auth_enabled:
+                overrides.setdefault("MLKEM_AUTH_SIG_POLICY", DEFAULT_MLKEM_AUTH_SIG_POLICY)
+                overrides.setdefault("MLKEM_AUTH_SERVER_ID", DEFAULT_MLKEM_AUTH_SERVER_ID)
+
+        return overrides
+
+    @staticmethod
+    def _auth_sig_policy_for_env(env_values: dict[str, str]) -> str:
+        raw_value = first_config_value(
+            env_values,
+            keys=MLKEM_AUTH_SIG_POLICY_KEYS,
+            default=DEFAULT_MLKEM_AUTH_SIG_POLICY,
+        )
+        return str(raw_value or DEFAULT_MLKEM_AUTH_SIG_POLICY).strip().upper() or DEFAULT_MLKEM_AUTH_SIG_POLICY
+
+    def _auth_status_from_env(self, env_values: dict[str, str]) -> dict[str, Any]:
+        if not self._auth_enabled_for_env(env_values):
+            return {
+                "auth_enabled": False,
+                "sig_policy": "",
+                "server_id": "",
+            }
+        server_id = first_config_value(
+            env_values,
+            keys=MLKEM_AUTH_SERVER_ID_KEYS,
+            default=DEFAULT_MLKEM_AUTH_SERVER_ID,
+        )
+        return {
+            "auth_enabled": True,
+            "sig_policy": self._auth_sig_policy_for_env(env_values),
+            "server_id": str(server_id or DEFAULT_MLKEM_AUTH_SERVER_ID).strip() or DEFAULT_MLKEM_AUTH_SERVER_ID,
+        }
+
     def _get_crypto_status_core(self) -> dict[str, Any]:
         """Internal: crypto status without degradation overlay."""
         control_summary = self._control_plane_summary()
+        auth_summary = self._auth_status_from_env(self._board_access.build_env())
         _disabled = {
             "channel_state": "disabled",
             "kem_backend": "-",
@@ -2991,6 +3147,7 @@ class DashboardState:
             "error": None,
             "enabled": False,
             "board_configured": False,
+            **auth_summary,
             **control_summary,
         }
 
@@ -3063,6 +3220,9 @@ class DashboardState:
             data["batch_status"] = batch.get("status") if batch else None
             data["batch_completed"] = batch.get("completed", 0) if batch else 0
             data["batch_total"] = batch.get("total", 0) if batch else 0
+            data.setdefault("auth_enabled", auth_summary["auth_enabled"])
+            data.setdefault("sig_policy", auth_summary["sig_policy"])
+            data.setdefault("server_id", auth_summary["server_id"])
             return data
         except (URLError, OSError, json.JSONDecodeError, TimeoutError) as exc:
             # 保留上次正常值，只更新 error
@@ -3221,7 +3381,12 @@ class DashboardState:
         error_output = proc.stderr.strip() or proc.stdout.strip() or "unknown error"
         raise RuntimeError(f"failed to write remote file {remote_path}: {error_output}")
 
-    def _aircraft_position_upstream_probe_snapshot(self, *, board_access: BoardAccessConfig) -> dict[str, Any]:
+    def _aircraft_position_upstream_probe_snapshot(
+        self,
+        *,
+        board_access: BoardAccessConfig,
+        defer_refresh: bool = False,
+    ) -> dict[str, Any]:
         runtime = _aircraft_position_bridge_runtime(
             board_access,
             bind_host=self._bind_host,
@@ -3252,6 +3417,10 @@ class DashboardState:
                 else None
             )
             cached_ts = self._aircraft_position_upstream_probe_cache_ts
+        if defer_refresh and cached_probe is not None:
+            cached_probe["stale"] = True
+            cached_probe["note"] = "TVM live 推理进行中，暂缓板端定位上游探测，继续展示最近一次缓存结果。"
+            return cached_probe
         if cached_probe is not None and (time.monotonic() - cached_ts) <= AIRCRAFT_POSITION_UPSTREAM_DISCOVERY_TTL_SEC:
             return cached_probe
         try:
@@ -3561,13 +3730,18 @@ class DashboardState:
                         timeout=8,
                     )
                     running_cmdline = pgrep_proc.stdout or ""
-                    if running_cmdline and expected_tvm_python_raw not in running_cmdline:
+                    raw_match = bool(running_cmdline and expected_tvm_python_raw in running_cmdline)
+                    normalized_match = bool(
+                        running_cmdline
+                        and expected_tvm_python
+                        and expected_tvm_python in running_cmdline
+                    )
+                    if running_cmdline and not raw_match and not normalized_match:
                         restart_reason = (
                             "检测到板端 tcp_server 的 --tvm-python 与当前期望运行时不一致"
                         )
-                    elif (
-                        running_cmdline
-                        and expected_tvm_python
+                    elif raw_match and (
+                        expected_tvm_python
                         and expected_tvm_python != expected_tvm_python_raw
                         and "--tvm-python env " in running_cmdline
                     ):
@@ -3834,7 +4008,13 @@ class DashboardState:
                 pass
             return {"status": "error", "message": str(exc)}
 
-    def _board_telemetry_snapshot(self, *, board_access: BoardAccessConfig, board_online: bool) -> dict[str, Any]:
+    def _board_telemetry_snapshot(
+        self,
+        *,
+        board_access: BoardAccessConfig,
+        board_online: bool,
+        defer_refresh: bool = False,
+    ) -> dict[str, Any]:
         with self._lock:
             cached = (
                 json.loads(json.dumps(self._board_telemetry_cache, ensure_ascii=False))
@@ -3845,6 +4025,11 @@ class DashboardState:
             refreshing = self._board_telemetry_refreshing
 
         age_sec = time.monotonic() - cached_ts if cached_ts > 0 else None
+        if defer_refresh and cached is not None:
+            cached["status"] = "stale"
+            cached["stale"] = True
+            cached["note"] = "TVM live 推理进行中，暂缓板端资源占用刷新，继续展示最近一次缓存值。"
+            return cached
         if cached is not None and age_sec is not None and age_sec <= BOARD_TELEMETRY_TTL_SEC:
             return cached
 
@@ -3957,7 +4142,12 @@ class DashboardState:
             name="board-telemetry-refresh",
         ).start()
 
-    def _board_position_api_snapshot(self, board_access: BoardAccessConfig) -> dict[str, Any]:
+    def _board_position_api_snapshot(
+        self,
+        board_access: BoardAccessConfig,
+        *,
+        defer_refresh: bool = False,
+    ) -> dict[str, Any]:
         with self._lock:
             cached = (
                 json.loads(json.dumps(self._board_position_api_cache, ensure_ascii=False))
@@ -3968,6 +4158,10 @@ class DashboardState:
             refreshing = self._board_position_api_refreshing
 
         age_sec = time.monotonic() - cached_ts if cached_ts > 0 else None
+        if defer_refresh and cached is not None:
+            cached["stale"] = True
+            cached["note"] = "TVM live 推理进行中，暂缓板端定位 API 刷新，继续展示最近一次缓存值。"
+            return cached
         if cached is not None and age_sec is not None and age_sec <= BOARD_POSITION_API_TTL_SEC:
             return cached
 
@@ -4027,12 +4221,23 @@ class DashboardState:
             last_fault = self._last_fault_result
             aircraft_position = self._aircraft_position
             local_aircraft_bridge_state = json.loads(json.dumps(self._local_aircraft_bridge_state, ensure_ascii=False))
+            batch_state = dict(self._batch_state) if self._batch_state is not None else None
 
         snapshot = build_snapshot(live_probe=live_probe, aircraft_position=aircraft_position)
         aircraft_position_payload = snapshot["aircraft_position"]
-        aircraft_upstream_probe = self._aircraft_position_upstream_probe_snapshot(board_access=board_access)
+        event_spine = self._event_spine.summary(limit=1)
+        active_inference = self._active_inference_summary()
+        batch_status = str((batch_state or {}).get("status") or "").strip().lower()
+        defer_board_refresh = bool(active_inference.get("running")) or batch_status in {"launching", "running"}
+        aircraft_upstream_probe = self._aircraft_position_upstream_probe_snapshot(
+            board_access=board_access,
+            defer_refresh=defer_board_refresh,
+        )
         discovered_upstream_url = str(aircraft_upstream_probe.get("selected_url") or "").strip()
-        board_position_api = self._board_position_api_snapshot(board_access)
+        board_position_api = self._board_position_api_snapshot(
+            board_access,
+            defer_refresh=defer_board_refresh,
+        )
         aircraft_bridge = _aircraft_position_bridge_status(
             board_access,
             aircraft_position_payload=aircraft_position_payload,
@@ -4047,8 +4252,6 @@ class DashboardState:
             "bridge_runtime": aircraft_bridge,
             "position_api_runtime": board_position_api,
         }
-        event_spine = self._event_spine.summary(limit=1)
-        active_inference = self._active_inference_summary()
         current_board_access = self._live_board_access_for_variant(board_access, variant="current")
         baseline_board_access = self._live_board_access_for_variant(board_access, variant="baseline")
         admission = describe_demo_admission(current_board_access, variant="current")
@@ -4093,6 +4296,7 @@ class DashboardState:
         live_telemetry = self._board_telemetry_snapshot(
             board_access=board_access,
             board_online=board_online,
+            defer_refresh=defer_board_refresh,
         )
         safety_panel = build_safety_panel(
             guard_state=str(guard_state or "UNKNOWN"),
@@ -4454,6 +4658,15 @@ class DashboardState:
             "stages": [],
         }
 
+    @staticmethod
+    def _extract_board_runner_summary(summary: Any) -> dict[str, Any]:
+        if not isinstance(summary, dict):
+            return {}
+        pipeline_summary = summary.get("pipeline")
+        if isinstance(pipeline_summary, dict) and pipeline_summary:
+            return pipeline_summary
+        return summary
+
     def refresh_live_probe(self) -> dict[str, Any]:
         with self._lock:
             board_access = self._board_access
@@ -4563,38 +4776,59 @@ class DashboardState:
         if live_attempt.get("status") == "success":
             summary = live_attempt["runner_summary"]
             wrapper_summary = live_attempt.get("wrapper_summary", {})
-            load_ms = round(float(summary.get("load_ms") or 0.0), 3)
-            vm_init_ms = round(float(summary.get("vm_init_ms") or 0.0), 3)
-            board_payload_ms_raw = summary.get("run_median_ms")
+            board_summary = self._extract_board_runner_summary(summary)
+            pipeline_summary_used = board_summary is not summary
+            load_ms = round(float(board_summary.get("load_ms") or 0.0), 3)
+            vm_init_ms = round(float(board_summary.get("vm_init_ms") or 0.0), 3)
+            board_endpoint_ms_raw = board_summary.get("ms_per_image")
+            board_payload_ms_raw = board_endpoint_ms_raw
             if board_payload_ms_raw is None:
-                board_payload_ms_raw = summary.get("run_mean_ms")
-            live_stages = [
-                {
-                    "label": "板端装载",
-                    "value_ms": load_ms,
-                    "emphasis": "host",
-                },
-                {
-                    "label": "板端初始化",
-                    "value_ms": vm_init_ms,
-                    "emphasis": "board",
-                },
-            ]
+                board_payload_ms_raw = board_summary.get("run_median_ms")
+            if board_payload_ms_raw is None:
+                board_payload_ms_raw = board_summary.get("run_mean_ms")
+            live_stages = []
             board_payload_ms = (
                 round(float(board_payload_ms_raw), 3)
                 if board_payload_ms_raw is not None
                 else None
             )
-            if board_payload_ms is not None:
+            if pipeline_summary_used and board_endpoint_ms_raw is not None:
                 live_stages.append(
                     {
-                        "label": "板端推理",
+                        "label": "板端重建（流水线）",
                         "value_ms": board_payload_ms,
                         "emphasis": "total",
                     }
                 )
+            else:
+                live_stages.extend(
+                    [
+                        {
+                            "label": "板端装载",
+                            "value_ms": load_ms,
+                            "emphasis": "host",
+                        },
+                        {
+                            "label": "板端初始化",
+                            "value_ms": vm_init_ms,
+                            "emphasis": "board",
+                        },
+                    ]
+                )
+                if board_payload_ms is not None:
+                    live_stages.append(
+                        {
+                            "label": "板端推理",
+                            "value_ms": board_payload_ms,
+                            "emphasis": "total",
+                        }
+                    )
             live_total_ms = wrapper_summary.get("per_image_ms")
-            if live_total_ms is not None:
+            if live_total_ms is None:
+                live_total_ms = board_endpoint_ms_raw
+            if pipeline_summary_used and live_total_ms is not None:
+                live_total_ms = round(float(live_total_ms), 3)
+            elif live_total_ms is not None:
                 live_total_ms = round(load_ms + vm_init_ms + float(live_total_ms), 3)
             else:
                 live_total_ms = round(sum(item["value_ms"] for item in live_stages), 3)
@@ -4639,7 +4873,7 @@ class DashboardState:
                         "total_ms": round(float(live_total_ms), 3),
                         "stages": live_stages,
                     },
-                    "artifact_sha": summary.get("artifact_sha256") or payload["artifact_sha"],
+                    "artifact_sha": board_summary.get("artifact_sha256") or summary.get("artifact_sha256") or payload["artifact_sha"],
                     "runner_summary": summary,
                     "wrapper_summary": wrapper_summary,
                     "live_attempt": live_attempt_payload,
@@ -4672,7 +4906,7 @@ class DashboardState:
         return payload
 
     def _update_last_inference_summary(self, payload: dict[str, Any], variant: str) -> None:
-        cached_payload = json.loads(json.dumps(payload, ensure_ascii=False))
+        cached_payload = _json_safe_copy(payload)
         timings = payload.get("timings") if isinstance(payload.get("timings"), dict) else {}
         sample = payload.get("sample") if isinstance(payload.get("sample"), dict) else {}
         self._last_inference_result = {
@@ -4771,7 +5005,7 @@ class DashboardState:
                     "request_state": "completed",
                     "status_category": status_category,
                     "message": message,
-                    "diagnostics": diagnostics,
+                    "diagnostics": _json_safe_copy(diagnostics),
                 },
             }
         )
@@ -7061,6 +7295,12 @@ class DemoRequestHandler(SimpleHTTPRequestHandler):
                 return
             if parsed.path == "/api/crypto-test":
                 payload = self.server.app_state.run_crypto_test()
+                self.respond_json(HTTPStatus.OK, payload)
+                return
+            if parsed.path == "/api/crypto-reset":
+                payload = self.server.app_state.reset_crypto_channel(
+                    restart_remote_server=bool(body.get("restart_remote_server", True)),
+                )
                 self.respond_json(HTTPStatus.OK, payload)
                 return
             if parsed.path == "/api/session/board-access":

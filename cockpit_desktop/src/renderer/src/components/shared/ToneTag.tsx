@@ -79,6 +79,7 @@ export function ToneTag({
             display: 'inline-block',
             width: 6,
             height: 6,
+            borderRadius: '50%',
             marginRight: 5,
             background: mapped?.color ?? T.textLabel,
           }}

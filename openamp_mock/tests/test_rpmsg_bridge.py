@@ -20,6 +20,29 @@ BRIDGE_SPEC.loader.exec_module(bridge)
 
 
 class OpenAmpRpmsgBridgeTest(unittest.TestCase):
+    def test_open_transport_fd_falls_back_when_nonblocking_open_is_rejected(self) -> None:
+        rpmsg_dev = Path("/dev/rpmsg0")
+
+        with (
+            mock.patch.object(
+                bridge.os,
+                "open",
+                side_effect=[OSError(errno.EINVAL, "invalid open flags"), 9],
+            ) as open_mock,
+            mock.patch.object(bridge.os, "set_blocking") as set_blocking_mock,
+        ):
+            fd = bridge.open_transport_fd(rpmsg_dev)
+
+        self.assertEqual(fd, 9)
+        self.assertEqual(
+            open_mock.call_args_list,
+            [
+                mock.call(rpmsg_dev, bridge.os.O_RDWR | bridge.os.O_NONBLOCK),
+                mock.call(rpmsg_dev, bridge.os.O_RDWR),
+            ],
+        )
+        set_blocking_mock.assert_called_once_with(9, False)
+
     def test_write_all_tries_direct_write_before_waiting_for_writable(self) -> None:
         with (
             mock.patch.object(bridge.os, "write", return_value=4) as mock_write,

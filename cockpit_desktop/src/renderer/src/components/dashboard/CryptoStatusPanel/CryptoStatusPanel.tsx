@@ -1,7 +1,7 @@
 import { useCryptoStatus } from '../../../hooks/useCryptoStatus'
-import { postCryptoToggle, postCryptoTest } from '../../../api/client'
+import { postCryptoReset, postCryptoTest, postCryptoToggle } from '../../../api/client'
 import s from './CryptoStatusPanel.module.css'
-import { useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 
 const STATE_LABEL: Record<string, { label: string; tone: string }> = {
   idle: { label: '空闲', tone: 'neutral' },
@@ -11,15 +11,49 @@ const STATE_LABEL: Record<string, { label: string; tone: string }> = {
   disabled: { label: '未启用', tone: 'off' },
 }
 
+function controlPlaneDisplay(rawValue: string | undefined): string {
+  const value = String(rawValue || '').trim()
+  const normalized = value.toUpperCase()
+  if (!normalized || normalized === 'UNKNOWN' || normalized === 'NOT_PROBED') {
+    return '未探测'
+  }
+  if (normalized === 'NONE') {
+    return 'NONE'
+  }
+  return value
+}
+
+type MetricTone = 'default' | 'mono' | 'muted' | 'ok' | 'fail'
+
+type MetricItem = {
+  label: string
+  value: ReactNode
+  tone?: MetricTone
+  wide?: boolean
+}
+
 export function CryptoStatusPanel() {
   const { data, isLoading, isError, refetch } = useCryptoStatus()
   const [testing, setTesting] = useState(false)
+  const [resetting, setResetting] = useState(false)
   const [testResult, setTestResult] = useState<{ ok: boolean; msg: string } | null>(null)
 
   const enabled = data?.enabled ?? false
   const boardConfigured = data?.board_configured ?? false
 
+  useEffect(() => {
+    setTestResult(null)
+  }, [enabled, boardConfigured])
+
+  function errorMessage(error: unknown): string {
+    if (error instanceof Error) {
+      return error.message
+    }
+    return String(error)
+  }
+
   async function handleToggle() {
+    setTestResult(null)
     try {
       await postCryptoToggle(!enabled)
       refetch()
@@ -37,13 +71,27 @@ export function CryptoStatusPanel() {
           msg: `握手 ${r.handshake_ms?.toFixed(1) ?? '?'}ms | 总耗时 ${r.wall_ms?.toFixed(0) ?? '?'}ms`,
         })
       } else {
-        setTestResult({ ok: false, msg: r.message ?? 'unknown error' })
+        setTestResult({ ok: false, msg: r.message?.trim() || 'unknown error' })
       }
       refetch()
     } catch (e) {
-      setTestResult({ ok: false, msg: String(e) })
+      setTestResult({ ok: false, msg: errorMessage(e) })
     } finally {
       setTesting(false)
+    }
+  }
+
+  async function handleReset() {
+    setResetting(true)
+    setTestResult(null)
+    try {
+      const r = await postCryptoReset(true)
+      setTestResult({ ok: true, msg: r.message?.trim() || '安全信道已重置' })
+      refetch()
+    } catch (e) {
+      setTestResult({ ok: false, msg: errorMessage(e) })
+    } finally {
+      setResetting(false)
     }
   }
 
@@ -144,6 +192,156 @@ export function CryptoStatusPanel() {
 
   // 5) Toggle ON — normal display
   const st = STATE_LABEL[data.channel_state] ?? { label: data.channel_state, tone: 'neutral' }
+  const controlSnapshotStale = Boolean(data.control_status_stale) || data.status_source === 'stale_control'
+  const settingsItems: MetricItem[] = [
+    { label: 'KEM 后端', value: data.kem_backend, tone: 'mono' },
+    { label: '密码套件', value: data.cipher_suite, tone: 'mono' },
+  ]
+
+  if (data.auth_enabled != null) {
+    settingsItems.push({
+      label: '认证面',
+      value: data.auth_enabled ? `已启用 / ${data.sig_policy || 'UNKNOWN'}` : '未启用',
+      tone: 'mono',
+    })
+  }
+
+  if (data.auth_enabled && data.server_id) {
+    settingsItems.push({
+      label: '服务端标识',
+      value: data.server_id,
+      tone: 'mono',
+    })
+  }
+
+  const runtimeItems: MetricItem[] = [
+    { label: '通道状态', value: st.label },
+  ]
+
+  if (data.handshake_ms != null) {
+    runtimeItems.push({ label: '握手耗时', value: `${data.handshake_ms.toFixed(1)} ms`, tone: 'mono' })
+  }
+  if (data.encrypt_ms != null) {
+    runtimeItems.push({ label: '加密发送', value: `${data.encrypt_ms.toFixed(1)} ms`, tone: 'mono' })
+  }
+  if (data.decrypt_ms != null) {
+    runtimeItems.push({ label: '解密接收', value: `${data.decrypt_ms.toFixed(1)} ms`, tone: 'mono' })
+  }
+  if (data.inference_ms != null) {
+    runtimeItems.push({ label: 'TVM 推理', value: `${data.inference_ms.toFixed(1)} ms`, tone: 'mono' })
+  }
+  if (data.bytes_sent != null || data.bytes_received != null) {
+    runtimeItems.push({
+      label: '加密流量',
+      value: `↑${data.bytes_sent ?? 0}B / ↓${data.bytes_received ?? 0}B`,
+      tone: 'mono',
+    })
+  }
+  if (data.control_guard_state || data.control_last_fault_code) {
+    runtimeItems.push({
+      label: controlSnapshotStale ? '控制面(缓存)' : '控制面',
+      value: `${controlPlaneDisplay(data.control_guard_state)} / ${controlPlaneDisplay(data.control_last_fault_code)}`,
+      tone: 'mono',
+    })
+  }
+  if (data.control_heartbeat_ok != null || data.control_total_fault_count != null) {
+    runtimeItems.push({
+      label: 'HB / 故障',
+      value: `${data.control_heartbeat_ok ?? 0} / ${data.control_total_fault_count ?? 0}`,
+      tone: 'mono',
+    })
+  }
+  if (
+    data.control_job_req_count != null
+    || data.control_job_admit_count != null
+    || data.control_job_reject_count != null
+  ) {
+    runtimeItems.push({
+      label: 'JOB',
+      value: `REQ=${data.control_job_req_count ?? 0} ALLOW=${data.control_job_admit_count ?? 0} DENY=${data.control_job_reject_count ?? 0}`,
+      tone: 'mono',
+      wide: true,
+    })
+  }
+  if (
+    data.control_heartbeat_event_count != null
+    || data.control_heartbeat_lost_count != null
+    || data.control_safe_stop_triggered_count != null
+    || data.control_safe_stop_cleared_count != null
+  ) {
+    runtimeItems.push({
+      label: '事件',
+      value: `HB=${data.control_heartbeat_event_count ?? 0}(lost=${data.control_heartbeat_lost_count ?? 0}) STOP=${data.control_safe_stop_triggered_count ?? 0}→${data.control_safe_stop_cleared_count ?? 0}`,
+      tone: 'mono',
+      wide: true,
+    })
+  }
+  if (data.last_sha256_match != null) {
+    runtimeItems.push({
+      label: 'SHA256',
+      value: data.last_sha256_match ? '✓ 匹配' : '✗ 不匹配',
+      tone: data.last_sha256_match ? 'ok' : 'fail',
+    })
+  }
+  if (data.session_count != null && data.session_count > 0) {
+    runtimeItems.push({ label: '累计会话', value: data.session_count, tone: 'mono' })
+  }
+  if (data.batch_status === 'running') {
+    runtimeItems.push({
+      label: '批量推理',
+      value: `${data.batch_completed ?? 0} / ${data.batch_total ?? '?'} 运行中...`,
+      tone: 'mono',
+      wide: true,
+    })
+  }
+
+  const infoItems: MetricItem[] = []
+  if (data.control_recover_attempted && data.control_recover_note) {
+    infoItems.push({
+      label: '恢复说明',
+      value: data.control_recover_note,
+      tone: 'muted',
+      wide: true,
+    })
+  }
+  if (data.status_note) {
+    const infoLabel = data.status_source === 'probe_error'
+      ? '控制面探测'
+      : data.status_source === 'stale_control'
+        ? '控制面缓存'
+        : '控制面说明'
+    const infoTone = data.status_source === 'probe_error' ? 'fail' : 'muted'
+    infoItems.push({
+      label: infoLabel,
+      value: data.status_note,
+      tone: infoTone,
+      wide: true,
+    })
+  }
+  if (testResult) {
+    infoItems.push({
+      label: testResult.ok ? '本次操作' : '测试结果',
+      value: testResult.msg,
+      tone: testResult.ok ? 'ok' : 'fail',
+      wide: true,
+    })
+  }
+  if (data.error) {
+    infoItems.push({
+      label: '错误信息',
+      value: data.error,
+      tone: 'fail',
+      wide: true,
+    })
+  }
+
+  function metricValueClass(tone: MetricTone = 'default'): string {
+    if (tone === 'mono') return `${s.metricValue} ${s.metricMono}`
+    if (tone === 'muted') return `${s.metricValue} ${s.metricMuted}`
+    if (tone === 'ok') return `${s.metricValue} ${s.metricOk}`
+    if (tone === 'fail') return `${s.metricValue} ${s.metricFail}`
+    return s.metricValue
+  }
 
   return (
     <div className={s.card}>
@@ -160,95 +358,34 @@ export function CryptoStatusPanel() {
         </button>
       </div>
 
-      <div className={s.rowGrid}>
-        <span className={s.label}>通道状态</span>
-        <span className={s.value}>{st.label}</span>
+      <div className={s.subSection}>
+        <div className={s.subSectionTitle}>配置项</div>
+        <div className={`${s.metricGrid} ${s.settingsGrid}`}>
+          {settingsItems.map((item) => (
+            <div
+              key={item.label}
+              className={`${s.metricCard}${item.wide ? ` ${s.metricWide}` : ''}`}
+            >
+              <div className={s.metricLabel}>{item.label}</div>
+              <div className={metricValueClass(item.tone)}>{item.value}</div>
+            </div>
+          ))}
+        </div>
+      </div>
 
-        <span className={s.label}>KEM 后端</span>
-        <span className={s.mono}>{data.kem_backend}</span>
-
-        <span className={s.label}>密码套件</span>
-        <span className={s.mono}>{data.cipher_suite}</span>
-
-        {data.handshake_ms != null && <>
-          <span className={s.label}>握手耗时</span>
-          <span className={s.mono}>{data.handshake_ms.toFixed(1)} ms</span>
-        </>}
-        {data.encrypt_ms != null && <>
-          <span className={s.label}>加密发送</span>
-          <span className={s.mono}>{data.encrypt_ms.toFixed(1)} ms</span>
-        </>}
-        {data.decrypt_ms != null && <>
-          <span className={s.label}>解密接收</span>
-          <span className={s.mono}>{data.decrypt_ms.toFixed(1)} ms</span>
-        </>}
-        {data.inference_ms != null && <>
-          <span className={s.label}>TVM 推理</span>
-          <span className={s.mono}>{data.inference_ms.toFixed(1)} ms</span>
-        </>}
-
-        {(data.bytes_sent != null || data.bytes_received != null) && <>
-          <span className={s.label}>加密流量</span>
-          <span className={s.mono}>↑{data.bytes_sent ?? 0}B / ↓{data.bytes_received ?? 0}B</span>
-        </>}
-
-        {(data.control_guard_state || data.control_last_fault_code) && <>
-          <span className={s.label}>控制面</span>
-          <span className={s.mono}>
-            {data.control_guard_state ?? 'UNKNOWN'} / {data.control_last_fault_code ?? 'UNKNOWN'}
-          </span>
-        </>}
-
-        {(data.control_heartbeat_ok != null || data.control_total_fault_count != null) && <>
-          <span className={s.label}>HB / 故障</span>
-          <span className={s.mono}>{data.control_heartbeat_ok ?? 0} / {data.control_total_fault_count ?? 0}</span>
-        </>}
-
-        {(data.control_job_req_count != null
-          || data.control_job_admit_count != null
-          || data.control_job_reject_count != null) && <>
-          <span className={s.label}>JOB</span>
-          <span className={s.mono}>
-            REQ={data.control_job_req_count ?? 0} ALLOW={data.control_job_admit_count ?? 0} DENY={data.control_job_reject_count ?? 0}
-          </span>
-        </>}
-
-        {(data.control_heartbeat_event_count != null
-          || data.control_heartbeat_lost_count != null
-          || data.control_safe_stop_triggered_count != null
-          || data.control_safe_stop_cleared_count != null) && <>
-          <span className={s.label}>事件</span>
-          <span className={s.mono}>
-            HB={data.control_heartbeat_event_count ?? 0}(lost={data.control_heartbeat_lost_count ?? 0}) STOP={data.control_safe_stop_triggered_count ?? 0}→{data.control_safe_stop_cleared_count ?? 0}
-          </span>
-        </>}
-
-        {data.control_recover_attempted && data.control_recover_note && <>
-          <span className={s.label}>恢复</span>
-          <span className={s.muted}>{data.control_recover_note}</span>
-        </>}
-
-        {data.last_sha256_match != null && <>
-          <span className={s.label}>SHA256</span>
-          <span className={data.last_sha256_match ? s.ok : s.fail}>
-            {data.last_sha256_match ? '✓ 匹配' : '✗ 不匹配'}
-          </span>
-        </>}
-
-        {data.session_count != null && data.session_count > 0 && <>
-          <span className={s.label}>累计会话</span>
-          <span className={s.mono}>{data.session_count}</span>
-        </>}
-
-        {data.error && <>
-          <span className={s.label}>错误</span>
-          <span className={s.muted}>{data.error}</span>
-        </>}
-
-        {data.batch_status === 'running' && <>
-          <span className={s.label}>批量推理</span>
-          <span className={s.mono}>{data.batch_completed ?? 0} / {data.batch_total ?? '?'} 运行中...</span>
-        </>}
+      <div className={s.subSection}>
+        <div className={s.subSectionTitle}>运行状态</div>
+        <div className={s.metricGrid}>
+          {runtimeItems.map((item) => (
+            <div
+              key={item.label}
+              className={`${s.metricCard}${item.wide ? ` ${s.metricWide}` : ''}`}
+            >
+              <div className={s.metricLabel}>{item.label}</div>
+              <div className={metricValueClass(item.tone)}>{item.value}</div>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Batch benchmark results */}
@@ -296,19 +433,40 @@ export function CryptoStatusPanel() {
       })()}
 
       <div className={s.testSection}>
-        <button
-          className={s.testBtn}
-          onClick={handleTest}
-          disabled={testing}
-        >
-          {testing ? <span className={s.spinner} /> : '测试加密通道'}
-        </button>
-        {testResult && (
-          <span className={testResult.ok ? s.ok : s.fail}>
-            {testResult.msg}
-          </span>
-        )}
+        <div className={s.actionRow}>
+          <button
+            className={s.testBtn}
+            onClick={handleTest}
+            disabled={testing || resetting}
+          >
+            {testing ? <span className={s.spinner} /> : '测试加密通道'}
+          </button>
+          <button
+            className={s.secondaryBtn}
+            onClick={handleReset}
+            disabled={testing || resetting}
+          >
+            {resetting ? <span className={s.spinner} /> : '重置安全信道'}
+          </button>
+        </div>
       </div>
+
+      {infoItems.length > 0 && (
+        <div className={s.infoSection}>
+          <div className={s.subSectionTitle}>信息项</div>
+          <div className={s.metricGrid}>
+            {infoItems.map((item) => (
+              <div
+                key={item.label}
+                className={`${s.metricCard} ${s.metricWide}${item.tone === 'fail' ? ` ${s.metricCardFail}` : ''}${item.tone === 'ok' ? ` ${s.metricCardOk}` : ''}`}
+              >
+                <div className={s.metricLabel}>{item.label}</div>
+                <div className={metricValueClass(item.tone)}>{item.value}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

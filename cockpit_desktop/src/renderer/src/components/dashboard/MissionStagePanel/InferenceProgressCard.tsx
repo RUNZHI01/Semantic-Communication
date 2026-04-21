@@ -21,6 +21,12 @@ export function InferenceProgressCard({ activeJobId, inferenceProgress, system }
   const status = system.data
   const lastCompleted = useAppStore((s) => s.lastCompletedInference)
   const setLastCompletedInference = useAppStore((s) => s.setLastCompletedInference)
+  const mergedResults = {
+    ...(status?.recent_results ?? {}),
+    ...(lastCompleted?.variant === 'current' && lastCompleted?.execution_mode === 'live' && lastCompleted?.status === 'success'
+      ? { current: lastCompleted }
+      : {}),
+  }
 
   // Active running inference
   if (activeJobId) {
@@ -62,9 +68,9 @@ export function InferenceProgressCard({ activeJobId, inferenceProgress, system }
               </Space>
             )
           })()}
-        {status?.recent_results && Object.keys(status.recent_results).length > 0 && (
+        {Object.keys(mergedResults).length > 0 && (
           <div className={s.timelineWrapper}>
-            <InferenceTimeline results={status.recent_results as Record<string, any>} />
+            <InferenceTimeline results={mergedResults as Record<string, any>} />
           </div>
         )}
       </PanelCard>
@@ -112,9 +118,9 @@ export function InferenceProgressCard({ activeJobId, inferenceProgress, system }
           </button>
         </Space>
 
-        {status?.recent_results && Object.keys(status.recent_results).length > 0 && (
+        {Object.keys(mergedResults).length > 0 && (
           <div className={s.timelineWrapper}>
-            <InferenceTimeline results={status.recent_results as Record<string, any>} />
+            <InferenceTimeline results={mergedResults as Record<string, any>} />
           </div>
         )}
       </PanelCard>

@@ -302,6 +302,22 @@ def emit_event(
                 "timeout_sec": hook_timeout_sec,
                 "duration_ms": int((time.monotonic() - hook_started) * 1000),
             }
+        except Exception as exc:
+            hook_result = {
+                "returncode": -1,
+                "stdout": "",
+                "stderr": "",
+                "response": {
+                    "phase": phase,
+                    "source": "openamp_control_wrapper",
+                    "transport_status": "hook_error",
+                    "protocol_semantics": "not_verified",
+                    "note": f"{phase} control hook raised {exc.__class__.__name__}: {exc}",
+                },
+                "timed_out": False,
+                "timeout_sec": hook_timeout_sec,
+                "duration_ms": int((time.monotonic() - hook_started) * 1000),
+            }
         else:
             hook_result = {
                 "returncode": result.returncode,

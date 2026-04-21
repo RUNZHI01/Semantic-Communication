@@ -34,6 +34,7 @@ DEFAULT_INFERENCE_ENV_CANDIDATES = (
     "session_bootstrap/config/inference_tvm310_safe.2026-03-10.phytium_pi.env",
 )
 DEMO_PREFERRED_INFERENCE_ENV_CANDIDATES = (
+    "session_bootstrap/config/inference_demo_openamp_mean4_v7.2026-04-20.phytium_pi.env",
     "session_bootstrap/tmp/openamp_3core_handwritten_mean4_v7_payload_cmp_20260406.env",
 )
 VALIDATED_INFERENCE_REPORT_CANDIDATES = (
@@ -169,11 +170,59 @@ def discover_validated_inference_env(
     return None
 
 
+def _missing_required_inference_env_keys(values: dict[str, str]) -> list[str]:
+    missing: list[str] = []
+    for key in INFERENCE_SHARED_REQUIRED_KEYS:
+        if not str(values.get(key, "")).strip():
+            missing.append(key)
+    for variant in ("current", "baseline"):
+        for key in INFERENCE_VARIANT_REQUIRED_KEYS.get(variant, ()):
+            if not str(values.get(key, "")).strip() and key not in missing:
+                missing.append(key)
+    return missing
+
+
+def choose_preloaded_inference_env(
+    report_candidates: tuple[str, ...] = VALIDATED_INFERENCE_REPORT_CANDIDATES,
+    env_candidates: tuple[str, ...] = DEFAULT_INFERENCE_ENV_CANDIDATES,
+) -> Path | None:
+    ordered_candidates: list[Path] = []
+    seen: set[Path] = set()
+
+    discovered = discover_validated_inference_env(report_candidates)
+    if discovered is not None:
+        resolved = discovered.resolve()
+        ordered_candidates.append(resolved)
+        seen.add(resolved)
+
+    for raw_path in env_candidates:
+        candidate = resolve_existing_env(raw_path)
+        if candidate is None:
+            continue
+        resolved = candidate.resolve()
+        if resolved in seen:
+            continue
+        ordered_candidates.append(resolved)
+        seen.add(resolved)
+
+    first_existing: Path | None = None
+    for candidate in ordered_candidates:
+        if first_existing is None:
+            first_existing = candidate
+        try:
+            values = sanitize_env_values(load_env_path(candidate))
+        except OSError:
+            continue
+        if not _missing_required_inference_env_keys(values):
+            return candidate
+    return first_existing
+
+
 def discover_demo_default_inference_env() -> Path | None:
     preferred = first_existing_env(DEMO_PREFERRED_INFERENCE_ENV_CANDIDATES)
     if preferred is not None:
         return preferred
-    return discover_validated_inference_env() or first_existing_env(DEFAULT_INFERENCE_ENV_CANDIDATES)
+    return choose_preloaded_inference_env()
 
 
 def discover_validated_openamp_remote_project_root(
@@ -672,6 +721,12 @@ def build_demo_default_board_access(
     if not str(startup_env_values.get("MLKEM_REMOTE_PYTHON") or "").strip():
         # Prefer the board-side conda mlkem runtime for ML-KEM control/data plane helpers.
         startup_env_values["MLKEM_REMOTE_PYTHON"] = "/home/user/anaconda3/envs/mlkem/bin/python"
+    if not any(
+        str(source.get("MLKEM_TRANSPORT_MODE") or "").strip()
+        for source in (startup_env_values, ssh_env_values, inference_env_values)
+    ):
+        # Default to the TCP/Tailscale path; USRP remains an explicit opt-in.
+        startup_env_values["MLKEM_TRANSPORT_MODE"] = "tcp"
     remote_project_root = discover_validated_openamp_remote_project_root()
     if (
         remote_project_root

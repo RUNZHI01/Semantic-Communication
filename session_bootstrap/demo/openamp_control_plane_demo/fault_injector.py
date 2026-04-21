@@ -688,7 +688,24 @@ def run_recover_action(access: BoardAccessConfig, *, trusted_sha: str, timeout_s
         return result
 
     try:
-        cleanup_phase = run_phase("SAFE_STOP", make_safe_stop_payload(config["job_id"], "manual_recover"))
+        pre_status = run_phase("STATUS_REQ", make_status_payload(config["job_id"], trusted_sha, config["job_flags"]))
+        if not status_phase_is_live(pre_status):
+            payload = build_action_failure(
+                "recover",
+                phase_results,
+                status=phase_failure_status(pre_status),
+                logs=logs,
+            )
+            payload["execution_mode"] = "error"
+            return payload
+
+        pre_fields = status_fields_from_response(pre_status["response"])
+        log(logs, f"▶ STATUS_REQ: 初始 guard={pre_fields['guard_state']} active_job_id={pre_fields['active_job_id']}")
+        target_job_id = config["job_id"]
+        if pre_fields["guard_state"] == "JOB_ACTIVE" and pre_fields["active_job_id"] > 0:
+            target_job_id = pre_fields["active_job_id"]
+
+        cleanup_phase = run_phase("SAFE_STOP", make_safe_stop_payload(target_job_id, "manual_recover"))
         cleanup_fields = status_fields_from_response(cleanup_phase.get("response") if isinstance(cleanup_phase.get("response"), dict) else {})
         log(logs, f"▶ SAFE_STOP: guard={cleanup_fields['guard_state']} last_fault={cleanup_fields['last_fault_code']}")
         if not safe_stop_phase_is_live(cleanup_phase):

@@ -696,6 +696,22 @@ def require_existing_device(path: Path, label: str) -> None:
         raise SystemExit(f"ERROR: {label} not found: {path}")
 
 
+def open_transport_fd(rpmsg_dev: Path) -> int:
+    try:
+        return os.open(rpmsg_dev, os.O_RDWR | os.O_NONBLOCK)
+    except OSError as err:
+        if err.errno != errno.EINVAL:
+            raise
+
+    # Some board-side rpmsg_char variants reject O_NONBLOCK during open().
+    fd = os.open(rpmsg_dev, os.O_RDWR)
+    try:
+        os.set_blocking(fd, False)
+    except (AttributeError, OSError):
+        pass
+    return fd
+
+
 def drain_fd(fd: int, max_bytes: int) -> bytes:
     chunks: list[bytes] = []
     remaining = max_bytes
@@ -777,7 +793,7 @@ def transact(
     max_rx_bytes: int,
     drain_before_send: bool,
 ) -> dict[str, Any]:
-    fd = os.open(rpmsg_dev, os.O_RDWR | os.O_NONBLOCK)
+    fd = open_transport_fd(rpmsg_dev)
     try:
         drained = b""
         if drain_before_send:

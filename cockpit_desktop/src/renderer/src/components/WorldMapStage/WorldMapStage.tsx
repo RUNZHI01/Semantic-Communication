@@ -67,6 +67,17 @@ function normalizeTrack(aircraft: AircraftMapContract | null | undefined): { tra
   return { track: [], headingDeg: 0 }
 }
 
+function buildAircraftTrackKey(aircraft: AircraftMapContract | null | undefined): string {
+  const heading = aircraft?.kinematics?.heading_deg ?? ''
+  const position = `${aircraft?.position?.latitude ?? ''},${aircraft?.position?.longitude ?? ''}`
+  const track = Array.isArray(aircraft?.track)
+    ? aircraft.track
+        .map((point) => `${point.latitude ?? ''},${point.longitude ?? ''},${point.age_sec ?? ''}`)
+        .join('|')
+    : ''
+  return `${heading}::${position}::${track}`
+}
+
 export function WorldMapStage({ aircraft, chinaTheater = false, landingMode = false, height = '100%' }: WorldMapStageProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const baseRef = useRef<HTMLCanvasElement>(null)
@@ -79,14 +90,15 @@ export function WorldMapStage({ aircraft, chinaTheater = false, landingMode = fa
 
   const sweepDegRef = useRef(0)
   const rafRef = useRef<number>(0)
+  const sweepCtxRef = useRef<CanvasRenderingContext2D | null>(null)
 
-  // JSON.stringify creates a stable key: TanStack Query returns a new object reference
-  // on every poll even when data is identical, which would cause the sweep animation
-  // to restart every 3 s if we depended on the raw `aircraft` reference.
+  const aircraftTrackKey = useMemo(() => buildAircraftTrackKey(aircraft), [aircraft])
+
+  // TanStack Query returns a fresh object reference on each poll. Depend on the
+  // map-relevant fields only so identical telemetry snapshots do not restart the sweep.
   const { track, headingDeg } = useMemo(
     () => normalizeTrack(aircraft),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [JSON.stringify(aircraft)],
+    [aircraftTrackKey],
   )
   const hasPoint = track.length > 0
 
@@ -178,16 +190,20 @@ export function WorldMapStage({ aircraft, chinaTheater = false, landingMode = fa
     })
   }, [size, track, headingDeg, chinaTheater, landingMode])
 
+  useLayoutEffect(() => {
+    const canvas = sweepRef.current
+    if (!canvas || size.w < 8 || size.h < 8) {
+      sweepCtxRef.current = null
+      return
+    }
+    sweepCtxRef.current = setupCanvas2d(canvas, size.w, size.h)
+    sweepCtxRef.current?.clearRect(0, 0, size.w, size.h)
+  }, [size.w, size.h])
+
   useEffect(() => {
     if (!hasPoint) {
       sweepDegRef.current = 0
-      const c = sweepRef.current
-      if (c) {
-        const ctx = setupCanvas2d(c, size.w, size.h)
-        if (ctx) {
-          ctx.clearRect(0, 0, size.w, size.h)
-        }
-      }
+      sweepCtxRef.current?.clearRect(0, 0, size.w, size.h)
       return
     }
 
@@ -196,26 +212,23 @@ export function WorldMapStage({ aircraft, chinaTheater = false, landingMode = fa
 
     const tick = () => {
       sweepDegRef.current = (sweepDegRef.current + 12) % 360
-      const canvas = sweepRef.current
-      if (canvas && size.w >= 8 && size.h >= 8) {
-        const ctx = setupCanvas2d(canvas, size.w, size.h)
-        if (ctx) {
-          const proj = createProjection(size.w, size.h, MAP_INSET, chinaTheater)
-          const last = track[track.length - 1]!
-          const mx = proj.projectX(last.longitude)
-          const my = proj.projectY(last.latitude)
-          ctx.clearRect(0, 0, size.w, size.h)
-          drawSweepLayer({
-            ctx,
-            cssWidth: size.w,
-            cssHeight: size.h,
-            proj,
-            markerX: mx,
-            markerY: my,
-            sweepDeg: sweepDegRef.current,
-            timestampMs: performance.now(),
-          })
-        }
+      const ctx = sweepCtxRef.current
+      if (ctx && size.w >= 8 && size.h >= 8) {
+        const proj = createProjection(size.w, size.h, MAP_INSET, chinaTheater)
+        const last = track[track.length - 1]!
+        const mx = proj.projectX(last.longitude)
+        const my = proj.projectY(last.latitude)
+        ctx.clearRect(0, 0, size.w, size.h)
+        drawSweepLayer({
+          ctx,
+          cssWidth: size.w,
+          cssHeight: size.h,
+          proj,
+          markerX: mx,
+          markerY: my,
+          sweepDeg: sweepDegRef.current,
+          timestampMs: performance.now(),
+        })
       }
       rafRef.current = requestAnimationFrame(tick)
     }

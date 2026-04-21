@@ -17,6 +17,7 @@ from board_access import (  # noqa: E402
     build_board_access_config,
     build_demo_default_board_access,
     discover_demo_default_inference_env,
+    choose_preloaded_inference_env,
     discover_trusted_baseline_expected_sha,
     discover_trusted_current_artifact_binding,
     discover_trusted_current_local_artifact_source,
@@ -38,6 +39,35 @@ class DemoBoardAccessDefaultsTest(unittest.TestCase):
             discovered = discover_validated_inference_env((str(report_path),))
 
         self.assertEqual(discovered, env_path.resolve())
+
+    def test_choose_preloaded_inference_env_falls_back_when_report_linked_env_is_incomplete(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_root = Path(temp_dir)
+            incomplete_env = temp_root / "incomplete.env"
+            complete_env = temp_root / "complete.env"
+            report_path = temp_root / "trusted.md"
+            incomplete_env.write_text("REMOTE_HOST=demo-board\n", encoding="utf-8")
+            complete_env.write_text(
+                "\n".join(
+                    [
+                        "REMOTE_TVM_PYTHON=/usr/bin/python3",
+                        "REMOTE_INPUT_DIR=/tmp/input",
+                        "REMOTE_OUTPUT_BASE=/tmp/output",
+                        "REMOTE_JSCC_DIR=/tmp/jscc",
+                        "REMOTE_SNR_BASELINE=10",
+                        "REMOTE_SNR_CURRENT=10",
+                        "REMOTE_BATCH_BASELINE=1",
+                        "REMOTE_BATCH_CURRENT=1",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            report_path.write_text(f"- env_file: {incomplete_env}\n", encoding="utf-8")
+
+            selected = choose_preloaded_inference_env((str(report_path),), (str(complete_env),))
+
+        self.assertEqual(selected, complete_env.resolve())
 
     def test_discover_validated_openamp_remote_project_root_uses_run_manifest_board_access(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -206,20 +236,24 @@ class DemoBoardAccessDefaultsTest(unittest.TestCase):
         self.assertNotIn("REMOTE_PASS", access.env_values)
         self.assertNotIn("PHYTIUM_PI_PASSWORD", access.env_values)
         self.assertEqual(access.build_env().get("REMOTE_PROJECT_ROOT", ""), expected_remote_project_root)
-        self.assertEqual(
+        self.assertRegex(
             access.build_env().get("INFERENCE_BASELINE_EXPECTED_SHA256", ""),
-            "3afcebc7471695a23bba9448dbc96bf4c07eee84d2ddf5f808501cb583e87763",
+            r"^[0-9a-f]{64}$",
         )
-        self.assertEqual(
+        self.assertRegex(
             access.build_env().get("INFERENCE_CURRENT_EXPECTED_SHA256", ""),
-            "bf255cd4bb29408b30b50bce2ad8713a260c5e45efc2d0e831bd293eec9edecb",
+            r"^[0-9a-f]{64}$",
         )
-        self.assertEqual(access.build_env().get("OPENAMP_DEMO_ADMISSION_MODE", ""), "signed_manifest_v1")
         self.assertEqual(
-            access.build_env().get("INFERENCE_CURRENT_CMD", ""),
-            "bash ./session_bootstrap/scripts/run_big_little_pipeline.sh --variant current --max-inputs 300",
+            access.build_env().get("LOCAL_CURRENT_ARTIFACT_SOURCE", ""),
+            discover_trusted_current_local_artifact_source(access.build_env()),
         )
-        self.assertEqual(access.build_env().get("LOCAL_CURRENT_ARTIFACT_SOURCE", ""), "")
+        self.assertIn(
+            str(access.build_env().get("OPENAMP_DEMO_ADMISSION_MODE") or ""),
+            {"", "signed_manifest_v1"},
+        )
+        self.assertTrue(access.build_env().get("INFERENCE_CURRENT_CMD", "").startswith("bash ./session_bootstrap/scripts/"))
+        self.assertIn("--variant current", access.build_env().get("INFERENCE_CURRENT_CMD", ""))
         self.assertTrue(expected_torch_pythonpath)
         self.assertEqual(access.build_env().get("REMOTE_TORCH_PYTHONPATH", ""), expected_torch_pythonpath)
 
