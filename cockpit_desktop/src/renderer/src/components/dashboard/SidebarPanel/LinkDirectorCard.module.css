@@ -1,22 +1,38 @@
-.infoGroup {
+.tagGroup {
   display: flex;
   flex-wrap: wrap;
-  gap: 14px;  /* Increased from 6px */
+  gap: 8px;
+  margin-bottom: 12px;
 }
 
-.statItem {
-  display: flex;
+.profileId {
+  display: inline-flex;
   align-items: center;
-  gap: 14px;  /* Increased from 3px */
+  min-height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.statIcon {
+.section {
+  margin-top: 12px;
+}
+
+.sectionLabel {
+  display: block;
+  margin-bottom: 8px;
   color: var(--color-text-tertiary);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
-.statText {
+.summaryText {
+  margin: 8px 0 0;
   color: var(--color-text-secondary);
-  font-size: 14px;
+  font-size: 13px;
+  line-height: 1.6;
 }
 
 .emptyText {

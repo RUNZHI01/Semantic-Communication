@@ -31,7 +31,13 @@ if str(REPO_ROOT) not in sys.path:
 
 from aircraft_position_bridge import FIELD_PATH_CANDIDATES, build_config_from_env_values, fetch_normalized_payload
 from archive_replay import ArchiveSessionNotFoundError, list_archive_sessions, load_archive_session
-from board_access import BoardAccessConfig, build_board_access_config, build_demo_default_board_access, load_env_file
+from board_access import (
+    BoardAccessConfig,
+    build_board_access_config,
+    build_demo_default_board_access,
+    load_env_file,
+    normalize_transport_mode,
+)
 from board_probe import DEFAULT_LIVE_PROBE_OUTPUT, is_successful_probe, load_probe_output, run_live_probe, write_probe_output
 from crypto_runtime import (
     DEFAULT_CIPHER_SUITE,
@@ -2244,9 +2250,11 @@ class DashboardState:
         with self._lock:
             fallback = self._board_access
         config = build_board_access_config(payload, fallback=fallback)
-        auth_overrides = self._board_access_auth_overrides_from_payload(payload)
-        if auth_overrides:
-            config = config.with_env_overrides(auth_overrides)
+        config_overrides: dict[str, str] = {}
+        config_overrides.update(self._board_access_auth_overrides_from_payload(payload))
+        config_overrides.update(self._board_access_runtime_overrides_from_payload(payload))
+        if config_overrides:
+            config = config.with_env_overrides(config_overrides)
         mgr_to_close: MlkemSessionManager | None = None
         with self._lock:
             self._board_access = config
@@ -2283,8 +2291,8 @@ class DashboardState:
                 mgr_to_close.close()
             except Exception:
                 pass
-        # 密码录入后立即在后台尝试启动板端 tcp_server，无需等待 toggle ON 或首次推理
-        if config.connection_ready:
+        # TCP 模式下密码录入后立即在后台尝试启动板端 tcp_server；USRP 路径不做这一步。
+        if config.connection_ready and local_crypto_transport_mode(config.build_env()) == "tcp":
             threading.Thread(
                 target=self._ensure_board_tcp_server,
                 args=(config,),
@@ -3220,6 +3228,22 @@ class DashboardState:
                 overrides.setdefault("MLKEM_AUTH_SIG_POLICY", DEFAULT_MLKEM_AUTH_SIG_POLICY)
                 overrides.setdefault("MLKEM_AUTH_SERVER_ID", DEFAULT_MLKEM_AUTH_SERVER_ID)
 
+        return overrides
+
+    def _board_access_runtime_overrides_from_payload(self, payload: dict[str, Any]) -> dict[str, str]:
+        overrides: dict[str, str] = {}
+        raw_transport_mode = payload.get("transport_mode")
+        if raw_transport_mode in (None, ""):
+            return overrides
+
+        try:
+            transport_mode = normalize_transport_mode(str(raw_transport_mode), default="")
+        except ValueError as exc:
+            raise ValueError("unsupported transport_mode; expected tcp or usrp") from exc
+
+        overrides["MLKEM_TRANSPORT_MODE"] = transport_mode
+        if transport_mode == "usrp":
+            overrides.setdefault("MLKEM_USRP_MODE", "ota")
         return overrides
 
     @staticmethod

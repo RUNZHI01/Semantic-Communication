@@ -4741,6 +4741,44 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertTrue(payload["board_access"]["inference_ready_variants"]["baseline"])
         self.assertEqual(payload["board_access"]["field_sources"]["password"], "session")
 
+    def test_board_access_endpoint_accepts_transport_mode_override(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+
+        status, _, payload = request_json(
+            state,
+            "POST",
+            "/api/session/board-access",
+            body=json.dumps({"password": "demo-pass", "transport_mode": "usrp"}).encode("utf-8"),
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["board_access"]["transport_mode"], "usrp")
+        self.assertEqual(payload["board_access"]["transport_label"], "USRP OTA")
+        self.assertEqual(payload["board_access"]["transport_tone"], "online")
+        self.assertIn("USRP OTA", payload["board_access"]["transport_label"])
+        self.assertEqual(state._board_access.build_env()["MLKEM_TRANSPORT_MODE"], "usrp")
+        self.assertEqual(state._board_access.build_env()["MLKEM_USRP_MODE"], "ota")
+
+        system_status, _, system_payload = request_json(state, "GET", "/api/system-status")
+
+        self.assertEqual(system_status, 200)
+        self.assertEqual(system_payload["board_access"]["transport_mode"], "usrp")
+        self.assertEqual(system_payload["board_access"]["transport_label"], "USRP OTA")
+
+    def test_board_access_endpoint_rejects_unsupported_transport_mode(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+
+        status, _, payload = request_json(
+            state,
+            "POST",
+            "/api/session/board-access",
+            body=json.dumps({"password": "demo-pass", "transport_mode": "bluetooth"}).encode("utf-8"),
+        )
+
+        self.assertEqual(status, 400)
+        self.assertEqual(payload["status"], "error")
+        self.assertEqual(payload["message"], "unsupported transport_mode; expected tcp or usrp")
+
     def test_board_access_endpoint_rejects_unsupported_auth_policy(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
 

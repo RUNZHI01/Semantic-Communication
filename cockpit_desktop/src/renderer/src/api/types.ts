@@ -385,6 +385,7 @@ export type BoardAccessPayload = {
   password?: string
   port?: number | string
   env_file?: string
+  transport_mode?: string
   auth_enabled?: boolean
   auth_sig_policy?: string
   auth_server_id?: string
@@ -395,6 +396,10 @@ export type BoardAccessResponse = JsonObject & {
   configured?: boolean
   probe_ready?: boolean
   missing_connection_fields?: string[]
+  transport_mode?: string
+  transport_label?: string
+  transport_tone?: string
+  transport_summary?: string
 }
 
 // ---------------------------------------------------------------------------
