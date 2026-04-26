@@ -1,0 +1,111 @@
+\documentclass[tikz,border=10pt]{standalone}
+\usepackage{amssymb}
+\usepackage{fontspec}
+\usepackage{xeCJK}
+
+% 严格遵循字体规范：英文 Times New Roman，中文黑体
+\setmainfont{Times New Roman}
+\setCJKmainfont{SimHei}
+
+\usepackage{tikz}
+\usetikzlibrary{positioning, calc, backgrounds, fit, arrows.meta}
+
+% ============================================
+% IEEE 顶刊风格配色定义
+% ============================================
+\definecolor{serialGray}{HTML}{BDC3C7}   % 串行基准色-中性灰
+\definecolor{pipeBlue}{HTML}{2874A6}     % 流水线优化色-学术钢蓝
+\definecolor{highlightRed}{HTML}{B03A2E} % 突出强调色-学术砖红
+\definecolor{textDark}{HTML}{2C3E50}     % 深色文字
+\definecolor{textGray}{HTML}{5D6D7E}     % 灰色文字
+\definecolor{borderColor}{HTML}{95A5A6}  % 边框色
+
+\begin{document}
+\begin{tikzpicture}[
+  % --- 统一字号规范管理 ---
+  fontCaption/.style={font=\fontsize{9pt}{10.8pt}\selectfont\bfseries}, 
+  fontAxis/.style={font=\fontsize{8pt}{9.6pt}\selectfont\bfseries},    
+  fontNormal/.style={font=\fontsize{7.5pt}{9pt}\selectfont},           
+  fontSmall/.style={font=\fontsize{6.5pt}{7.8pt}\selectfont},
+  % 坐标轴缩放：X轴 1单位 = 1.3cm, Y轴 1单位(ms) = 0.015cm
+  x=1.3cm, y=0.015cm  
+]
+
+% ============================================
+% 整体背景
+% ============================================
+\fill[white] (-1.2, -60) rectangle (9.2, 500);
+
+% ============================================
+% 标题与图例区
+% ============================================
+% 图表主标题
+\node[fontCaption, textDark] at (4.0, 480) {异构大小核流水线性能对比 (OpenAMP 三核统一板态)};
+
+% 图例
+\fill[serialGray] (2.0, 435) rectangle (2.3, 450);
+\node[right, fontNormal, textDark] at (2.4, 442.5) {串行重建 (Baseline)};
+
+\fill[pipeBlue] (4.5, 435) rectangle (4.8, 450);
+\node[right, fontNormal, textDark] at (4.9, 442.5) {流水线重建 (Optimized)};
+
+% ============================================
+% 坐标系与网格线
+% ============================================
+% Y轴网格线与刻度
+\foreach \y in {0, 100, 200, 300, 400} {
+  \draw[dashed, textGray!40, line width=0.5pt] (0, \y) -- (8, \y);
+  \node[left, fontSmall, textGray] at (-0.1, \y) {\y};
+}
+
+% X轴与Y轴主线
+\draw[thick, borderColor] (0,0) -- (0, 420);
+\draw[thick, borderColor] (0,0) -- (8, 0);
+
+% 轴标题
+\node[fontAxis, textDark, rotate=90] at (-1.0, 200) {单张重建时间 (ms/image)};
+\node[fontAxis, textDark, align=center] at (2.5, -30) {MetaSchedule 优化版本};
+\node[fontAxis, textDark, align=center] at (5.5, -30) {手写优化版本};
+
+% ============================================
+% 数据柱状图与标注：左侧组 (MetaSchedule)
+% ============================================
+% 串行柱 (347.3 ms)
+\fill[serialGray] (2.0, 0) rectangle (2.45, 347.3);
+\node[above, fontAxis, textDark] at (2.225, 347.3) {347.3};
+
+% 流水线柱 (257.4 ms)
+\fill[pipeBlue] (2.55, 0) rectangle (3.0, 257.4);
+\node[above, fontAxis, text=pipeBlue] at (2.775, 257.4) {257.4};
+
+% 提升比例趋势箭头
+\draw[-{Stealth[length=2.5mm, width=1.8mm]}, thick, highlightRed] 
+  (2.225, 370) -- (2.225, 405) -- (2.775, 405) -- (2.775, 280);
+\node[above, fontAxis, text=highlightRed] at (2.5, 405) {+34.6\% 吞吐提升};
+
+
+% ============================================
+% 数据柱状图与标注：右侧组 (手写优化)
+% ============================================
+% 串行柱 (345.6 ms)
+\fill[serialGray] (5.0, 0) rectangle (5.45, 345.6);
+\node[above, fontAxis, textDark] at (5.225, 345.6) {345.6};
+
+% 流水线柱 (249.4 ms)
+\fill[pipeBlue] (5.55, 0) rectangle (6.0, 249.4);
+\node[above, fontAxis, text=pipeBlue] at (5.775, 249.4) {249.4};
+
+% 提升比例趋势箭头
+\draw[-{Stealth[length=2.5mm, width=1.8mm]}, thick, highlightRed] 
+  (5.225, 370) -- (5.225, 405) -- (5.775, 405) -- (5.775, 275);
+\node[above, fontAxis, text=highlightRed] at (5.5, 405) {+38.7\% 吞吐提升};
+
+
+% ============================================
+% 跨组横向对比参考线 (直观印证手写优化全面占优)
+% ============================================
+\draw[densely dotted, thick, highlightRed] (2.775, 249.4) -- (5.55, 249.4);
+\node[below, fontSmall, text=highlightRed] at (4.16, 249.4) {249.4 < 257.4 (手写优化延迟更低)};
+
+\end{tikzpicture}
+\end{document}
