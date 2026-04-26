@@ -1,0 +1,132 @@
+\documentclass[tikz,border=10pt]{standalone}
+\usepackage{amssymb}
+\usepackage{fontspec}
+\usepackage{xeCJK}
+
+% 严格遵循字体规范：英文 Times New Roman，中文黑体
+\setmainfont{Times New Roman}
+\setCJKmainfont{SimHei}
+
+\usepackage{tikz}
+\usetikzlibrary{positioning, calc, backgrounds, fit, arrows.meta}
+
+% ============================================
+% IEEE 顶刊风格配色定义 (高对比度、沉稳、适合彩色/黑白印刷)
+% ============================================
+\definecolor{tradBg}{HTML}{F9EBEA}       % 传统压缩背景-极浅砖红
+\definecolor{tradHeader}{HTML}{B03A2E}   % 传统压缩标题-学术砖红
+\definecolor{semBg}{HTML}{EAF2F8}        % 语义通信背景-极浅钢蓝
+\definecolor{semHeader}{HTML}{2874A6}    % 语义通信标题-学术钢蓝
+\definecolor{int8Color}{HTML}{17A589}    % INT8量化-学术深青色
+\definecolor{textDark}{HTML}{2C3E50}     % 深色文字
+\definecolor{textGray}{HTML}{5D6D7E}     % 灰色文字
+\definecolor{borderColor}{HTML}{95A5A6}  % 边框色 (清晰的中性灰)
+\definecolor{barGray}{HTML}{BDC3C7}      % 对照条灰色
+
+\begin{document}
+\begin{tikzpicture}[
+  % --- 统一字号规范管理 ---
+  fontCaption/.style={font=\fontsize{9pt}{10.8pt}\selectfont\bfseries}, % 图表标题: 8-9pt (全图最大)
+  fontAxis/.style={font=\fontsize{8pt}{9.6pt}\selectfont\bfseries},    % 轴标题/独立区块标题: 7-8pt
+  fontNormal/.style={font=\fontsize{7.5pt}{9pt}\selectfont},           % 图例文本/正文要点: 7-8pt
+  fontSmall/.style={font=\fontsize{6.5pt}{7.8pt}\selectfont}           % 注释/刻度标签: 6-7pt
+]
+
+% ============================================
+% 整体背景 (纯白，去除原有的灰底，符合顶刊排版)
+% ============================================
+\fill[white] (-8.5, 2.5) rectangle (8.5, -8.5);
+
+% ============================================
+% 标题区
+% ============================================
+\node[fontCaption, text=textDark] at (0, 1.8) 
+  {传统压缩与语义通信的弱网对比};
+
+\node[fontNormal, text=textGray, text width=15cm, align=center] at (0, 1.1)
+  {对比传统像素级压缩与语义通信在传输内容及极端弱网（如 SNR=1 dB）下的表现差异。引入 INT8 量化可进一步释放带宽潜力。};
+
+% ============================================
+% 左侧卡片：传统图像压缩
+% ============================================
+% 去除阴影，减小圆角，增强学术严谨感
+\node[
+  rectangle, rounded corners=4pt, fill=tradBg, draw=tradHeader, line width=1pt,
+  minimum width=7.5cm, minimum height=4.6cm
+] (tradcard) at (-3.95, -1.8) {};
+
+\node[fill=tradHeader, text=white, fontAxis, rounded corners=2pt, inner sep=5pt, anchor=north west]
+  at ([xshift=0.4cm, yshift=-0.4cm]tradcard.north west) {传统图像压缩};
+
+\node[fontAxis, text=textDark, anchor=north west]
+  at ([xshift=0.4cm, yshift=-1.4cm]tradcard.north west) {传输对象：像素级数据};
+
+\node[fontNormal, text=textGray, align=left, text width=6.7cm, anchor=north west]
+  at ([xshift=0.4cm, yshift=-2.1cm]tradcard.north west) {
+  $\bullet$ 以 JPEG / H.265 为代表，围绕像素保真展开\\[6pt]
+  $\bullet$ 强依赖信道环境，需大量冗余与纠错开销\\[6pt]
+  $\bullet$ 极端弱网（如 SNR=1 dB）下极易出现明显失真甚至不可用
+};
+
+% ============================================
+% 右侧卡片：语义通信
+% ============================================
+\node[
+  rectangle, rounded corners=4pt, fill=semBg, draw=semHeader, line width=1pt,
+  minimum width=7.5cm, minimum height=4.6cm
+] (semcard) at (3.95, -1.8) {};
+
+\node[fill=semHeader, text=white, fontAxis, rounded corners=2pt, inner sep=5pt, anchor=north west]
+  at ([xshift=0.4cm, yshift=-0.4cm]semcard.north west) {语义通信 (本系统方案)};
+
+\node[fontAxis, text=textDark, anchor=north west]
+  at ([xshift=0.4cm, yshift=-1.4cm]semcard.north west) {传输对象：Latent 语义特征};
+
+\node[fontNormal, text=textGray, align=left, text width=6.7cm, anchor=north west]
+  at ([xshift=0.4cm, yshift=-2.1cm]semcard.north west) {
+  $\bullet$ 提取紧凑高维语义表征，将通信压力从像素级降到语义级\\[6pt]
+  $\bullet$ 重建质量随信道改善稳步提升，具有显著的弱网抗毁伤能力\\[6pt]
+  $\bullet$ 极端弱网（如 SNR=1 dB）下仍可实现有效重建（PSNR > 29 dB）
+};
+
+% ============================================
+% 视觉分割 VS 徽章
+% ============================================
+\node[
+  circle, fill=white, draw=borderColor, line width=1pt, 
+  fontAxis, text=textDark, inner sep=3.5pt
+] at (0, -1.8) {VS};
+
+% ============================================
+% 底部大小对照区 (严格按比例绘制绝对坐标)
+% ============================================
+\node[
+  rectangle, rounded corners=4pt, fill=white, draw=borderColor, line width=0.8pt,
+  minimum width=15.4cm, minimum height=3.2cm
+] (sizebox) at (0, -6.2) {};
+
+\node[fontAxis, text=textDark, anchor=north west]
+  at ([xshift=0.4cm, yshift=-0.3cm]sizebox.north west) {本系统输入与 Latent 传输大小对照};
+
+% 横条1: RGB 原图 (基准长度 7.0cm -> 代表 192KB)
+\node[fontNormal, text=textDark, anchor=west] at (-7.3, -5.5) {256$\times$256 RGB 原图};
+\fill[barGray!60, rounded corners=2pt] (-3.5, -5.65) rectangle (3.5, -5.35);
+\node[fontNormal, text=textDark, anchor=west] at (3.7, -5.5) {$\approx$ 192 KB};
+
+% 横条2: FP32 Latent (长度 7.0 * (128/192) = 4.66cm)
+\node[fontNormal, text=textDark, anchor=west] at (-7.3, -6.2) {Encoder Latent (FP32)};
+\fill[semHeader!85, rounded corners=2pt] (-3.5, -6.35) rectangle (1.16, -6.05);
+\node[fontNormal, text=semHeader!90!black, anchor=west] at (1.36, -6.2) {$\approx$ 128 KB (压缩比约 1.5 倍)};
+
+% 横条3: INT8 Latent (长度 7.0 * (32/192) = 1.16cm)
+\node[fontNormal, text=textDark, anchor=west] at (-7.3, -6.9) {Encoder Latent (INT8)};
+\fill[int8Color!90, rounded corners=2pt] (-3.5, -7.05) rectangle (-2.34, -6.75);
+\node[fontNormal, text=int8Color!90!black, anchor=west] at (-2.14, -6.9) {$\approx$ 32 KB (压缩比约 6.0 倍)};
+
+% 注释说明
+\node[fontSmall, text=textGray, anchor=center] at (0, -7.5) {
+  注：语义通信能在压缩数据量的同时保持弱网鲁棒性；弱网鲁棒性量化结论引自文献[6]。
+};
+
+\end{tikzpicture}
+\end{document}
