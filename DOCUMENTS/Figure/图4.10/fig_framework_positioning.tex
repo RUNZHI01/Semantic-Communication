@@ -1,0 +1,176 @@
+% 双引擎部署定位与端侧性能关系
+\documentclass[tikz,border=10pt]{standalone}
+\usepackage{amssymb}
+\usepackage{fontspec}
+\usepackage{xeCJK}
+
+% 设置字体：中文黑体，英文及数字Times New Roman
+\setCJKmainfont{SimHei} 
+\setmainfont{Times New Roman}
+
+\usepackage{tikz}
+\usepackage{graphicx}
+\usetikzlibrary{
+  arrows.meta, positioning, shapes.geometric, calc,
+  backgrounds, fit
+}
+
+% ============================================
+% 严格定义学术期刊配色规范 (IEEE标准)
+% ============================================
+% 全局通用颜色：纯黑、纯白、灰色
+\definecolor{colorBlack}{HTML}{000000} 
+\definecolor{colorWhite}{HTML}{FFFFFF} 
+\definecolor{colorGrayText}{HTML}{757575} 
+
+% TVM 侧配色：学术风橄榄绿 (Subdued Olive Green)
+\definecolor{colorTVMMain}{HTML}{72A478} 
+\definecolor{colorTVMLight}{HTML}{C6DCC8} 
+\definecolor{colorTVMText}{HTML}{4F7553} 
+
+% MNN 侧配色：学术风牛仔蓝 (Subdued Denim Blue)
+\definecolor{colorMNNMain}{HTML}{728EAC} 
+\definecolor{colorMNNLight}{HTML}{C6D3DF} 
+\definecolor{colorMNNText}{HTML}{4F6A88} 
+
+% ============================================
+% 严格定义设计规范对应的字号命令
+% ============================================
+\newcommand{\fsCaption}{\fontsize{9pt}{11pt}\selectfont} 
+\newcommand{\fsMain}{\fontsize{8pt}{10pt}\selectfont}    
+\newcommand{\fsSub}{\fontsize{7pt}{9pt}\selectfont}      
+\newcommand{\fsNote}{\fontsize{6pt}{8pt}\selectfont}     
+
+% 定义列表文本样式命令
+\newcommand{\tech}[1]{{\fsNote\color{colorBlack!90}#1}}
+\newcommand{\scene}[1]{{\fsNote\itshape\color{colorGrayText!90}#1}}
+
+% ============================================
+% 抽象全局TikZ样式，提升代码复用与整洁度
+% ============================================
+\tikzset{
+  >=stealth,
+  % 统一外框样式
+  outerFrame/.style={
+    rectangle, rounded corners=6pt, line width=1pt,
+    minimum width=6.0cm, minimum height=11.5cm, anchor=north
+  },
+  % 统一内部内容框样式
+  infoBox/.style={
+    rectangle, rounded corners=3pt, align=center,
+    minimum width=5.2cm, inner sep=6pt
+  },
+  % 定位标签专用样式
+  titleBox/.style={
+    rectangle, rounded corners=3pt, align=center,
+    minimum width=5.2cm, inner sep=4pt, font=\fsMain\color{colorWhite}
+  }
+}
+
+\begin{document}
+
+\begin{tikzpicture}[node distance=0.25cm]
+
+% ============================================
+% 标题区
+% ============================================
+\node[font=\fsCaption\bfseries, color=colorBlack] (maintitle) at (0, 0) {双引擎部署定位与端侧性能关系};
+\node[font=\fsMain, color=colorGrayText!90, below=0.15cm of maintitle] (subtitle) 
+  {TVM负责固定形状极致性能，MNN负责动态尺寸灵活部署};
+
+% ============================================
+% 左柱：TVM引擎
+% ============================================
+\begin{scope}[local bounding box=tvmcol]
+  % 1. 绘制底层外框
+  \node[outerFrame, draw=colorTVMMain, fill=colorTVMLight!30] (tvmframe) at (-3.6, -1.0) {};
+  
+  % 2. 自上而下流式排版内部元素
+  \node[anchor=north, yshift=-0.4cm] (tvmlogo) at (tvmframe.north) 
+    {\includegraphics[width=2.0cm]{TVM.png}};
+    
+  \node[font=\fsNote, color=colorGrayText!80, below=0.1cm of tvmlogo] (tvmfull)
+    {Tensor Virtual Machine};
+    
+  \node[titleBox, draw=colorTVMMain, fill=colorTVMMain, below=0.25cm of tvmfull] (tvmlabel) {
+    \textbf{深度学习编译器路线}\\[1pt]
+    \textbf{固定形状极致性能}
+  };
+  
+  % 原先拆分的说明文字和数值合并为一个节点，实现原生居中
+  \node[infoBox, draw=colorTVMMain, fill=colorWhite, below=of tvmlabel, minimum height=2.4cm] (tvmdata) {
+    {\fsMain\bfseries\color{colorBlack!85}端到端重建中位时间}\\[3pt]
+    {\fsNote\color{colorGrayText!70}(256$\times$256固定输入)}\\[8pt]
+    {\fsCaption\bfseries\color{colorTVMText} 230.3\,}{\fsSub\color{colorBlack!90} ms}
+  };
+  
+  \node[infoBox, draw=colorTVMMain!60, fill=colorTVMLight!20, below=of tvmdata] (tvmtech) {
+    \textbf{\fsMain\color{colorBlack} 核心技术栈}\\[4pt]
+    \tech{$\bullet$ Relax IR多层次中间表示}\\
+    \tech{$\bullet$ MetaSchedule自动调优}\\
+    \tech{$\bullet$ 算子级手写优化}\\
+    \tech{\quad (bias融合/NEON向量化)}\\
+    \tech{$\bullet$ Cortex-A72目标收敛}
+  };
+  
+  \node[infoBox, draw=colorTVMMain!40, fill=colorTVMLight!10, below=of tvmtech] (tvmscene) {
+    \textbf{\fsMain\color{colorBlack} 适用场景}\\[3pt]
+    \scene{标准化巡检图像批量重建}\\
+    \scene{(分辨率统一的生产线场景)}
+  };
+\end{scope}
+
+% ============================================
+% 右柱：MNN引擎
+% ============================================
+\begin{scope}[local bounding box=mnncol]
+  % 1. 绘制底层外框
+  \node[outerFrame, draw=colorMNNMain, fill=colorMNNLight!30] (mnnframe) at (3.6, -1.0) {};
+  
+  % 2. 自上而下流式排版内部元素
+  \node[anchor=north, yshift=-0.4cm] (mnnlogo) at (mnnframe.north) 
+    {\includegraphics[width=2.0cm]{MNN.png}};
+    
+  \node[font=\fsNote, color=colorGrayText!80, below=0.1cm of mnnlogo] (mnnfull)
+    {Mobile Neural Network};
+    
+  \node[titleBox, draw=colorMNNMain, fill=colorMNNMain, below=0.25cm of mnnfull] (mnnlabel) {
+    \textbf{轻量级推理引擎路线}\\[1pt]
+    \textbf{动态尺寸灵活部署}
+  };
+  
+  % 文本节点合并合并
+  \node[infoBox, draw=colorMNNMain, fill=colorWhite, below=of mnnlabel, minimum height=2.4cm] (mnndata) {
+    {\fsMain\bfseries\color{colorBlack!85}端到端平均时间}\\[3pt]
+    {\fsNote\color{colorGrayText!70}(300张混合尺寸图像)}\\[8pt]
+    {\fsCaption\bfseries\color{colorMNNText} 327.3\,}{\fsSub\color{colorBlack!90} ms}
+  };
+  
+  \node[infoBox, draw=colorMNNMain!60, fill=colorMNNLight!20, below=of mnndata] (mnntech) {
+    \textbf{\fsMain\color{colorBlack} 核心技术栈}\\[4pt]
+    \tech{$\bullet$ 几何计算机制（光栅算子）}\\
+    \tech{$\bullet$ 半自动搜索机制}\\
+    \tech{$\bullet$ 双Interpreter并行部署}\\
+    \tech{$\bullet$ resizeTensor动态适配}\\
+    \tech{$\bullet$ 无需预缩放直接处理}
+  };
+  
+  \node[infoBox, draw=colorMNNMain!40, fill=colorMNNLight!10, below=of mnntech] (mnnscene) {
+    \textbf{\fsMain\color{colorBlack} 适用场景}\\[3pt]
+    \scene{多源多尺寸图像实时处理}\\
+    \scene{(分辨率不确定的混合输入)} 
+  };
+\end{scope}
+
+% ============================================
+% 中间连接区：协同互补徽标 (Badge)
+% ============================================
+\coordinate (centerNode) at (0, -6.6); % 设定连接箭头的水平基准高度
+
+% 绘制贯穿的双向箭头，并在中间放置白色背景徽标
+\draw[{Stealth[length=5pt]}-{Stealth[length=5pt]}, line width=1.2pt, colorGrayText!80] 
+  (tvmframe.east |- centerNode) -- (mnnframe.west |- centerNode)
+  node[midway, fill=colorWhite, draw=colorGrayText!60, rounded corners=4pt, inner sep=4pt, font=\fsMain\bfseries\color{colorBlack}] {协同互补};
+
+\end{tikzpicture}
+\end{document}

@@ -1,0 +1,274 @@
+% 图4.10 双引擎部署定位与端侧性能关系
+% 基于CICC0903540技术文档4.4节
+\documentclass[tikz,border=10pt]{standalone}
+\usepackage{amssymb}
+\usepackage{fontspec}
+\usepackage{xeCJK}
+\setCJKmainfont{SimHei}
+\usepackage{tikz}
+\usepackage{pgfplots}
+\usepackage{graphicx}
+\usetikzlibrary{
+  arrows.meta, positioning, shapes.geometric, calc,
+  backgrounds, fit, decorations.pathreplacing, patterns
+}
+
+% 低饱和度马卡龙配色
+\definecolor{mBlue}{HTML}{AEC6CF}
+\definecolor{mBlueDark}{HTML}{7A9CA8}
+\definecolor{mGreen}{HTML}{B1D8B7}
+\definecolor{mGreenDark}{HTML}{7DA882}
+\definecolor{mPurple}{HTML}{B39EB5}
+\definecolor{mYellow}{HTML}{FDFD96}
+\definecolor{mGray}{HTML}{E5E4E2}
+\definecolor{mGrayDark}{HTML}{B5B4B2}
+\definecolor{mDark}{HTML}{4A4A4A}
+
+% 全局TikZ样式
+\tikzset{
+  >=stealth,
+  every node/.style={align=center, font=\sffamily},
+  block/.style={
+    rounded corners=3pt, draw=mDark, align=center,
+    minimum height=0.8cm, inner sep=5pt},
+  arr/.style={-{Stealth[length=4pt]}, semithick, draw=mDark},
+}
+
+\begin{document}
+% 定义文本样式命令
+\newcommand{\tech}[1]{{\tiny\sffamily\color{mDark!90}#1}}
+\newcommand{\scene}[1]{{\footnotesize\sffamily\itshape\color{mDark!70}#1}}
+
+\begin{tikzpicture}[
+  node distance=0.4cm,
+  box/.style={
+    rectangle, rounded corners=4pt, draw=mDark, align=center,
+    font=\small\sffamily, semithick, inner sep=6pt},
+  title/.style={
+    font=\bfseries\sffamily, color=mDark},
+  subtitle/.style={
+    font=\footnotesize\sffamily, color=mDark!80},
+  data/.style={
+    font=\Large\bfseries\sffamily, color=mDark},
+  unit/.style={
+    font=\small\sffamily, color=mDark!70},
+]
+
+% ============================================
+% 标题区
+% ============================================
+\node[title, scale=1.3] (maintitle) at (0, 0) {图4.10\quad 双引擎部署定位与端侧性能关系};
+\node[subtitle, below=0.2cm of maintitle] (subtitle) 
+  {TVM负责固定形状极致性能，MNN负责动态尺寸灵活部署};
+
+% ============================================
+% 左柱：TVM引擎
+% ============================================
+\begin{scope}[local bounding box=tvmcol]
+  % 外框背景
+  \node[
+    rectangle, rounded corners=6pt, draw=mBlueDark, line width=1pt,
+    fill=mBlue!20, minimum width=6.2cm, minimum height=10cm,
+    anchor=north, yshift=-1.2cm
+  ] (tvmframe) at (-4, 0) {};
+  
+  % Logo
+  \node[anchor=north, yshift=-0.3cm] (tvmlogo) at (tvmframe.north) 
+    {\includegraphics[width=2.5cm]{TVM.png}};
+  
+  % 全称
+  \node[anchor=north, font=\tiny\sffamily\color{mDark!60}, yshift=-0.1cm] (tvmfull) at (tvmlogo.south)
+    {Tensor Virtual Machine};
+  
+  % 定位标签
+  \node[
+    anchor=north, yshift=-0.4cm,
+    rectangle, rounded corners=3pt, draw=mBlueDark, fill=mBlue!40,
+    minimum width=5.5cm, inner sep=5pt
+  ] (tvmlabel) at (tvmfull.south) {
+    \textbf{\small 深度学习编译器路线}\\[2pt]
+    \textbf{【固定形状极致性能】}
+  };
+  
+  % 性能数据区
+  \node[
+    anchor=north, yshift=-0.5cm,
+    rectangle, rounded corners=4pt, draw=mBlueDark, fill=white,
+    minimum width=5.5cm, minimum height=2.2cm
+  ] (tvmbar) at (tvmlabel.south) {};
+  
+  % 柱状图
+  \fill[mBlue!70] ([xshift=-1.8cm, yshift=0.3cm]tvmbar.center) 
+    rectangle ++(1.2cm, 1.4cm);
+  \draw[mBlueDark, thick] ([xshift=-1.8cm, yshift=0.3cm]tvmbar.center) 
+    rectangle ++(1.2cm, 1.4cm);
+  
+  % 性能数值
+  \node[anchor=west, data, color=mBlueDark] at ([xshift=-0.3cm, yshift=0.3cm]tvmbar.center)
+    {230.3};
+  \node[anchor=west, unit] at ([xshift=0.8cm, yshift=0.3cm]tvmbar.center)
+    {ms};
+  
+  % 说明文字
+  \node[anchor=north, subtitle] at ([yshift=-0.8cm]tvmbar.center)
+    {端到端重建中位时间};
+  \node[anchor=north, font=\tiny\sffamily\color{mDark!50}] at ([yshift=-1.3cm]tvmbar.center)
+    {(256$\times$256固定输入)};
+  
+  % 核心技术栈
+  \node[
+    anchor=north, yshift=-0.4cm,
+    rectangle, rounded corners=3pt, draw=mBlueDark!60, fill=mBlue!10,
+    minimum width=5.5cm, inner sep=5pt
+  ] (tvmtech) at (tvmbar.south) {
+    \textbf{\footnotesize 核心技术栈}\\[4pt]
+    \tech{• Relax IR多层次中间表示}\\
+    \tech{• MetaSchedule自动调优}\\
+    \tech{• 算子级手写优化}\\
+    \tech{\quad (bias融合/NEON向量化)}\\
+    \tech{• Cortex-A72目标收敛}
+  };
+  
+  % 适用场景
+  \node[
+    anchor=north, yshift=-0.3cm,
+    rectangle, rounded corners=3pt, draw=mBlueDark!40, fill=mBlue!5,
+    minimum width=5.5cm, inner sep=5pt
+  ] (tvscene) at (tvmtech.south) {
+    \textbf{\footnotesize 适用场景}\\[3pt]
+    \scene{标准化巡检图像批量重建}\\
+    \scene{(分辨率统一的生产线场景)}
+  };
+\end{scope}
+
+% ============================================
+% 右柱：MNN引擎
+% ============================================
+\begin{scope}[local bounding box=mnncol]
+  % 外框背景
+  \node[
+    rectangle, rounded corners=6pt, draw=mGreenDark, line width=1pt,
+    fill=mGreen!20, minimum width=6.2cm, minimum height=10cm,
+    anchor=north, yshift=-1.2cm
+  ] (mnnframe) at (4, 0) {};
+  
+  % Logo
+  \node[anchor=north, yshift=-0.3cm] (mnnlogo) at (mnnframe.north) 
+    {\includegraphics[width=2.5cm]{MNN.png}};
+  
+  % 全称
+  \node[anchor=north, font=\tiny\sffamily\color{mDark!60}, yshift=-0.1cm] (mnnfull) at (mnnlogo.south)
+    {Mobile Neural Network};
+  
+  % 定位标签
+  \node[
+    anchor=north, yshift=-0.4cm,
+    rectangle, rounded corners=3pt, draw=mGreenDark, fill=mGreen!40,
+    minimum width=5.5cm, inner sep=5pt
+  ] (mnnlabel) at (mnnfull.south) {
+    \textbf{\small 轻量级推理引擎路线}\\[2pt]
+    \textbf{【动态尺寸灵活部署】}
+  };
+  
+  % 性能数据区
+  \node[
+    anchor=north, yshift=-0.5cm,
+    rectangle, rounded corners=4pt, draw=mGreenDark, fill=white,
+    minimum width=5.5cm, minimum height=2.2cm
+  ] (mnnbar) at (mnnlabel.south) {};
+  
+  % 柱状图（更高表示性能数字更大）
+  \fill[mGreen!70] ([xshift=-1.8cm, yshift=0.3cm]mnnbar.center) 
+    rectangle ++(1.2cm, 2.0cm);
+  \draw[mGreenDark, thick] ([xshift=-1.8cm, yshift=0.3cm]mnnbar.center) 
+    rectangle ++(1.2cm, 2.0cm);
+  
+  % 性能数值
+  \node[anchor=west, data, color=mGreenDark] at ([xshift=-0.3cm, yshift=0.3cm]mnnbar.center)
+    {327.3};
+  \node[anchor=west, unit] at ([xshift=0.8cm, yshift=0.3cm]mnnbar.center)
+    {ms};
+  
+  % 说明文字
+  \node[anchor=north, subtitle] at ([yshift=-0.8cm]mnnbar.center)
+    {端到端平均时间};
+  \node[anchor=north, font=\tiny\sffamily\color{mDark!50}] at ([yshift=-1.3cm]mnnbar.center)
+    {(300张混合尺寸图像)};
+  
+  % 核心技术栈
+  \node[
+    anchor=north, yshift=-0.4cm,
+    rectangle, rounded corners=3pt, draw=mGreenDark!60, fill=mGreen!10,
+    minimum width=5.5cm, inner sep=5pt
+  ] (mnntech) at (mnnbar.south) {
+    \textbf{\footnotesize 核心技术栈}\\[4pt]
+    \tech{• 几何计算机制（光栅算子）}\\
+    \tech{• 半自动搜索机制}\\
+    \tech{• 双Interpreter并行部署}\\
+    \tech{• resizeTensor动态适配}\\
+    \tech{• 无需预缩放直接处理}
+  };
+  
+  % 适用场景
+  \node[
+    anchor=north, yshift=-0.3cm,
+    rectangle, rounded corners=3pt, draw=mGreenDark!40, fill=mGreen!5,
+    minimum width=5.5cm, inner sep=5pt
+  ] (mnscene) at (mnntech.south) {
+    \textbf{\footnotesize 适用场景}\\[3pt]
+    \scene{多源多尺寸图像实时处理}\\
+    \scene{(分辨率不确定的混合输入)} 
+  };
+\end{scope}
+
+% ============================================
+% 中间连接区：协同互补
+% ============================================
+\node[anchor=center, font=\bfseries\sffamily\small, color=mDark] (synergy) at (0, -5.5) {协同互补};
+\draw[arr, line width=1.5pt, mDark] ([xshift=-0.8cm]synergy.center) -- ([xshift=-0.1cm]synergy.center);
+\draw[arr, line width=1.5pt, mDark] ([xshift=0.8cm]synergy.center) -- ([xshift=0.1cm]synergy.center);
+
+% ============================================
+% 底部共享区
+% ============================================
+\begin{scope}[yshift=-12cm]
+  % 背景框
+  \node[
+    rectangle, rounded corners=6pt, draw=mGrayDark, line width=0.8pt,
+    fill=mGray!30, minimum width=14cm, minimum height=3.8cm
+  ] (sharebox) at (0, 0) {};
+  
+  % 标题
+  \node[anchor=north, yshift=-0.3cm, font=\bfseries\sffamily] at (sharebox.north)
+    {共享数据流};
+  
+  % 流程节点
+  \node[box, fill=white] (enc) at (-5, -0.8) {上位机\\语义编码};
+  \node[box, fill=white] (latent) at (-2, -0.8) {Latent\\张量传输};
+  \node[box, fill=mPurple!30] (infer) at (1, -0.8) {飞腾端\\推理引擎};
+  \node[box, fill=white] (out) at (4.5, -0.8) {重建输出\\图像显示};
+  
+  % 流程箭头
+  \draw[arr] (enc) -- (latent);
+  \draw[arr] (latent) -- (infer);
+  \draw[arr] (infer) -- (out);
+  
+  % 运行时切换标注
+  \node[anchor=north, font=\scriptsize\sffamily, color=mPurple!80] at (1, -1.6)
+    {运行时配置切换（TVM模式 / MNN模式）};
+  
+  % 核心结论
+  \node[
+    anchor=south, yshift=0.2cm,
+    rectangle, rounded corners=3pt, draw=mDark, fill=white,
+    minimum width=13cm, inner sep=6pt
+  ] (conclusion) at (0, -2.2) {
+    \textbf{核心结论：}\small
+    TVM与MNN并非"二选一"的替代关系，而是"双轨协同"的互补方案\quad
+    $\bullet$\quad 固定形状场景 $\rightarrow$ TVM（230.3ms）\quad
+    $\bullet$\quad 动态尺寸场景 $\rightarrow$ MNN（327.3ms）
+  };
+\end{scope}
+
+\end{tikzpicture}
+\end{document}
