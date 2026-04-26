@@ -1,0 +1,108 @@
+% 图 4.7 MNN 概述示意图 — 无图例防遮挡精修版 (IEEE字体与排版规范)
+% 请务必使用 XeLaTeX 引擎编译以支持系统字体
+\documentclass[tikz,border=10pt]{standalone}
+% ================= 字体配置 =================
+\usepackage{fontspec}
+\setmainfont{Times New Roman} % 英文统一 Times New Roman
+\usepackage[UTF8, scheme=plain]{ctex}
+\setCJKmainfont{SimHei}       % 中文统一黑体
+\usetikzlibrary{positioning, fit, arrows.meta, backgrounds, calc}
+% ================= 自定义容错配色 =================
+\definecolor{myDark}{RGB}{30,30,30}
+\definecolor{myGray}{RGB}{240,242,245}
+\definecolor{myBlue}{RGB}{220,235,245}
+\definecolor{myBlueBorder}{RGB}{120,160,200}
+\definecolor{myOrange}{RGB}{255,235,215}
+\definecolor{myOrangeBorder}{RGB}{220,140,70}
+\definecolor{myPurple}{RGB}{235,230,245}
+\definecolor{myPurpleBorder}{RGB}{170,150,200}
+\begin{document}
+\begin{tikzpicture}[
+  x=1.0cm, y=1.0cm,
+  node distance=1.0cm and 1.2cm, % 进一步拉大垂直间距防干涉
+  % ================= 字号与样式定义 =================
+  box/.style={
+    rectangle, draw=myBlueBorder, fill=myBlue, thick,
+    minimum height=0.8cm, font=\footnotesize, align=center,
+    rounded corners=2pt, inner sep=6pt},
+  subbox/.style={
+    rectangle, draw=myDark!70, fill=white, semithick,
+    minimum height=0.65cm, font=\scriptsize, align=center,
+    rounded corners=1pt, inner sep=4pt},
+  hlbox/.style={
+    rectangle, draw=myOrangeBorder, fill=myOrange, thick,
+    minimum height=0.8cm, font=\footnotesize\bfseries, align=center,
+    rounded corners=2pt, inner sep=6pt},
+  hlsubbox/.style={
+    rectangle, draw=myOrangeBorder, fill=white, thick,
+    minimum height=0.65cm, font=\scriptsize\bfseries, align=center,
+    rounded corners=1pt, inner sep=4pt},
+  arr/.style={-{Stealth[length=5pt, width=3.5pt]}, thick, draw=myDark},
+  dasharr/.style={-{Stealth[length=5pt, width=3.5pt]}, semithick, dashed, draw=myDark!70},
+  lbl/.style={font=\small\bfseries, color=myDark}
+]
+  % ================= 1. 顶部输入层 =================
+  \node[box, minimum width=5cm] (model)
+    {动态尺寸 ONNX 模型\\[2pt]{\scriptsize (含 Semantic Latent)}};
+  \node[hlbox, minimum width=5cm, right=1.5cm of model] (image)
+    {多源异构巡检图像\\[2pt]{\scriptsize (混合分辨率直通)}};
+  % ================= 2. 离线转换层 =================
+  \node[subbox, minimum width=2.4cm, below=1.4cm of model.south west, anchor=north west] (fe)
+    {Frontend};
+  \node[subbox, minimum width=2.4cm, right=0.5cm of fe] (go)
+    {Graph Optimizer};
+  \node[lbl, above=0.15cm of fe.north west, anchor=south west] (cvt_lbl) {Converter (离线预处理)};
+  % ================= 3. 任务调度与动态适配 =================
+  \node[hlsubbox, minimum width=5cm, below=1.4cm of image.south, anchor=north] (scheduler)
+    {Round-Robin 任务分发\\[2pt]{\scriptsize \textbf{resizeTensor} $\to$ \textbf{resizeSession}}};
+  \node[lbl, above=0.15cm of scheduler.north west, anchor=south west] (sched_lbl) {Dynamic Scheduler (动态适配器)};
+  % ================= 4. 在线推理层 (双实例并行) =================
+  \node[hlsubbox, minimum width=5.2cm, below=2.4cm of fe.south west, anchor=north west] (inst0)
+    {Interpreter 实例 0\\[2pt]{\scriptsize (绑定 Cortex-A72 大核)}};
+  \node[hlsubbox, minimum width=5.2cm, right=1.1cm of inst0] (inst1)
+    {Interpreter 实例 1\\[2pt]{\scriptsize (绑定 Cortex-A55 小核)}};
+  \node[lbl, above=0.15cm of inst0.north west, anchor=south west] (int_lbl) {Interpreter (飞腾双引擎并行部署)};
+  % ================= 5. 引擎与底层加速 =================
+  \node[subbox, minimum width=5.2cm, below=0.6cm of inst0] (eng)
+    {Engine (调度/内存管理)};
+  \node[subbox, minimum width=5.2cm, below=0.6cm of inst1] (be)
+    {Backend (飞腾纯 CPU 异构底座)};
+  \node[subbox, minimum width=3.4cm, below=0.8cm of eng.south west, anchor=north west] (geo)
+    {几何计算\\[2pt]{\scriptsize 光栅算子分解}};
+  \node[subbox, minimum width=3.4cm, right=0.5cm of geo] (semi)
+    {半自动搜索\\[2pt]{\scriptsize 规避次优实现}};
+  \node[subbox, minimum width=3.4cm, right=0.5cm of semi] (neon)
+    {NEON 向量化\\[2pt]{\scriptsize 底层指令加速}};
+  % ================= 6. 结果输出 =================
+  \node[hlbox, minimum width=11.5cm, below=1.0cm of semi] (output)
+    {系统演示闭环验证：300 张混合尺寸图像直推，总耗时 98.2s (吞吐提升 1.43 倍)};
+  % ================= 数据流连线 =================
+  \draw[arr] (model.south) -- ++(0,-0.4) -| (fe.north);
+  \draw[arr] (fe) -- (go);
+  \draw[arr] (image.south) -- (scheduler.north);
+  % 离线模型预加载 (拉伸走线距离避免压到色块)
+  \draw[dasharr] (go.south) -- ++(0,-0.6) -| ([xshift=-1.5cm]inst0.north);
+  \draw[dasharr] (go.south) -- ++(0,-0.6) -| ([xshift=-1.5cm]inst1.north);
+  % 动态任务分发 (拉伸走线距离避免压到色块)
+  \draw[arr, draw=myOrangeBorder, thick] (scheduler.south) -- ++(0,-0.8) -| ([xshift=1.5cm]inst0.north);
+  \draw[arr, draw=myOrangeBorder, thick] (scheduler.south) -- ++(0,-0.8) -| ([xshift=1.5cm]inst1.north);
+  \draw[arr] (inst0) -- (eng);
+  \draw[arr] (inst1) -- (be);
+  \draw[arr] (eng) -- (be);
+  \draw[arr] (eng.south) -- ++(0,-0.4) -| (geo.north);
+  \draw[arr] (geo) -- (semi);
+  \draw[arr] (semi) -- (neon);
+  \draw[arr] (geo.south) -- ++(0,-0.4) -| (output.north);
+  \draw[arr] (semi.south) -- (output.north);
+  \draw[arr] (neon.south) -- ++(0,-0.4) -| (output.north);
+  % ================= 背景模块分区 =================
+  \begin{scope}[on background layer]
+    \node[fit=(cvt_lbl)(fe)(go), fill=myBlue!40, draw=myBlueBorder!60,
+      rounded corners=2pt, inner xsep=10pt, inner ysep=8pt] (box_cvt) {};
+    \node[fit=(sched_lbl)(scheduler), fill=myOrange!50, draw=myOrangeBorder!60,
+      rounded corners=2pt, inner xsep=10pt, inner ysep=8pt] (box_sched) {};
+    \node[fit=(int_lbl)(inst0)(inst1)(eng)(be)(geo)(semi)(neon), fill=myPurple!40, draw=myPurpleBorder!60,
+      rounded corners=2pt, inner xsep=10pt, inner ysep=8pt] (box_int) {};
+  \end{scope}
+\end{tikzpicture}
+\end{document}
