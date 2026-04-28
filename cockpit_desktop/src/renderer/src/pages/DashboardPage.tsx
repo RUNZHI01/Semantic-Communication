@@ -10,6 +10,7 @@ import {
   useRunBaseline,
   useInjectFault,
   useRecover,
+  useSetBoardAccess,
   useSwitchLinkProfile,
   useRunInferenceBatch,
 } from '../hooks/useActions';
@@ -39,6 +40,7 @@ export function DashboardPage() {
   const baselineMut = useRunBaseline();
   const faultMut = useInjectFault();
   const recoverMut = useRecover();
+  const boardAccessMut = useSetBoardAccess();
   const linkMut = useSwitchLinkProfile();
   const batchMut = useRunInferenceBatch();
 
@@ -61,6 +63,8 @@ export function DashboardPage() {
               system={system}
               onRecover={() => recoverMut.mutate()}
               recoverPending={recoverMut.isPending}
+              onSelectTransport={(mode) => boardAccessMut.mutate({ transport_mode: mode })}
+              transportPending={boardAccessMut.isPending}
               onSwitchProfile={(id) => linkMut.mutate(id)}
               switchPending={linkMut.isPending}
             />

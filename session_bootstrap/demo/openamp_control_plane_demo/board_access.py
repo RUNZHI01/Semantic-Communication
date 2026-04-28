@@ -14,6 +14,7 @@ HOST_KEYS = ("REMOTE_HOST", "PHYTIUM_PI_HOST")
 USER_KEYS = ("REMOTE_USER", "PHYTIUM_PI_USER")
 PASSWORD_KEYS = ("REMOTE_PASS", "PHYTIUM_PI_PASSWORD")
 PORT_KEYS = ("REMOTE_SSH_PORT", "PHYTIUM_PI_PORT")
+TRANSPORT_MODE_KEYS = ("MLKEM_TRANSPORT_MODE", "MLKEM_DATA_TRANSPORT", "MLKEM_TRANSPORT")
 
 INFERENCE_SHARED_REQUIRED_KEYS = (
     "REMOTE_TVM_PYTHON",
@@ -119,6 +120,47 @@ def normalize_port(raw: str) -> str:
     if port < 1 or port > 65535:
         raise ValueError("SSH 端口必须在 1 到 65535 之间。")
     return str(port)
+
+
+def normalize_transport_mode(raw: str | None, *, default: str = "tcp") -> str:
+    value = str(raw or "").strip().lower()
+    if not value:
+        return default
+    if value in {"tcp", "tailscale", "wired"}:
+        return "tcp"
+    if value in {"usrp", "ota", "wireless"}:
+        return "usrp"
+    raise ValueError("unsupported transport_mode")
+
+
+def current_transport_mode(env_values: dict[str, str]) -> str:
+    for key in TRANSPORT_MODE_KEYS:
+        value = str(env_values.get(key, "")).strip()
+        if value:
+            try:
+                return normalize_transport_mode(value)
+            except ValueError:
+                return "tcp"
+    return "tcp"
+
+
+def transport_mode_label(mode: str) -> str:
+    if normalize_transport_mode(mode) == "usrp":
+        return "USRP OTA"
+    return "Tailscale / TCP"
+
+
+def transport_mode_tone(mode: str) -> str:
+    if normalize_transport_mode(mode) == "usrp":
+        return "online"
+    return "info"
+
+
+def transport_mode_summary(mode: str) -> str:
+    normalized = normalize_transport_mode(mode)
+    if normalized == "usrp":
+        return "当前数据面按 USRP OTA 组织；控制面与认证面继续沿用既有 TCP / AEAD 链路。"
+    return "当前数据面按 Tailscale / TCP 组织；USRP 无线链路保持显式切换，不作为默认入口。"
 
 
 def sanitize_env_values(values: dict[str, str]) -> dict[str, str]:
@@ -588,6 +630,7 @@ class BoardAccessConfig:
     def to_public_dict(self) -> dict[str, Any]:
         missing_current = self.missing_inference_fields("current")
         missing_baseline = self.missing_inference_fields("baseline")
+        transport_mode = current_transport_mode(self.build_env())
         return {
             "configured": self.configured,
             "connection_ready": self.connection_ready,
@@ -608,6 +651,10 @@ class BoardAccessConfig:
                 "current": missing_current,
                 "baseline": missing_baseline,
             },
+            "transport_mode": transport_mode,
+            "transport_label": transport_mode_label(transport_mode),
+            "transport_tone": transport_mode_tone(transport_mode),
+            "transport_summary": transport_mode_summary(transport_mode),
             "source_summary": self.source_summary,
             "field_sources": self.field_sources,
             "preloaded_defaults": {

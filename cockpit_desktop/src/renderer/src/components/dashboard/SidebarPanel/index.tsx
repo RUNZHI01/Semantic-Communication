@@ -9,6 +9,8 @@ interface SidebarPanelProps {
   system: any;
   onRecover: () => void;
   recoverPending: boolean;
+  onSelectTransport: (mode: string) => void;
+  transportPending: boolean;
   onSwitchProfile: (profileId: string) => void;
   switchPending: boolean;
 }
@@ -17,13 +19,21 @@ export function SidebarPanel({
   system,
   onRecover,
   recoverPending,
+  onSelectTransport,
+  transportPending,
   onSwitchProfile,
   switchPending,
 }: SidebarPanelProps) {
   return (
     <div className={s.panel}>
       <div className={s.topSection}>
-        <LinkDirectorCard system={system} onSwitchProfile={onSwitchProfile} switchPending={switchPending} />
+        <LinkDirectorCard
+          system={system}
+          onSelectTransport={onSelectTransport}
+          transportPending={transportPending}
+          onSwitchProfile={onSwitchProfile}
+          switchPending={switchPending}
+        />
         <SafetyCard system={system} onRecover={onRecover} recoverPending={recoverPending} />
       </div>
       <div className={s.bottomSection}>

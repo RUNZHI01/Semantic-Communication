@@ -31,18 +31,27 @@ if str(REPO_ROOT) not in sys.path:
 
 from aircraft_position_bridge import FIELD_PATH_CANDIDATES, build_config_from_env_values, fetch_normalized_payload
 from archive_replay import ArchiveSessionNotFoundError, list_archive_sessions, load_archive_session
-from board_access import BoardAccessConfig, build_board_access_config, build_demo_default_board_access, load_env_file
+from board_access import (
+    BoardAccessConfig,
+    build_board_access_config,
+    build_demo_default_board_access,
+    load_env_file,
+    normalize_transport_mode,
+)
 from board_probe import DEFAULT_LIVE_PROBE_OUTPUT, is_successful_probe, load_probe_output, run_live_probe, write_probe_output
 from crypto_runtime import (
     DEFAULT_CIPHER_SUITE,
     DEFAULT_CRYPTO_PORT,
     DEFAULT_STATUS_PORT,
+    LOCAL_TONGSUO_BRIDGE_KEYS,
+    OQS_INSTALL_KEYS,
     REMOTE_PROJECT_ROOT_KEYS,
     REMOTE_SERVER_SCRIPT_KEYS,
     REMOTE_TVM_PYTHON_KEYS,
     STATUS_PORT_KEYS,
     SUITE_KEYS,
     _derive_remote_server_script,
+    _detect_local_tongsuo_bridge,
     _normalize_remote_tvm_python,
     MlkemSessionManager,
     build_local_crypto_client_command,
@@ -52,6 +61,8 @@ from crypto_runtime import (
     local_crypto_transport_mode,
     parse_int_config,
     resolve_local_crypto_client,
+    resolve_local_mlkem_runtime_root,
+    resolve_local_oqs_install,
     resolve_local_crypto_server,
     run_ssh_command,
 )
@@ -1992,6 +2003,7 @@ class DashboardState:
             startup_env_overrides=demo_startup_env_overrides,
         )
         self._last_control_status: dict[str, Any] | None = None
+        self._last_control_probe_error: dict[str, Any] | None = None
         self._last_inference_result: dict[str, Any] | None = None
         self._recent_inference_results: dict[str, dict[str, Any]] = {}
         self._last_fault_result: dict[str, Any] | None = None
@@ -2018,6 +2030,7 @@ class DashboardState:
         }
         self._local_aircraft_bridge_thread_started = False
         self._crypto_enabled: bool = False
+        self._last_crypto_test_result: dict[str, Any] | None = None
         self._last_soft_recover_ts: float = 0.0
         self._soft_recover_cooldown_sec: float = 45.0
         self._last_soft_recover_result: dict[str, Any] | None = None
@@ -2194,6 +2207,7 @@ class DashboardState:
             crypto_enabled = self._crypto_enabled
             self._crypto_status_cache = None
             self._crypto_status_cache_ts = 0.0
+            self._last_crypto_test_result = None
             mgr_to_close = self._mlkem_session_mgr
             self._mlkem_session_mgr = None
 
@@ -2228,9 +2242,11 @@ class DashboardState:
         with self._lock:
             fallback = self._board_access
         config = build_board_access_config(payload, fallback=fallback)
-        auth_overrides = self._board_access_auth_overrides_from_payload(payload)
-        if auth_overrides:
-            config = config.with_env_overrides(auth_overrides)
+        config_overrides: dict[str, str] = {}
+        config_overrides.update(self._board_access_auth_overrides_from_payload(payload))
+        config_overrides.update(self._board_access_runtime_overrides_from_payload(payload))
+        if config_overrides:
+            config = config.with_env_overrides(config_overrides)
         mgr_to_close: MlkemSessionManager | None = None
         with self._lock:
             self._board_access = config
@@ -2250,11 +2266,13 @@ class DashboardState:
             self._board_position_api_refreshing = False
             self._aircraft_position_upstream_probe_cache = None
             self._aircraft_position_upstream_probe_cache_ts = 0.0
+            self._last_control_probe_error = None
+            self._last_crypto_test_result = None
             crypto_enabled = self._crypto_enabled
         if mgr_to_close is not None:
             self._close_mlkem_session_manager(mgr_to_close)
-        # 密码录入后立即在后台尝试启动板端 tcp_server，无需等待 toggle ON 或首次推理
-        if config.connection_ready:
+        # 仅在 TCP 模式下自动拉起板端 tcp_server；USRP 数据面保持显式切换。
+        if config.connection_ready and local_crypto_transport_mode(config.build_env()) == "tcp":
             threading.Thread(
                 target=self._ensure_board_tcp_server,
                 args=(config,),
@@ -3100,6 +3118,22 @@ class DashboardState:
 
         return overrides
 
+    def _board_access_runtime_overrides_from_payload(self, payload: dict[str, Any]) -> dict[str, str]:
+        overrides: dict[str, str] = {}
+        raw_transport_mode = payload.get("transport_mode")
+        if raw_transport_mode in (None, ""):
+            return overrides
+
+        try:
+            transport_mode = normalize_transport_mode(str(raw_transport_mode), default="")
+        except ValueError as exc:
+            raise ValueError("unsupported transport_mode; expected tcp or usrp") from exc
+
+        overrides["MLKEM_TRANSPORT_MODE"] = transport_mode
+        if transport_mode == "usrp":
+            overrides.setdefault("MLKEM_USRP_MODE", "ota")
+        return overrides
+
     @staticmethod
     def _auth_sig_policy_for_env(env_values: dict[str, str]) -> str:
         raw_value = first_config_value(
@@ -3126,6 +3160,135 @@ class DashboardState:
             "sig_policy": self._auth_sig_policy_for_env(env_values),
             "server_id": str(server_id or DEFAULT_MLKEM_AUTH_SERVER_ID).strip() or DEFAULT_MLKEM_AUTH_SERVER_ID,
         }
+
+    @staticmethod
+    def _normalize_cipher_suite_label(raw_value: Any) -> str:
+        value = str(raw_value or "").strip()
+        if not value:
+            return "unknown"
+        return value.lower().replace("_", "-")
+
+    def _infer_local_kem_backend_label(
+        self,
+        env_values: dict[str, str],
+        *,
+        client_script: Path | None,
+    ) -> str:
+        explicit_tongsuo = first_config_value(env_values, keys=LOCAL_TONGSUO_BRIDGE_KEYS, default="")
+        if explicit_tongsuo:
+            return "tongsuo-ML-KEM-768"
+
+        extra_roots: tuple[Path, ...] = ()
+        if client_script is not None:
+            extra_roots = (client_script.parent.parent,)
+
+        runtime_root, _ = resolve_local_mlkem_runtime_root(env_values, extra_roots=extra_roots)
+        if _detect_local_tongsuo_bridge(runtime_root) is not None:
+            return "tongsuo-ML-KEM-768"
+
+        explicit_oqs = first_config_value(env_values, keys=OQS_INSTALL_KEYS, default="")
+        if explicit_oqs:
+            return "liboqs-ML-KEM-768"
+
+        oqs_root, _ = resolve_local_oqs_install(env_values, extra_roots=extra_roots)
+        if oqs_root is not None:
+            return "liboqs-ML-KEM-768"
+
+        return "ML-KEM-768"
+
+    @staticmethod
+    def _status_float(value: Any) -> float | None:
+        if value is None:
+            return None
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _status_int(value: Any) -> int | None:
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _record_successful_crypto_test(
+        self,
+        *,
+        env_values: dict[str, str],
+        client_script: Path,
+        transport_mode: str,
+        metrics: dict[str, Any],
+        input_bytes: int,
+    ) -> dict[str, Any]:
+        suite = self._normalize_cipher_suite_label(
+            metrics.get("suite") or first_config_value(env_values, keys=SUITE_KEYS, default=DEFAULT_CIPHER_SUITE)
+        )
+        backend = str(metrics.get("backend") or "").strip() or self._infer_local_kem_backend_label(
+            env_values,
+            client_script=client_script,
+        )
+        last_sha256_match = metrics.get("sha256_match")
+        if last_sha256_match is not None:
+            last_sha256_match = bool(last_sha256_match)
+
+        current_ts = now_iso()
+        channel_state = "ready" if str(transport_mode).strip().lower() == "daemon" else "idle"
+        encrypt_bytes = self._status_int(metrics.get("bytes_sent"))
+        decrypt_bytes = self._status_int(metrics.get("bytes_received"))
+        auth_snapshot = self._auth_status_from_env(env_values)
+        if metrics.get("auth_enabled") is not None:
+            auth_snapshot["auth_enabled"] = bool(metrics.get("auth_enabled"))
+        if metrics.get("sig_policy"):
+            auth_snapshot["sig_policy"] = str(metrics.get("sig_policy") or "").strip()
+        if metrics.get("server_id"):
+            auth_snapshot["server_id"] = str(metrics.get("server_id") or "").strip()
+
+        with self._lock:
+            prev_status = dict(self._crypto_status_cache or {})
+            prev_test = dict(self._last_crypto_test_result or {})
+            prev_session_count = max(
+                int(prev_status.get("session_count") or 0),
+                int(prev_test.get("session_count") or 0),
+            )
+            prev_bytes_sent = max(
+                int(prev_status.get("bytes_sent") or 0),
+                int(prev_test.get("bytes_sent") or 0),
+            )
+            prev_bytes_received = max(
+                int(prev_status.get("bytes_received") or 0),
+                int(prev_test.get("bytes_received") or 0),
+            )
+
+            snapshot = {
+                "channel_state": channel_state,
+                "kem_backend": backend,
+                "cipher_suite": suite,
+                "handshake_ms": self._status_float(metrics.get("handshake_ms")),
+                "encrypt_ms": self._status_float(metrics.get("encrypt_ms")),
+                "decrypt_ms": self._status_float(metrics.get("decrypt_ms")),
+                "inference_ms": self._status_float(metrics.get("inference_ms")),
+                "bytes_sent": prev_bytes_sent + max(encrypt_bytes if encrypt_bytes is not None else input_bytes, 0),
+                "bytes_received": prev_bytes_received + max(decrypt_bytes or 0, 0),
+                "last_sha256_match": last_sha256_match,
+                "session_count": prev_session_count + 1,
+                "last_session_at": current_ts,
+                "error": None,
+                "enabled": True,
+                "board_configured": True,
+                **auth_snapshot,
+            }
+            self._last_crypto_test_result = dict(snapshot)
+            self._crypto_status_cache = dict(snapshot)
+            self._crypto_status_cache_ts = time.monotonic()
+
+        return snapshot
+
+    @staticmethod
+    def _format_board_status_error(exc: Exception) -> str:
+        return f"board status endpoint unavailable: {exc}"
 
     def _get_crypto_status_core(self) -> dict[str, Any]:
         """Internal: crypto status without degradation overlay."""
@@ -3158,6 +3321,7 @@ class DashboardState:
                 return {**_disabled, "board_configured": bc, "batch_benchmark": None}
             cached = self._crypto_status_cache
             cache_ts = self._crypto_status_cache_ts
+            last_test = self._last_crypto_test_result
             if cached is not None and (time.monotonic() - cache_ts) < 1.5:
                 batch = self._batch_state
                 bm = batch.get("benchmark") if batch else None
@@ -3197,6 +3361,7 @@ class DashboardState:
                 "batch_status": None,
                 "batch_completed": 0,
                 "batch_total": 0,
+                **auth_summary,
                 **control_summary,
             }
 
@@ -3225,20 +3390,40 @@ class DashboardState:
             data.setdefault("server_id", auth_summary["server_id"])
             return data
         except (URLError, OSError, json.JSONDecodeError, TimeoutError) as exc:
+            error_text = self._format_board_status_error(exc)
             # 保留上次正常值，只更新 error
             with self._lock:
                 prev = self._crypto_status_cache
+                last_test = self._last_crypto_test_result
                 batch = self._batch_state
             if prev is not None:
                 fallback = {
                     **prev,
                     "enabled": True,
                     "board_configured": True,
-                    "error": f"board not reachable: {exc}",
+                    "error": error_text,
                     "batch_benchmark": batch.get("benchmark") if batch else None,
                     "batch_status": batch.get("status") if batch else None,
                     "batch_completed": batch.get("completed", 0) if batch else 0,
                     "batch_total": batch.get("total", 0) if batch else 0,
+                    **auth_summary,
+                    **control_summary,
+                }
+                with self._lock:
+                    self._crypto_status_cache = fallback
+                    self._crypto_status_cache_ts = time.monotonic()
+                return fallback
+            if last_test is not None:
+                fallback = {
+                    **last_test,
+                    "enabled": True,
+                    "board_configured": True,
+                    "error": error_text,
+                    "batch_benchmark": batch.get("benchmark") if batch else None,
+                    "batch_status": batch.get("status") if batch else None,
+                    "batch_completed": batch.get("completed", 0) if batch else 0,
+                    "batch_total": batch.get("total", 0) if batch else 0,
+                    **auth_summary,
                     **control_summary,
                 }
                 with self._lock:
@@ -3259,13 +3444,14 @@ class DashboardState:
                 "last_sha256_match": None,
                 "session_count": 0,
                 "last_session_at": None,
-                "error": f"board not reachable: {exc}",
+                "error": error_text,
                 "enabled": True,
                 "board_configured": True,
                 "batch_benchmark": None,
                 "batch_status": None,
                 "batch_completed": 0,
                 "batch_total": 0,
+                **auth_summary,
                 **control_summary,
             }
             with self._lock:
@@ -3302,6 +3488,50 @@ class DashboardState:
             "control_recover_attempted": bool(soft_recover),
             "control_recover_note": str(soft_recover.get("note") or ""),
         }
+
+    def _refresh_control_plane_status(
+        self,
+        board_access: BoardAccessConfig,
+        *,
+        variant: str = "current",
+        source: str,
+        job_id: str = "",
+    ) -> dict[str, Any] | None:
+        if not board_access.probe_ready:
+            return None
+
+        variant_access = self._live_board_access_for_variant(board_access, variant=variant)
+        trusted_sha = expected_sha_for_variant(variant_access, variant) or self._current_trusted_sha(variant_access)
+        try:
+            status_probe = query_live_status(board_access, trusted_sha=trusted_sha)
+        except Exception as exc:
+            error_payload = {
+                "status": "error",
+                "message": str(exc),
+                "status_source": "probe_error",
+                "guard_state": "NOT_PROBED",
+                "last_fault_code": "NOT_PROBED",
+            }
+            with self._lock:
+                self._last_control_probe_error = error_payload
+            return error_payload
+
+        if status_probe.get("status") == "success":
+            with self._lock:
+                self._last_control_status = status_probe
+                self._last_control_probe_error = None
+            self._emit_status_observation_events(status_probe, source=source, job_id=job_id)
+        else:
+            error_payload = {
+                "status": str(status_probe.get("status") or "error"),
+                "message": str(status_probe.get("message") or "控制面探测失败。"),
+                "status_source": "probe_error",
+                "guard_state": str(status_probe.get("guard_state") or "NOT_PROBED"),
+                "last_fault_code": str(status_probe.get("last_fault_code") or "NOT_PROBED"),
+            }
+            with self._lock:
+                self._last_control_probe_error = error_payload
+        return status_probe
 
     def _maybe_soft_recover_control_plane(
         self,
@@ -3920,6 +4150,9 @@ class DashboardState:
 
         host = board_access.host
         env_values = board_access.build_env()
+        transport_mode = local_crypto_transport_mode(env_values)
+        if transport_mode == "tcp":
+            self._ensure_board_tcp_server(board_access)
         tcp_client, searched_paths = resolve_local_crypto_client(env_values)
         if tcp_client is None:
             searched_text = ", ".join(str(path) for path in searched_paths[:5]) or "no candidate paths"
@@ -3931,6 +4164,11 @@ class DashboardState:
 
         # 生成测试输入：兼容新版 batch client 与旧版单图 client。
         tmp_path = self._create_mlkem_input_file(tcp_client)
+        test_job_id = f"crypto_test_{tmp_path.stem}"
+        try:
+            test_input_bytes = int(tmp_path.stat().st_size)
+        except OSError:
+            test_input_bytes = 0
 
         cmd, env = build_local_crypto_client_command(
             env_values,
@@ -3953,13 +4191,35 @@ class DashboardState:
                 )
                 wall_ms = round((time.monotonic() - t0) * 1000, 1)
                 tmp_path.unlink()
-                return {
+                result = {
                     "status": "ok" if daemon_result.get("status") == "ok" else "error",
                     "wall_ms": wall_ms,
                     "handshake_ms": round(mgr._handshake_ms, 1),
                     "sha256_match": daemon_result.get("sha256_match", False),
                     "transport_mode": "daemon",
                 }
+                if result["status"] == "ok":
+                    daemon_metrics = {
+                        "handshake_ms": result.get("handshake_ms"),
+                        "encrypt_ms": daemon_result.get("encrypt_ms"),
+                        "decrypt_ms": daemon_result.get("decrypt_ms"),
+                        "inference_ms": daemon_result.get("inference_ms"),
+                        "sha256_match": daemon_result.get("sha256_match"),
+                        "suite": first_config_value(env_values, keys=SUITE_KEYS, default=DEFAULT_CIPHER_SUITE),
+                    }
+                    self._record_successful_crypto_test(
+                        env_values=env_values,
+                        client_script=tcp_client,
+                        transport_mode="daemon",
+                        metrics=daemon_metrics,
+                        input_bytes=test_input_bytes,
+                    )
+                    self._refresh_control_plane_status(
+                        board_access,
+                        source="crypto_test_probe",
+                        job_id=test_job_id,
+                    )
+                return result
             except Exception:
                 pass  # 回退到子进程模式
 
@@ -3982,16 +4242,29 @@ class DashboardState:
 
             # 解析 stdout 中关键指标
             stdout = proc.stdout
-            result: dict[str, Any] = {"status": "ok", "wall_ms": wall_ms}
+            metrics = self._parse_mlkem_client_metrics(stdout)
+            result: dict[str, Any] = {
+                "status": "ok",
+                "wall_ms": wall_ms,
+                "transport_mode": transport_mode,
+            }
+            if metrics.get("handshake_ms") is not None:
+                result["handshake_ms"] = float(metrics["handshake_ms"])
+            if metrics.get("sha256_match") is not None:
+                result["sha256_match"] = bool(metrics["sha256_match"])
 
-            for line in stdout.splitlines():
-                if "握手完成" in line:
-                    # 提取耗时
-                    m = re.search(r"([\d.]+)\s*ms", line)
-                    if m:
-                        result["handshake_ms"] = float(m.group(1))
-                if "SHA256 匹配" in line or "对端 SHA256 匹配: 是" in line or "✓ 传输成功" in line:
-                    result["sha256_match"] = True
+            self._record_successful_crypto_test(
+                env_values=env_values,
+                client_script=tcp_client,
+                transport_mode=transport_mode,
+                metrics=metrics,
+                input_bytes=test_input_bytes,
+            )
+            self._refresh_control_plane_status(
+                board_access,
+                source="crypto_test_probe",
+                job_id=test_job_id,
+            )
 
             return result
 
@@ -5037,8 +5310,13 @@ class DashboardState:
             "result_recv_ms": None,
             "sha256_match": None,
             "result_received": None,
+            "bytes_sent": None,
+            "bytes_received": None,
             "suite": "",
             "backend": "",
+            "auth_enabled": None,
+            "sig_policy": "",
+            "server_id": "",
         }
         for line in stdout.splitlines():
             text = str(line).strip()
@@ -5053,10 +5331,16 @@ class DashboardState:
                 if m:
                     metrics["handshake_ms"] = float(m.group(1))
             elif "加密发送" in text:
+                m = re.search(r"(\d+)\s*B", text)
+                if m:
+                    metrics["bytes_sent"] = int(m.group(1))
                 m = re.search(r"耗时\s*([\d.]+)\s*ms", text)
                 if m:
                     metrics["encrypt_ms"] = float(m.group(1))
             elif "接收重建结果" in text:
+                m = re.search(r"(\d+)\s*B", text)
+                if m:
+                    metrics["bytes_received"] = int(m.group(1))
                 m = re.search(r"耗时\s*([\d.]+)\s*ms", text)
                 if m:
                     metrics["result_recv_ms"] = float(m.group(1))
@@ -5066,6 +5350,13 @@ class DashboardState:
                 m = re.search(r"([\d.]+)\s*ms", text)
                 if m:
                     metrics["inference_ms"] = float(m.group(1))
+            elif text.startswith("身份认证:"):
+                metrics["auth_enabled"] = "已启用" in text
+                m = re.search(r"\(([^)]+)\)", text)
+                if m:
+                    metrics["sig_policy"] = m.group(1).strip()
+            elif text.startswith("服务端标识:"):
+                metrics["server_id"] = text.split(":", 1)[1].strip()
             elif "板端重建结果:" in text:
                 if "已回传" in text:
                     metrics["result_received"] = True

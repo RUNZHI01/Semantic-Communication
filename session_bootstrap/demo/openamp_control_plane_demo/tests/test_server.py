@@ -2133,6 +2133,185 @@ class DashboardStateTest(unittest.TestCase):
         self.assertEqual(payload["control_total_fault_count"], 3)
         self.assertFalse(payload["service_mode"]["available"])
 
+    def test_refresh_control_plane_status_caches_probe_error(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        board_access = server.build_board_access_config(
+            {
+                "host": "demo-board",
+                "user": "demo-user",
+                "password": "demo-pass",
+                "port": "22",
+            },
+            fallback=state._board_access,
+        )
+
+        with patch("server.query_live_status", side_effect=RuntimeError("rpmsg bridge unavailable")):
+            payload = state._refresh_control_plane_status(
+                board_access,
+                source="unit_test_probe",
+            )
+
+        self.assertEqual(payload["status"], "error")
+        self.assertEqual(payload["message"], "rpmsg bridge unavailable")
+        self.assertEqual(state._last_control_probe_error["status_source"], "probe_error")
+        self.assertEqual(state._last_control_probe_error["message"], "rpmsg bridge unavailable")
+
+    def test_run_crypto_test_updates_status_cache_from_subprocess_metrics(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        state._crypto_enabled = True
+        state._board_access = server.build_board_access_config(
+            {
+                "host": "demo-board",
+                "user": "demo-user",
+                "password": "demo-pass",
+                "port": "22",
+            },
+            fallback=state._board_access,
+        )
+
+        stdout = "\n".join(
+            [
+                "密码套件:  SM4_GCM",
+                "KEM 后端:  mock-backend",
+                "握手完成: 9.0ms",
+                "身份认证:  已启用 (DUAL_REQUIRED)",
+                "服务端标识: phytium-board",
+                "加密发送: 49152B, 耗时 3.0ms",
+                "✓ 传输成功",
+                "  对端 SHA256 匹配: 是",
+                "  TVM 推理耗时: 21.0ms",
+                "  接收重建结果: 65536B, 耗时 4.0ms",
+            ]
+        )
+        control_probe = {
+            "status": "success",
+            "guard_state": "READY",
+            "last_fault_code": "NONE",
+            "heartbeat_ok": 1,
+            "total_fault_count": 0,
+        }
+
+        with (
+            patch("server.resolve_local_crypto_client", return_value=(Path("/tmp/tcp_client.py"), [Path("/tmp/tcp_client.py")])),
+            patch(
+                "server.build_local_crypto_client_command",
+                side_effect=lambda env_values, *, host, input_path, client_script: (
+                    ["fake-python", str(client_script), "--host", host, "--input", str(input_path)],
+                    {},
+                ),
+            ),
+            patch.object(state, "_ensure_board_tcp_server", return_value=None),
+            patch.object(state, "_get_mlkem_session_manager", return_value=None),
+            patch(
+                "server.subprocess.run",
+                return_value=server.subprocess.CompletedProcess(
+                    ["fake-python", "tcp_client.py"],
+                    0,
+                    stdout=stdout,
+                    stderr="",
+                ),
+            ),
+            patch("server.query_live_status", return_value=control_probe) as query_status,
+        ):
+            result = state.run_crypto_test()
+
+        self.assertEqual(result["status"], "ok")
+        query_status.assert_called_once()
+        payload = state.get_crypto_status()
+        self.assertEqual(payload["channel_state"], "idle")
+        self.assertEqual(payload["kem_backend"], "mock-backend")
+        self.assertEqual(payload["cipher_suite"], "sm4-gcm")
+        self.assertEqual(payload["handshake_ms"], 9.0)
+        self.assertEqual(payload["encrypt_ms"], 3.0)
+        self.assertEqual(payload["decrypt_ms"], 4.0)
+        self.assertEqual(payload["inference_ms"], 21.0)
+        self.assertEqual(payload["bytes_sent"], 49152)
+        self.assertEqual(payload["bytes_received"], 65536)
+        self.assertEqual(payload["last_sha256_match"], True)
+        self.assertEqual(payload["session_count"], 1)
+        self.assertEqual(payload["auth_enabled"], True)
+        self.assertEqual(payload["sig_policy"], "DUAL_REQUIRED")
+        self.assertEqual(payload["server_id"], "phytium-board")
+        self.assertEqual(payload["control_guard_state"], "READY")
+        self.assertEqual(payload["control_last_fault_code"], "NONE")
+        self.assertEqual(payload["control_heartbeat_ok"], 1)
+        self.assertEqual(payload["control_total_fault_count"], 0)
+        self.assertIsNone(payload["error"])
+
+    def test_get_crypto_status_reuses_last_successful_crypto_test_when_status_probe_is_unreachable(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        state._crypto_enabled = True
+        state._board_access = server.build_board_access_config(
+            {
+                "host": "100.121.87.73",
+                "user": "demo-user",
+                "password": "demo-pass",
+                "port": "22",
+            },
+            fallback=state._board_access.with_env_overrides(
+                {
+                    "MLKEM_STATUS_PORT": "18080",
+                    "TONGSUO_KEM_BRIDGE": "/tmp/libtongsuo_kem_bridge.so",
+                    "MLKEM_CIPHER_SUITE": "SM4_GCM",
+                }
+            ),
+        )
+
+        class FakeMgr:
+            def __init__(self) -> None:
+                self._handshake_ms = 12.3
+
+            def ensure_alive(self) -> None:
+                return None
+
+            def send_image(
+                self,
+                input_path: str,
+                job_id: str,
+                *,
+                run_tvm: bool = False,
+                expect_result: bool = False,
+            ) -> dict[str, object]:
+                del input_path, job_id, run_tvm, expect_result
+                return {
+                    "status": "ok",
+                    "sha256_match": True,
+                    "encrypt_ms": 7.0,
+                    "decrypt_ms": None,
+                    "inference_ms": None,
+                }
+
+        with (
+            patch("server.resolve_local_crypto_client", return_value=(Path("/tmp/tcp_client.py"), [Path("/tmp/tcp_client.py")])),
+            patch(
+                "server.build_local_crypto_client_command",
+                side_effect=lambda env_values, *, host, input_path, client_script: (
+                    ["fake-python", str(client_script), "--host", host, "--input", str(input_path)],
+                    {},
+                ),
+            ),
+            patch.object(state, "_ensure_board_tcp_server", return_value=None),
+            patch.object(state, "_get_mlkem_session_manager", return_value=FakeMgr()),
+            patch("server.query_live_status", side_effect=RuntimeError("control probe failed")),
+        ):
+            result = state.run_crypto_test()
+
+        self.assertEqual(result["status"], "ok")
+        state._crypto_status_cache_ts = 0.0
+
+        with patch("server.fetch_json_direct", side_effect=server.URLError("[Errno 111] Connection refused")):
+            payload = state.get_crypto_status()
+
+        self.assertEqual(payload["channel_state"], "ready")
+        self.assertEqual(payload["kem_backend"], "tongsuo-ML-KEM-768")
+        self.assertEqual(payload["cipher_suite"], "sm4-gcm")
+        self.assertEqual(payload["handshake_ms"], 12.3)
+        self.assertEqual(payload["encrypt_ms"], 7.0)
+        self.assertTrue((payload["bytes_sent"] or 0) > 0)
+        self.assertEqual(payload["last_sha256_match"], True)
+        self.assertEqual(payload["session_count"], 1)
+        self.assertIn("board status endpoint unavailable", str(payload["error"]))
+
     def test_set_board_access_applies_auth_policy_overrides(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
 
@@ -4271,6 +4450,44 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertTrue(payload["board_access"]["inference_ready_variants"]["current"])
         self.assertTrue(payload["board_access"]["inference_ready_variants"]["baseline"])
         self.assertEqual(payload["board_access"]["field_sources"]["password"], "session")
+
+    def test_board_access_endpoint_accepts_transport_mode_override(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+
+        status, _, payload = request_json(
+            state,
+            "POST",
+            "/api/session/board-access",
+            body=json.dumps({"password": "demo-pass", "transport_mode": "usrp"}).encode("utf-8"),
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["board_access"]["transport_mode"], "usrp")
+        self.assertEqual(payload["board_access"]["transport_label"], "USRP OTA")
+        self.assertEqual(payload["board_access"]["transport_tone"], "online")
+        self.assertIn("USRP OTA", payload["board_access"]["transport_label"])
+        self.assertEqual(state._board_access.build_env()["MLKEM_TRANSPORT_MODE"], "usrp")
+        self.assertEqual(state._board_access.build_env()["MLKEM_USRP_MODE"], "ota")
+
+        system_status, _, system_payload = request_json(state, "GET", "/api/system-status")
+
+        self.assertEqual(system_status, 200)
+        self.assertEqual(system_payload["board_access"]["transport_mode"], "usrp")
+        self.assertEqual(system_payload["board_access"]["transport_label"], "USRP OTA")
+
+    def test_board_access_endpoint_rejects_unsupported_transport_mode(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+
+        status, _, payload = request_json(
+            state,
+            "POST",
+            "/api/session/board-access",
+            body=json.dumps({"password": "demo-pass", "transport_mode": "bluetooth"}).encode("utf-8"),
+        )
+
+        self.assertEqual(status, 400)
+        self.assertEqual(payload["status"], "error")
+        self.assertEqual(payload["message"], "unsupported transport_mode; expected tcp or usrp")
 
     def test_board_access_env_switch_refreshes_current_trusted_sha_runtime(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
