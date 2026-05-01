@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 
 import {
   buildBatchCompletionToken,
+  shouldHydrateRecentCurrentForBatch,
   shouldFinalizeInferenceJob,
   shouldRefreshCompletedBatch,
   shouldTrackInferenceJob,
@@ -43,4 +44,10 @@ test('batch completion token is stable for the same settled batch', () => {
   const token = buildBatchCompletionToken(batch)
   assert.equal(shouldRefreshCompletedBatch(null, batch), true)
   assert.equal(shouldRefreshCompletedBatch(token, batch), false)
+})
+
+test('mnn batch completion should not hydrate stale tvm current result', () => {
+  assert.equal(shouldHydrateRecentCurrentForBatch({ status: 'done', engine: 'mnn' }), false)
+  assert.equal(shouldHydrateRecentCurrentForBatch({ status: 'done', engine: 'tvm' }), true)
+  assert.equal(shouldHydrateRecentCurrentForBatch({ status: 'done' }), false)
 })

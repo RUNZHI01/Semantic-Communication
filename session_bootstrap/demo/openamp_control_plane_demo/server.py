@@ -3836,9 +3836,24 @@ class DashboardState:
                 PurePosixPath(remote_server_script).with_name(local_helper_script.name)
             )
             assets.append((remote_helper_script, local_helper_script))
+        package_candidates = (
+            local_server_script.parent / "mlkem_link",
+            local_server_script.parent.parent / "mlkem_link",
+        )
+        local_package_dir = next((path for path in package_candidates if path.is_dir()), None)
+        if local_package_dir is not None:
+            remote_package_dir = PurePosixPath(remote_server_script).parent / local_package_dir.name
+            for local_package_file in sorted(local_package_dir.rglob("*.py")):
+                if "__pycache__" in local_package_file.parts or "tests" in local_package_file.parts:
+                    continue
+                remote_relative = local_package_file.relative_to(local_package_dir)
+                remote_package_file = remote_package_dir.joinpath(*remote_relative.parts)
+                assets.append((str(remote_package_file), local_package_file))
 
         hasher = hashlib.sha256()
-        for _remote_path, local_path in assets:
+        for remote_path, local_path in assets:
+            hasher.update(remote_path.encode("utf-8"))
+            hasher.update(b"\0")
             hasher.update(local_path.read_bytes())
         signature = hasher.hexdigest()
         signature_key = f"{board_access.host}:{remote_server_script}"
@@ -4927,10 +4942,17 @@ class DashboardState:
         with self._lock:
             records = list(self._inference_jobs.values())
         for record in records:
-            snapshot = record.get("last_snapshot")
-            if not isinstance(snapshot, dict):
+            try:
                 snapshot = record["job"].snapshot()
-                record["last_snapshot"] = snapshot
+            except Exception:
+                snapshot = record.get("last_snapshot")
+                if not isinstance(snapshot, dict):
+                    continue
+            else:
+                with self._lock:
+                    current_record = self._inference_jobs.get(str(record.get("job_id") or ""))
+                    if current_record is not None:
+                        current_record["last_snapshot"] = snapshot
             if snapshot.get("request_state") == "running":
                 return {
                     "job_id": record["job_id"],
@@ -7349,7 +7371,13 @@ class DemoRequestHandler(SimpleHTTPRequestHandler):
                 return
             if parsed.path == "/api/run-baseline":
                 image_index = self.coerce_int(body.get("image_index"), default=0)
-                payload = self.server.app_state.run_demo_inference(variant="baseline", image_index=image_index)
+                max_inputs = self.coerce_int(body.get("max_inputs"), default=DEFAULT_MAX_INPUTS)
+                max_inputs = max(1, min(max_inputs, 1000))
+                payload = self.server.app_state.run_demo_inference(
+                    variant="baseline",
+                    image_index=image_index,
+                    max_inputs=max_inputs,
+                )
                 self.respond_json(HTTPStatus.OK, payload)
                 return
             if parsed.path == "/api/run-inference-batch":

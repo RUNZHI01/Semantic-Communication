@@ -43,42 +43,50 @@ interface HeroMetricsProps {
 
 export function HeroMetrics({ system, inferenceProgress, batchState }: HeroMetricsProps) {
   const status = system.data
-  const results = status?.recent_results
-  const lastCompletedInference = useAppStore((s) => s.lastCompletedInference)
-  const currentFromStatus = results?.['current']
-  const current = (
-    lastCompletedInference?.variant === 'current'
-    && lastCompletedInference?.execution_mode === 'live'
-    && lastCompletedInference?.status === 'success'
-  ) ? lastCompletedInference : currentFromStatus
-  const baseline = results?.['baseline']
+  const comparisonResults = useAppStore((s) => s.comparisonResults)
+  const pendingBatchJobId = useAppStore((s) => s.pendingBatchJobId)
   const live = status?.live
   const boardOnline = live?.board_online ?? false
+  const batch = batchState?.data
+  const isCurrentSessionBatch = Boolean(
+    batch?.batch_job_id
+    && pendingBatchJobId
+    && batch.batch_job_id === pendingBatchJobId,
+  )
+  const activeBatch = isCurrentSessionBatch ? batch : undefined
 
-  const basePayloadCurrent = current?.timings?.payload_ms
-  const payloadBaseline = baseline?.timings?.payload_ms
-  const baseImprovementPct = (basePayloadCurrent && payloadBaseline && payloadBaseline > 0)
-    ? ((payloadBaseline - basePayloadCurrent) / payloadBaseline * 100)
+  const acceleratorResults = [comparisonResults.tvm, comparisonResults.mnn]
+    .filter((item): item is NonNullable<typeof item> => Boolean(item))
+  const latestAccelerator = acceleratorResults.reduce<(typeof acceleratorResults)[number] | undefined>(
+    (latest, item) => {
+      if (!latest) return item
+      return (item.updatedAt ?? 0) >= (latest.updatedAt ?? 0) ? item : latest
+    },
+    undefined,
+  )
+  const baseReconstructionCurrent = latestAccelerator?.reconstructionMs
+  const reconstructionBaseline = comparisonResults.pytorch?.reconstructionMs
+  const baseImprovementPct = (baseReconstructionCurrent && reconstructionBaseline && reconstructionBaseline > 0)
+    ? ((reconstructionBaseline - baseReconstructionCurrent) / reconstructionBaseline * 100)
     : null
 
   const lp = inferenceProgress?.data?.live_progress
-  const batch = batchState?.data
   const isSingleInferenceActive = !!inferenceProgress?.data && inferenceProgress.data.request_state === 'running'
-  const isBatchActive = batch?.status === 'running'
+  const isBatchActive = activeBatch?.status === 'running'
   const isActiveInference = isSingleInferenceActive || isBatchActive
-  const batchEngineLabel = batch?.engine === 'mnn' ? 'MNN 推理' : 'TVM 推理'
+  const batchEngineLabel = activeBatch?.engine === 'mnn' ? 'MNN 推理' : 'TVM 推理'
   const progressLabel = isSingleInferenceActive
     ? (lp?.label ?? inferenceProgress?.data?.status_category ?? inferenceProgress?.data?.request_state)
     : isBatchActive
-      ? `${batchEngineLabel} ${batch?.completed ?? 0}/${batch?.total ?? 300}`
-      : batch?.status === 'done'
-        ? batch.fallback && batch.fallback > 0
-          ? `批量结束 ${batch.success ?? 0}/${batch.total ?? 300} 成功`
+      ? `${batchEngineLabel} ${activeBatch?.completed ?? 0}/${activeBatch?.total ?? 300}`
+      : activeBatch?.status === 'done'
+        ? activeBatch.fallback && activeBatch.fallback > 0
+          ? `批量结束 ${activeBatch.success ?? 0}/${activeBatch.total ?? 300} 成功`
           : '批量完成'
         : '空闲'
 
   // Mock data for sparklines to show activity
-  const mockPayloadData = [145, 142, 138, 135, 132, 130, 131, 129, 130];
+  const mockReconstructionData = [145, 142, 138, 135, 132, 130, 131, 129, 130];
   const mockSpeedupData = [85, 88, 90, 91, 92, 93, 92.5, 93, 93];
 
   return (
@@ -106,19 +114,19 @@ export function HeroMetrics({ system, inferenceProgress, batchState }: HeroMetri
         <span className={s.metricValue}>{live?.guard_state ?? '—'}</span>
       </div>
 
-      {/* Current Payload */}
+      {/* Reconstruction latency */}
       <div className={s.metricItem}>
         <div className={s.metricTop}>
           <Icons.Zap size={11} className={s.metricIcon} aria-hidden="true" />
-          <span className={s.metricLabel}>Payload</span>
+          <span className={s.metricLabel}>重建</span>
         </div>
         <div className={s.metricValueContainer}>
-          {basePayloadCurrent != null ? (
+          {baseReconstructionCurrent != null ? (
             <>
               <span className={`${s.metricValue} ${s.metricHighlight}`}>
-                <CountUp end={basePayloadCurrent} decimals={1} duration={350} /> ms
+                <CountUp end={baseReconstructionCurrent} decimals={1} duration={350} /> ms
               </span>
-              {isActiveInference && <Sparkline data={mockPayloadData} color="var(--color-primary)" />}
+              {isActiveInference && <Sparkline data={mockReconstructionData} color="var(--color-primary)" />}
             </>
           ) : (
             <span className={s.metricValue}>—</span>
@@ -133,9 +141,9 @@ export function HeroMetrics({ system, inferenceProgress, batchState }: HeroMetri
           <span className={s.metricLabel}>Baseline</span>
         </div>
         <div className={s.metricValueContainer}>
-          {payloadBaseline != null ? (
+          {reconstructionBaseline != null ? (
             <span className={s.metricValue}>
-              <CountUp end={payloadBaseline} decimals={1} duration={350} /> ms
+              <CountUp end={reconstructionBaseline} decimals={1} duration={350} /> ms
             </span>
           ) : (
             <span className={s.metricValue}>—</span>

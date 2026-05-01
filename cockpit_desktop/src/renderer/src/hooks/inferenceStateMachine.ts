@@ -37,3 +37,10 @@ export function shouldRefreshCompletedBatch(
   const token = buildBatchCompletionToken(payload)
   return Boolean(token) && token !== lastSettledBatchToken
 }
+
+export function shouldHydrateRecentCurrentForBatch(payload: BatchStateResponse | null | undefined): boolean {
+  if (!payload || payload.status !== 'done') {
+    return false
+  }
+  return payload.engine === 'tvm'
+}

@@ -149,8 +149,8 @@ export async function postRunInference(imageIndex = 0, variant = 'current'): Pro
   return postJson<RunInferenceResponse>('/api/run-inference', { image_index: imageIndex, mode: variant })
 }
 
-export async function postRunBaseline(imageIndex = 0): Promise<RunInferenceResponse> {
-  return postJson<RunInferenceResponse>('/api/run-baseline', { image_index: imageIndex })
+export async function postRunBaseline(imageIndex = 0, count = 300): Promise<RunInferenceResponse> {
+  return postJson<RunInferenceResponse>('/api/run-baseline', { image_index: imageIndex, max_inputs: count })
 }
 
 export async function postInjectFault(faultType: string): Promise<FaultInjectResponse> {
