@@ -146,8 +146,8 @@ def current_transport_mode(env_values: dict[str, str]) -> str:
 
 def transport_mode_label(mode: str) -> str:
     if normalize_transport_mode(mode) == "usrp":
-        return "USRP OTA"
-    return "Tailscale / TCP"
+        return "混合链路模式"
+    return "全有线模式"
 
 
 def transport_mode_tone(mode: str) -> str:
@@ -159,8 +159,8 @@ def transport_mode_tone(mode: str) -> str:
 def transport_mode_summary(mode: str) -> str:
     normalized = normalize_transport_mode(mode)
     if normalized == "usrp":
-        return "当前数据面按 USRP OTA 组织；控制面与认证面继续沿用既有 TCP / AEAD 链路。"
-    return "当前数据面按 Tailscale / TCP 组织；USRP 无线链路保持显式切换，不作为默认入口。"
+        return "混合链路模式：控制面 Tailscale/TCP，数据面 USRP 射频链路。"
+    return "全有线模式：控制面 Tailscale/TCP，数据面 TCP。"
 
 
 def sanitize_env_values(values: dict[str, str]) -> dict[str, str]:

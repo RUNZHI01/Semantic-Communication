@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 import types
@@ -205,6 +206,12 @@ class CryptoRuntimeTest(unittest.TestCase):
         self.assertIn("export OQS_INSTALL_PATH=/home/user/liboqs-dist", command)
         self.assertIn("export LD_LIBRARY_PATH=/home/user/liboqs-dist/lib", command)
 
+    def test_local_control_transport_mode_stays_tcp_when_data_transport_is_usrp(self) -> None:
+        env_values = {"MLKEM_TRANSPORT_MODE": "usrp"}
+
+        self.assertEqual(crypto_runtime.local_crypto_transport_mode(env_values), "usrp")
+        self.assertEqual(crypto_runtime.local_control_transport_mode(env_values), "tcp")
+
     def test_build_remote_crypto_server_command_omits_status_port_when_server_script_lacks_support(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             server_script = Path(temp_dir) / "tcp_server.py"
@@ -296,6 +303,7 @@ class CryptoRuntimeTest(unittest.TestCase):
             input_path.write_bytes(b"\0" * 32)
 
             with (
+                patch.dict(os.environ, {}, clear=True),
                 patch.object(crypto_runtime, "PROJECT_ROOT", current_repo),
                 patch.object(crypto_runtime.Path, "cwd", return_value=current_repo),
             ):

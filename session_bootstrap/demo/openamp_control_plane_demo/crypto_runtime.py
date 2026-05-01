@@ -119,6 +119,12 @@ def local_crypto_transport_mode(env_values: Mapping[str, str] | None) -> str:
     return "tcp"
 
 
+def local_control_transport_mode(env_values: Mapping[str, str] | None) -> str:
+    """控制/认证面当前固定走 TCP/Tailscale。"""
+    del env_values
+    return "tcp"
+
+
 def _resolve_existing_path(raw_path: str, *, base_dir: Path | None = None) -> Path | None:
     candidate = Path(raw_path)
     if not candidate.is_absolute():

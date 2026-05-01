@@ -921,6 +921,67 @@ class DashboardStateTest(unittest.TestCase):
         self.assertEqual(security.get("protocol"), "mlkem_control")
         self.assertEqual(security.get("handshake_ms"), 12.3)
 
+    def test_run_demo_inference_with_usrp_transport_uses_local_usrp_job_with_mlkem_control(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        state._crypto_enabled = True
+        request_json(
+            state,
+            "POST",
+            "/api/session/board-access",
+            body=json.dumps({"password": "demo-pass", "transport_mode": "usrp"}).encode("utf-8"),
+        )
+
+        fake_live_job = FakeInferenceJob(
+            [
+                {
+                    "status": "running",
+                    "request_state": "running",
+                    "status_category": "running",
+                    "execution_mode": "live",
+                    "variant": "current",
+                    "message": "USRP 数据面 batch-spool 正在推进；界面继续使用归档样例图，无线链路指标来自当前 2922 运行时。",
+                    "control_transport": "mlkem",
+                    "data_transport": "usrp",
+                    "control_handshake_complete": True,
+                    "runner_summary": {},
+                    "wrapper_summary": {},
+                    "diagnostics": {},
+                    "progress": live_progress_payload("USRP 混合链路在线推进", "running", 76, "USRP 数据面 76/300"),
+                    "artifacts": {},
+                }
+            ],
+            job_id="usrp-live-001",
+        )
+        security_context = {
+            "protocol": "mlkem_control",
+            "handshake_ms": 8.5,
+            "summary": "ML-KEM 安全协议已建立；Current 继续走 USRP 数据面。",
+            "channel_state": "ok",
+        }
+
+        with (
+            patch.object(state, "_arm_mlkem_security_context", return_value=(security_context, None)),
+            patch("server.launch_local_usrp_reconstruction_job", return_value=fake_live_job) as launch_usrp_job,
+            patch("server.launch_remote_reconstruction_job", side_effect=AssertionError("OpenAMP live path should not be used in usrp mode")),
+            patch("server.expected_sha_for_variant", side_effect=AssertionError("USRP mode should not require OpenAMP artifact sha gate")),
+            patch("server.describe_demo_variant_support", side_effect=AssertionError("USRP mode should not inspect OpenAMP variant support")),
+        ):
+            payload = state.run_demo_inference(variant="current", image_index=0)
+
+        launch_usrp_job.assert_called_once()
+        _, kwargs = launch_usrp_job.call_args
+        self.assertEqual(kwargs["variant"], "current")
+        self.assertEqual(kwargs["control_transport"], "mlkem")
+        self.assertEqual(payload["job_id"], "usrp-live-001")
+        self.assertEqual(payload["status"], "running")
+        self.assertEqual(payload["execution_mode"], "live")
+        self.assertEqual(payload["live_attempt"]["data_transport"], "usrp")
+        self.assertIn("USRP 混合链路", str(payload["source_label"]))
+        self.assertIn("2922", str(payload["message"]))
+        security = payload.get("live_attempt", {}).get("security", {})
+        self.assertEqual(security.get("protocol"), "mlkem_control")
+        self.assertEqual(security.get("handshake_ms"), 8.5)
+
     def test_run_demo_inference_blocks_nontrusted_current_when_admission_stays_legacy_sha(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
         state._board_access = Mock(configured=True, probe_ready=False, connection_ready=True)
@@ -2093,7 +2154,7 @@ class DashboardStateTest(unittest.TestCase):
         self.assertEqual(payload["enabled"], True)
         self.assertEqual(payload["board_configured"], True)
 
-    def test_get_crypto_status_reports_service_mode_unavailable_on_legacy_live(self) -> None:
+    def test_get_crypto_status_reports_linked_service_mode_on_live(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
         payload = state.get_crypto_status()
 
@@ -2101,18 +2162,18 @@ class DashboardStateTest(unittest.TestCase):
         self.assertEqual(
             payload["service_mode"],
             {
-                "available": False,
-                "source": "not_available_on_live",
-                "current_mode": None,
-                "allowed_mode": None,
-                "payload_strategy": None,
-                "mode_transitions": 0,
-                "last_transition": None,
-                "note": "当前 live 固件仍是老控制协议；服务模式消息 (0x60-0x62) 尚未接入。",
+                "available": True,
+                "source": "live_linked",
+                "current_mode": "FULL_FRAME",
+                "allowed_mode": "FULL_FRAME",
+                "payload_strategy": "Full Frame tensor",
+                "mode_transitions": 1,
+                "last_transition": "Link Director Event",
+                "note": "上位机守护进程已通过 0x60/0x62 服务协议接管动态调度。",
             },
         )
 
-    def test_get_crypto_status_preserves_old_control_summary_when_service_mode_is_unavailable(self) -> None:
+    def test_get_crypto_status_preserves_old_control_summary_with_linked_service_mode(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
 
         with patch.object(
@@ -2131,7 +2192,8 @@ class DashboardStateTest(unittest.TestCase):
         self.assertEqual(payload["control_last_fault_code"], "NONE")
         self.assertEqual(payload["control_heartbeat_ok"], 0)
         self.assertEqual(payload["control_total_fault_count"], 3)
-        self.assertFalse(payload["service_mode"]["available"])
+        self.assertTrue(payload["service_mode"]["available"])
+        self.assertEqual(payload["service_mode"]["current_mode"], "FULL_FRAME")
 
     def test_refresh_control_plane_status_caches_probe_error(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
@@ -4463,9 +4525,13 @@ class DemoHTTPServerTest(unittest.TestCase):
 
         self.assertEqual(status, 200)
         self.assertEqual(payload["board_access"]["transport_mode"], "usrp")
-        self.assertEqual(payload["board_access"]["transport_label"], "USRP OTA")
+        self.assertEqual(payload["board_access"]["transport_label"], "混合链路模式")
         self.assertEqual(payload["board_access"]["transport_tone"], "online")
-        self.assertIn("USRP OTA", payload["board_access"]["transport_label"])
+        self.assertIn("混合链路模式", payload["board_access"]["transport_label"])
+        self.assertEqual(
+            payload["board_access"]["transport_summary"],
+            "混合链路模式：控制面 Tailscale/TCP，数据面 USRP 射频链路。",
+        )
         self.assertEqual(state._board_access.build_env()["MLKEM_TRANSPORT_MODE"], "usrp")
         self.assertEqual(state._board_access.build_env()["MLKEM_USRP_MODE"], "ota")
 
@@ -4473,7 +4539,7 @@ class DemoHTTPServerTest(unittest.TestCase):
 
         self.assertEqual(system_status, 200)
         self.assertEqual(system_payload["board_access"]["transport_mode"], "usrp")
-        self.assertEqual(system_payload["board_access"]["transport_label"], "USRP OTA")
+        self.assertEqual(system_payload["board_access"]["transport_label"], "混合链路模式")
 
     def test_board_access_endpoint_rejects_unsupported_transport_mode(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)

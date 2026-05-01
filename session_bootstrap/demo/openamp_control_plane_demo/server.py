@@ -58,6 +58,7 @@ from crypto_runtime import (
     build_remote_crypto_server_command,
     first_config_value,
     inspect_local_crypto_client_capabilities,
+    local_control_transport_mode,
     local_crypto_transport_mode,
     parse_int_config,
     resolve_local_crypto_client,
@@ -97,6 +98,7 @@ from inference_runner import (
     launch_remote_reconstruction_job,
     load_signed_manifest_summary,
 )
+from usrp_runtime import launch_local_usrp_reconstruction_job
 
 
 STATIC_ROOT = Path(__file__).resolve().parent / "static"
@@ -2218,7 +2220,7 @@ class DashboardState:
             and crypto_enabled
             and board_access
             and board_access.connection_ready
-            and local_crypto_transport_mode(board_access.build_env()) == "tcp"
+            and local_control_transport_mode(board_access.build_env()) == "tcp"
         ):
             threading.Thread(
                 target=self._ensure_board_tcp_server,
@@ -2271,8 +2273,8 @@ class DashboardState:
             crypto_enabled = self._crypto_enabled
         if mgr_to_close is not None:
             self._close_mlkem_session_manager(mgr_to_close)
-        # 仅在 TCP 模式下自动拉起板端 tcp_server；USRP 数据面保持显式切换。
-        if config.connection_ready and local_crypto_transport_mode(config.build_env()) == "tcp":
+        # 控制/认证面固定走 TCP/Tailscale；即使数据面切到 USRP，也需要维持 tcp_server。
+        if config.connection_ready and local_control_transport_mode(config.build_env()) == "tcp":
             threading.Thread(
                 target=self._ensure_board_tcp_server,
                 args=(config,),
@@ -2488,7 +2490,7 @@ class DashboardState:
         如果 host / port / suite / client script / transport 发生变化会关闭旧管理器。
         找不到 tcp_client.py 时返回 None（回退到子进程模式）。
         """
-        if local_crypto_transport_mode(env_values) != "tcp":
+        if local_control_transport_mode(env_values) != "tcp":
             self._close_mlkem_session_manager()
             return None
 
@@ -4817,6 +4819,7 @@ class DashboardState:
         image_index = self._safe_int(record.get("image_index"), default=0)
         live_attempt = payload.get("live_attempt") if isinstance(payload.get("live_attempt"), dict) else {}
         control_transport = str(live_attempt.get("control_transport") or "hook").strip().lower()
+        data_transport = str(live_attempt.get("data_transport") or "").strip().lower()
         common_data = {
             "variant": variant,
             "image_index": image_index,
@@ -4824,6 +4827,7 @@ class DashboardState:
             "request_state": str(payload.get("request_state") or ""),
             "status_category": str(payload.get("status_category") or ""),
             "control_transport": control_transport or "hook",
+            "data_transport": data_transport or "tcp",
         }
         self._emit_job_event_once(
             record,
@@ -4835,13 +4839,18 @@ class DashboardState:
             data=common_data,
         )
         if payload.get("execution_mode") == "live" and control_transport != "none":
+            admit_message = f"OpenAMP admitted live job {job_id}."
+            if data_transport == "usrp":
+                admit_message = f"Mixed-link live job {job_id} admitted on the TCP/ML-KEM control plane."
+            elif control_transport == "mlkem":
+                admit_message = f"ML-KEM/TCP control plane admitted live job {job_id}."
             self._emit_job_event_once(
                 record,
                 "JOB_ADMITTED",
                 source="inference",
                 plane="control",
                 mode_scope=CONTROL_MODE_SCOPE,
-                message=f"OpenAMP admitted live job {job_id}.",
+                message=admit_message,
                 data=common_data,
             )
         if payload.get("execution_mode") == "live":
@@ -4986,7 +4995,9 @@ class DashboardState:
         variant = str(record["variant"])
         image_index = int(record["image_index"])
         control_transport = str(live_attempt.get("control_transport") or "hook").strip().lower()
+        data_transport = str(live_attempt.get("data_transport") or "").strip().lower()
         runner_only_mode = control_transport == "none"
+        usrp_mode = data_transport == "usrp"
         security_protocol = str(record.get("security_protocol") or "").strip().lower()
         security_handshake_ms = record.get("security_handshake_ms")
         security_summary = str(record.get("security_summary") or "").strip()
@@ -5012,29 +5023,47 @@ class DashboardState:
                     "execution_mode": "live",
                     "status_category": "running",
                     "source_label": (
-                        "ML-KEM 安全协议就绪 + 真实在线执行（控制面降级）"
-                        if security_armed and runner_only_mode
+                        "ML-KEM 安全协议就绪 + USRP 混合链路在线推进"
+                        if usrp_mode and security_armed
                         else (
-                            "ML-KEM 安全协议就绪 + 真实在线推进"
-                            if security_armed
-                            else ("真实在线执行（控制面降级）" if runner_only_mode else "真实在线推进")
+                            "USRP 混合链路在线推进"
+                            if usrp_mode
+                            else (
+                                "ML-KEM 安全协议就绪 + 真实在线执行（控制面降级）"
+                                if security_armed and runner_only_mode
+                                else (
+                                    "ML-KEM 安全协议就绪 + 真实在线推进"
+                                    if security_armed
+                                    else ("真实在线执行（控制面降级）" if runner_only_mode else "真实在线推进")
+                                )
+                            )
                         )
                     ),
                     "message": (
                         live_attempt.get("message")
                         or (
                             (
-                                f"{security_summary} 控制面预检未通过后已切到 SSH 兼容模式，"
-                                "界面正在同步板端本地 latent 重建进度。"
-                            )
-                            if security_armed and runner_only_mode
-                            else (
-                                f"{security_summary} 界面正在同步板端本地 latent 重建进度。"
-                                if security_armed
+                                f"{security_summary} 数据面已切到 USRP 射频链路，界面正在同步当前 2922 批处理进度。"
+                                if usrp_mode and security_armed
                                 else (
-                                    "控制面预检未通过后已切到 SSH 兼容模式，界面正在同步板端执行进度。"
-                                    if runner_only_mode
-                                    else "OpenAMP 控制面已接入本次演示，界面正在同步板端推进阶段。"
+                                    "当前演示已切到 USRP 数据面，界面正在同步 2922 批处理进度；图像对比继续使用归档样例。"
+                                    if usrp_mode
+                                    else (
+                                        (
+                                            f"{security_summary} 控制面预检未通过后已切到 SSH 兼容模式，"
+                                            "界面正在同步板端本地 latent 重建进度。"
+                                        )
+                                        if security_armed and runner_only_mode
+                                        else (
+                                            f"{security_summary} 界面正在同步板端本地 latent 重建进度。"
+                                            if security_armed
+                                            else (
+                                                "控制面预检未通过后已切到 SSH 兼容模式，界面正在同步板端执行进度。"
+                                                if runner_only_mode
+                                                else "OpenAMP 控制面已接入本次演示，界面正在同步板端推进阶段。"
+                                            )
+                                        )
+                                    )
                                 )
                             )
                         )
@@ -5111,32 +5140,52 @@ class DashboardState:
                     "execution_mode": "live",
                     "status_category": "success",
                     "source_label": (
-                        "ML-KEM 安全协议就绪 + 真实在线执行（控制面降级） + 归档样例图"
-                        if security_armed and runner_only_mode
+                        "ML-KEM 安全协议就绪 + USRP 混合链路在线推进 + 归档样例图"
+                        if usrp_mode and security_armed
                         else (
-                            "ML-KEM 安全协议就绪 + 真实在线推进 + 归档样例图"
-                            if security_armed
+                            "USRP 混合链路在线推进 + 归档样例图"
+                            if usrp_mode
                             else (
-                                "真实在线执行（控制面降级） + 归档样例图"
-                                if runner_only_mode
-                                else "真实在线推进 + 归档样例图"
+                                "ML-KEM 安全协议就绪 + 真实在线执行（控制面降级） + 归档样例图"
+                                if security_armed and runner_only_mode
+                                else (
+                                    "ML-KEM 安全协议就绪 + 真实在线推进 + 归档样例图"
+                                    if security_armed
+                                    else (
+                                        "真实在线执行（控制面降级） + 归档样例图"
+                                        if runner_only_mode
+                                        else "真实在线推进 + 归档样例图"
+                                    )
+                                )
                             )
                         )
                     ),
                     "message": live_attempt.get("message")
                     or (
                         (
-                            f"{security_summary} 本次重建未通过 TCP 批量搬运 latent；"
-                            "真实重建继续使用板端本地 latent / 既有 live 数据面，图像对比继续使用归档样例。"
-                        )
-                        if security_armed
-                        else (
-                            "本次演示已通过 OpenAMP 控制面完成作业下发、板端执行与结果回收；图像对比继续使用归档样例，"
-                            "现场呈现更稳定。"
-                            if not runner_only_mode
+                            f"{security_summary} 数据面已通过 USRP 射频链路完成传输；图像对比继续使用归档样例，"
+                            "链路指标来自当前 2922 运行时。"
+                            if usrp_mode and security_armed
                             else (
-                                "本次演示已在 SSH 兼容模式下完成真实板端执行；"
-                                "图像对比继续使用归档样例，当前不宣称控制面握手已成功。"
+                                "本次演示已通过 USRP 射频链路完成数据面传输；图像对比继续使用归档样例，"
+                                "链路指标来自当前 2922 运行时。"
+                                if usrp_mode
+                                else (
+                                    (
+                                        f"{security_summary} 本次重建未通过 TCP 批量搬运 latent；"
+                                        "真实重建继续使用板端本地 latent / 既有 live 数据面，图像对比继续使用归档样例。"
+                                    )
+                                    if security_armed
+                                    else (
+                                        "本次演示已通过 OpenAMP 控制面完成作业下发、板端执行与结果回收；图像对比继续使用归档样例，"
+                                        "现场呈现更稳定。"
+                                        if not runner_only_mode
+                                        else (
+                                            "本次演示已在 SSH 兼容模式下完成真实板端执行；"
+                                            "图像对比继续使用归档样例，当前不宣称控制面握手已成功。"
+                                        )
+                                    )
+                                )
                             )
                         )
                     ),
@@ -6853,6 +6902,101 @@ class DashboardState:
         with self._lock:
             board_access = self._board_access
             last_live_probe = self._last_live_probe
+        env_values = board_access.build_env()
+        if local_crypto_transport_mode(env_values) == "usrp":
+            if board_access.configured:
+                active_record = self._running_inference_job_record()
+                if active_record is not None:
+                    active_variant = str(active_record["variant"])
+                    active_job_id = str(active_record["job_id"])
+                    message = (
+                        f"当前 demo 已有 live 作业在跑（job_id={active_job_id}，variant={active_variant}）；"
+                        "为避免本地 USRP runner 与现有任务重叠，已保守阻断新的 launch。"
+                    )
+                    payload = self._build_blocked_inference_payload(
+                        variant=variant,
+                        image_index=image_index,
+                        status_category="board_busy",
+                        source_label="保守阻断（已有 live 作业）",
+                        message=message,
+                        detail="当前 demo 进程内已有 live 作业尚未完成。",
+                        diagnostics={
+                            "running_job_id": active_job_id,
+                            "running_variant": active_variant,
+                            "data_transport": "usrp",
+                        },
+                        expected_count=max_inputs,
+                        event_log=[message],
+                    )
+                else:
+                    security_context, security_blocked = self._arm_mlkem_security_context(
+                        board_access=board_access,
+                        variant=variant,
+                        image_index=image_index,
+                        expected_count=max_inputs,
+                    )
+                    if security_blocked is not None:
+                        payload = security_blocked
+                    else:
+                        live_job = launch_local_usrp_reconstruction_job(
+                            board_access,
+                            variant=variant,
+                            max_inputs=max_inputs,
+                            control_transport="mlkem" if security_context else "none",
+                        )
+                        event_record, payload = self._register_live_job(
+                            live_job=live_job,
+                            variant=variant,
+                            image_index=image_index,
+                            security_context=security_context,
+                        )
+            else:
+                payload.update(
+                    {
+                        "status": "fallback",
+                        "request_state": "completed",
+                        "status_category": "config_error",
+                        "timings": self._empty_live_timings(),
+                        "live_progress": {
+                            "state": "completed",
+                            "label": "回退展示",
+                            "tone": "degraded",
+                            "percent": 0,
+                            "phase_percent": 100,
+                            "completed_count": 0,
+                            "expected_count": max_inputs,
+                            "remaining_count": max_inputs,
+                            "completion_ratio": 0.0,
+                            "count_source": "demo_default",
+                            "count_label": f"0 / {max_inputs}",
+                            "current_stage": "回退展示",
+                            "stages": [],
+                            "event_log": [],
+                        },
+                        "message": "尚未录入本场板卡会话，当前无法建立混合链路控制面；已回退到归档样例。",
+                        "live_attempt": {
+                            "status": "config_error",
+                            "request_state": "completed",
+                            "status_category": "config_error",
+                            "message": "混合链路模式未完成会话配置，当前已回退到预录结果。",
+                            "diagnostics": {"data_transport": "usrp"},
+                        },
+                    }
+                )
+            with self._lock:
+                if payload.get("request_state") == "completed":
+                    self._update_last_inference_summary(payload, variant)
+            if event_record is not None:
+                self._emit_inference_record_events(event_record, payload)
+            elif payload.get("request_state") == "completed":
+                self._emit_inference_rejection_events(
+                    variant=variant,
+                    image_index=image_index,
+                    status_category=str(payload.get("status_category") or "fallback"),
+                    message=str(payload.get("message") or "Live job request rejected in demo spine."),
+                    diagnostics=dict(payload.get("live_attempt", {}).get("diagnostics") or {}),
+                )
+            return payload
         live_board_access = self._live_board_access_for_variant(board_access, variant=variant)
         variant_expected_sha = expected_sha_for_variant(live_board_access, variant) or self._trusted_current_sha
         variant_support = describe_demo_variant_support(live_board_access, variant=variant)
