@@ -814,6 +814,7 @@ class RunRemoteReconstructionTest(unittest.TestCase):
             command[command.index("--control-hook-timeout-sec") + 1],
             str(live_control_hook_timeout_sec(900.0)),
         )
+        self.assertEqual(command[command.index("--heartbeat-interval-sec") + 1], "2.0")
         self.assertEqual(
             command[command.index("--expected-outputs") + 1],
             str(inference_runner.DEFAULT_MAX_INPUTS),

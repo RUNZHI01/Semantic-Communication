@@ -53,7 +53,8 @@ export function useRunBaseline() {
   const inv = useInvalidateOnSuccess()
   const setActiveJobId = useAppStore((s) => s.setActiveJobId)
   return useMutation({
-    mutationFn: ({ imageIndex }: { imageIndex?: number }) => postRunBaseline(imageIndex),
+    mutationFn: ({ imageIndex, count }: { imageIndex?: number; count?: number }) =>
+      postRunBaseline(imageIndex, count ?? 300),
     onSuccess: (data) => {
       inv()
       if (data.job_id) setActiveJobId(data.job_id)
@@ -101,10 +102,12 @@ export function useGatePreview() {
 export function useRunInferenceBatch() {
   const inv = useInvalidateOnSuccess()
   const qc = useQueryClient()
+  const setPendingBatchJobId = useAppStore((s) => s.setPendingBatchJobId)
   return useMutation({
     mutationFn: ({ count }: { count?: number } = {}) => postRunInferenceBatch(count ?? 300),
-    onSuccess: () => {
+    onSuccess: (data) => {
       inv()
+      setPendingBatchJobId(data.batch_job_id ?? null)
       void qc.invalidateQueries({ queryKey: ['batch-state'] })
     },
   })
@@ -113,10 +116,12 @@ export function useRunInferenceBatch() {
 export function useRunMnnBatch() {
   const inv = useInvalidateOnSuccess()
   const qc = useQueryClient()
+  const setPendingBatchJobId = useAppStore((s) => s.setPendingBatchJobId)
   return useMutation({
     mutationFn: ({ count }: { count?: number } = {}) => postRunMnnBatch(count ?? 300),
-    onSuccess: () => {
+    onSuccess: (data) => {
       inv()
+      setPendingBatchJobId(data.batch_job_id ?? null)
       void qc.invalidateQueries({ queryKey: ['batch-state'] })
     },
   })

@@ -4,6 +4,8 @@ import { useAircraftPosition } from '../hooks/useAircraftPosition'
 import { useInferenceProgressPoll } from '../hooks/useInferenceProgress'
 import { useBatchStatePoll } from '../hooks/useBatchState'
 import { useAppStore } from '../stores/appStore'
+import type { ComparisonEngineKey, ComparisonResult } from '../stores/appStore'
+import type { RunInferenceResponse } from '../api/types'
 import { useCryptoStatus } from '../hooks/useCryptoStatus'
 import {
   useProbeBoard,
@@ -35,6 +37,43 @@ const AUTH_POLICY_HINTS: Record<AuthSigPolicy, string> = {
   DUAL_REQUIRED: '同时校验 SM2 与 ML-DSA 标识，最接近当前完整认证链路。',
   SM2_ONLY: '仅保留国密签名身份校验，便于单独验证 SM2 链路。',
   MLDSA_ONLY: '仅保留后量子签名身份校验，便于单独验证 ML-DSA 链路。',
+}
+
+function numericValue(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : undefined
+  }
+  return undefined
+}
+
+function comparisonFromInference(
+  engine: Extract<ComparisonEngineKey, 'pytorch' | 'tvm'>,
+  payload: RunInferenceResponse | undefined,
+): ComparisonResult | undefined {
+  if (payload?.status !== 'success' || payload.execution_mode !== 'live') {
+    return undefined
+  }
+  const reconstructionMs = payload.timings?.total_ms ?? payload.timings?.payload_ms
+  if (reconstructionMs == null) {
+    return undefined
+  }
+  return {
+    engine,
+    label: engine === 'pytorch' ? 'PyTorch参考' : 'TVM重建',
+    reconstructionMs,
+    runMs:
+      numericValue(payload.runner_summary?.run_median_ms)
+      ?? numericValue(payload.runner_summary?.run_mean_ms)
+      ?? payload.timings?.payload_ms
+      ?? undefined,
+    sampleCount:
+      numericValue(payload.runner_summary?.processed_count)
+      ?? numericValue(payload.runner_summary?.input_count)
+      ?? payload.live_progress?.completed_count,
+    quality: payload.quality,
+  }
 }
 
 function normalizeAuthSigPolicy(rawValue: string | undefined): AuthSigPolicy {
@@ -161,7 +200,13 @@ export function DashboardPageMinimal() {
   const batchState = useBatchStatePoll()
 
   const activeJobId = useAppStore((s) => s.activeJobId)
+  const pendingBatchJobId = useAppStore((s) => s.pendingBatchJobId)
   const lastCompletedInference = useAppStore((s) => s.lastCompletedInference)
+  const setLastCompletedInference = useAppStore((s) => s.setLastCompletedInference)
+  const setLastSettledBatchToken = useAppStore((s) => s.setLastSettledBatchToken)
+  const setPendingBatchJobId = useAppStore((s) => s.setPendingBatchJobId)
+  const comparisonResults = useAppStore((s) => s.comparisonResults)
+  const clearComparisonResults = useAppStore((s) => s.clearComparisonResults)
   const chinaTheater = useAppStore((s) => s.chinaTheater)
   const setChinaTheater = useAppStore((s) => s.setChinaTheater)
   const [boardPassword, setBoardPassword] = useState('')
@@ -191,6 +236,13 @@ export function DashboardPageMinimal() {
     setToasts((prev) => [...prev, { id, text, type }])
     setTimeout(() => removeToast(id), 3000)
   }, [removeToast])
+
+  useEffect(() => {
+    clearComparisonResults()
+    setLastCompletedInference(null)
+    setLastSettledBatchToken(null)
+    setPendingBatchJobId(null)
+  }, [clearComparisonResults, setLastCompletedInference, setLastSettledBatchToken, setPendingBatchJobId])
 
   useEffect(() => {
     if (authDirty) return
@@ -280,45 +332,89 @@ export function DashboardPageMinimal() {
 
   // Derived data
   const status = system.data
-  const results = status?.recent_results
-  const currentResultFromStatus = (
-    results?.['current']?.execution_mode === 'live' && results?.['current']?.status === 'success'
-      ? results?.['current']
-      : undefined
-  )
   const currentResultFromStore = (
     lastCompletedInference?.variant === 'current'
     && lastCompletedInference?.execution_mode === 'live'
     && lastCompletedInference?.status === 'success'
   ) ? lastCompletedInference : undefined
-  const currentResult = currentResultFromStore ?? currentResultFromStatus
-  const baselineResult = results?.['baseline']
-  const payloadMs = currentResult?.timings?.payload_ms
-  const baselineMs = baselineResult?.timings?.payload_ms
-  const speedup = (payloadMs != null && baselineMs != null && baselineMs > 0)
-    ? ((baselineMs - payloadMs) / baselineMs * 100)
-    : null
+  const currentResult = currentResultFromStore
+  const baselineResultFromStore = (
+    lastCompletedInference?.variant === 'baseline'
+    && lastCompletedInference?.execution_mode === 'live'
+    && lastCompletedInference?.status === 'success'
+  ) ? lastCompletedInference : undefined
+  const baselineResult = baselineResultFromStore
+  const pytorchComparison =
+    comparisonResults.pytorch
+    ?? comparisonFromInference('pytorch', baselineResult)
+  const tvmComparison =
+    comparisonResults.tvm
+    ?? comparisonFromInference('tvm', currentResult)
+  const mnnComparison =
+    comparisonResults.mnn
+  const comparisonRows = [pytorchComparison, tvmComparison, mnnComparison]
+    .filter((item): item is ComparisonResult => Boolean(item))
+  const maxComparisonMs = Math.max(...comparisonRows.map((item) => item.reconstructionMs), 1)
+  const pytorchReferenceMs = pytorchComparison?.reconstructionMs
+  const resultQuality = tvmComparison?.quality
+  const hasPositiveSpeedup = comparisonRows.some((row) => (
+    row.engine !== 'pytorch'
+    && pytorchReferenceMs != null
+    && pytorchReferenceMs > 0
+    && pytorchReferenceMs > row.reconstructionMs
+  ))
 
-  const batchServiceMode = batch?.service_mode as string | undefined
-  const batchEngine = (batch?.engine === 'mnn' ? 'mnn' : 'tvm') as 'mnn' | 'tvm'
+  const liveJob = inferenceProgress.data
+  const liveProgress = liveJob?.live_progress
+  const isSingleLiveRunning = Boolean(activeJobId) && liveJob?.request_state !== 'completed'
+  const liveEngineLabel = liveJob?.variant === 'baseline'
+    ? 'PyTorch'
+    : liveJob?.variant === 'current'
+      ? 'TVM'
+      : 'Live'
+  const liveExpectedCount = Math.max(1, liveProgress?.expected_count ?? 1)
+  const liveCompletedCount = Math.max(0, Math.min(liveProgress?.completed_count ?? 0, liveExpectedCount))
+  const liveCountPercent = liveProgress?.completion_ratio != null
+    ? liveProgress.completion_ratio * 100
+    : (liveProgress?.percent ?? (liveCompletedCount / liveExpectedCount) * 100)
+  const liveStagePercent = liveProgress?.phase_percent
+  const livePercentSource = liveExpectedCount <= 1 && liveStagePercent != null
+    ? Math.max(liveCountPercent, liveStagePercent)
+    : liveCountPercent
+  const livePercent = Math.max(
+    0,
+    Math.min(livePercentSource, 100),
+  )
+  const isCurrentSessionBatch = Boolean(batch?.batch_job_id && pendingBatchJobId && batch.batch_job_id === pendingBatchJobId)
+  const activeBatch = isCurrentSessionBatch ? batch : undefined
+  const batchServiceMode = activeBatch?.service_mode as string | undefined
+  const batchEngine = (activeBatch?.engine === 'mnn' ? 'mnn' : 'tvm') as 'mnn' | 'tvm'
   const batchEngineLabel = batchEngine === 'mnn' ? 'MNN' : 'TVM'
-  const totalImages = Math.max(1, batch?.total ?? 300)
-  const progress = Math.max(0, Math.min(batch?.completed ?? 0, totalImages))
-  const batchSuccess = Math.max(0, batch?.success ?? 0)
-  const batchFallback = Math.max(0, batch?.fallback ?? 0)
-  const isRunning = batch?.status === 'running'
-  const isDone = batch?.status === 'done'
+  const batchTotalImages = Math.max(1, activeBatch?.total ?? 300)
+  const batchProgress = Math.max(0, Math.min(activeBatch?.completed ?? 0, batchTotalImages))
+  const batchSuccess = Math.max(0, activeBatch?.success ?? 0)
+  const batchFallback = Math.max(0, activeBatch?.fallback ?? 0)
+  const isBatchRunning = activeBatch?.status === 'running'
+  const isBatchDone = activeBatch?.status === 'done'
+  const isRunning = isSingleLiveRunning || isBatchRunning
+  const isDone = !isSingleLiveRunning && isBatchDone
   const modeTag = batchServiceMode === 'ROI_ONLY' ? ' (降采样 3:1)' : ''
-  const currentStage = isRunning
-    ? batchEngine === 'mnn'
-      ? (progress > 0 ? `MNN 动态尺寸批量 ${progress}/${totalImages}` : 'MNN 动态尺寸批量执行中')
-      : `TVM 在线推进 ${progress}/${totalImages}${modeTag}`
+  const totalImages = isSingleLiveRunning ? liveExpectedCount : batchTotalImages
+  const progress = isSingleLiveRunning ? liveCompletedCount : batchProgress
+  const progressPercent = isSingleLiveRunning ? livePercent : (progress / totalImages) * 100
+  const progressEngineLabel = isSingleLiveRunning ? liveEngineLabel : batchEngineLabel
+  const currentStage = isSingleLiveRunning
+    ? (liveProgress?.current_stage || liveProgress?.label || `${liveEngineLabel} Live 执行中`)
+    : isBatchRunning
+      ? batchEngine === 'mnn'
+        ? (batchProgress > 0 ? `MNN 动态尺寸批量 ${batchProgress}/${batchTotalImages}` : 'MNN 动态尺寸批量执行中')
+        : `TVM 在线推进 ${batchProgress}/${batchTotalImages}${modeTag}`
     : isDone
       ? batchFallback > 0
         ? `批量结束：成功 ${batchSuccess}，回退 ${batchFallback}`
         : batchEngine === 'mnn'
-          ? `MNN 批量完成：${progress}/${totalImages}`
-          : `批量完成：${progress}/${totalImages}${modeTag}`
+          ? `MNN 批量完成：${batchProgress}/${batchTotalImages}`
+          : `批量完成：${batchProgress}/${batchTotalImages}${modeTag}`
       : '等待操作员启动 TVM 300 张'
   const progressBadge = isRunning
     ? '运行中'
@@ -327,11 +423,13 @@ export function DashboardPageMinimal() {
         ? (batchSuccess > 0 ? '部分回退' : '已回退')
         : '已完成'
       : '等待触发'
-  const progressSubtitle = batchEngine === 'mnn'
-    ? `${totalImages} 张 MNN 动态尺寸推理`
-    : batchServiceMode === 'ROI_ONLY'
-      ? `${totalImages} 张降采样推理 (原 300 张跳帧 3:1)`
-      : `${totalImages} 张 TVM 图像在线推进`
+  const progressSubtitle = isSingleLiveRunning
+    ? `${liveExpectedCount} 张 ${liveEngineLabel} Live 在线推进`
+    : batchEngine === 'mnn'
+      ? `${batchTotalImages} 张 MNN 动态尺寸推理`
+      : batchServiceMode === 'ROI_ONLY'
+        ? `${batchTotalImages} 张降采样推理 (原 300 张跳帧 3:1)`
+        : `${batchTotalImages} 张 TVM 图像在线推进`
   const progressSuffix = isRunning ? '处理中' : isDone ? '已完成' : '待启动'
   const boardOnline = status?.live?.board_online ?? false
   const authHint = authEnabled
@@ -394,8 +492,8 @@ export function DashboardPageMinimal() {
               <div className={`${s.sectionCard} ${isRunning ? `${s.cardActiveGlow} ${s.scanlineOverlay}` : ''}`}>
                 <div className={s.progressHeader}>
                   <div>
-                    <div className={s.progressLabel}>{batchEngineLabel} 推理进度</div>
-                    <div className={s.progressSubTitle}>{progressSubtitle} {currentMode === 'ROI_ONLY' && batchEngine !== 'mnn' && '(降采样中)'}</div>
+                    <div className={s.progressLabel}>{progressEngineLabel} 推理进度</div>
+                    <div className={s.progressSubTitle}>{progressSubtitle} {currentMode === 'ROI_ONLY' && !isSingleLiveRunning && batchEngine !== 'mnn' && '(降采样中)'}</div>
                   </div>
                   <div className={s.progressBadge}>
                     {isRunning && <span className={s.pulseDot} />}
@@ -411,7 +509,7 @@ export function DashboardPageMinimal() {
                 <div className={s.progressTrack}>
                   <div
                     className={s.progressFill}
-                    style={{ width: `${(progress / totalImages) * 100}%` }}
+                    style={{ width: `${progressPercent}%` }}
                   />
                 </div>
 
@@ -475,8 +573,8 @@ export function DashboardPageMinimal() {
 
                   <button
                     className={s.btnTonal}
-                    onClick={() => baselineMut.mutate({ imageIndex: 0 })}
-                    disabled={baselineMut.isPending}
+                    onClick={() => baselineMut.mutate({ imageIndex: 0, count: 300 })}
+                    disabled={baselineMut.isPending || isRunning}
                   >
                     {baselineMut.isPending ? <span className={s.spinner} /> : <Icons.Activity size={16} />}
                     <span>PyTorch Live</span>
@@ -487,55 +585,51 @@ export function DashboardPageMinimal() {
 
             <AnimatedListItem className={s.flex1Item}>
               {/* Result Comparison — uses flex:1 to fill remaining space */}
-              <div className={`${s.resultCard} ${speedup != null && speedup > 0 ? s.cardSuccessGlow : ''}`} style={{ flex: 1 }}>
+              <div className={`${s.resultCard} ${hasPositiveSpeedup ? s.cardSuccessGlow : ''}`} style={{ flex: 1 }}>
                 <div className={s.sectionTitle}>推理结果对比</div>
-                {payloadMs != null ? (
+                {comparisonRows.length > 0 ? (
                   <>
                     <div className={s.comparisonShowcase}>
-                      {baselineMs != null && (
-                        <div className={s.barRow}>
-                          <div className={s.barLabel}>PyTorch参考</div>
+                      {comparisonRows.map((row) => {
+                        const rowSpeedup = row.engine !== 'pytorch' && pytorchReferenceMs != null && pytorchReferenceMs > 0
+                          ? ((pytorchReferenceMs - row.reconstructionMs) / pytorchReferenceMs * 100)
+                          : null
+                        return (
+                        <div key={row.engine} className={s.barRow}>
+                          <div className={s.barLabel}>{row.label}</div>
                           <div className={s.barTrack}>
-                            <div className={s.barFillBaseline} style={{ width: '100%' }} />
+                            <div
+                              className={row.engine === 'pytorch' ? s.barFillBaseline : s.barFillCurrent}
+                              style={{ width: `${Math.min((row.reconstructionMs / maxComparisonMs) * 100, 100)}%` }}
+                            />
                           </div>
-                          <div className={s.barValue}>
-                            <CountUp end={baselineMs} decimals={1} duration={400} /> ms
+                          <div className={row.engine === 'pytorch' ? s.barValue : s.barValueHighlight}>
+                            <span><CountUp end={row.reconstructionMs} decimals={1} duration={400} /> ms</span>
+                            {rowSpeedup != null && (
+                              <span className={s.trendBadge} style={{
+                                background: rowSpeedup >= 0 ? 'var(--color-success-container)' : 'var(--color-error-container)',
+                                color: rowSpeedup >= 0 ? 'var(--color-success)' : 'var(--color-error)'
+                              }}>
+                                {rowSpeedup >= 0 ? '↓' : '↑'} <CountUp end={Math.abs(rowSpeedup)} decimals={1} duration={400} />%
+                              </span>
+                            )}
                           </div>
                         </div>
-                      )}
-                      <div className={s.barRow}>
-                        <div className={s.barLabel}>TVM</div>
-                        <div className={s.barTrack}>
-                          <div
-                            className={s.barFillCurrent}
-                            style={{ width: `${Math.min((payloadMs / (baselineMs || payloadMs || 1)) * 100, 100)}%` }}
-                          />
-                        </div>
-                        <div className={s.barValueHighlight}>
-                          <span><CountUp end={payloadMs} decimals={1} duration={400} /> ms</span>
-                          {speedup != null && (
-                            <span className={s.trendBadge} style={{
-                              background: speedup >= 0 ? 'var(--color-success-container)' : 'var(--color-error-container)',
-                              color: speedup >= 0 ? 'var(--color-success)' : 'var(--color-error)'
-                            }}>
-                              {speedup >= 0 ? '↓' : '↑'} <CountUp end={Math.abs(speedup)} decimals={1} duration={400} />%
-                            </span>
-                          )}
-                        </div>
-                      </div>
+                        )
+                      })}
                     </div>
-                    {currentResult?.quality && (
+                    {resultQuality && (
                       <div className={s.qualityMetrics}>
-                        {currentResult.quality.psnr_db != null && (
+                        {resultQuality.psnr_db != null && (
                           <div className={s.qualityItem}>
                             <span className={s.qualityLabel}>PSNR</span>
-                            <span className={s.qualityValue}>{currentResult.quality.psnr_db.toFixed(2)} dB</span>
+                            <span className={s.qualityValue}>{resultQuality.psnr_db.toFixed(2)} dB</span>
                           </div>
                         )}
-                        {currentResult.quality.ssim != null && (
+                        {resultQuality.ssim != null && (
                           <div className={s.qualityItem}>
                             <span className={s.qualityLabel}>SSIM</span>
-                            <span className={s.qualityValue}>{currentResult.quality.ssim.toFixed(4)}</span>
+                            <span className={s.qualityValue}>{resultQuality.ssim.toFixed(4)}</span>
                           </div>
                         )}
                       </div>
@@ -550,10 +644,10 @@ export function DashboardPageMinimal() {
                       暂无推理结果
                     </div>
                     <div className={s.emptySubtitle}>
-                      点击上方「启动 TVM 推理 (300 张)」开始在线推进
+                      点击上方「启动 TVM 推理 (300 张)」或「MNN推理」开始在线推进
                     </div>
                     <div className={s.emptyDescription}>
-                      推理完成后将展示 TVM vs PyTorch 参考延迟对比、加速比、PSNR/SSIM 质量指标
+                      推理完成后将展示 TVM/MNN vs PyTorch 参考重建时间对比；TVM 单图结果会附带 PSNR/SSIM 质量指标
                     </div>
                   </div>
                 )}

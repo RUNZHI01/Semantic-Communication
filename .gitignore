@@ -21,6 +21,11 @@ coverage.xml
 # Runtime/demo outputs
 cockpit_native/runtime/
 session_bootstrap/demo/openamp_control_plane_demo/runtime/
+output/
+server.log
+server.pid
+session_bootstrap/board_snapshots/
+session_bootstrap/state/
 
 # LaTeX build artifacts
 cicc_tech_doc/*.aux

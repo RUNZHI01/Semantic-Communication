@@ -491,6 +491,38 @@ class DashboardStateTest(unittest.TestCase):
 
         self.assertEqual(state.get_batch_state(), {"status": "idle"})
 
+    def test_running_inference_job_record_refreshes_stale_snapshot(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        job = FakeInferenceJob(
+            [
+                {
+                    "status": "success",
+                    "request_state": "completed",
+                    "execution_mode": "live",
+                    "variant": "current",
+                    "message": "completed on board",
+                    "progress": live_progress_payload("真实在线推进", "completed", 100, "已返回结果"),
+                }
+            ],
+            job_id="stale-job-001",
+        )
+        state._inference_jobs[job.job_id] = {
+            "job": job,
+            "job_id": job.job_id,
+            "variant": "current",
+            "image_index": 0,
+            "last_snapshot": {
+                "status": "running",
+                "request_state": "running",
+                "execution_mode": "live",
+                "variant": "current",
+                "message": "stale local snapshot",
+            },
+        }
+
+        self.assertIsNone(state._running_inference_job_record())
+        self.assertEqual(state._inference_jobs[job.job_id]["last_snapshot"]["request_state"], "completed")
+
     def test_start_batch_inference_returns_blocked_without_running_batch_when_launch_falls_back(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
 
@@ -2045,7 +2077,7 @@ class DashboardStateTest(unittest.TestCase):
         self.assertNotIn("pkill -f 'tcp_server.py' || true", captured)
         build_cmd.assert_not_called()
 
-    def test_sync_remote_mlkem_server_assets_uploads_server_and_helper_once(self) -> None:
+    def test_sync_remote_mlkem_server_assets_uploads_server_helper_and_mlkem_link_once(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
         board_access = server.build_board_access_config(
             {
@@ -2058,11 +2090,17 @@ class DashboardStateTest(unittest.TestCase):
         )
 
         with tempfile.TemporaryDirectory() as temp_dir:
-            scripts_dir = Path(temp_dir)
+            project_dir = Path(temp_dir)
+            scripts_dir = project_dir / "scripts"
+            scripts_dir.mkdir()
+            package_dir = project_dir / "mlkem_link"
+            package_dir.mkdir()
             local_server_script = scripts_dir / "tcp_server.py"
             local_helper_script = scripts_dir / "tvm_inference_helper.py"
             local_server_script.write_text("#!/usr/bin/env python3\nprint('server')\n", encoding="utf-8")
             local_helper_script.write_text("#!/usr/bin/env python3\nprint('helper')\n", encoding="utf-8")
+            (package_dir / "__init__.py").write_text("PACKAGE = True\n", encoding="utf-8")
+            (package_dir / "kem.py").write_text("def demo():\n    return 'kem'\n", encoding="utf-8")
             uploads: list[str] = []
 
             def fake_write_remote_text_file(
@@ -2095,6 +2133,8 @@ class DashboardStateTest(unittest.TestCase):
             [
                 "/home/demo-user/tcp_server.py",
                 "/home/demo-user/tvm_inference_helper.py",
+                "/home/demo-user/mlkem_link/__init__.py",
+                "/home/demo-user/mlkem_link/kem.py",
             ],
         )
 
@@ -4967,6 +5007,7 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(payload["source_label"], "真实在线推进")
         self.assertIn("OpenAMP 控制面已接管", payload["message"])
         launch_job.assert_called_once()
+        self.assertEqual(launch_job.call_args.kwargs["max_inputs"], server.DEFAULT_MAX_INPUTS)
 
     def test_inference_progress_endpoint_returns_completed_live_payload(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
