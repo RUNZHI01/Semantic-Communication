@@ -23,6 +23,7 @@ if str(DEMO_ROOT) not in sys.path:
 
 import server  # noqa: E402
 from server import DashboardState, DemoRequestHandler  # noqa: E402
+import usrp_runtime  # noqa: E402
 
 
 REPO_ROOT = DEMO_ROOT.parents[2]
@@ -549,7 +550,12 @@ class DashboardStateTest(unittest.TestCase):
         self.assertEqual(payload["engine"], "tvm")
         self.assertEqual(payload["service_mode"], "FULL_FRAME")
         self.assertIn("远端推理配置不完整或不可用", payload["message"])
-        self.assertEqual(state.get_batch_state(), {"status": "idle"})
+        batch_state = state.get_batch_state()
+        self.assertEqual(batch_state["status"], "done")
+        self.assertEqual(batch_state["completed"], 0)
+        self.assertEqual(batch_state["fallback"], 3)
+        self.assertEqual(batch_state["status_category"], "config_error")
+        self.assertIn("远端推理配置不完整或不可用", batch_state["message"])
         run_demo_inference.assert_called_once()
 
     def test_start_batch_inference_returns_blocked_when_crypto_client_diagnostics_include_paths(self) -> None:
@@ -592,7 +598,11 @@ class DashboardStateTest(unittest.TestCase):
         self.assertEqual(payload["status_category"], "client_missing")
         self.assertEqual(payload["engine"], "tvm")
         self.assertEqual(payload["service_mode"], "FULL_FRAME")
-        self.assertEqual(state.get_batch_state(), {"status": "idle"})
+        batch_state = state.get_batch_state()
+        self.assertEqual(batch_state["status"], "done")
+        self.assertEqual(batch_state["completed"], 0)
+        self.assertEqual(batch_state["fallback"], 3)
+        self.assertEqual(batch_state["status_category"], "client_missing")
 
     def test_start_batch_inference_alert_mode_keeps_batch_state_accessible_and_completes(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
@@ -881,6 +891,65 @@ class DashboardStateTest(unittest.TestCase):
         self.assertNotIn("REMOTE_REAL_EXTRA_PYTHONPATH", captured_env)
         self.assertIn("--warmup-inputs", captured_cmd)
         self.assertEqual(captured_cmd[captured_cmd.index("--warmup-inputs") + 1], "0")
+
+    def test_run_mnn_batch_uses_usrp_rx_dir_when_input_source_is_usrp(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        state._board_access = state._board_access.with_env_overrides(
+            {
+                "OPENAMP_DEMO_INPUT_SOURCE_MODE": "usrp",
+                "REMOTE_USRP_RX_DIR": "/home/user/cockpit_usrp_rx",
+            }
+        )
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env_path = Path(temp_dir) / "mnn.env"
+            env_path.write_text(
+                "\n".join(
+                    [
+                        "REMOTE_HOST=100.121.87.73",
+                        "REMOTE_USER=user",
+                        "REMOTE_PASS=user",
+                        "REMOTE_SSH_PORT=22",
+                        "REMOTE_MNN_PYTHON=/home/user/anaconda3/envs/MNN/bin/python",
+                        "REMOTE_INPUT_DIR=/home/user/Downloads/jscc-test/encoder_outputs",
+                        "REMOTE_OUTPUT_BASE=/home/user/Downloads/jscc-test/mnn_benchmark_outputs",
+                        "REMOTE_SNR_CURRENT=10",
+                        "MNN_FP32_MODEL=/home/user/Downloads/MNNversion/origin/model1.mnn",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            captured_env: dict[str, str] = {}
+
+            def fake_popen(*args, **kwargs):
+                del args
+                captured_env.update(kwargs.get("env") or {})
+                return FakePopen(
+                    stdout_lines=[
+                        json.dumps(
+                            {
+                                "status": "ok",
+                                "selected_input_count": 3,
+                                "processed_count": 3,
+                                "sample_stats": {},
+                                "errors": [],
+                            },
+                            ensure_ascii=False,
+                        )
+                    ]
+                )
+
+            with (
+                patch.object(server, "DEFAULT_MNN_BATCH_ENV_FILE", env_path),
+                patch("server.subprocess.Popen", side_effect=fake_popen),
+            ):
+                payload = state._run_mnn_batch(count=3)
+
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(captured_env["OPENAMP_DEMO_INPUT_SOURCE_MODE"], "usrp")
+        self.assertEqual(captured_env["REMOTE_USRP_RX_DIR"], "/home/user/cockpit_usrp_rx")
 
     def test_post_run_mnn_batch_uses_dashboard_state_entrypoint(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
@@ -1943,7 +2012,6 @@ class DashboardStateTest(unittest.TestCase):
                 "user": "demo-user",
                 "password": "demo-pass",
                 "port": "22",
-                "env_file": "session_bootstrap/tmp/inference_real_reconstruction_compare_currentsafe_chunk4_refresh_20260313_1758.env",
             },
             fallback=state._board_access,
         )
@@ -2077,6 +2145,60 @@ class DashboardStateTest(unittest.TestCase):
         self.assertNotIn("pkill -f 'tcp_server.py' || true", captured)
         build_cmd.assert_not_called()
 
+    def test_ensure_board_tcp_server_restarts_stale_process_when_status_port_down(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        board_access = server.build_board_access_config(
+            {
+                "host": "demo-board",
+                "user": "demo-user",
+                "password": "demo-pass",
+                "port": "22",
+            },
+            fallback=state._board_access.with_env_overrides(
+                {"MLKEM_REMOTE_SERVER_SCRIPT": "/home/demo-user/tcp_server.py"}
+            ),
+        )
+        captured: list[str] = []
+
+        def fake_run_ssh_command(*, remote_command: str, **kwargs: object):
+            del kwargs
+            captured.append(remote_command)
+            if remote_command == "pgrep -af 'tcp_server.py' || true":
+                return server.subprocess.CompletedProcess(
+                    [],
+                    0,
+                    stdout=(
+                        "257019 /home/user/anaconda3/envs/mlkem/bin/python "
+                        "/home/demo-user/tcp_server.py --status-port 8080\n"
+                    ),
+                    stderr="",
+                )
+            return server.subprocess.CompletedProcess([], 0, stdout="", stderr="")
+
+        with (
+            patch(
+                "server.fetch_json_direct",
+                side_effect=[
+                    RuntimeError("status down"),
+                    RuntimeError("status down"),
+                    RuntimeError("status down"),
+                    RuntimeError("status down"),
+                    RuntimeError("status down"),
+                    {"cipher_suite": "sm4-gcm"},
+                ],
+            ),
+            patch("server.resolve_local_crypto_server", return_value=(Path("/tmp/tcp_server.py"), [])),
+            patch.object(state, "_sync_remote_mlkem_server_assets", return_value={"updated": False}),
+            patch("server.run_ssh_command", side_effect=fake_run_ssh_command),
+            patch("server.build_remote_crypto_server_command", return_value="echo restart-remote-server"),
+            patch("server.time.sleep", return_value=None),
+        ):
+            state._ensure_board_tcp_server(board_access)
+
+        self.assertIn("pgrep -af 'tcp_server.py' || true", captured)
+        self.assertIn("pkill -f 'tcp_server.py' || true", captured)
+        self.assertIn("echo restart-remote-server", captured)
+
     def test_sync_remote_mlkem_server_assets_uploads_server_helper_and_mlkem_link_once(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
         board_access = server.build_board_access_config(
@@ -2099,6 +2221,8 @@ class DashboardStateTest(unittest.TestCase):
             local_helper_script = scripts_dir / "tvm_inference_helper.py"
             local_server_script.write_text("#!/usr/bin/env python3\nprint('server')\n", encoding="utf-8")
             local_helper_script.write_text("#!/usr/bin/env python3\nprint('helper')\n", encoding="utf-8")
+            (scripts_dir / "latent_transport.py").write_text("HELPER = 'latent'\n", encoding="utf-8")
+            (scripts_dir / "run_logger.py").write_text("HELPER = 'logger'\n", encoding="utf-8")
             (package_dir / "__init__.py").write_text("PACKAGE = True\n", encoding="utf-8")
             (package_dir / "kem.py").write_text("def demo():\n    return 'kem'\n", encoding="utf-8")
             uploads: list[str] = []
@@ -2133,6 +2257,8 @@ class DashboardStateTest(unittest.TestCase):
             [
                 "/home/demo-user/tcp_server.py",
                 "/home/demo-user/tvm_inference_helper.py",
+                "/home/demo-user/latent_transport.py",
+                "/home/demo-user/run_logger.py",
                 "/home/demo-user/mlkem_link/__init__.py",
                 "/home/demo-user/mlkem_link/kem.py",
             ],
@@ -2521,6 +2647,74 @@ class ServerMainTest(unittest.TestCase):
             "https://api.map.baidu.com/location/ip?coor=bd09ll&output=json&ak=demo",
         )
         self.assertEqual(overrides["AIRCRAFT_POSITION_LATITUDE_PATH"], "content.point.y")
+
+    def test_demo_startup_env_overrides_keeps_usrp_runtime_env(self) -> None:
+        args = Namespace(
+            aircraft_position_env="",
+            demo_admission_mode="",
+            signed_manifest_file="",
+            signed_manifest_public_key="",
+            baseline_admission_mode="",
+            baseline_signed_manifest_file="",
+            baseline_signed_manifest_public_key="",
+        )
+
+        with patch.dict(
+            os.environ,
+            {
+                "REMOTE_USRP_RX_DIR": "/home/user/cockpit_usrp_rx",
+                "OPENAMP_DEMO_INPUT_SOURCE_MODE": "usrp",
+                "OPENAMP_DEMO_LOCAL_LATENT_DIR": "/tmp/latents",
+                "CHUNK_BYTES": "4096",
+            },
+            clear=False,
+        ):
+            overrides = server.demo_startup_env_overrides(args)
+
+        self.assertEqual(overrides["REMOTE_USRP_RX_DIR"], "/home/user/cockpit_usrp_rx")
+        self.assertEqual(overrides["OPENAMP_DEMO_INPUT_SOURCE_MODE"], "usrp")
+        self.assertEqual(overrides["OPENAMP_DEMO_LOCAL_LATENT_DIR"], "/tmp/latents")
+        self.assertEqual(overrides["CHUNK_BYTES"], "4096")
+
+    def test_usrp_job_default_timeout_scales_with_batch_count(self) -> None:
+        self.assertEqual(
+            usrp_runtime._resolve_usrp_job_timeout_sec({}, expected_outputs=300),
+            1500.0,
+        )
+        self.assertEqual(
+            usrp_runtime._resolve_usrp_job_timeout_sec({"USRP_JOB_TIMEOUT_SEC": "60"}, expected_outputs=300),
+            120.0,
+        )
+        self.assertEqual(
+            usrp_runtime._resolve_usrp_job_timeout_sec({"USRP_JOB_TIMEOUT_SEC": "1800"}, expected_outputs=300),
+            1800.0,
+        )
+
+    def test_usrp_summary_recovers_progress_from_log_after_timeout(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir_name:
+            log_path = Path(temp_dir_name) / "cockpit_usrp.log"
+            log_path.write_text(
+                "\n".join(
+                    [
+                        "batch_progress round=0 batch=1/15 processed=20/300 pass=19 pending=281",
+                        "batch_progress round=0 batch=2/15 processed=40/300 pass=39 pending=261",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            summary = usrp_runtime._merge_log_progress_into_summary(
+                {"target_count": 300, "completed_count": 0, "pass_count": 0, "fail_count": 0},
+                log_path,
+                fallback_target=300,
+            )
+
+        self.assertEqual(summary["target_count"], 300)
+        self.assertEqual(summary["completed_count"], 40)
+        self.assertEqual(summary["pass_count"], 39)
+        self.assertEqual(summary["fail_count"], 1)
+        self.assertEqual(summary["pending_count"], 260)
+        self.assertFalse(summary["all_pass"])
 
     def test_main_builds_server_and_serves_without_startup_probe(self) -> None:
         args = Namespace(
@@ -4565,21 +4759,35 @@ class DemoHTTPServerTest(unittest.TestCase):
 
         self.assertEqual(status, 200)
         self.assertEqual(payload["board_access"]["transport_mode"], "usrp")
-        self.assertEqual(payload["board_access"]["transport_label"], "混合链路模式")
+        self.assertEqual(payload["board_access"]["transport_label"], "USRP 模式")
         self.assertEqual(payload["board_access"]["transport_tone"], "online")
-        self.assertIn("混合链路模式", payload["board_access"]["transport_label"])
+        self.assertIn("USRP", payload["board_access"]["transport_label"])
         self.assertEqual(
             payload["board_access"]["transport_summary"],
-            "混合链路模式：控制面 Tailscale/TCP，数据面 USRP 射频链路。",
+            "USRP 模式：认证/控制面仍走 Tailscale/TCP，重建数据面走 USRP OTA。",
         )
         self.assertEqual(state._board_access.build_env()["MLKEM_TRANSPORT_MODE"], "usrp")
         self.assertEqual(state._board_access.build_env()["MLKEM_USRP_MODE"], "ota")
+        self.assertEqual(state._board_access.build_env()["OPENAMP_DEMO_INPUT_SOURCE_MODE"], "usrp")
 
         system_status, _, system_payload = request_json(state, "GET", "/api/system-status")
 
         self.assertEqual(system_status, 200)
         self.assertEqual(system_payload["board_access"]["transport_mode"], "usrp")
-        self.assertEqual(system_payload["board_access"]["transport_label"], "混合链路模式")
+        self.assertEqual(system_payload["board_access"]["transport_label"], "USRP 模式")
+        self.assertEqual(system_payload["board_access"]["input_source_mode"], "usrp")
+
+        status, _, payload = request_json(
+            state,
+            "POST",
+            "/api/session/board-access",
+            body=json.dumps({"transport_mode": "tcp"}).encode("utf-8"),
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["board_access"]["transport_mode"], "tcp")
+        self.assertEqual(payload["board_access"]["input_source_mode"], "prerecorded")
+        self.assertEqual(state._board_access.build_env()["OPENAMP_DEMO_INPUT_SOURCE_MODE"], "prerecorded")
 
     def test_board_access_endpoint_rejects_unsupported_transport_mode(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
@@ -4594,6 +4802,20 @@ class DemoHTTPServerTest(unittest.TestCase):
         self.assertEqual(status, 400)
         self.assertEqual(payload["status"], "error")
         self.assertEqual(payload["message"], "unsupported transport_mode; expected tcp or usrp")
+
+    def test_board_access_usrp_defaults_prefer_local_airfield300_image_dir(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+
+        status, _, payload = request_json(
+            state,
+            "POST",
+            "/api/session/board-access",
+            body=json.dumps({"transport_mode": "usrp"}).encode("utf-8"),
+        )
+
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["board_access"]["local_usrp_image_dir"].endswith("host_pic_to_latent/airfield300"))
+        self.assertTrue(state._board_access.build_env()["OPENAMP_DEMO_LOCAL_IMAGE_DIR"].endswith("host_pic_to_latent/airfield300"))
 
     def test_board_access_env_switch_refreshes_current_trusted_sha_runtime(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)

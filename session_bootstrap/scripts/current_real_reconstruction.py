@@ -51,6 +51,7 @@ except ImportError:
 
 
 LOGGER = logging.getLogger("current_real_reconstruction")
+SUPPORTED_INPUT_PATTERNS = ("*.pt", "*.npz", "*.npy")
 
 
 def configure_logging():
@@ -67,6 +68,17 @@ def parse_args():
     parser.add_argument("--snr", type=float, required=True)
     parser.add_argument("--batch-size", type=int, required=True)
     parser.add_argument("--variant", default="current")
+    parser.add_argument(
+        "--input-source-mode",
+        default="prerecorded",
+        choices=("prerecorded", "usrp"),
+        help="输入来源模式：预录目录或 USRP RX 目录。",
+    )
+    parser.add_argument(
+        "--input-source-label",
+        default="",
+        help="输入来源标签，供日志和 summary 标注。",
+    )
     parser.add_argument("--expected-sha256", default="")
     parser.add_argument(
         "--max-inputs",
@@ -193,6 +205,29 @@ def save_reconstruction(output: np.ndarray, output_stem: Path) -> Path:
     save_path = output_stem.with_suffix(".npy")
     np.save(save_path, np.asarray(output))
     return save_path
+
+
+def collect_input_files(input_dir: Path) -> list[Path]:
+    input_files: list[Path] = []
+    for pattern in SUPPORTED_INPUT_PATTERNS:
+        input_files.extend(Path(path) for path in glob.glob(str(input_dir / pattern)))
+    return sorted({path.resolve(): path for path in input_files}.values())
+
+
+def resolve_effective_input_dir(input_dir: Path, input_source_mode: str) -> Path:
+    if input_source_mode != "usrp":
+        return input_dir
+    if not input_dir.is_dir():
+        return input_dir
+    if collect_input_files(input_dir):
+        return input_dir
+
+    candidate_dirs = [path for path in input_dir.iterdir() if path.is_dir()]
+    candidate_dirs.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+    for candidate in candidate_dirs:
+        if collect_input_files(candidate):
+            return candidate
+    return input_dir
 
 
 def _normalized_key(key: str) -> str:
@@ -535,6 +570,8 @@ def build_summary(
     output_dtype: str,
     output_shape,
     runtime_profiles,
+    requested_input_dir: Path,
+    resolved_input_dir: Path,
 ):
     aggregated_profiles = aggregate_runtime_profiles(runtime_profiles)
     runtime_profile_status = "not_requested"
@@ -561,7 +598,11 @@ def build_summary(
         "artifact_sha256_match": None
         if not args.expected_sha256
         else artifact_sha256 == args.expected_sha256.lower(),
-        "input_dir": args.input_dir,
+        "input_source_mode": args.input_source_mode,
+        "input_source_label": args.input_source_label or args.input_source_mode,
+        "requested_input_dir": str(requested_input_dir),
+        "resolved_input_dir": str(resolved_input_dir),
+        "input_dir": str(resolved_input_dir),
         "output_dir": str(reconstructions_dir),
         "output_count": len(list(reconstructions_dir.glob("*"))),
         "processed_count": processed_count,
@@ -607,14 +648,25 @@ def main():
         np.random.seed(args.seed)
 
     artifact_path = Path(args.artifact_path)
-    input_dir = Path(args.input_dir)
+    requested_input_dir = Path(args.input_dir)
     output_dir = Path(args.output_dir)
     reconstructions_dir = output_dir / "reconstructions"
 
     if not artifact_path.is_file():
         raise SystemExit(f"ERROR: artifact not found: {artifact_path}")
+    if not requested_input_dir.is_dir():
+        raise SystemExit(f"ERROR: input dir not found: {requested_input_dir}")
+
+    input_dir = resolve_effective_input_dir(requested_input_dir, args.input_source_mode)
     if not input_dir.is_dir():
-        raise SystemExit(f"ERROR: input dir not found: {input_dir}")
+        raise SystemExit(f"ERROR: resolved input dir not found: {input_dir}")
+    LOGGER.info(
+        "输入模式: %s (%s), 请求目录=%s, 实际目录=%s",
+        args.input_source_mode,
+        args.input_source_label or args.input_source_mode,
+        requested_input_dir,
+        input_dir,
+    )
 
     expected_sha256 = args.expected_sha256.strip().lower()
     artifact_sha256 = file_sha256(artifact_path)
@@ -626,13 +678,11 @@ def main():
 
     reconstructions_dir.mkdir(parents=True, exist_ok=True)
 
-    input_patterns = ("*.pt", "*.npz", "*.npy")
-    input_files = []
-    for pattern in input_patterns:
-        input_files.extend(Path(path) for path in glob.glob(str(input_dir / pattern)))
-    input_files = sorted({path.resolve(): path for path in input_files}.values())
+    input_files = collect_input_files(input_dir)
     if not input_files:
-        raise SystemExit(f"ERROR: no supported latent files found in {input_dir}")
+        raise SystemExit(
+            f"ERROR: no supported latent files found in {input_dir} (mode={args.input_source_mode})"
+        )
     available_input_count = len(input_files)
     if args.max_inputs:
         input_files = input_files[: args.max_inputs]
@@ -670,6 +720,20 @@ def main():
             LOGGER.info("重构图像保存至: %s", save_path)
             run_samples_ms.append(elapsed_ms)
             processed_count += 1
+            print(
+                json.dumps(
+                    {
+                        "openamp_demo_progress": {
+                            "delta": 1,
+                            "completed_count": processed_count,
+                            "input_path": str(input_path),
+                            "output_path": str(save_path),
+                        }
+                    },
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
             last_output = output_np
             if args.profile_ops and len(runtime_profiles) < args.profile_samples:
                 runtime_profiles.append(
@@ -705,6 +769,8 @@ def main():
         output_dtype=output_dtype,
         output_shape=output_shape,
         runtime_profiles=runtime_profiles,
+        requested_input_dir=requested_input_dir,
+        resolved_input_dir=input_dir,
     )
     print(json.dumps(summary, ensure_ascii=False))
 

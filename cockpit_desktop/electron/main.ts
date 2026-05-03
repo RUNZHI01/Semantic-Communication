@@ -34,8 +34,8 @@ function createWindow(runtimeConfig: BackendRuntimeConfig): void {
   mainWindow.on('ready-to-show', () => {
     mainWindow?.webContents.setZoomFactor(WSL_SCALE)
     mainWindow?.show()
-    if (!app.isPackaged) {
-      mainWindow?.webContents.openDevTools()
+    if (!app.isPackaged && process.env.COCKPIT_OPEN_DEVTOOLS === '1') {
+      mainWindow?.webContents.openDevTools({ mode: 'right' })
     }
   })
 

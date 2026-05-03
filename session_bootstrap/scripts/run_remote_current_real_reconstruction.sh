@@ -34,6 +34,8 @@ Artifact selection:
 Optional env:
   REMOTE_TORCH_PYTHONPATH
   REMOTE_REAL_EXTRA_PYTHONPATH
+  OPENAMP_DEMO_INPUT_SOURCE_MODE=prerecorded|usrp
+  REMOTE_USRP_RX_DIR
   INFERENCE_OUTPUT_PREFIX
   INFERENCE_REAL_OUTPUT_PREFIX
   LOCAL_CURRENT_ARTIFACT_SOURCE
@@ -120,8 +122,28 @@ if [[ "$REMOTE_MODE" != "ssh" && "$REMOTE_MODE" != "local" ]]; then
 fi
 
 require_var REMOTE_TVM_PYTHON
-require_var REMOTE_INPUT_DIR
 require_var REMOTE_OUTPUT_BASE
+
+INPUT_SOURCE_MODE_RAW="${OPENAMP_DEMO_INPUT_SOURCE_MODE:-${REMOTE_INPUT_SOURCE_MODE:-prerecorded}}"
+INPUT_SOURCE_MODE="$(printf '%s' "$INPUT_SOURCE_MODE_RAW" | tr '[:upper:]' '[:lower:]')"
+case "$INPUT_SOURCE_MODE" in
+  prerecorded|preset|archive)
+    INPUT_SOURCE_MODE="prerecorded"
+    require_var REMOTE_INPUT_DIR
+    REAL_INPUT_DIR="$REMOTE_INPUT_DIR"
+    INPUT_SOURCE_LABEL="预录模式"
+    ;;
+  usrp|radio|wireless)
+    INPUT_SOURCE_MODE="usrp"
+    require_var REMOTE_USRP_RX_DIR
+    REAL_INPUT_DIR="$REMOTE_USRP_RX_DIR"
+    INPUT_SOURCE_LABEL="USRP 传输模式"
+    ;;
+  *)
+    echo "ERROR: unsupported OPENAMP_DEMO_INPUT_SOURCE_MODE/REMOTE_INPUT_SOURCE_MODE: $INPUT_SOURCE_MODE_RAW" >&2
+    exit 1
+    ;;
+esac
 
 if [[ "$REMOTE_MODE" == "ssh" ]]; then
   for req in REMOTE_HOST REMOTE_USER REMOTE_PASS; do
@@ -273,11 +295,11 @@ run_real_reconstruction() {
 #!/usr/bin/env bash
 set -euo pipefail
 SH
-    declare -p REMOTE_TVM_PYTHON REMOTE_INPUT_DIR REAL_OUTPUT_DIR REAL_SNR REAL_BATCH VARIANT REAL_ARTIFACT_PATH REAL_EXPECTED_SHA256 REAL_EXTRA_PYTHONPATH MAX_INPUTS SEED PROFILE_OPS PROFILE_SAMPLES TVM_RUNTIME_PRELOAD_PY TVM_TRANSPOSE_ADD6_PROXY_SO TVM_TRANSPOSE_ADD6_PROXY_FUNC TVM_TRANSPOSE_ADD6_PROXY_REG
+    declare -p REMOTE_TVM_PYTHON REAL_INPUT_DIR REAL_OUTPUT_DIR REAL_SNR REAL_BATCH VARIANT REAL_ARTIFACT_PATH REAL_EXPECTED_SHA256 REAL_EXTRA_PYTHONPATH MAX_INPUTS SEED PROFILE_OPS PROFILE_SAMPLES TVM_RUNTIME_PRELOAD_PY TVM_TRANSPOSE_ADD6_PROXY_SO TVM_TRANSPOSE_ADD6_PROXY_FUNC TVM_TRANSPOSE_ADD6_PROXY_REG INPUT_SOURCE_MODE INPUT_SOURCE_LABEL
     cat <<'SH'
 
 remote_python="$REMOTE_TVM_PYTHON"
-input_dir="$REMOTE_INPUT_DIR"
+input_dir="$REAL_INPUT_DIR"
 output_dir="$REAL_OUTPUT_DIR"
 snr="$REAL_SNR"
 batch_size="$REAL_BATCH"
@@ -293,6 +315,8 @@ preload_py="${TVM_RUNTIME_PRELOAD_PY:-}"
 proxy_so="${TVM_TRANSPOSE_ADD6_PROXY_SO:-}"
 proxy_func="${TVM_TRANSPOSE_ADD6_PROXY_FUNC:-}"
 proxy_reg="${TVM_TRANSPOSE_ADD6_PROXY_REG:-}"
+input_source_mode="$INPUT_SOURCE_MODE"
+input_source_label="$INPUT_SOURCE_LABEL"
 
 mkdir -p "$output_dir"
 rm -rf "$output_dir/reconstructions"
@@ -336,7 +360,7 @@ run_remote_python() {
   return "$rc"
 }
 
-echo "[current-real] variant=$variant artifact=$artifact_path output_dir=$output_dir snr=$snr batch_size=$batch_size python=$remote_python"
+echo "[current-real] variant=$variant input_source_mode=$input_source_mode input_source_label=$input_source_label input_dir=$input_dir artifact=$artifact_path output_dir=$output_dir snr=$snr batch_size=$batch_size python=$remote_python"
 
 extra_args=()
 if [[ -n "$max_inputs" ]]; then
@@ -359,6 +383,8 @@ run_remote_python - \
   --snr "$snr" \
   --batch-size "$batch_size" \
   --variant "$variant" \
+  --input-source-mode "$input_source_mode" \
+  --input-source-label "$input_source_label" \
   --expected-sha256 "$expected_sha256" \
   "${extra_args[@]}" <<'PY'
 SH
@@ -371,6 +397,7 @@ SH
 
   if [[ "$REMOTE_MODE" == "ssh" ]]; then
     set +e
+    SSH_WITH_PASSWORD_DISABLE_CONTROLMASTER=1 \
     bash "$SCRIPT_DIR/ssh_with_password.sh" \
       --host "$REMOTE_HOST" \
       --user "$REMOTE_USER" \

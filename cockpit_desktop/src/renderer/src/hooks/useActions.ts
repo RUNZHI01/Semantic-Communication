@@ -13,6 +13,7 @@ import {
 } from '../api/client'
 import { useAppStore } from '../stores/appStore'
 import { isCompletedInferenceResult, shouldTrackInferenceJob } from './inferenceStateMachine'
+import { recordComparisonResult } from './useInferenceProgress'
 
 function useInvalidateOnSuccess() {
   const qc = useQueryClient()
@@ -33,6 +34,7 @@ export function useRunInference() {
   const inv = useInvalidateOnSuccess()
   const setActiveJobId = useAppStore((s) => s.setActiveJobId)
   const setLastCompletedInference = useAppStore((s) => s.setLastCompletedInference)
+  const setComparisonResult = useAppStore((s) => s.setComparisonResult)
   return useMutation({
     mutationFn: ({ imageIndex, variant }: { imageIndex?: number; variant?: string }) =>
       postRunInference(imageIndex, variant),
@@ -41,6 +43,7 @@ export function useRunInference() {
       // ML-KEM 同步完成时 request_state=completed，直接持久化结果
       if (isCompletedInferenceResult(data)) {
         setLastCompletedInference(data)
+        recordComparisonResult(data, setComparisonResult)
         setActiveJobId(null)
         return
       }
@@ -52,12 +55,20 @@ export function useRunInference() {
 export function useRunBaseline() {
   const inv = useInvalidateOnSuccess()
   const setActiveJobId = useAppStore((s) => s.setActiveJobId)
+  const setLastCompletedInference = useAppStore((s) => s.setLastCompletedInference)
+  const setComparisonResult = useAppStore((s) => s.setComparisonResult)
   return useMutation({
     mutationFn: ({ imageIndex, count }: { imageIndex?: number; count?: number }) =>
       postRunBaseline(imageIndex, count ?? 300),
     onSuccess: (data) => {
       inv()
-      if (data.job_id) setActiveJobId(data.job_id)
+      if (isCompletedInferenceResult(data)) {
+        setLastCompletedInference(data)
+        recordComparisonResult(data, setComparisonResult)
+        setActiveJobId(null)
+        return
+      }
+      if (shouldTrackInferenceJob(data)) setActiveJobId(data.job_id ?? null)
     },
   })
 }

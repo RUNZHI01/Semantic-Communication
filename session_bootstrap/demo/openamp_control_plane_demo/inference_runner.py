@@ -14,7 +14,11 @@ from threading import Lock, Thread
 import time
 from typing import Any
 
-from board_access import BoardAccessConfig
+from board_access import (
+    BoardAccessConfig,
+    current_input_source_mode,
+    input_source_mode_label,
+)
 from remote_failure import build_diagnostics, build_operator_message, classify_status_category
 
 
@@ -249,6 +253,16 @@ def hook_transport_failed(response: dict[str, Any]) -> bool:
         "status_resp_received",
         "job_ack_received",
         "heartbeat_ack_received",
+        "job_done_status_received",
+    }
+
+
+def hook_job_done_failed(response: dict[str, Any]) -> bool:
+    transport_status = hook_transport_status(response)
+    if not transport_status:
+        return False
+    return transport_status not in {
+        "ack_received",
         "job_done_status_received",
     }
 
@@ -1449,6 +1463,9 @@ class LiveRemoteReconstructionJob:
         self._control_transport = (
             CONTROL_TRANSPORT_HOOK if control_transport_uses_hook(control_transport) else CONTROL_TRANSPORT_NONE
         )
+        env_values = access.build_env()
+        self._input_source_mode = current_input_source_mode(env_values)
+        self._input_source_label = input_source_mode_label(self._input_source_mode)
         self._hook_cmd = ""
         self._hook_timeout_sec = live_control_hook_timeout_sec(timeout_sec)
         self._control_preflight = dict(control_preflight) if isinstance(control_preflight, dict) else None
@@ -1793,6 +1810,8 @@ class LiveRemoteReconstructionJob:
         classification_error_text = "\n".join(part for part in (hook_error_text, runner_log_tail) if part)
         control_transport = getattr(self, "_control_transport", CONTROL_TRANSPORT_HOOK)
         admission = getattr(self, "_admission", None)
+        input_source_mode = getattr(self, "_input_source_mode", "prerecorded")
+        input_source_label = getattr(self, "_input_source_label", "预录模式")
         control_handshake_complete = handshake.get("complete") if handshake else None
         if not control_transport_uses_hook(control_transport):
             control_handshake_complete = False
@@ -1828,7 +1847,7 @@ class LiveRemoteReconstructionJob:
                 message = build_inference_message(status_category, variant=self.variant, include_fallback=True)
                 performance_diag = {}
             else:
-                if control_transport_uses_hook(control_transport) and hook_transport_failed(job_done_response):
+                if control_transport_uses_hook(control_transport) and hook_job_done_failed(job_done_response):
                     status = "error"
                     status_category = (
                         hook_status_category(job_done_response)
@@ -1897,6 +1916,8 @@ class LiveRemoteReconstructionJob:
                 )
 
         diagnostics = build_diagnostics(stdout=stdout, stderr=stderr, returncode=self._process.returncode)
+        diagnostics["input_source_mode"] = input_source_mode
+        diagnostics["input_source_label"] = input_source_label
         if runner_log_tail and status != "success":
             diagnostics["runner_log_tail"] = runner_log_tail
         if status_category == "artifact_mismatch":
@@ -1955,6 +1976,8 @@ class LiveRemoteReconstructionJob:
             expected_outputs=getattr(self, "_expected_outputs", DEFAULT_MAX_INPUTS),
         )
         control_transport = getattr(self, "_control_transport", CONTROL_TRANSPORT_HOOK)
+        input_source_label = getattr(self, "_input_source_label", "预录模式")
+        input_source_mode = getattr(self, "_input_source_mode", "prerecorded")
         control_handshake_complete = handshake.get("complete") if handshake else None
         if not control_transport_uses_hook(control_transport):
             control_handshake_complete = False
@@ -1965,18 +1988,21 @@ class LiveRemoteReconstructionJob:
             "execution_mode": "live",
             "variant": self.variant,
             "message": (
-                "OpenAMP 控制面已接管本次演示，界面正在同步板端阶段。"
+                f"OpenAMP 控制面已接管本次演示，界面正在同步板端阶段。当前输入模式：{input_source_label}。"
                 if control_transport_uses_hook(control_transport)
                 else (
                     f"{demo_variant_label(self.variant)} live 已切到 SSH 兼容模式，"
-                    "界面正在同步板端执行进度。"
+                    f"界面正在同步板端执行进度。当前输入模式：{input_source_label}。"
                 )
             ),
             "control_transport": control_transport,
             "control_handshake_complete": control_handshake_complete,
             "runner_summary": {},
             "wrapper_summary": {},
-            "diagnostics": {},
+            "diagnostics": {
+                "input_source_mode": input_source_mode,
+                "input_source_label": input_source_label,
+            },
             "progress": build_progress_payload(
                 trace_events,
                 request_state="running",

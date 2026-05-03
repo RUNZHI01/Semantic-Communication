@@ -55,7 +55,9 @@ export function useBatchStatePoll() {
       const completionToken = buildBatchCompletionToken(query.data)
       setLastSettledBatchToken(completionToken)
       const completedBatchJobId = query.data.batch_job_id ?? null
-      const isCurrentSessionBatch = Boolean(pendingBatchJobId && pendingBatchJobId === completedBatchJobId)
+      const isCurrentSessionBatch = Boolean(
+        completedBatchJobId && (!pendingBatchJobId || pendingBatchJobId === completedBatchJobId),
+      )
       if (isCurrentSessionBatch) {
         recordCompletedBatchComparison(query.data, setComparisonResult)
         if (shouldHydrateRecentCurrentForBatch(query.data)) {

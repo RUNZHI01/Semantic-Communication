@@ -35,6 +35,7 @@ from board_access import (
     BoardAccessConfig,
     build_board_access_config,
     build_demo_default_board_access,
+    current_input_source_mode,
     load_env_file,
     normalize_transport_mode,
 )
@@ -89,6 +90,8 @@ from inference_runner import (
     DEMO_BASELINE_ADMISSION_MODE_ENV,
     DEMO_BASELINE_SIGNED_MANIFEST_FILE_ENV,
     DEMO_BASELINE_SIGNED_MANIFEST_PUBLIC_KEY_ENV,
+    DEMO_MAX_INPUTS_ENV,
+    DEMO_MODE_ENV,
     DEMO_SIGNED_MANIFEST_FILE_ENV,
     DEMO_SIGNED_MANIFEST_PUBLIC_KEY_ENV,
     describe_demo_admission,
@@ -98,12 +101,31 @@ from inference_runner import (
     launch_remote_reconstruction_job,
     load_signed_manifest_summary,
 )
-from usrp_runtime import launch_local_usrp_reconstruction_job
+from usrp_runtime import (
+    INFERENCE_ENGINE_MNN,
+    INFERENCE_ENGINE_NONE,
+    INFERENCE_ENGINE_TVM,
+    ensure_usrp_control_servers_started,
+    inspect_usrp_control_servers,
+    launch_local_usrp_reconstruction_job,
+    shutdown_usrp_control_servers_now,
+)
 
 
 STATIC_ROOT = Path(__file__).resolve().parent / "static"
 DEFAULT_MNN_BATCH_ENV_FILE = REPO_ROOT / "session_bootstrap" / "config" / "mnn_benchmark.phytium_pi.example.env"
 REMOTE_MNN_RECONSTRUCTION_SCRIPT = REPO_ROOT / "session_bootstrap" / "scripts" / "run_remote_mnn_reconstruction.sh"
+REMOTE_TVM_RECONSTRUCTION_SCRIPT = REPO_ROOT / "session_bootstrap" / "scripts" / "run_remote_current_real_reconstruction.sh"
+DEFAULT_LOCAL_USRP_LATENT_DIR_CANDIDATES = (
+    REPO_ROOT.parent / "host_pic_to_latent" / "encoder_outputs_airfield300",
+    REPO_ROOT.parent / "host_pic_to_latent" / "encoder_outputs",
+    REPO_ROOT.parent / "artifacts" / "host_pic_to_latent_300_smoke" / "encoder_outputs",
+    REPO_ROOT.parent / "artifacts" / "host_pic_to_latent_smoke" / "encoder_outputs",
+)
+DEFAULT_LOCAL_USRP_IMAGE_DIR_CANDIDATES = (
+    REPO_ROOT.parent / "host_pic_to_latent" / "airfield300",
+    REPO_ROOT.parent / "host_pic_to_latent" / "airfield",
+)
 MLKEM_MODERN_INPUT_BYTES = 1 * 32 * 32 * 32 * 4
 MLKEM_LEGACY_INPUT_BYTES = 1 * 3 * 64 * 64 * 4
 MLKEM_AUTH_ENABLED_KEYS = ("MLKEM_AUTH_ENABLED",)
@@ -1982,6 +2004,41 @@ def _compute_mnn_benchmark(summary: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _metric_from_values(values: list[float]) -> dict[str, Any] | None:
+    if not values:
+        return None
+    import statistics
+
+    ordered = sorted(values)
+    n = len(ordered)
+    return {
+        "n": n,
+        "min_ms": round(ordered[0], 2),
+        "max_ms": round(ordered[-1], 2),
+        "mean_ms": round(statistics.mean(ordered), 2),
+        "median_ms": round(statistics.median(ordered), 2),
+        "p95_ms": round(ordered[int(n * 0.95)], 2) if n >= 20 else None,
+    }
+
+
+def _compute_tvm_benchmark(summary: dict[str, Any]) -> dict[str, Any]:
+    samples = summary.get("run_samples_ms") if isinstance(summary, dict) and isinstance(summary.get("run_samples_ms"), list) else []
+    values: list[float] = []
+    for item in samples:
+        try:
+            values.append(float(item))
+        except (TypeError, ValueError):
+            continue
+    metric = _metric_from_values(values)
+    return {
+        "handshake_ms": None,
+        "encrypt_ms": None,
+        "decrypt_ms": None,
+        "inference_ms": metric,
+        "total_ms": metric,
+    }
+
+
 class DashboardState:
     def __init__(
         self,
@@ -2295,6 +2352,36 @@ class DashboardState:
                 ).start()
         self._ensure_local_aircraft_position_bridge_thread()
         return config.to_public_dict()
+
+    def get_usrp_control_status(self) -> dict[str, Any]:
+        with self._lock:
+            board_access = self._board_access
+        if not board_access.connection_ready:
+            return {
+                "status": "waiting_session",
+                "message": "板卡会话未补齐，暂无法探测 USRP persistent TX/RX。",
+            }
+        return inspect_usrp_control_servers(board_access)
+
+    def start_usrp_control(self) -> dict[str, Any]:
+        with self._lock:
+            board_access = self._board_access
+        if not board_access.connection_ready:
+            return {
+                "status": "config_error",
+                "message": "板卡会话未补齐，无法启动 USRP persistent TX/RX。",
+            }
+        return ensure_usrp_control_servers_started(board_access, auto_start=True)
+
+    def stop_usrp_control(self) -> dict[str, Any]:
+        with self._lock:
+            board_access = self._board_access
+        if not board_access.connection_ready:
+            return {
+                "status": "config_error",
+                "message": "板卡会话未补齐，无法关闭 USRP persistent TX/RX。",
+            }
+        return shutdown_usrp_control_servers_now(board_access)
 
     def _merged_aircraft_position_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
         current = json.loads(json.dumps(self._aircraft_position, ensure_ascii=False))
@@ -3134,7 +3221,43 @@ class DashboardState:
         overrides["MLKEM_TRANSPORT_MODE"] = transport_mode
         if transport_mode == "usrp":
             overrides.setdefault("MLKEM_USRP_MODE", "ota")
+            overrides.setdefault("OPENAMP_DEMO_INPUT_SOURCE_MODE", "usrp")
+            local_image_dir = self._discover_default_local_usrp_image_dir()
+            if local_image_dir:
+                overrides.setdefault("OPENAMP_DEMO_LOCAL_IMAGE_DIR", local_image_dir)
+            if not str(payload.get("local_latent_dir") or "").strip():
+                local_latent_dir = self._discover_default_local_usrp_latent_dir()
+                if local_latent_dir:
+                    overrides.setdefault("OPENAMP_DEMO_LOCAL_LATENT_DIR", local_latent_dir)
+            else:
+                overrides["OPENAMP_DEMO_LOCAL_LATENT_DIR"] = str(payload.get("local_latent_dir") or "").strip()
+            if str(payload.get("local_latent_pattern") or "").strip():
+                overrides["OPENAMP_DEMO_LOCAL_LATENT_PATTERN"] = str(payload.get("local_latent_pattern") or "").strip()
+        else:
+            overrides.setdefault("OPENAMP_DEMO_INPUT_SOURCE_MODE", "prerecorded")
         return overrides
+
+    @staticmethod
+    def _discover_default_local_usrp_latent_dir() -> str:
+        for candidate in DEFAULT_LOCAL_USRP_LATENT_DIR_CANDIDATES:
+            try:
+                if candidate.is_dir() and any(candidate.glob("*.npz")):
+                    return str(candidate)
+                if candidate.is_dir() and any(candidate.glob("*.pt")):
+                    return str(candidate)
+            except OSError:
+                continue
+        return ""
+
+    @staticmethod
+    def _discover_default_local_usrp_image_dir() -> str:
+        for candidate in DEFAULT_LOCAL_USRP_IMAGE_DIR_CANDIDATES:
+            try:
+                if candidate.is_dir() and (any(candidate.glob("*.jpg")) or any(candidate.glob("*.png"))):
+                    return str(candidate)
+            except OSError:
+                continue
+        return ""
 
     @staticmethod
     def _auth_sig_policy_for_env(env_values: dict[str, str]) -> str:
@@ -3320,13 +3443,21 @@ class DashboardState:
             board_access = self._board_access
             if not self._crypto_enabled:
                 bc = bool(board_access and board_access.connection_ready)
-                return {**_disabled, "board_configured": bc, "batch_benchmark": None}
+                return {
+                    **_disabled,
+                    "board_configured": bc,
+                    "batch_benchmark": None,
+                    "batch_transport_benchmark": None,
+                    "batch_inference_benchmark": None,
+                }
             cached = self._crypto_status_cache
             cache_ts = self._crypto_status_cache_ts
             last_test = self._last_crypto_test_result
             if cached is not None and (time.monotonic() - cache_ts) < 1.5:
                 batch = self._batch_state
                 bm = batch.get("benchmark") if batch else None
+                transport_bm = batch.get("transport_benchmark") if batch else None
+                inference_bm = batch.get("inference_benchmark") if batch else None
                 bs = batch.get("status") if batch else None
                 bc_completed = batch.get("completed", 0) if batch else 0
                 bc_total = batch.get("total", 0) if batch else 0
@@ -3335,6 +3466,8 @@ class DashboardState:
                     "enabled": True,
                     **control_summary,
                     "batch_benchmark": bm,
+                    "batch_transport_benchmark": transport_bm,
+                    "batch_inference_benchmark": inference_bm,
                     "batch_status": bs,
                     "batch_completed": bc_completed,
                     "batch_total": bc_total,
@@ -3360,6 +3493,8 @@ class DashboardState:
                 "enabled": True,
                 "board_configured": False,
                 "batch_benchmark": None,
+                "batch_transport_benchmark": None,
+                "batch_inference_benchmark": None,
                 "batch_status": None,
                 "batch_completed": 0,
                 "batch_total": 0,
@@ -3384,6 +3519,8 @@ class DashboardState:
                 self._crypto_status_cache_ts = time.monotonic()
                 batch = self._batch_state
             data["batch_benchmark"] = batch.get("benchmark") if batch else None
+            data["batch_transport_benchmark"] = batch.get("transport_benchmark") if batch else None
+            data["batch_inference_benchmark"] = batch.get("inference_benchmark") if batch else None
             data["batch_status"] = batch.get("status") if batch else None
             data["batch_completed"] = batch.get("completed", 0) if batch else 0
             data["batch_total"] = batch.get("total", 0) if batch else 0
@@ -3405,6 +3542,8 @@ class DashboardState:
                     "board_configured": True,
                     "error": error_text,
                     "batch_benchmark": batch.get("benchmark") if batch else None,
+                    "batch_transport_benchmark": batch.get("transport_benchmark") if batch else None,
+                    "batch_inference_benchmark": batch.get("inference_benchmark") if batch else None,
                     "batch_status": batch.get("status") if batch else None,
                     "batch_completed": batch.get("completed", 0) if batch else 0,
                     "batch_total": batch.get("total", 0) if batch else 0,
@@ -3422,6 +3561,8 @@ class DashboardState:
                     "board_configured": True,
                     "error": error_text,
                     "batch_benchmark": batch.get("benchmark") if batch else None,
+                    "batch_transport_benchmark": batch.get("transport_benchmark") if batch else None,
+                    "batch_inference_benchmark": batch.get("inference_benchmark") if batch else None,
                     "batch_status": batch.get("status") if batch else None,
                     "batch_completed": batch.get("completed", 0) if batch else 0,
                     "batch_total": batch.get("total", 0) if batch else 0,
@@ -3450,6 +3591,8 @@ class DashboardState:
                 "enabled": True,
                 "board_configured": True,
                 "batch_benchmark": None,
+                "batch_transport_benchmark": None,
+                "batch_inference_benchmark": None,
                 "batch_status": None,
                 "batch_completed": 0,
                 "batch_total": 0,
@@ -4016,6 +4159,17 @@ class DashboardState:
                             return
                         except Exception:
                             time.sleep(0.8)
+                    print("[ML-KEM auto-start] 检测到板端 tcp_server 进程存在但状态端口不通，重启板端 tcp_server")
+                    forced_restart = True
+                    run_ssh_command(
+                        host=host,
+                        user=user,
+                        password=password,
+                        port=ssh_port,
+                        remote_command="pkill -f 'tcp_server.py' || true",
+                        timeout=8,
+                    )
+                    time.sleep(1)
             except Exception:
                 pass
 
@@ -4061,13 +4215,20 @@ class DashboardState:
             runtime_env_values,
             local_server_script=local_server_script,
         )
-        local_helper_script = local_server_script.with_name("tvm_inference_helper.py")
         assets: list[tuple[str, Path]] = [(remote_server_script, local_server_script)]
-        if local_helper_script.exists():
-            remote_helper_script = str(
-                PurePosixPath(remote_server_script).with_name(local_helper_script.name)
-            )
-            assets.append((remote_helper_script, local_helper_script))
+        for helper_name in (
+            "tvm_inference_helper.py",
+            "artifact_guard.py",
+            "latent_transport.py",
+            "replay_guard.py",
+            "run_logger.py",
+        ):
+            local_helper_script = local_server_script.with_name(helper_name)
+            if local_helper_script.exists():
+                remote_helper_script = str(
+                    PurePosixPath(remote_server_script).with_name(local_helper_script.name)
+                )
+                assets.append((remote_helper_script, local_helper_script))
         package_candidates = (
             local_server_script.parent / "mlkem_link",
             local_server_script.parent.parent / "mlkem_link",
@@ -4528,6 +4689,7 @@ class DashboardState:
             board_access,
             defer_refresh=defer_board_refresh,
         )
+        usrp_control_status = self.get_usrp_control_status()
         aircraft_bridge = _aircraft_position_bridge_status(
             board_access,
             aircraft_position_payload=aircraft_position_payload,
@@ -4641,6 +4803,7 @@ class DashboardState:
             "telemetry": live_telemetry,
             "aircraft_bridge": aircraft_bridge,
             "board_position_api": board_position_api,
+            "usrp_control": usrp_control_status,
         }
         event_spine_payload = {
             "api_path": "/api/event-spine",
@@ -5011,6 +5174,19 @@ class DashboardState:
         image_index = int(record["image_index"])
         control_transport = str(live_attempt.get("control_transport") or "hook").strip().lower()
         data_transport = str(live_attempt.get("data_transport") or "").strip().lower()
+        runner_summary = live_attempt.get("runner_summary") if isinstance(live_attempt.get("runner_summary"), dict) else {}
+        diagnostics_payload = live_attempt.get("diagnostics") if isinstance(live_attempt.get("diagnostics"), dict) else {}
+        input_source_label = str(
+            runner_summary.get("input_source_label")
+            or diagnostics_payload.get("input_source_label")
+            or ""
+        ).strip()
+
+        def with_input_source(base_label: str) -> str:
+            if not input_source_label or input_source_label in base_label:
+                return base_label
+            return f"{base_label} / {input_source_label}"
+
         runner_only_mode = control_transport == "none"
         usrp_mode = data_transport == "usrp"
         security_protocol = str(record.get("security_protocol") or "").strip().lower()
@@ -5037,7 +5213,7 @@ class DashboardState:
                     "status": "running",
                     "execution_mode": "live",
                     "status_category": "running",
-                    "source_label": (
+                    "source_label": with_input_source(
                         "ML-KEM 安全协议就绪 + USRP 混合链路在线推进"
                         if usrp_mode and security_armed
                         else (
@@ -5154,7 +5330,7 @@ class DashboardState:
                     "status": "success",
                     "execution_mode": "live",
                     "status_category": "success",
-                    "source_label": (
+                    "source_label": with_input_source(
                         "ML-KEM 安全协议就绪 + USRP 混合链路在线推进 + 归档样例图"
                         if usrp_mode and security_armed
                         else (
@@ -5223,7 +5399,7 @@ class DashboardState:
                 "status": "fallback",
                 "execution_mode": "prerecorded",
                 "status_category": live_attempt.get("status_category", "fallback"),
-                "source_label": (
+                "source_label": with_input_source(
                     "握手未完成，回退展示（归档样例）"
                     if live_attempt.get("control_handshake_complete") is False
                     else "回退展示（归档样例）"
@@ -5329,15 +5505,25 @@ class DashboardState:
         event_log: list[str] | None = None,
     ) -> dict[str, Any]:
         payload = self._build_prerecorded_payload_safe(image_index=image_index, variant=variant)
+        fallback_timings = (
+            payload.get("timings")
+            if str(variant or "").strip().lower() == "baseline" and isinstance(payload.get("timings"), dict)
+            else self._empty_live_timings()
+        )
+        fallback_execution_mode = (
+            payload.get("execution_mode")
+            if str(variant or "").strip().lower() == "baseline"
+            else "prerecorded"
+        )
         payload.update(
             {
                 "status": "fallback",
-                "execution_mode": "prerecorded",
+                "execution_mode": fallback_execution_mode,
                 "request_state": "completed",
                 "status_category": status_category,
                 "source_label": source_label,
                 "message": message,
-                "timings": self._empty_live_timings(),
+                "timings": fallback_timings,
                 "live_progress": self._blocked_live_progress(
                     label=source_label,
                     detail=detail,
@@ -5453,14 +5639,35 @@ class DashboardState:
             board_access = self._board_access
         if DEFAULT_MNN_BATCH_ENV_FILE.is_file():
             _, mnn_env_values = load_env_file(str(DEFAULT_MNN_BATCH_ENV_FILE))
+            runtime_env_values = board_access.build_env()
+            for key in (
+                "MLKEM_TRANSPORT_MODE",
+                "OPENAMP_DEMO_INPUT_SOURCE_MODE",
+                "REMOTE_INPUT_SOURCE_MODE",
+                "REMOTE_USRP_RX_DIR",
+            ):
+                value = str(runtime_env_values.get(key, "") or "").strip()
+                if value:
+                    mnn_env_values[key] = value
             return board_access.with_env_overrides(mnn_env_values)
         return board_access
 
     def _run_mnn_batch(self, *, count: int = 300, progress_callback: Any = None) -> dict[str, Any]:
         access = self._mnn_batch_access()
+        return self._run_mnn_batch_with_access(access, count=count, progress_callback=progress_callback)
+
+    def _run_mnn_batch_with_access(
+        self,
+        access: BoardAccessConfig,
+        *,
+        count: int = 300,
+        progress_callback: Any = None,
+    ) -> dict[str, Any]:
         env_values = access.build_env()
         missing = access.missing_connection_fields()
-        for key in ("REMOTE_MNN_PYTHON", "REMOTE_INPUT_DIR", "REMOTE_OUTPUT_BASE", "MNN_FP32_MODEL", "REMOTE_SNR_CURRENT"):
+        input_source_mode = current_input_source_mode(env_values)
+        required_input_key = "REMOTE_USRP_RX_DIR" if input_source_mode == "usrp" else "REMOTE_INPUT_DIR"
+        for key in ("REMOTE_MNN_PYTHON", required_input_key, "REMOTE_OUTPUT_BASE", "MNN_FP32_MODEL", "REMOTE_SNR_CURRENT"):
             if not str(env_values.get(key, "")).strip():
                 missing.append(key)
         if missing:
@@ -5594,6 +5801,215 @@ class DashboardState:
             payload["errors"] = [((stderr_text or "").strip() or stdout_text.strip() or f"returncode={proc.returncode}")]
         return payload
 
+    def _run_tvm_batch_with_access(
+        self,
+        access: BoardAccessConfig,
+        *,
+        count: int = 300,
+        progress_callback: Any = None,
+    ) -> dict[str, Any]:
+        env_values = access.build_env()
+        missing = access.missing_inference_fields("current")
+        if missing:
+            return {
+                "status": "config_error",
+                "message": f"TVM 推理配置不完整: {', '.join(missing)}",
+                "errors": [f"missing_fields={', '.join(missing)}"],
+                "selected_input_count": count,
+                "processed_count": 0,
+            }
+
+        command = [
+            "bash",
+            str(REMOTE_TVM_RECONSTRUCTION_SCRIPT),
+            "--variant",
+            "current",
+            "--max-inputs",
+            str(max(1, count)),
+            "--seed",
+            "0",
+        ]
+        env = access.build_subprocess_env()
+        env["REMOTE_MODE"] = "ssh"
+        env[DEMO_MODE_ENV] = "1"
+        env[DEMO_MAX_INPUTS_ENV] = str(max(1, count))
+        timeout_sec = max(900.0, float(max(1, count)) * 5.0)
+        try:
+            proc = subprocess.Popen(
+                command,
+                cwd=REPO_ROOT,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                bufsize=1,
+                env=env,
+            )
+        except OSError as exc:
+            return {
+                "status": "launch_error",
+                "message": f"TVM 推理启动失败: {exc}",
+                "errors": [f"{type(exc).__name__}: {exc}"],
+                "selected_input_count": count,
+                "processed_count": 0,
+            }
+
+        stdout_lines: list[str] = []
+        stderr_text = ""
+        timeout_flag = {"value": False}
+        completed_count = 0
+        all_progress_received = {"value": False}
+        progress_done_deadline = {"value": 0.0}
+
+        def _kill_proc_on_timeout() -> None:
+            timeout_flag["value"] = True
+            try:
+                proc.kill()
+            except OSError:
+                pass
+
+        timer = threading.Timer(timeout_sec, _kill_proc_on_timeout)
+        timer.start()
+        try:
+            assert proc.stdout is not None
+            for raw_line in proc.stdout:
+                stdout_lines.append(raw_line)
+                stripped = raw_line.strip()
+                if not stripped:
+                    continue
+                try:
+                    line_payload = json.loads(stripped)
+                except json.JSONDecodeError:
+                    continue
+                progress_payload = line_payload.get("openamp_demo_progress") if isinstance(line_payload, dict) else None
+                if not isinstance(progress_payload, dict):
+                    continue
+                try:
+                    delta = int(progress_payload.get("delta") or 0)
+                except (TypeError, ValueError):
+                    delta = 0
+                if delta <= 0:
+                    continue
+                try:
+                    completed_from_payload = int(progress_payload.get("completed_count") or 0)
+                except (TypeError, ValueError):
+                    completed_from_payload = 0
+                completed_count = min(max(1, count), max(completed_from_payload, completed_count + delta))
+                if progress_callback is not None:
+                    progress_callback(completed_count, max(1, count))
+                if completed_count >= count and not all_progress_received["value"]:
+                    all_progress_received["value"] = True
+                    progress_done_deadline["value"] = time.monotonic() + 5.0
+                if all_progress_received["value"] and time.monotonic() >= progress_done_deadline["value"]:
+                    break
+            proc.wait()
+            if proc.stderr is not None:
+                stderr_text = proc.stderr.read()
+        finally:
+            timer.cancel()
+
+        if proc.returncode is None:
+            proc.kill()
+            proc.wait()
+
+        if timeout_flag["value"]:
+            return {
+                "status": "timeout",
+                "message": "TVM 批量推理超时。",
+                "errors": ["TimeoutExpired: TVM batch timed out"],
+                "selected_input_count": count,
+                "processed_count": completed_count,
+            }
+
+        stdout_text = "".join(stdout_lines)
+        try:
+            payload = _parse_json_stdout_payload(stdout_text)
+        except (json.JSONDecodeError, ValueError) as exc:
+            stderr = (stderr_text or "").strip()
+            stdout = stdout_text.strip()
+            detail = stderr or stdout or str(exc)
+            return {
+                "status": "parse_error",
+                "message": f"TVM 推理结果解析失败: {detail}",
+                "errors": [f"{type(exc).__name__}: {detail}"],
+                "selected_input_count": count,
+                "processed_count": 0,
+            }
+
+        if progress_callback is not None:
+            processed = int(payload.get("processed_count") or completed_count or 0)
+            selected = int(payload.get("selected_input_count") or payload.get("input_count") or count or 1)
+            if processed > completed_count:
+                progress_callback(min(processed, max(1, selected)), max(1, selected))
+
+        if proc.returncode != 0 and str(payload.get("status") or "ok").lower() in {"ok", "success"}:
+            payload["status"] = "error"
+        if proc.returncode != 0 and not payload.get("errors"):
+            payload["errors"] = [((stderr_text or "").strip() or stdout_text.strip() or f"returncode={proc.returncode}")]
+        return payload
+
+    def _usrp_stage_access(self, base_access: BoardAccessConfig, remote_stage_manifest: dict[str, Any]) -> BoardAccessConfig:
+        remote_dir = str(remote_stage_manifest.get("remote_dir") or "").strip()
+        if not remote_dir:
+            remote_dir = str(base_access.build_env().get("REMOTE_USRP_RX_DIR") or "").strip()
+        return base_access.with_env_overrides(
+            {
+                "OPENAMP_DEMO_INPUT_SOURCE_MODE": "usrp",
+                "REMOTE_INPUT_SOURCE_MODE": "usrp",
+                "REMOTE_USRP_RX_DIR": remote_dir,
+            }
+        )
+
+    def _run_tvm_after_usrp_stage(
+        self,
+        base_access: BoardAccessConfig,
+        *,
+        count: int,
+        progress_callback: Any = None,
+    ) -> Any:
+        def _callback(remote_stage_manifest: dict[str, Any], progress: Any) -> dict[str, Any]:
+            access = self._usrp_stage_access(base_access, remote_stage_manifest)
+            progress_callback_to_use = progress_callback or progress
+            progress_callback_to_use(0, max(1, count))
+            result = self._run_tvm_batch_with_access(
+                access,
+                count=max(1, count),
+                progress_callback=progress_callback_to_use,
+            )
+            status_text = str(result.get("status") or "").lower()
+            if status_text in {"ok", "success"}:
+                processed = int(result.get("processed_count") or 0)
+                selected = int(result.get("selected_input_count") or result.get("input_count") or max(1, count))
+                progress_callback_to_use(processed, max(1, selected))
+                return {"status": "ok", **result}
+            error_text = str(result.get("message") or "TVM 推理失败")
+            return {
+                "status": "error",
+                "message": error_text,
+                "errors": [error_text],
+                "processed_count": 0,
+                "selected_input_count": max(1, count),
+                "runner_result": result,
+            }
+
+        return _callback
+
+    def _run_mnn_after_usrp_stage(
+        self,
+        base_access: BoardAccessConfig,
+        *,
+        count: int,
+        progress_callback: Any = None,
+    ) -> Any:
+        def _callback(remote_stage_manifest: dict[str, Any], progress: Any) -> dict[str, Any]:
+            access = self._usrp_stage_access(base_access, remote_stage_manifest)
+            return self._run_mnn_batch_with_access(
+                access,
+                count=max(1, count),
+                progress_callback=progress_callback or progress,
+            )
+
+        return _callback
+
     def start_mnn_batch_inference(self, *, count: int = 300) -> dict[str, Any]:
         import threading
 
@@ -5601,6 +6017,169 @@ class DashboardState:
             existing = self._batch_state
             if existing and existing.get("status") == "running":
                 return {"status": "already_running", "batch_job_id": existing.get("batch_job_id"), "engine": existing.get("engine")}
+
+            board_access = self._board_access
+            env_values = board_access.build_env()
+            if local_crypto_transport_mode(env_values) == "usrp":
+                batch_job_id = f"mnn-usrp-{int(time.time())}-{max(1, count)}"
+                self._batch_state = {
+                    "status": "launching",
+                    "batch_job_id": batch_job_id,
+                    "engine": "mnn",
+                    "total": max(1, count),
+                    "completed": 0,
+                    "success": 0,
+                    "fallback": 0,
+                    "sha_match": 0,
+                    "started_at": time.time(),
+                    "finished_at": None,
+                    "service_mode": None,
+                    "benchmark": None,
+                    "host_preprocess_progress": {"completed": 0, "total": max(1, count), "status": "pending"},
+                    "transport_progress": {"completed": 0, "total": max(1, count), "status": "pending"},
+                    "inference_progress": {"completed": 0, "total": max(1, count), "status": "pending"},
+                }
+
+                security_context, security_blocked = self._arm_mlkem_security_context(
+                    board_access=board_access,
+                    variant="current",
+                    image_index=0,
+                    expected_count=max(1, count),
+                )
+                if security_blocked is not None:
+                    state = self._batch_state
+                    if state is not None and state.get("batch_job_id") == batch_job_id:
+                        state["status"] = "done"
+                        state["finished_at"] = time.time()
+                        state["fallback"] = max(1, count)
+                        state["message"] = str(security_blocked.get("message") or "MNN USRP 推理未启动")
+                        state["status_category"] = str(security_blocked.get("status_category") or "")
+                    return {
+                        "status": "blocked",
+                        "batch_job_id": batch_job_id,
+                        "total": max(1, count),
+                        "engine": "mnn",
+                        "message": str(security_blocked.get("message") or "MNN USRP 推理未启动"),
+                    }
+
+                def _mnn_usrp_progress(completed: int, total: int) -> None:
+                    with self._lock:
+                        state = self._batch_state
+                        if state is None or state.get("batch_job_id") != batch_job_id:
+                            return
+                        state["inference_progress"] = {
+                            "completed": max(0, min(int(completed), max(1, int(total)))),
+                            "total": max(1, int(total)),
+                            "status": "running",
+                        }
+                        state["completed"] = state["inference_progress"]["completed"]
+                        state["total"] = state["inference_progress"]["total"]
+
+                live_job = launch_local_usrp_reconstruction_job(
+                    board_access,
+                    variant="current",
+                    max_inputs=max(1, count),
+                    control_transport="mlkem" if security_context else "none",
+                    inference_engine=INFERENCE_ENGINE_MNN,
+                    inference_callback=self._run_mnn_after_usrp_stage(
+                        board_access,
+                        count=max(1, count),
+                        progress_callback=_mnn_usrp_progress,
+                    ),
+                )
+                record, _payload = self._register_live_job(
+                    live_job=live_job,
+                    variant="current",
+                    image_index=0,
+                    security_context=security_context,
+                )
+                live_job_id = str(record["job_id"])
+                self._batch_state = {**self._batch_state, "status": "running", "live_job_id": live_job_id}
+
+                def _usrp_mnn_worker() -> None:
+                    worker_error = ""
+                    last_result: dict[str, Any] | None = None
+                    try:
+                        deadline = time.monotonic() + max(1800.0, float(max(1, count)) * 10.0)
+                        while True:
+                            last_result = self._peek_inference_progress(live_job_id)
+                            live_progress = last_result.get("live_progress") if isinstance(last_result.get("live_progress"), dict) else {}
+                            live_attempt = last_result.get("live_attempt") if isinstance(last_result.get("live_attempt"), dict) else {}
+                            stage_progress = live_attempt.get("stage_progress") if isinstance(live_attempt.get("stage_progress"), dict) else {}
+                            host_stage = stage_progress.get("host_preprocess") if isinstance(stage_progress.get("host_preprocess"), dict) else {}
+                            transport_stage = stage_progress.get("transport") if isinstance(stage_progress.get("transport"), dict) else {}
+                            inference_stage = stage_progress.get("inference") if isinstance(stage_progress.get("inference"), dict) else {}
+                            with self._lock:
+                                state = self._batch_state
+                                if state is None or state.get("batch_job_id") != batch_job_id or state.get("status") != "running":
+                                    return
+                                state["host_preprocess_progress"] = {
+                                    "completed": int(host_stage.get("completed_count") or 0),
+                                    "total": max(1, int(host_stage.get("expected_count") or count)),
+                                    "status": str(host_stage.get("state") or "pending"),
+                                }
+                                state["transport_progress"] = {
+                                    "completed": int(transport_stage.get("completed_count") or 0),
+                                    "total": max(1, int(transport_stage.get("expected_count") or count)),
+                                    "status": str(transport_stage.get("state") or "running"),
+                                }
+                                state["inference_progress"] = {
+                                    "completed": int(inference_stage.get("completed_count") or 0),
+                                    "total": max(1, int(inference_stage.get("expected_count") or count)),
+                                    "status": str(inference_stage.get("state") or "pending"),
+                                }
+                                state["completed"] = int(live_progress.get("completed_count") or 0)
+                                state["total"] = max(1, int(live_progress.get("expected_count") or count))
+                            if last_result.get("request_state") != "running":
+                                break
+                            if time.monotonic() >= deadline:
+                                worker_error = "MNN USRP 全链路等待完成超时"
+                                break
+                            time.sleep(0.2)
+                    except Exception as exc:
+                        worker_error = f"{type(exc).__name__}: {exc}"
+
+                    last_result = last_result or {}
+                    live_attempt = last_result.get("live_attempt") if isinstance(last_result.get("live_attempt"), dict) else {}
+                    wrapper_summary = live_attempt.get("wrapper_summary") if isinstance(live_attempt.get("wrapper_summary"), dict) else {}
+                    artifacts = live_attempt.get("artifacts") if isinstance(live_attempt.get("artifacts"), dict) else {}
+                    stage_progress = live_attempt.get("stage_progress") if isinstance(live_attempt.get("stage_progress"), dict) else {}
+                    host_stage = stage_progress.get("host_preprocess") if isinstance(stage_progress.get("host_preprocess"), dict) else {}
+                    inference_summary = wrapper_summary.get("inference_summary") if isinstance(wrapper_summary.get("inference_summary"), dict) else {}
+                    processed = max(0, int(inference_summary.get("processed_count") or 0))
+                    total = max(processed, int(inference_summary.get("selected_input_count") or count or 1))
+                    succeeded = last_result.get("execution_mode") == "live" and last_result.get("status") == "success"
+                    with self._lock:
+                        state = self._batch_state
+                        if state is None or state.get("batch_job_id") != batch_job_id:
+                            return
+                        state["host_preprocess_progress"] = {
+                            "completed": int(host_stage.get("completed_count") or (max(1, count) if succeeded else 0)),
+                            "total": max(1, int(host_stage.get("expected_count") or count)),
+                            "status": str(host_stage.get("state") or ("completed" if succeeded else "fallback")),
+                        }
+                        if str(artifacts.get("remote_rx_dir") or "").strip():
+                            state["remote_usrp_rx_payload_dir"] = str(artifacts.get("remote_rx_dir") or "").strip()
+                        state["status"] = "done"
+                        state["finished_at"] = time.time()
+                        state["completed"] = processed if processed > 0 else (total if succeeded else 0)
+                        state["total"] = total
+                        state["success"] = processed if succeeded else 0
+                        state["fallback"] = 0 if succeeded else max(0, total - processed)
+                        state["benchmark"] = _compute_mnn_benchmark(inference_summary)
+                        state["inference_benchmark"] = state["benchmark"]
+                        transport_benchmark = wrapper_summary.get("transport_benchmark") if isinstance(wrapper_summary.get("transport_benchmark"), dict) else None
+                        state["transport_benchmark"] = transport_benchmark
+                        state["engine"] = "mnn"
+                        state["runner_summary"] = inference_summary
+                        state["message"] = str(last_result.get("message") or worker_error or "")
+                        state["status_category"] = str(last_result.get("status_category") or ("success" if succeeded else "error"))
+                        if worker_error and not succeeded:
+                            state["error"] = worker_error
+
+                thread = threading.Thread(target=_usrp_mnn_worker, daemon=True)
+                thread.start()
+                return {"status": "started", "batch_job_id": batch_job_id, "total": max(1, count), "engine": "mnn"}
 
             batch_job_id = f"mnn-{int(time.time())}-{max(1, count)}"
             self._batch_state = {
@@ -5782,6 +6361,8 @@ class DashboardState:
             existing = self._batch_state
             if existing and existing.get("status") == "running":
                 return {"status": "already_running", "batch_job_id": existing.get("batch_job_id")}
+            board_access_for_mode = self._board_access
+            is_usrp_batch = local_crypto_transport_mode(board_access_for_mode.build_env()) == "usrp"
 
             # ── ALERT_ONLY：不做推理，模拟坐标下发 ──
             if current_mode == "ALERT_ONLY":
@@ -5888,6 +6469,22 @@ class DashboardState:
                 },
                 "benchmark": None,
             }
+            if is_usrp_batch:
+                self._batch_state["transport_progress"] = {
+                    "completed": 0,
+                    "total": effective_count,
+                    "status": "pending",
+                }
+                self._batch_state["host_preprocess_progress"] = {
+                    "completed": 0,
+                    "total": effective_count,
+                    "status": "pending",
+                }
+                self._batch_state["inference_progress"] = {
+                    "completed": 0,
+                    "total": effective_count,
+                    "status": "pending",
+                }
 
         if current_mode == "ROI_ONLY":
             self._event_spine.publish(
@@ -5931,7 +6528,19 @@ class DashboardState:
                     and state.get("batch_job_id") == batch_job_id
                     and state.get("status") == "launching"
                 ):
-                    self._batch_state = None
+                    state["status"] = "done"
+                    state["finished_at"] = time.time()
+                    state["completed"] = 0
+                    state["success"] = 0
+                    state["fallback"] = int(state.get("total") or effective_count)
+                    state["message"] = str(initial_result.get("message") or "TVM 推理未启动")
+                    state["status_category"] = str(initial_result.get("status_category") or "")
+                    state["execution_mode"] = str(initial_result.get("execution_mode") or "")
+                    state["source_label"] = str(initial_result.get("source_label") or "")
+                    live_attempt = initial_result.get("live_attempt")
+                    if isinstance(live_attempt, dict):
+                        state["diagnostics"] = live_attempt.get("diagnostics") or {}
+                    state["benchmark"] = _compute_benchmark(state["_samples"])
             return {
                 "status": "blocked",
                 "batch_job_id": batch_job_id,
@@ -5957,15 +6566,39 @@ class DashboardState:
             worker_error = ""
             last_result: dict[str, Any] | None = initial_result
             try:
-                deadline = time.monotonic() + max(120.0, effective_count * 10.0)
+                deadline = time.monotonic() + max(1800.0 if is_usrp_batch else 120.0, effective_count * 10.0)
                 while True:
                     progress = last_result.get("live_progress") if isinstance(last_result.get("live_progress"), dict) else {}
+                    live_attempt = last_result.get("live_attempt") if isinstance(last_result.get("live_attempt"), dict) else {}
+                    stage_progress = live_attempt.get("stage_progress") if isinstance(live_attempt.get("stage_progress"), dict) else {}
+                    host_stage = stage_progress.get("host_preprocess") if isinstance(stage_progress.get("host_preprocess"), dict) else {}
+                    transport_stage = stage_progress.get("transport") if isinstance(stage_progress.get("transport"), dict) else {}
+                    inference_stage = stage_progress.get("inference") if isinstance(stage_progress.get("inference"), dict) else {}
                     with self._lock:
                         state = self._batch_state
                         if state is None or state.get("status") != "running":
                             return
-                        state["completed"] = int(progress.get("completed_count") or 0)
-                        state["total"] = max(1, int(progress.get("expected_count") or effective_count))
+                        if is_usrp_batch:
+                            state["host_preprocess_progress"] = {
+                                "completed": int(host_stage.get("completed_count") or 0),
+                                "total": max(1, int(host_stage.get("expected_count") or effective_count)),
+                                "status": str(host_stage.get("state") or "pending"),
+                            }
+                            state["transport_progress"] = {
+                                "completed": int(transport_stage.get("completed_count") or 0),
+                                "total": max(1, int(transport_stage.get("expected_count") or effective_count)),
+                                "status": str(transport_stage.get("state") or "running"),
+                            }
+                            state["inference_progress"] = {
+                                "completed": int(inference_stage.get("completed_count") or 0),
+                                "total": max(1, int(inference_stage.get("expected_count") or effective_count)),
+                                "status": str(inference_stage.get("state") or "pending"),
+                            }
+                            state["completed"] = int(state["inference_progress"]["completed"])
+                            state["total"] = max(1, int(state["inference_progress"]["total"]))
+                        else:
+                            state["completed"] = int(progress.get("completed_count") or 0)
+                            state["total"] = max(1, int(progress.get("expected_count") or effective_count))
                         if last_result.get("request_state") != "running":
                             break
                     if time.monotonic() >= deadline:
@@ -6002,13 +6635,42 @@ class DashboardState:
                 timings = last_result.get("timings") if isinstance(last_result.get("timings"), dict) else {}
                 runner_summary = live_attempt.get("runner_summary") if isinstance(live_attempt.get("runner_summary"), dict) else {}
                 wrapper_summary = live_attempt.get("wrapper_summary") if isinstance(live_attempt.get("wrapper_summary"), dict) else {}
+                artifacts = live_attempt.get("artifacts") if isinstance(live_attempt.get("artifacts"), dict) else {}
+                stage_progress = live_attempt.get("stage_progress") if isinstance(live_attempt.get("stage_progress"), dict) else {}
+                host_stage = stage_progress.get("host_preprocess") if isinstance(stage_progress.get("host_preprocess"), dict) else {}
+                transport_stage = stage_progress.get("transport") if isinstance(stage_progress.get("transport"), dict) else {}
+                inference_stage = stage_progress.get("inference") if isinstance(stage_progress.get("inference"), dict) else {}
+                inference_summary = wrapper_summary.get("inference_summary") if isinstance(wrapper_summary.get("inference_summary"), dict) else {}
+                transport_benchmark = wrapper_summary.get("transport_benchmark") if isinstance(wrapper_summary.get("transport_benchmark"), dict) else None
+                inference_benchmark = wrapper_summary.get("inference_benchmark") if isinstance(wrapper_summary.get("inference_benchmark"), dict) else None
 
                 with self._lock:
                     state = self._batch_state
                     if state is None:
                         return
-                    state["completed"] = completed
-                    state["total"] = total
+                    if is_usrp_batch:
+                        state["host_preprocess_progress"] = {
+                            "completed": int(host_stage.get("completed_count") or effective_count),
+                            "total": max(1, int(host_stage.get("expected_count") or effective_count)),
+                            "status": str(host_stage.get("state") or ("completed" if is_live else "fallback")),
+                        }
+                        if str(artifacts.get("remote_rx_dir") or "").strip():
+                            state["remote_usrp_rx_payload_dir"] = str(artifacts.get("remote_rx_dir") or "").strip()
+                        state["transport_progress"] = {
+                            "completed": int(transport_stage.get("completed_count") or completed),
+                            "total": max(1, int(transport_stage.get("expected_count") or total)),
+                            "status": str(transport_stage.get("state") or ("completed" if is_live else "fallback")),
+                        }
+                        state["inference_progress"] = {
+                            "completed": int(inference_stage.get("completed_count") or completed),
+                            "total": max(1, int(inference_stage.get("expected_count") or total)),
+                            "status": str(inference_stage.get("state") or ("completed" if is_live else "fallback")),
+                        }
+                        state["completed"] = int(state["inference_progress"]["completed"])
+                        state["total"] = max(1, int(state["inference_progress"]["total"]))
+                    else:
+                        state["completed"] = completed
+                        state["total"] = total
                     state["success"] = completed if is_live else 0
                     state["fallback"] = 0 if is_live else max(0, total - completed)
                     state["sha_match"] = 0
@@ -6024,6 +6686,13 @@ class DashboardState:
                         total_ms = wrapper_summary.get("per_image_ms")
                     if total_ms is not None and is_live:
                         samples["total_ms"] = [float(total_ms)]
+                    if is_usrp_batch:
+                        if inference_benchmark is None and inference_summary:
+                            inference_benchmark = _compute_tvm_benchmark(inference_summary)
+                        state["benchmark"] = inference_benchmark
+                        state["inference_benchmark"] = inference_benchmark
+                        state["transport_benchmark"] = transport_benchmark
+                        state["runner_summary"] = inference_summary or runner_summary
                     if (
                         last_result.get("request_state") == "completed"
                         and isinstance(last_result.get("sample"), dict)
@@ -6042,7 +6711,8 @@ class DashboardState:
                     return
                 state["status"] = "done"
                 state["finished_at"] = time.time()
-                state["benchmark"] = _compute_benchmark(state["_samples"])
+                if not state.get("benchmark"):
+                    state["benchmark"] = _compute_benchmark(state["_samples"])
                 if worker_error:
                     state["error"] = worker_error
 
@@ -6965,6 +7635,12 @@ class DashboardState:
                             variant=variant,
                             max_inputs=max_inputs,
                             control_transport="mlkem" if security_context else "none",
+                            inference_engine=INFERENCE_ENGINE_TVM if variant == "current" else INFERENCE_ENGINE_NONE,
+                            inference_callback=(
+                                self._run_tvm_after_usrp_stage(board_access, count=max_inputs)
+                                if variant == "current"
+                                else None
+                            ),
                         )
                         event_record, payload = self._register_live_job(
                             live_job=live_job,
@@ -7634,6 +8310,73 @@ def demo_startup_env_overrides(args: argparse.Namespace) -> dict[str, str]:
         ),
         ("REMOTE_PASS", ""),
         ("PHYTIUM_PI_PASSWORD", ""),
+        ("MLKEM_REMOTE_OQS_INSTALL_PATH", ""),
+        ("MLKEM_REMOTE_LD_LIBRARY_PATH", ""),
+        ("MLKEM_REMOTE_TONGSUO_KEM_BRIDGE", ""),
+        ("MLKEM_REMOTE_TONGSUO_SIG_BRIDGE", ""),
+        ("MLKEM_REMOTE_RUN_LOGGER_DIR", ""),
+        ("RUN_LOGGER_DIR", ""),
+        ("MLKEM_AUTH_SERVER_SM2_KEY", ""),
+        ("MLKEM_AUTH_SERVER_SM2_PUB", ""),
+        ("MLKEM_AUTH_SERVER_MLDSA_KEY", ""),
+        ("MLKEM_AUTH_SERVER_MLDSA_PUB", ""),
+        ("MLKEM_AUTH_PEER_SM2_PUB", ""),
+        ("MLKEM_AUTH_PEER_MLDSA_PUB", ""),
+        ("MLKEM_LOCAL_TONGSUO_KEM_BRIDGE", ""),
+        ("MLKEM_LOCAL_LD_LIBRARY_PATH", ""),
+        ("TONGSUO_KEM_BRIDGE", ""),
+        ("TONGSUO_SIG_BRIDGE", ""),
+        ("OQS_INSTALL_PATH", ""),
+        ("REMOTE_USRP_RX_DIR", ""),
+        ("OPENAMP_DEMO_INPUT_SOURCE_MODE", ""),
+        ("OPENAMP_DEMO_LOCAL_LATENT_DIR", ""),
+        ("OPENAMP_DEMO_LOCAL_LATENT_PATTERN", ""),
+        ("OPENAMP_DEMO_LOCAL_IMAGE_DIR", ""),
+        ("OPENAMP_DEMO_IMAGE_TO_LATENT_ENABLED", ""),
+        ("OPENAMP_DEMO_IMAGE_TO_LATENT_SCRIPT", ""),
+        ("OPENAMP_DEMO_IMAGE_TO_LATENT_OUTPUT_DIR", ""),
+        ("OPENAMP_DEMO_IMAGE_TO_LATENT_DEVICE", ""),
+        ("OPENAMP_DEMO_IMAGE_TO_LATENT_CONFIG", ""),
+        ("OPENAMP_DEMO_IMAGE_TO_LATENT_SNR", ""),
+        ("OPENAMP_DEMO_USRP_PAYLOAD_CODEC", ""),
+        ("OPENAMP_DEMO_REMOTE_DECODE_PYTHON", ""),
+        ("REMOTE_USRP_DECODE_PYTHON", ""),
+        ("MLKEM_USRP_RUNNER_SCRIPT", ""),
+        ("MLKEM_USRP_INPUT_DIR", ""),
+        ("MLKEM_USRP_INPUT_FILE", ""),
+        ("MLKEM_USRP_RUN_ROOT", ""),
+        ("MLKEM_USRP_MAX_ARQ_ROUNDS", ""),
+        ("USRP_FAST_ARQ_PROFILE", ""),
+        ("USRP_STOP_ON_FAIL", ""),
+        ("USRP_AUTO_START_CONTROL", ""),
+        ("OPENAMP_DEMO_USRP_SHUTDOWN_AFTER_TRANSPORT", ""),
+        ("USRP_SHUTDOWN_CONTROL_AFTER_TRANSPORT", ""),
+        ("RX_CONTROL_HOST", ""),
+        ("RX_CONTROL_PORT", ""),
+        ("TX_CONTROL_HOST", ""),
+        ("TX_CONTROL_PORT", ""),
+        ("RX_CAPTURE_MODE", ""),
+        ("REMOTE_RX_SSH_TARGET", ""),
+        ("REMOTE_RX_RUN_ROOT", ""),
+        ("REMOTE_USRP_PROJECT_ROOT", ""),
+        ("REMOTE_DECODE_BIN", ""),
+        ("TX_ARGS", ""),
+        ("RX_ARGS", ""),
+        ("RATE", ""),
+        ("FREQ", ""),
+        ("TX_GAIN", ""),
+        ("RX_GAIN", ""),
+        ("RX_ANT", ""),
+        ("BIND_ADDR", ""),
+        ("FRAME_CANDIDATES", ""),
+        ("BATCH_RX_TIMEOUT_SEC", ""),
+        ("BATCH_TX_TIMEOUT_SEC", ""),
+        ("USRP_JOB_TIMEOUT_SEC", ""),
+        ("BATCH_SIZE", ""),
+        ("BATCH_DECODE_WORKERS", ""),
+        ("CHUNK_BYTES", ""),
+        ("QPSK_DECODE_BACKEND", ""),
+        ("QPSK_CPP_SYNC_MODE", ""),
     )
 
     for env_name, cli_value in env_or_arg_pairs:
@@ -7729,6 +8472,9 @@ class DemoRequestHandler(SimpleHTTPRequestHandler):
                 return
             self.respond_json(HTTPStatus.OK, payload)
             return
+        if parsed.path == "/api/usrp-control":
+            self.respond_json(HTTPStatus.OK, self.server.app_state.get_usrp_control_status())
+            return
         if parsed.path == "/docs":
             self.respond_doc_view(parsed.query)
             return
@@ -7767,6 +8513,14 @@ class DemoRequestHandler(SimpleHTTPRequestHandler):
                     self.respond_json(HTTPStatus.BAD_REQUEST, {"status": "error", "message": str(exc)})
                     return
                 self.respond_json(HTTPStatus.OK, {"status": "ok", "board_access": payload})
+                return
+            if parsed.path == "/api/usrp-control/start":
+                payload = self.server.app_state.start_usrp_control()
+                self.respond_json(HTTPStatus.OK, payload)
+                return
+            if parsed.path == "/api/usrp-control/stop":
+                payload = self.server.app_state.stop_usrp_control()
+                self.respond_json(HTTPStatus.OK, payload)
                 return
             if parsed.path == "/api/link-director/profile":
                 try:

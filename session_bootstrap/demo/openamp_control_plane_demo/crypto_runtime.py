@@ -32,6 +32,7 @@ LOCAL_CLIENT_SCRIPT_KEYS = ("MLKEM_CLIENT_SCRIPT", "MLKEM_TCP_CLIENT_SCRIPT")
 LOCAL_SERVER_SCRIPT_KEYS = ("MLKEM_SERVER_SCRIPT", "MLKEM_TCP_SERVER_SCRIPT")
 OQS_INSTALL_KEYS = ("OQS_INSTALL_PATH", "MLKEM_OQS_INSTALL_PATH", "MLKEM_LIBOQS_ROOT")
 LOCAL_TONGSUO_BRIDGE_KEYS = ("MLKEM_LOCAL_TONGSUO_KEM_BRIDGE", "TONGSUO_KEM_BRIDGE")
+LOCAL_TONGSUO_SIG_BRIDGE_KEYS = ("MLKEM_LOCAL_TONGSUO_SIG_BRIDGE", "TONGSUO_SIG_BRIDGE")
 LOCAL_LD_LIBRARY_KEYS = ("MLKEM_LOCAL_LD_LIBRARY_PATH",)
 
 REMOTE_PROJECT_ROOT_KEYS = ("MLKEM_REMOTE_PROJECT_ROOT", "OPENAMP_REMOTE_PROJECT_ROOT")
@@ -56,6 +57,7 @@ SUITE_KEYS = ("MLKEM_CIPHER_SUITE", "MLKEM_SUITE")
 TRANSPORT_MODE_KEYS = ("MLKEM_TRANSPORT_MODE", "MLKEM_DATA_TRANSPORT", "MLKEM_TRANSPORT")
 REMOTE_OUTPUT_DIR_KEYS = ("MLKEM_OUTPUT_DIR",)
 REMOTE_LOG_PATH_KEYS = ("MLKEM_REMOTE_LOG_PATH",)
+REMOTE_RUN_LOGGER_DIR_KEYS = ("MLKEM_REMOTE_RUN_LOGGER_DIR", "RUN_LOGGER_DIR")
 REMOTE_SNR_KEYS = ("MLKEM_SNR", "REMOTE_SNR_CURRENT")
 
 LOCAL_PYTHON_KEYS = ("COCKPIT_PYTHON", "PYTHON")
@@ -405,13 +407,22 @@ def resolve_local_oqs_install(
     *,
     extra_roots: Sequence[Path | str] = (),
 ) -> tuple[Path | None, list[Path]]:
-    return resolve_local_asset(
+    resolved, searched = resolve_local_asset(
         "liboqs-dist",
         env_values=env_values,
         explicit_path_keys=OQS_INSTALL_KEYS,
         explicit_root_keys=(*LOCAL_REPO_ROOT_KEYS, *LOCAL_SCRIPT_ROOT_KEYS),
         extra_roots=extra_roots,
     )
+    if resolved is not None:
+        return resolved, searched
+
+    for base_dir in _candidate_base_dirs(env_values, extra_roots=extra_roots):
+        candidate = base_dir / "liboqs" / "liboqs-dist"
+        searched.append(candidate)
+        if _path_exists(candidate):
+            return candidate.resolve(), searched
+    return None, searched
 
 
 def resolve_local_mlkem_runtime_root(
@@ -515,6 +526,25 @@ def _detect_local_tongsuo_bridge(runtime_root: Path | None) -> Path | None:
     return None
 
 
+def _detect_local_tongsuo_sig_bridge(runtime_root: Path | None) -> Path | None:
+    if runtime_root is None:
+        return None
+
+    candidates = (
+        runtime_root / "tongsuo-dist" / "tongsuo" / "lib" / "libtongsuo_sig_bridge.so",
+        runtime_root / "tongsuo-dist" / "lib64" / "libtongsuo_sig_bridge.so",
+        runtime_root / "tongsuo-dist" / "lib" / "libtongsuo_sig_bridge.so",
+    )
+    for candidate in candidates:
+        try:
+            exists = candidate.exists()
+        except OSError:
+            exists = False
+        if exists:
+            return candidate.resolve()
+    return None
+
+
 def _build_local_crypto_env(
     env_values: Mapping[str, str] | None,
     *,
@@ -546,12 +576,23 @@ def _build_local_crypto_env(
     if bridge_path is not None:
         env["TONGSUO_KEM_BRIDGE"] = str(bridge_path)
 
+    sig_bridge_value = first_config_value(env_values, keys=LOCAL_TONGSUO_SIG_BRIDGE_KEYS, default="")
+    sig_bridge_path: Path | None = None
+    if sig_bridge_value:
+        sig_bridge_path = _resolve_existing_path(sig_bridge_value)
+    if sig_bridge_path is None:
+        sig_bridge_path = _detect_local_tongsuo_sig_bridge(runtime_root)
+    if sig_bridge_path is not None:
+        env["TONGSUO_SIG_BRIDGE"] = str(sig_bridge_path)
+
     explicit_local_ld = first_config_value(env_values, keys=LOCAL_LD_LIBRARY_KEYS, default="")
     if explicit_local_ld:
         for segment in reversed([item for item in explicit_local_ld.split(os.pathsep) if item]):
             _prepend_env_path(env, "LD_LIBRARY_PATH", segment)
     elif bridge_path is not None:
         _prepend_env_path(env, "LD_LIBRARY_PATH", str(bridge_path.parent))
+    elif sig_bridge_path is not None:
+        _prepend_env_path(env, "LD_LIBRARY_PATH", str(sig_bridge_path.parent))
 
     for key, value in _config_env_pairs(env_values, (*AUTH_COMMON_KEYS, *LOCAL_AUTH_CLIENT_KEYS)):
         env[key] = value
@@ -1097,6 +1138,10 @@ def build_remote_crypto_server_command(
     remote_prelude = first_config_value(env_values, keys=REMOTE_PRELUDE_KEYS)
     if remote_prelude:
         command_steps.append(remote_prelude)
+
+    run_logger_dir = first_config_value(env_values, keys=REMOTE_RUN_LOGGER_DIR_KEYS)
+    if run_logger_dir:
+        command_steps.append(f"export RUN_LOGGER_DIR={shlex_quote(run_logger_dir)}")
 
     for key, value in _config_env_pairs(env_values, (*AUTH_COMMON_KEYS, *REMOTE_AUTH_SERVER_KEYS)):
         command_steps.append(f"export {key}={shlex_quote(value)}")

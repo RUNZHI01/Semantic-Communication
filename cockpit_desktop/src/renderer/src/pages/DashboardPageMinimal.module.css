@@ -409,6 +409,39 @@
   box-shadow: 4px 0 12px rgba(26, 86, 219, 0.6); /* Leading edge glow */
 }
 
+.hostPreprocessFill {
+  background: repeating-linear-gradient(
+    90deg,
+    #facc15 0px,
+    #facc15 4px,
+    transparent 4px,
+    transparent 6px
+  );
+  box-shadow: 4px 0 12px rgba(250, 204, 21, 0.45);
+}
+
+.transportFill {
+  background: repeating-linear-gradient(
+    90deg,
+    #22c55e 0px,
+    #22c55e 4px,
+    transparent 4px,
+    transparent 6px
+  );
+  box-shadow: 4px 0 12px rgba(34, 197, 94, 0.5);
+}
+
+.inferenceFill {
+  background: repeating-linear-gradient(
+    90deg,
+    var(--color-primary) 0px,
+    var(--color-primary) 4px,
+    transparent 4px,
+    transparent 6px
+  );
+  box-shadow: 4px 0 12px rgba(26, 86, 219, 0.6);
+}
+
 /* Processing head effect */
 .progressFill::after {
   content: '';
@@ -432,6 +465,63 @@
   font-size: 13px;
   color: var(--color-text-tertiary);
   font-weight: 400;
+}
+
+.stageProgressGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.stageProgressRow {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.stageProgressTopline {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.stageProgressTitle {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.stageProgressCount {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-tertiary);
+  font-family: var(--font-family-mono);
+  font-feature-settings: 'tnum' 1, 'zero' 1;
+  white-space: nowrap;
+}
+
+.progressIssue {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(220, 38, 38, 0.18);
+  background: var(--color-error-container);
+  color: var(--color-error);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.progressIssueTitle {
+  font-weight: 700;
+}
+
+.progressIssueDetail {
+  color: var(--color-text-secondary);
+  font-family: var(--font-family-mono);
+  font-size: 12px;
 }
 
 /* Live Log Stream */
@@ -586,6 +676,154 @@
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
   gap: 8px;
+}
+
+.batchPresetMeta {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.batchPresetTitle {
+  color: var(--color-text-primary);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.batchPresetHint {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  line-height: 1.55;
+  margin-top: 4px;
+}
+
+.batchPresetBadge {
+  padding: 5px 10px;
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.batchPresetBadgeTcp {
+  color: var(--color-primary);
+  background: var(--color-primary-container);
+  border: 1px solid rgba(26, 86, 219, 0.12);
+}
+
+.batchPresetBadgeUsr {
+  color: #92400E;
+  background: rgba(250, 204, 21, 0.18);
+  border: 1px solid rgba(245, 158, 11, 0.28);
+}
+
+.batchPresetRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.batchPresetButton {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  min-height: 68px;
+  padding: 12px;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  text-align: left;
+  cursor: pointer;
+  transition: all 200ms var(--easing-standard);
+}
+
+.batchPresetButton:hover:not(:disabled) {
+  border-color: rgba(26, 86, 219, 0.35);
+  background: rgba(26, 86, 219, 0.05);
+}
+
+.batchPresetButton:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(26, 86, 219, 0.18);
+}
+
+.batchPresetButton:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.batchPresetButtonActive {
+  color: var(--color-primary);
+  background: linear-gradient(135deg, rgba(26, 86, 219, 0.12), rgba(255, 255, 255, 0.92));
+  border-color: rgba(26, 86, 219, 0.42);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+.batchPresetLabel {
+  color: var(--color-text-primary);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.batchPresetCaption {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.batchInputRow {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.batchInputField {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.batchInputLabel {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  min-width: 64px;
+}
+
+.batchInput {
+  width: 120px;
+  padding: 0 12px;
+  height: 40px;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  font-size: 14px;
+  font-weight: 600;
+  outline: none;
+  transition: border-color 200ms var(--easing-standard), box-shadow 200ms var(--easing-standard);
+  box-sizing: border-box;
+}
+
+.batchInput:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 3px rgba(26, 86, 219, 0.10);
+}
+
+.batchInput:disabled {
+  color: var(--color-text-muted);
+  background: rgba(148, 163, 184, 0.08);
+  cursor: not-allowed;
+}
+
+.batchInputHint {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  line-height: 1.5;
 }
 
 /* Action Status Dots */
@@ -841,89 +1079,225 @@
   justify-content: flex-end;
 }
 
+.transportBadge {
+  padding: 5px 10px;
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.transportBadgeTcp {
+  color: var(--color-primary);
+  background: var(--color-primary-container);
+  border: 1px solid rgba(26, 86, 219, 0.12);
+}
+
+.transportBadgeUsr {
+  color: var(--color-success);
+  background: var(--color-success-container);
+  border: 1px solid rgba(5, 150, 105, 0.18);
+}
+
+.transportSwitch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.transportOption {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  min-height: 72px;
+  padding: 12px;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  text-align: left;
+  cursor: pointer;
+  transition: all 200ms var(--easing-standard);
+}
+
+.transportOption:hover:not(:disabled) {
+  border-color: rgba(26, 86, 219, 0.35);
+  background: var(--color-primary-container);
+}
+
+.transportOption:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(26, 86, 219, 0.18);
+}
+
+.transportOption:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.transportOptionActive {
+  color: var(--color-primary);
+  background: linear-gradient(135deg, rgba(26, 86, 219, 0.12), rgba(255, 255, 255, 0.92));
+  border-color: rgba(26, 86, 219, 0.42);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+.transportOptionLabel {
+  color: var(--color-text-primary);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.transportOptionCaption {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.pathGrid {
+  display: grid;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.pathItem {
+  display: grid;
+  grid-template-columns: 108px minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border-light);
+  border-radius: var(--radius-md);
+  background: rgba(248, 250, 252, 0.72);
+}
+
+.pathLabel {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.pathValue {
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ===== Result Comparison (Bento Box / Bar Chart) ===== */
 .comparisonShowcase {
   display: flex;
   flex-direction: column;
-  gap: var(--space-md);
+  gap: 16px;
   margin-top: var(--space-sm);
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  background:
+    linear-gradient(135deg, rgba(236, 246, 239, 0.92) 0%, rgba(239, 246, 255, 0.92) 52%, rgba(248, 252, 255, 0.88) 100%);
+  border: 1px solid rgba(198, 214, 234, 0.72);
 }
 
 .barRow {
-  display: flex;
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr) auto;
   align-items: center;
-  gap: var(--space-md);
+  gap: 14px;
 }
 
 .barLabel {
-  width: 84px;
   font-size: 12px;
-  font-weight: 600;
-  color: var(--color-text-secondary);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  flex-shrink: 0;
+  font-weight: 700;
+  color: #4b5c78;
+  letter-spacing: 0.02em;
+  line-height: 1.3;
 }
 
 .barTrack {
   flex: 1;
-  height: 8px;
-  background: var(--color-bg-primary);
-  border-radius: 4px;
+  height: 7px;
+  background: rgba(186, 201, 223, 0.42);
+  border-radius: 999px;
   overflow: hidden;
   position: relative;
 }
 
 .barFillBaseline {
   height: 100%;
-  background: var(--color-border-base);
-  border-radius: 4px;
+  background: linear-gradient(90deg, #c6d2e6 0%, #cfd9ea 100%);
+  border-radius: 999px;
   transition: width 500ms var(--easing-standard);
 }
 
 .barFillCurrent {
   height: 100%;
-  background: var(--color-primary);
-  border-radius: 4px;
-  box-shadow: 0 0 8px rgba(26, 86, 219, 0.4);
+  background: linear-gradient(90deg, #2b5ed4 0%, #3a76f0 100%);
+  border-radius: 999px;
+  box-shadow: 0 0 10px rgba(43, 94, 212, 0.28);
   transition: width 500ms var(--easing-standard);
 }
 
 .barValue {
-  width: 80px;
+  min-width: 92px;
   font-size: 14px;
-  font-weight: 600;
-  color: var(--color-text-secondary);
+  font-weight: 700;
+  color: #687791;
   font-family: var(--font-family-mono);
   font-feature-settings: 'tnum' 1;
   text-align: right;
-  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 .barValueHighlight {
-  width: 140px;
+  min-width: 152px;
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 8px;
-  font-size: 16px;
+  gap: 10px;
+  font-size: 15px;
   font-weight: 700;
-  color: var(--color-text-primary);
+  color: #223250;
   font-family: var(--font-family-mono);
   font-feature-settings: 'tnum' 1;
-  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.barMetric {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.barUnit {
+  font-size: 12px;
+  font-weight: 700;
+  color: inherit;
+  letter-spacing: 0;
 }
 
 .trendBadge {
   display: inline-flex;
   align-items: center;
-  background: var(--color-success-container);
-  color: var(--color-success);
-  padding: 2px 6px;
-  border-radius: 4px;
+  gap: 3px;
+  padding: 3px 7px;
+  border-radius: 999px;
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 700;
   font-family: var(--font-family-base);
+  white-space: nowrap;
+}
+
+.trendBadgePositive {
+  background: rgba(22, 163, 74, 0.12);
+  color: #16a34a;
+}
+
+.trendBadgeNegative {
+  background: rgba(220, 38, 38, 0.12);
+  color: #dc2626;
 }
 
 /* Quality metrics row */
@@ -1043,6 +1417,9 @@
   .actionRow {
     grid-template-columns: 1fr 1fr;
   }
+  .batchPresetRow {
+    grid-template-columns: 1fr 1fr;
+  }
   .faultGrid {
     grid-template-columns: 1fr 1fr;
   }
@@ -1055,6 +1432,21 @@
   }
   .sectionCard {
     padding: var(--space-md);
+  }
+  .batchPresetMeta {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .batchInputField {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .batchInput {
+    width: 100%;
+  }
+  .batchPresetRow {
+    grid-template-columns: 1fr;
   }
   .actionRow {
     grid-template-columns: 1fr;

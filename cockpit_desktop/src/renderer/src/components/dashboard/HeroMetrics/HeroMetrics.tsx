@@ -4,6 +4,7 @@ import type { BatchStateResponse } from '../../../api/types/crypto'
 import { Icons } from '../../icons'
 import { CountUp } from '../../shared/CountUp'
 import { useAppStore } from '../../../stores/appStore'
+import { comparisonResultFromInferencePayload } from '../../../hooks/comparisonResult'
 import s from './HeroMetrics.module.css'
 
 function Sparkline({ data, color }: { data: number[], color: string }) {
@@ -45,6 +46,8 @@ export function HeroMetrics({ system, inferenceProgress, batchState }: HeroMetri
   const status = system.data
   const comparisonResults = useAppStore((s) => s.comparisonResults)
   const pendingBatchJobId = useAppStore((s) => s.pendingBatchJobId)
+  const recentCurrentComparison = comparisonResultFromInferencePayload(status?.recent_results?.current)
+  const recentBaselineComparison = comparisonResultFromInferencePayload(status?.recent_results?.baseline)
   const live = status?.live
   const boardOnline = live?.board_online ?? false
   const batch = batchState?.data
@@ -53,9 +56,11 @@ export function HeroMetrics({ system, inferenceProgress, batchState }: HeroMetri
     && pendingBatchJobId
     && batch.batch_job_id === pendingBatchJobId,
   )
-  const activeBatch = isCurrentSessionBatch ? batch : undefined
+  const activeBatch = batch && (isCurrentSessionBatch || batch.status === 'running' || batch.status === 'done')
+    ? batch
+    : undefined
 
-  const acceleratorResults = [comparisonResults.tvm, comparisonResults.mnn]
+  const acceleratorResults = [comparisonResults.tvm ?? recentCurrentComparison, comparisonResults.mnn]
     .filter((item): item is NonNullable<typeof item> => Boolean(item))
   const latestAccelerator = acceleratorResults.reduce<(typeof acceleratorResults)[number] | undefined>(
     (latest, item) => {
@@ -65,7 +70,7 @@ export function HeroMetrics({ system, inferenceProgress, batchState }: HeroMetri
     undefined,
   )
   const baseReconstructionCurrent = latestAccelerator?.reconstructionMs
-  const reconstructionBaseline = comparisonResults.pytorch?.reconstructionMs
+  const reconstructionBaseline = comparisonResults.pytorch?.reconstructionMs ?? recentBaselineComparison?.reconstructionMs
   const baseImprovementPct = (baseReconstructionCurrent && reconstructionBaseline && reconstructionBaseline > 0)
     ? ((reconstructionBaseline - baseReconstructionCurrent) / reconstructionBaseline * 100)
     : null

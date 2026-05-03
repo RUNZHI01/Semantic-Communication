@@ -78,6 +78,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--session-threads", type=int, default=1)
     parser.add_argument("--precision", choices=("normal", "low", "high"), default="normal")
     parser.add_argument("--shape-mode", choices=("dynamic", "bucketed"), default="dynamic")
+    parser.add_argument("--input-source-mode", choices=("prerecorded", "usrp"), default="prerecorded")
+    parser.add_argument("--input-source-label", default="")
     parser.add_argument(
         "--bucket-shapes",
         default="",
@@ -247,6 +249,24 @@ def collect_input_files(input_dir: Path, max_inputs: int) -> tuple[list[Path], i
     if max_inputs:
         unique_files = unique_files[:max_inputs]
     return unique_files, available_count
+
+
+def resolve_effective_input_dir(input_dir: Path, input_source_mode: str) -> Path:
+    if input_source_mode != "usrp":
+        return input_dir
+    if not input_dir.is_dir():
+        return input_dir
+    files, _available_count = collect_input_files(input_dir, 0)
+    if files:
+        return input_dir
+
+    candidate_dirs = [path for path in input_dir.iterdir() if path.is_dir()]
+    candidate_dirs.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+    for candidate in candidate_dirs:
+        candidate_files, _candidate_count = collect_input_files(candidate, 0)
+        if candidate_files:
+            return candidate
+    return input_dir
 
 
 def base_name_for_input(path: Path) -> str:
@@ -439,7 +459,7 @@ def main() -> int:
     args = parse_args()
 
     model_path = Path(args.model_path)
-    input_dir = Path(args.input_dir)
+    requested_input_dir = Path(args.input_dir)
     output_dir = Path(args.output_dir)
     recon_dir = output_dir / "reconstructions"
     summary_json_path = output_dir / "summary.json"
@@ -450,8 +470,16 @@ def main() -> int:
 
     if not args.dry_run and not model_path.is_file():
         raise SystemExit(f"ERROR: model path not found: {model_path}")
+    input_dir = resolve_effective_input_dir(requested_input_dir, args.input_source_mode)
     if not input_dir.is_dir():
-        raise SystemExit(f"ERROR: input directory not found: {input_dir}")
+        raise SystemExit(f"ERROR: input directory not found: {requested_input_dir}")
+    LOGGER.info(
+        "输入模式: %s (%s), 请求目录=%s, 实际目录=%s",
+        args.input_source_mode,
+        args.input_source_label or args.input_source_mode,
+        requested_input_dir,
+        input_dir,
+    )
     if args.expected_sha256 and args.expected_sha256.lower() != file_sha256(model_path).lower():
         raise SystemExit(
             "ERROR: model sha256 mismatch "
@@ -540,6 +568,10 @@ def main() -> int:
             "variant": args.variant,
             "model_path": str(model_path),
             "model_sha256": file_sha256(model_path) if model_path.is_file() else None,
+            "input_source_mode": args.input_source_mode,
+            "input_source_label": args.input_source_label or args.input_source_mode,
+            "requested_input_dir": str(requested_input_dir),
+            "input_dir": str(input_dir),
             "available_input_count": available_count,
             "selected_input_count": len(input_files),
             "warmup_count": len(warmup_files),
@@ -579,6 +611,10 @@ def main() -> int:
             "status": "error",
             "variant": args.variant,
             "model_path": str(model_path),
+            "input_source_mode": args.input_source_mode,
+            "input_source_label": args.input_source_label or args.input_source_mode,
+            "requested_input_dir": str(requested_input_dir),
+            "input_dir": str(input_dir) if "input_dir" in locals() else str(requested_input_dir),
             "output_dir": str(output_dir),
             "reconstruction_dir": str(recon_dir),
             "errors": [f"{type(exc).__name__}: {exc}"],

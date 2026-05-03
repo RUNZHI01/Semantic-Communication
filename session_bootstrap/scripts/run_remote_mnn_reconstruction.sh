@@ -31,9 +31,13 @@ Options:
 Required env:
   REMOTE_MODE=ssh|local
   REMOTE_MNN_PYTHON
-  REMOTE_INPUT_DIR
   REMOTE_OUTPUT_BASE
   REMOTE_SNR_BASELINE / REMOTE_SNR_CURRENT
+
+Input source env:
+  OPENAMP_DEMO_INPUT_SOURCE_MODE=prerecorded|usrp
+  REMOTE_INPUT_DIR      Required when input source is prerecorded.
+  REMOTE_USRP_RX_DIR    Required when input source is usrp.
 
 SSH env when REMOTE_MODE=ssh:
   REMOTE_HOST
@@ -162,8 +166,28 @@ if [[ "$REMOTE_MODE" != "ssh" && "$REMOTE_MODE" != "local" ]]; then
 fi
 
 require_var REMOTE_MNN_PYTHON
-require_var REMOTE_INPUT_DIR
 require_var REMOTE_OUTPUT_BASE
+
+INPUT_SOURCE_MODE_RAW="${OPENAMP_DEMO_INPUT_SOURCE_MODE:-${REMOTE_INPUT_SOURCE_MODE:-prerecorded}}"
+INPUT_SOURCE_MODE="$(printf '%s' "$INPUT_SOURCE_MODE_RAW" | tr '[:upper:]' '[:lower:]')"
+case "$INPUT_SOURCE_MODE" in
+  prerecorded|preset|archive)
+    INPUT_SOURCE_MODE="prerecorded"
+    require_var REMOTE_INPUT_DIR
+    REAL_INPUT_DIR="$REMOTE_INPUT_DIR"
+    INPUT_SOURCE_LABEL="预录模式"
+    ;;
+  usrp|radio|wireless)
+    INPUT_SOURCE_MODE="usrp"
+    require_var REMOTE_USRP_RX_DIR
+    REAL_INPUT_DIR="$REMOTE_USRP_RX_DIR"
+    INPUT_SOURCE_LABEL="USRP 传输模式"
+    ;;
+  *)
+    echo "ERROR: unsupported OPENAMP_DEMO_INPUT_SOURCE_MODE/REMOTE_INPUT_SOURCE_MODE: $INPUT_SOURCE_MODE_RAW" >&2
+    exit 1
+    ;;
+esac
 
 if [[ "$REMOTE_MODE" == "ssh" ]]; then
   for req in REMOTE_HOST REMOTE_USER REMOTE_PASS; do
@@ -205,11 +229,11 @@ run_remote_reconstruction() {
 #!/usr/bin/env bash
 set -euo pipefail
 SH
-    declare -p REMOTE_MNN_PYTHON REMOTE_INPUT_DIR REAL_OUTPUT_DIR REAL_SNR VARIANT MODEL_PATH MNN_EXPECTED_SHA256 MNN_EXTRA_PYTHONPATH MAX_INPUTS SEED INTERPRETER_COUNT SESSION_THREADS PRECISION SHAPE_MODE BUCKET_SHAPES WARMUP_INPUTS AUTO_BACKEND TUNE_NUM DRY_RUN MOCK_INFER_MS
+    declare -p REMOTE_MNN_PYTHON REAL_INPUT_DIR REAL_OUTPUT_DIR REAL_SNR VARIANT MODEL_PATH MNN_EXPECTED_SHA256 MNN_EXTRA_PYTHONPATH MAX_INPUTS SEED INTERPRETER_COUNT SESSION_THREADS PRECISION SHAPE_MODE BUCKET_SHAPES WARMUP_INPUTS AUTO_BACKEND TUNE_NUM DRY_RUN MOCK_INFER_MS INPUT_SOURCE_MODE INPUT_SOURCE_LABEL
     cat <<'SH'
 
 remote_python="$REMOTE_MNN_PYTHON"
-input_dir="$REMOTE_INPUT_DIR"
+input_dir="$REAL_INPUT_DIR"
 output_dir="$REAL_OUTPUT_DIR"
 snr="$REAL_SNR"
 variant="$VARIANT"
@@ -228,6 +252,8 @@ auto_backend="$AUTO_BACKEND"
 tune_num="$TUNE_NUM"
 dry_run="$DRY_RUN"
 mock_infer_ms="$MOCK_INFER_MS"
+input_source_mode="$INPUT_SOURCE_MODE"
+input_source_label="$INPUT_SOURCE_LABEL"
 
 mkdir -p "$output_dir"
 rm -rf "$output_dir/reconstructions"
@@ -275,7 +301,7 @@ if [[ "$dry_run" == "1" ]]; then
   extra_args+=(--dry-run --mock-infer-ms "$mock_infer_ms")
 fi
 
-echo "[mnn-remote] variant=$variant model=$model_path output_dir=$output_dir snr=$snr python=$remote_python interpreters=$interpreter_count threads=$session_threads precision=$precision shape_mode=$shape_mode"
+echo "[mnn-remote] variant=$variant model=$model_path output_dir=$output_dir snr=$snr python=$remote_python interpreters=$interpreter_count threads=$session_threads precision=$precision shape_mode=$shape_mode input_source=$input_source_mode input_dir=$input_dir"
 
 run_remote_python - \
   --model-path "$model_path" \
@@ -288,6 +314,8 @@ run_remote_python - \
   --session-threads "$session_threads" \
   --precision "$precision" \
   --shape-mode "$shape_mode" \
+  --input-source-mode "$input_source_mode" \
+  --input-source-label "$input_source_label" \
   "${extra_args[@]}" <<'PY'
 SH
     cat "$PYTHON_RUNNER_SOURCE"
@@ -299,6 +327,7 @@ SH
 
   if [[ "$REMOTE_MODE" == "ssh" ]]; then
     set +e
+    SSH_WITH_PASSWORD_DISABLE_CONTROLMASTER=1 \
     bash "$SCRIPT_DIR/ssh_with_password.sh" \
       --host "$REMOTE_HOST" \
       --user "$REMOTE_USER" \

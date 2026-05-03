@@ -386,6 +386,8 @@ export type BoardAccessPayload = {
   port?: number | string
   env_file?: string
   transport_mode?: string
+  local_latent_dir?: string
+  local_latent_pattern?: string
   auth_enabled?: boolean
   auth_sig_policy?: string
   auth_server_id?: string
@@ -400,6 +402,15 @@ export type BoardAccessResponse = JsonObject & {
   transport_label?: string
   transport_tone?: string
   transport_summary?: string
+  input_source_mode?: string
+  input_source_label?: string
+  input_source_tone?: string
+  input_source_summary?: string
+  remote_usrp_rx_dir?: string
+  local_usrp_input_dir?: string
+  local_usrp_image_dir?: string
+  remote_prerecorded_input_dir?: string
+  remote_reconstruction_output_base?: string
 }
 
 // ---------------------------------------------------------------------------

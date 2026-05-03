@@ -535,7 +535,25 @@ def quality_metrics_by_relative_path(report_path_value: str) -> dict[str, dict[s
 
 @lru_cache(maxsize=1)
 def pytorch_reference_manifest() -> dict[str, Any]:
-    return read_json(PYTORCH_REFERENCE_MANIFEST)
+    if PYTORCH_REFERENCE_MANIFEST.exists():
+        return read_json(PYTORCH_REFERENCE_MANIFEST)
+    return {
+        "status": "missing",
+        "completed_at": "",
+        "started_at": "",
+        "output_count": 0,
+        "records": [],
+        "timing": {
+            "total_ms": 0.0,
+            "mean_ms": 0.0,
+        },
+        "generator_ckpt_sha256": "",
+        "origin_ckpt_sha256": "",
+        "device": "",
+        "snr": 0.0,
+        "manifest_path": repo_relative(PYTORCH_REFERENCE_MANIFEST),
+        "note": "PyTorch 参考 manifest 缺失；当前主 demo 已降级为空基线展示。",
+    }
 
 
 @lru_cache(maxsize=1)

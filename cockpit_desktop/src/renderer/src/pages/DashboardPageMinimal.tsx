@@ -4,8 +4,7 @@ import { useAircraftPosition } from '../hooks/useAircraftPosition'
 import { useInferenceProgressPoll } from '../hooks/useInferenceProgress'
 import { useBatchStatePoll } from '../hooks/useBatchState'
 import { useAppStore } from '../stores/appStore'
-import type { ComparisonEngineKey, ComparisonResult } from '../stores/appStore'
-import type { RunInferenceResponse } from '../api/types'
+import type { ComparisonResult } from '../stores/appStore'
 import { useCryptoStatus } from '../hooks/useCryptoStatus'
 import {
   useProbeBoard,
@@ -21,11 +20,14 @@ import { FlightPanel } from '../components/dashboard/FlightPanel'
 import { PageTransition, StaggeredList, AnimatedListItem } from '../components/animations'
 import { Icons } from '../components/icons'
 import { CountUp } from '../components/shared/CountUp'
+import type { BatchStageProgress } from '../api/types/crypto'
+import { comparisonResultFromInferencePayload } from '../hooks/comparisonResult'
 import s from './DashboardPageMinimal.module.css'
 
 const LIVE_LOG_ACTIONS = ['Processing block', 'Allocating memory', 'Optimizing tensor', 'Compiling kernel', 'Syncing device']
 
 type AuthSigPolicy = 'DUAL_REQUIRED' | 'SM2_ONLY' | 'MLDSA_ONLY'
+type TransportMode = 'tcp' | 'usrp'
 
 const AUTH_POLICY_OPTIONS: { value: AuthSigPolicy; label: string }[] = [
   { value: 'DUAL_REQUIRED', label: '双因子: SM2 + ML-DSA' },
@@ -39,6 +41,21 @@ const AUTH_POLICY_HINTS: Record<AuthSigPolicy, string> = {
   MLDSA_ONLY: '仅保留后量子签名身份校验，便于单独验证 ML-DSA 链路。',
 }
 
+const TRANSPORT_OPTIONS: { mode: TransportMode; label: string; caption: string }[] = [
+  {
+    mode: 'tcp',
+    label: '预录模式',
+    caption: '板端继续读取本地预录张量，保留原 demo 路径。',
+  },
+  {
+    mode: 'usrp',
+    label: 'USRP 模式',
+    caption: '上位机 latent 转 bin 后走 USRP OTA，板端从 RX 目录进入重建。',
+  },
+]
+
+const MAX_BATCH_COUNT = 300
+
 function numericValue(value: unknown): number | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) return value
   if (typeof value === 'string' && value.trim()) {
@@ -48,31 +65,14 @@ function numericValue(value: unknown): number | undefined {
   return undefined
 }
 
-function comparisonFromInference(
-  engine: Extract<ComparisonEngineKey, 'pytorch' | 'tvm'>,
-  payload: RunInferenceResponse | undefined,
-): ComparisonResult | undefined {
-  if (payload?.status !== 'success' || payload.execution_mode !== 'live') {
-    return undefined
-  }
-  const reconstructionMs = payload.timings?.total_ms ?? payload.timings?.payload_ms
-  if (reconstructionMs == null) {
-    return undefined
-  }
+function normalizeStageProgress(stage: BatchStageProgress | null | undefined, fallbackTotal: number) {
+  const total = Math.max(1, numericValue(stage?.total) ?? fallbackTotal)
+  const completed = Math.max(0, Math.min(numericValue(stage?.completed) ?? 0, total))
   return {
-    engine,
-    label: engine === 'pytorch' ? 'PyTorch参考' : 'TVM重建',
-    reconstructionMs,
-    runMs:
-      numericValue(payload.runner_summary?.run_median_ms)
-      ?? numericValue(payload.runner_summary?.run_mean_ms)
-      ?? payload.timings?.payload_ms
-      ?? undefined,
-    sampleCount:
-      numericValue(payload.runner_summary?.processed_count)
-      ?? numericValue(payload.runner_summary?.input_count)
-      ?? payload.live_progress?.completed_count,
-    quality: payload.quality,
+    completed,
+    total,
+    status: stage?.status ?? 'pending',
+    percent: Math.max(0, Math.min((completed / total) * 100, 100)),
   }
 }
 
@@ -82,6 +82,18 @@ function normalizeAuthSigPolicy(rawValue: string | undefined): AuthSigPolicy {
     return normalized
   }
   return 'DUAL_REQUIRED'
+}
+
+function normalizeTransportMode(rawValue: unknown): TransportMode {
+  return String(rawValue || '').trim().toLowerCase() === 'usrp' ? 'usrp' : 'tcp'
+}
+
+function normalizeBatchCountInput(rawValue: string, fallback: number): number {
+  const parsed = Number(rawValue)
+  if (!Number.isFinite(parsed)) {
+    return fallback
+  }
+  return Math.max(1, Math.min(Math.trunc(parsed), MAX_BATCH_COUNT))
 }
 
 const LiveLogStream = memo(function LiveLogStream({ isRunning }: { isRunning: boolean }) {
@@ -213,6 +225,8 @@ export function DashboardPageMinimal() {
   const [authEnabled, setAuthEnabled] = useState(false)
   const [authSigPolicy, setAuthSigPolicy] = useState<AuthSigPolicy>('DUAL_REQUIRED')
   const [authDirty, setAuthDirty] = useState(false)
+  const [batchCount, setBatchCount] = useState<number>(300)
+  const [batchCountTouched, setBatchCountTouched] = useState(false)
   const [toasts, setToasts] = useState<{ id: number; text: string; type: 'success' | 'error' }[]>([])
   const toastIdRef = useRef(0)
   const batch = batchState.isError ? undefined : batchState.data
@@ -225,6 +239,9 @@ export function DashboardPageMinimal() {
   const mnnBatchMut = useRunMnnBatch()
   const baselineMut = useRunBaseline()
   const boardAccessMut = useSetBoardAccess()
+  const status = system.data
+  const boardAccess = status?.board_access
+  const activeTransport = normalizeTransportMode(boardAccess?.transport_mode)
 
   const removeToast = useCallback((id: number) => {
     setToasts((prev) => prev.filter((t) => t.id !== id))
@@ -250,36 +267,41 @@ export function DashboardPageMinimal() {
     setAuthSigPolicy(normalizeAuthSigPolicy(cryptoData?.sig_policy))
   }, [cryptoData?.auth_enabled, cryptoData?.sig_policy, authDirty])
 
-  const handleRunInference = useMemo(
-    () => () => {
-      batchMut.mutate({ count: 300 }, {
+  useEffect(() => {
+    if (batchCountTouched) return
+    setBatchCount(activeTransport === 'usrp' ? 20 : 300)
+  }, [activeTransport, batchCountTouched])
+
+  const handleRunInference = useCallback(
+    (count: number = batchCount) => {
+      batchMut.mutate({ count }, {
         onSuccess: (data) => {
           if (data.status === 'already_running') {
-            showToast('TVM 300 张任务已在运行中', 'success')
+            showToast(`TVM ${count} 张任务已在运行中`, 'success')
           } else if (data.status === 'started') {
-            showToast('TVM 300 张任务已启动', 'success')
+            showToast(`TVM ${count} 张任务已启动`, 'success')
           } else {
-            showToast(data.message || 'TVM 300 张任务启动失败', 'error')
+            showToast(data.message || `TVM ${count} 张任务启动失败`, 'error')
           }
         },
         onError: (error) => {
           showToast(`启动失败: ${error.message}`, 'error')
-        }
+        },
       })
     },
-    [batchMut, showToast],
+    [batchCount, batchMut, showToast],
   )
 
-  const handleRunMnnInference = useMemo(
-    () => () => {
-      mnnBatchMut.mutate({ count: 300 }, {
+  const handleRunMnnInference = useCallback(
+    (count: number = batchCount) => {
+      mnnBatchMut.mutate({ count }, {
         onSuccess: (data) => {
           if (data.status === 'already_running') {
-            showToast('MNN 300 张任务已在运行中', 'success')
+            showToast(`MNN ${count} 张任务已在运行中`, 'success')
           } else if (data.status === 'started') {
-            showToast('MNN 300 张任务已启动', 'success')
+            showToast(`MNN ${count} 张任务已启动`, 'success')
           } else {
-            showToast(data.message || 'MNN 300 张任务启动失败', 'error')
+            showToast(data.message || `MNN ${count} 张任务启动失败`, 'error')
           }
         },
         onError: (error) => {
@@ -287,7 +309,7 @@ export function DashboardPageMinimal() {
         },
       })
     },
-    [mnnBatchMut, showToast],
+    [batchCount, mnnBatchMut, showToast],
   )
 
   const handleSavePassword = useMemo(
@@ -330,26 +352,37 @@ export function DashboardPageMinimal() {
     [authEnabled, authSigPolicy, boardAccessMut, showToast],
   )
 
+  const handleSelectTransport = useCallback(
+    (mode: TransportMode) => {
+      const selected = TRANSPORT_OPTIONS.find((option) => option.mode === mode)
+      boardAccessMut.mutate(
+        { transport_mode: mode },
+        {
+          onSuccess: (data) => {
+            const label = data.board_access?.transport_label ?? selected?.label ?? mode
+            showToast(`数据面模式已切换: ${label}`, 'success')
+          },
+          onError: (error) => {
+            showToast(`切换数据面模式失败: ${error.message}`, 'error')
+          },
+        },
+      )
+    },
+    [boardAccessMut, showToast],
+  )
+
   // Derived data
-  const status = system.data
-  const currentResultFromStore = (
-    lastCompletedInference?.variant === 'current'
-    && lastCompletedInference?.execution_mode === 'live'
-    && lastCompletedInference?.status === 'success'
-  ) ? lastCompletedInference : undefined
-  const currentResult = currentResultFromStore
-  const baselineResultFromStore = (
-    lastCompletedInference?.variant === 'baseline'
-    && lastCompletedInference?.execution_mode === 'live'
-    && lastCompletedInference?.status === 'success'
-  ) ? lastCompletedInference : undefined
-  const baselineResult = baselineResultFromStore
+  const recentResults = status?.recent_results
+  const currentResultFromStore = lastCompletedInference?.variant === 'current' ? lastCompletedInference : undefined
+  const currentResult = currentResultFromStore ?? recentResults?.current
+  const baselineResultFromStore = lastCompletedInference?.variant === 'baseline' ? lastCompletedInference : undefined
+  const baselineResult = baselineResultFromStore ?? recentResults?.baseline
   const pytorchComparison =
     comparisonResults.pytorch
-    ?? comparisonFromInference('pytorch', baselineResult)
+    ?? comparisonResultFromInferencePayload(baselineResult)
   const tvmComparison =
     comparisonResults.tvm
-    ?? comparisonFromInference('tvm', currentResult)
+    ?? comparisonResultFromInferencePayload(currentResult)
   const mnnComparison =
     comparisonResults.mnn
   const comparisonRows = [pytorchComparison, tvmComparison, mnnComparison]
@@ -386,7 +419,9 @@ export function DashboardPageMinimal() {
     Math.min(livePercentSource, 100),
   )
   const isCurrentSessionBatch = Boolean(batch?.batch_job_id && pendingBatchJobId && batch.batch_job_id === pendingBatchJobId)
-  const activeBatch = isCurrentSessionBatch ? batch : undefined
+  const activeBatch = batch && (isCurrentSessionBatch || batch.status === 'running' || batch.status === 'done')
+    ? batch
+    : undefined
   const batchServiceMode = activeBatch?.service_mode as string | undefined
   const batchEngine = (activeBatch?.engine === 'mnn' ? 'mnn' : 'tvm') as 'mnn' | 'tvm'
   const batchEngineLabel = batchEngine === 'mnn' ? 'MNN' : 'TVM'
@@ -396,6 +431,19 @@ export function DashboardPageMinimal() {
   const batchFallback = Math.max(0, activeBatch?.fallback ?? 0)
   const isBatchRunning = activeBatch?.status === 'running'
   const isBatchDone = activeBatch?.status === 'done'
+  const hasStageProgress = !isSingleLiveRunning && Boolean(activeBatch?.host_preprocess_progress || activeBatch?.transport_progress || activeBatch?.inference_progress)
+  const hostPreprocessStage = normalizeStageProgress(activeBatch?.host_preprocess_progress, batchTotalImages)
+  const transportStage = normalizeStageProgress(activeBatch?.transport_progress, batchTotalImages)
+  const inferenceStage = normalizeStageProgress(activeBatch?.inference_progress, batchTotalImages)
+  const batchIssueMessage = isBatchDone && batchFallback > 0
+    ? String(activeBatch?.message || '批量任务已回退，未产生有效 live 重建结果。')
+    : ''
+  const batchIssueDetail = isBatchDone && batchFallback > 0
+    ? [
+        activeBatch?.status_category ? `状态: ${activeBatch.status_category}` : '',
+        activeBatch?.source_label ? `来源: ${activeBatch.source_label}` : '',
+      ].filter(Boolean).join(' · ')
+    : ''
   const isRunning = isSingleLiveRunning || isBatchRunning
   const isDone = !isSingleLiveRunning && isBatchDone
   const modeTag = batchServiceMode === 'ROI_ONLY' ? ' (降采样 3:1)' : ''
@@ -415,7 +463,7 @@ export function DashboardPageMinimal() {
         : batchEngine === 'mnn'
           ? `MNN 批量完成：${batchProgress}/${batchTotalImages}`
           : `批量完成：${batchProgress}/${batchTotalImages}${modeTag}`
-      : '等待操作员启动 TVM 300 张'
+      : `等待操作员启动 TVM ${batchCount} 张`
   const progressBadge = isRunning
     ? '运行中'
     : isDone
@@ -431,7 +479,25 @@ export function DashboardPageMinimal() {
         ? `${batchTotalImages} 张降采样推理 (原 300 张跳帧 3:1)`
         : `${batchTotalImages} 张 TVM 图像在线推进`
   const progressSuffix = isRunning ? '处理中' : isDone ? '已完成' : '待启动'
+  const stageProgressSuffix = isRunning ? '处理中' : isDone ? '已完成' : '待启动'
   const boardOnline = status?.live?.board_online ?? false
+  const hostInputDir = boardAccess?.local_usrp_image_dir
+    || boardAccess?.local_usrp_input_dir
+    || (activeTransport === 'usrp' ? '' : boardAccess?.remote_prerecorded_input_dir)
+  const boardInputDir = activeTransport === 'usrp'
+    ? boardAccess?.remote_usrp_rx_dir
+    : boardAccess?.remote_prerecorded_input_dir
+  const boardOutputDir = boardAccess?.remote_reconstruction_output_base
+  const pendingTransportMode = boardAccessMut.variables?.transport_mode
+    ? normalizeTransportMode(boardAccessMut.variables.transport_mode)
+    : undefined
+  const roiEffectiveCount = Math.max(1, Math.ceil(batchCount / 3))
+  const batchTargetLabel = activeTransport === 'usrp' && batchCount === 20
+    ? '20 张快演'
+    : `${batchCount} 张`
+  const batchPresetHint = activeTransport === 'usrp'
+    ? 'USRP 模式推荐先跑 20 张快演，视频录制更紧凑；需要完整留证时再切回 300 张。'
+    : '默认可跑 300 张全量；如需快速演示，也可以先切到 20 张。'
   const authHint = authEnabled
     ? AUTH_POLICY_HINTS[authSigPolicy]
     : '当前只保留 ML-KEM + SM4，会跳过 ML-DSA / SM2 身份认证。'
@@ -501,21 +567,74 @@ export function DashboardPageMinimal() {
                   </div>
                 </div>
 
-                <div className={s.progressCount}>
-                  <strong>{progress}</strong>
-                  <span>/ {totalImages} {progressSuffix}</span>
-                </div>
+                {hasStageProgress ? (
+                  <div className={s.stageProgressGrid}>
+                    <div className={s.stageProgressRow}>
+                      <div className={s.stageProgressTopline}>
+                        <span className={s.stageProgressTitle}>上位机图片→latent</span>
+                        <span className={s.stageProgressCount}>{hostPreprocessStage.completed} / {hostPreprocessStage.total} {stageProgressSuffix}</span>
+                      </div>
+                      <div className={s.progressTrack}>
+                        <div
+                          className={`${s.progressFill} ${s.hostPreprocessFill}`}
+                          style={{ width: `${hostPreprocessStage.percent}%` }}
+                        />
+                      </div>
+                    </div>
+                    <div className={s.stageProgressRow}>
+                      <div className={s.stageProgressTopline}>
+                        <span className={s.stageProgressTitle}>USRP 传输/解包</span>
+                        <span className={s.stageProgressCount}>{transportStage.completed} / {transportStage.total} {stageProgressSuffix}</span>
+                      </div>
+                      <div className={s.progressTrack}>
+                        <div
+                          className={`${s.progressFill} ${s.transportFill}`}
+                          style={{ width: `${transportStage.percent}%` }}
+                        />
+                      </div>
+                    </div>
+                    <div className={s.stageProgressRow}>
+                      <div className={s.stageProgressTopline}>
+                        <span className={s.stageProgressTitle}>{batchEngineLabel} 板端推理</span>
+                        <span className={s.stageProgressCount}>{inferenceStage.completed} / {inferenceStage.total} {stageProgressSuffix}</span>
+                      </div>
+                      <div className={s.progressTrack}>
+                        <div
+                          className={`${s.progressFill} ${s.inferenceFill}`}
+                          style={{ width: `${inferenceStage.percent}%` }}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className={s.progressCount}>
+                      <strong>{progress}</strong>
+                      <span>/ {totalImages} {progressSuffix}</span>
+                    </div>
 
-                <div className={s.progressTrack}>
-                  <div
-                    className={s.progressFill}
-                    style={{ width: `${progressPercent}%` }}
-                  />
-                </div>
+                    <div className={s.progressTrack}>
+                      <div
+                        className={s.progressFill}
+                        style={{ width: `${progressPercent}%` }}
+                      />
+                    </div>
+                  </>
+                )}
 
                 <div className={s.progressMeta}>
-                  当前阶段：{currentStage}
+                  当前阶段：{hasStageProgress
+                    ? `USRP ${transportStage.status} · ${batchEngineLabel} ${inferenceStage.status}`
+                    : currentStage}
                 </div>
+
+                {batchIssueMessage && (
+                  <div className={s.progressIssue}>
+                    <div className={s.progressIssueTitle}>本次批量任务未进入有效重建链路</div>
+                    <div>{batchIssueMessage}</div>
+                    {batchIssueDetail && <div className={s.progressIssueDetail}>{batchIssueDetail}</div>}
+                  </div>
+                )}
 
                 <LiveLogStream isRunning={isRunning} />
               </div>
@@ -536,9 +655,42 @@ export function DashboardPageMinimal() {
               <div className={s.sectionCard}>
                 <div className={s.sectionTitle}>执行操作</div>
 
+                <div className={s.batchPresetMeta}>
+                  <div>
+                    <div className={s.batchPresetTitle}>批量规模</div>
+                    <div className={s.batchPresetHint}>{batchPresetHint}</div>
+                  </div>
+                  <div className={`${s.batchPresetBadge} ${activeTransport === 'usrp' ? s.batchPresetBadgeUsr : s.batchPresetBadgeTcp}`}>
+                    当前: {batchTargetLabel}
+                  </div>
+                </div>
+
+                <div className={s.batchInputRow}>
+                  <label className={s.batchInputField}>
+                    <span className={s.batchInputLabel}>图像数量</span>
+                    <input
+                      type="number"
+                      min={1}
+                      max={MAX_BATCH_COUNT}
+                      step={1}
+                      inputMode="numeric"
+                      className={s.batchInput}
+                      value={batchCount}
+                      disabled={isRunning || batchMut.isPending || mnnBatchMut.isPending || baselineMut.isPending}
+                      onChange={(e) => {
+                        setBatchCount(normalizeBatchCountInput(e.target.value, activeTransport === 'usrp' ? 20 : 300))
+                        setBatchCountTouched(true)
+                      }}
+                    />
+                  </label>
+                  <div className={s.batchInputHint}>
+                    预录模式默认 300，USRP 模式默认 20，最大 300。
+                  </div>
+                </div>
+
                 <button
                   className={s.btnFilled}
-                  onClick={handleRunInference}
+                  onClick={() => handleRunInference(batchCount)}
                   disabled={batchMut.isPending || mnnBatchMut.isPending || isRunning}
                 >
                   {batchMut.isPending ? <span className={s.spinner} /> : <Icons.Play size={18} />}
@@ -546,8 +698,8 @@ export function DashboardPageMinimal() {
                     {batchMut.isPending
                       ? '启动中...'
                       : currentMode === 'ROI_ONLY'
-                        ? '启动 TVM 降采样扫描 (有效预估 100 帧)'
-                        : '启动 TVM 推理 (300 张)'}
+                        ? `启动 TVM 降采样扫描 (${batchCount} 张入口 / 约 ${roiEffectiveCount} 帧)`
+                        : `启动 TVM 推理 (${batchTargetLabel})`}
                   </span>
                 </button>
 
@@ -564,20 +716,20 @@ export function DashboardPageMinimal() {
 
                   <button
                     className={s.btnTonal}
-                    onClick={handleRunMnnInference}
+                    onClick={() => handleRunMnnInference(batchCount)}
                     disabled={mnnBatchMut.isPending || batchMut.isPending || isRunning}
                   >
                     {mnnBatchMut.isPending ? <span className={s.spinner} /> : <Icons.FileText size={16} />}
-                    <span>MNN推理</span>
+                    <span>{`MNN ${batchTargetLabel}`}</span>
                   </button>
 
                   <button
                     className={s.btnTonal}
-                    onClick={() => baselineMut.mutate({ imageIndex: 0, count: 300 })}
+                    onClick={() => baselineMut.mutate({ imageIndex: 0, count: batchCount })}
                     disabled={baselineMut.isPending || isRunning}
                   >
                     {baselineMut.isPending ? <span className={s.spinner} /> : <Icons.Activity size={16} />}
-                    <span>PyTorch Live</span>
+                    <span>{`PyTorch ${batchTargetLabel}`}</span>
                   </button>
                 </div>
               </div>
@@ -604,12 +756,12 @@ export function DashboardPageMinimal() {
                             />
                           </div>
                           <div className={row.engine === 'pytorch' ? s.barValue : s.barValueHighlight}>
-                            <span><CountUp end={row.reconstructionMs} decimals={1} duration={400} /> ms</span>
+                            <span className={s.barMetric}>
+                              <CountUp end={row.reconstructionMs} decimals={1} duration={400} />
+                              <span className={s.barUnit}>ms</span>
+                            </span>
                             {rowSpeedup != null && (
-                              <span className={s.trendBadge} style={{
-                                background: rowSpeedup >= 0 ? 'var(--color-success-container)' : 'var(--color-error-container)',
-                                color: rowSpeedup >= 0 ? 'var(--color-success)' : 'var(--color-error)'
-                              }}>
+                              <span className={`${s.trendBadge} ${rowSpeedup >= 0 ? s.trendBadgePositive : s.trendBadgeNegative}`}>
                                 {rowSpeedup >= 0 ? '↓' : '↑'} <CountUp end={Math.abs(rowSpeedup)} decimals={1} duration={400} />%
                               </span>
                             )}
@@ -644,7 +796,7 @@ export function DashboardPageMinimal() {
                       暂无推理结果
                     </div>
                     <div className={s.emptySubtitle}>
-                      点击上方「启动 TVM 推理 (300 张)」或「MNN推理」开始在线推进
+                      {`点击上方「启动 TVM 推理 (${batchTargetLabel})」或「MNN ${batchTargetLabel}」开始在线推进`}
                     </div>
                     <div className={s.emptyDescription}>
                       推理完成后将展示 TVM/MNN vs PyTorch 参考重建时间对比；TVM 单图结果会附带 PSNR/SSIM 质量指标
@@ -724,6 +876,54 @@ export function DashboardPageMinimal() {
                     >
                       {boardAccessMut.isPending ? '保存中...' : '保存认证设置'}
                     </button>
+                  </div>
+                </div>
+                <div className={s.settingGroup}>
+                  <div className={s.settingRow}>
+                    <div className={s.settingMeta}>
+                      <div className={s.settingLabel}>数据面输入模式</div>
+                      <div className={s.settingCaption}>认证面配置下方统一切换主 demo 的重建数据来源。</div>
+                    </div>
+                    <div className={`${s.transportBadge} ${activeTransport === 'usrp' ? s.transportBadgeUsr : s.transportBadgeTcp}`}>
+                      当前: {activeTransport === 'usrp' ? 'USRP' : '预录'}
+                    </div>
+                  </div>
+                  <div className={s.transportSwitch}>
+                    {TRANSPORT_OPTIONS.map((option) => {
+                      const isActive = activeTransport === option.mode
+                      const isPending = boardAccessMut.isPending && pendingTransportMode === option.mode
+                      return (
+                        <button
+                          key={option.mode}
+                          type="button"
+                          className={`${s.transportOption} ${isActive ? s.transportOptionActive : ''}`}
+                          aria-pressed={isActive}
+                          disabled={boardAccessMut.isPending}
+                          onClick={() => {
+                            if (!isActive) handleSelectTransport(option.mode)
+                          }}
+                        >
+                          <span className={s.transportOptionLabel}>
+                            {isPending ? '切换中...' : option.label}
+                          </span>
+                          <span className={s.transportOptionCaption}>{option.caption}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <div className={s.pathGrid}>
+                    <div className={s.pathItem}>
+                      <span className={s.pathLabel}>上位机输入目录</span>
+                      <span className={s.pathValue}>{hostInputDir || (activeTransport === 'usrp' ? '未配置' : '预录模式不使用上位机输入')}</span>
+                    </div>
+                    <div className={s.pathItem}>
+                      <span className={s.pathLabel}>板端输入目录</span>
+                      <span className={s.pathValue}>{boardInputDir || '未配置'}</span>
+                    </div>
+                    <div className={s.pathItem}>
+                      <span className={s.pathLabel}>板端重建输出目录</span>
+                      <span className={s.pathValue}>{boardOutputDir || '未配置'}</span>
+                    </div>
                   </div>
                 </div>
               </div>

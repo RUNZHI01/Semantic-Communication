@@ -11,21 +11,12 @@ const { Text, Paragraph } = Typography
 
 interface LinkDirectorCardProps {
   system: UseQueryResult<SystemStatusResponse>
-  onSelectTransport: (mode: string) => void
-  transportPending: boolean
   onSwitchProfile: (profileId: string) => void
   switchPending: boolean
 }
 
-const TRANSPORT_OPTIONS = [
-  { mode: 'tcp', label: '全有线模式' },
-  { mode: 'usrp', label: '混合链路模式' },
-] as const
-
 export function LinkDirectorCard({
   system,
-  onSelectTransport,
-  transportPending,
   onSwitchProfile,
   switchPending,
 }: LinkDirectorCardProps) {
@@ -33,8 +24,7 @@ export function LinkDirectorCard({
   const boardAccess = status?.board_access
   const ld = status?.link_director
   const profiles = (ld?.profiles ?? []) as LinkDirectorProfile[]
-  const activeTransport = String(boardAccess?.transport_mode ?? 'tcp')
-  const transportLabel = boardAccess?.transport_label ?? '全有线模式'
+  const transportLabel = boardAccess?.transport_label ?? '预录模式'
   const transportTone = boardAccess?.transport_tone ?? 'info'
   const transportSummary = boardAccess?.transport_summary ?? '当前尚未读取到有效信道信息。'
 
@@ -57,21 +47,7 @@ export function LinkDirectorCard({
           </Space>
 
           <div className={s.section}>
-            <Text className={s.sectionLabel}>模式切换</Text>
-            <Space wrap size={6}>
-              {TRANSPORT_OPTIONS.map((option) => (
-                <Button
-                  key={option.mode}
-                  size="small"
-                  type={activeTransport === option.mode ? 'primary' : 'default'}
-                  loading={transportPending && activeTransport !== option.mode}
-                  onClick={() => onSelectTransport(option.mode)}
-                  className="text-sm"
-                >
-                  {option.label}
-                </Button>
-              ))}
-            </Space>
+            <Text className={s.sectionLabel}>数据面输入</Text>
             <Paragraph className={s.summaryText}>{transportSummary}</Paragraph>
           </div>
 

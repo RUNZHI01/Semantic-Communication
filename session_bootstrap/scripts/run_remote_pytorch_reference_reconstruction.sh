@@ -311,6 +311,7 @@ SH
 } >"$remote_runner"
 chmod 700 "$remote_runner"
 
+SSH_WITH_PASSWORD_DISABLE_CONTROLMASTER=1 \
 bash "$SCRIPT_DIR/ssh_with_password.sh" \
   --host "$REMOTE_HOST" \
   --user "$REMOTE_USER" \

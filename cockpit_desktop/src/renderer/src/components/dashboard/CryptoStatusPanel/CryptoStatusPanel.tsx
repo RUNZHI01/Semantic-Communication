@@ -2,6 +2,7 @@ import { useCryptoStatus } from '../../../hooks/useCryptoStatus'
 import { postCryptoReset, postCryptoTest, postCryptoToggle } from '../../../api/client'
 import s from './CryptoStatusPanel.module.css'
 import { useEffect, useState, type ReactNode } from 'react'
+import type { BenchmarkMetric } from '../../../api/types/crypto'
 
 const STATE_LABEL: Record<string, { label: string; tone: string }> = {
   idle: { label: '空闲', tone: 'neutral' },
@@ -389,21 +390,22 @@ export function CryptoStatusPanel() {
       </div>
 
       {/* Batch benchmark results */}
-      {data.batch_status === 'done' && data.batch_benchmark && (() => {
-        const bm = data.batch_benchmark
-        const rows: { label: string; key: keyof typeof bm }[] = [
-          { label: '握手', key: 'handshake_ms' },
-          { label: '加密', key: 'encrypt_ms' },
-          { label: '解密', key: 'decrypt_ms' },
-          { label: '推理', key: 'inference_ms' },
-          { label: '总计', key: 'total_ms' },
-        ]
-        const validRows = rows.filter(r => bm[r.key] != null)
+      {data.batch_status === 'done' && (data.batch_benchmark || data.batch_transport_benchmark || data.batch_inference_benchmark) && (() => {
+        const inferenceBm = data.batch_inference_benchmark ?? data.batch_benchmark
+        const transportBm = data.batch_transport_benchmark
+        const rows: { label: string; metric: BenchmarkMetric }[] = []
+        if (transportBm?.radio_airtime_ms) rows.push({ label: '无线空口', metric: transportBm.radio_airtime_ms })
+        if (transportBm?.decode_ms) rows.push({ label: '板端解码', metric: transportBm.decode_ms })
+        if (transportBm?.merge_ms) rows.push({ label: '文件合并', metric: transportBm.merge_ms })
+        if (transportBm?.total_ms) rows.push({ label: '传输/解包总计', metric: transportBm.total_ms })
+        if (inferenceBm?.inference_ms) rows.push({ label: '推理重建', metric: inferenceBm.inference_ms })
+        if (inferenceBm?.total_ms && inferenceBm.total_ms !== inferenceBm.inference_ms) rows.push({ label: '推理侧总计', metric: inferenceBm.total_ms })
+        const validRows = rows.filter((row) => row.metric != null)
         if (validRows.length === 0) return null
         return (
           <div className={s.benchSection}>
             <div className={s.benchTitle}>
-              批量 Benchmark ({bm.total_ms?.n ?? data.batch_completed ?? '?'} 张)
+              批量 Benchmark（传输与推理分开，{inferenceBm?.total_ms?.n ?? inferenceBm?.inference_ms?.n ?? data.batch_completed ?? '?'} 张）
             </div>
             <table className={s.benchTable}>
               <thead>
@@ -415,10 +417,10 @@ export function CryptoStatusPanel() {
                 </tr>
               </thead>
               <tbody>
-                {validRows.map(({ label, key }) => {
-                  const m = bm[key]!
+                {validRows.map(({ label, metric }) => {
+                  const m = metric!
                   return (
-                    <tr key={key}>
+                    <tr key={label}>
                       <td>{label}</td>
                       <td>{m.mean_ms} ms</td>
                       <td>{m.median_ms} ms</td>

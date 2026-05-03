@@ -15,6 +15,8 @@ USER_KEYS = ("REMOTE_USER", "PHYTIUM_PI_USER")
 PASSWORD_KEYS = ("REMOTE_PASS", "PHYTIUM_PI_PASSWORD")
 PORT_KEYS = ("REMOTE_SSH_PORT", "PHYTIUM_PI_PORT")
 TRANSPORT_MODE_KEYS = ("MLKEM_TRANSPORT_MODE", "MLKEM_DATA_TRANSPORT", "MLKEM_TRANSPORT")
+INPUT_SOURCE_MODE_KEYS = ("OPENAMP_DEMO_INPUT_SOURCE_MODE", "REMOTE_INPUT_SOURCE_MODE")
+REMOTE_USRP_RX_DIR_KEYS = ("REMOTE_USRP_RX_DIR",)
 
 INFERENCE_SHARED_REQUIRED_KEYS = (
     "REMOTE_TVM_PYTHON",
@@ -57,6 +59,9 @@ TRUSTED_CURRENT_ARTIFACT_REPORT_CANDIDATES = (
 )
 PYTORCH_REFERENCE_MANIFEST_CANDIDATES = (
     "session_bootstrap/tmp/quality_metrics_inputs_20260312/reference/pytorch_reference_manifest.json",
+)
+PYTORCH_REFERENCE_GENERATOR_CKPT_CANDIDATES = (
+    "../host_pic_to_latent/checkpoint/export/compressed_gan.pt",
 )
 VALIDATED_RUNTIME_FALLBACK_KEYS = (
     "REMOTE_TORCH_PYTHONPATH",
@@ -146,8 +151,8 @@ def current_transport_mode(env_values: dict[str, str]) -> str:
 
 def transport_mode_label(mode: str) -> str:
     if normalize_transport_mode(mode) == "usrp":
-        return "混合链路模式"
-    return "全有线模式"
+        return "USRP 模式"
+    return "预录模式"
 
 
 def transport_mode_tone(mode: str) -> str:
@@ -159,8 +164,53 @@ def transport_mode_tone(mode: str) -> str:
 def transport_mode_summary(mode: str) -> str:
     normalized = normalize_transport_mode(mode)
     if normalized == "usrp":
-        return "混合链路模式：控制面 Tailscale/TCP，数据面 USRP 射频链路。"
-    return "全有线模式：控制面 Tailscale/TCP，数据面 TCP。"
+        return "USRP 模式：认证/控制面仍走 Tailscale/TCP，重建数据面走 USRP OTA。"
+    return "预录模式：认证/控制面仍走 Tailscale/TCP，重建数据来自板端本地预录张量。"
+
+
+def normalize_input_source_mode(raw: str | None, *, default: str = "prerecorded") -> str:
+    value = str(raw or "").strip().lower()
+    if not value:
+        return default
+    if value in {"prerecorded", "preset", "archive"}:
+        return "prerecorded"
+    if value in {"usrp", "radio", "wireless"}:
+        return "usrp"
+    raise ValueError("unsupported input_source_mode")
+
+
+def current_input_source_mode(env_values: dict[str, str]) -> str:
+    for key in INPUT_SOURCE_MODE_KEYS:
+        value = str(env_values.get(key, "")).strip()
+        if value:
+            try:
+                return normalize_input_source_mode(value)
+            except ValueError:
+                return "prerecorded"
+    return "prerecorded"
+
+
+def input_source_mode_label(mode: str) -> str:
+    if normalize_input_source_mode(mode) == "usrp":
+        return "USRP 传输模式"
+    return "预录模式"
+
+
+def input_source_mode_tone(mode: str) -> str:
+    if normalize_input_source_mode(mode) == "usrp":
+        return "online"
+    return "info"
+
+
+def input_source_mode_summary(mode: str) -> str:
+    normalized = normalize_input_source_mode(mode)
+    if normalized == "usrp":
+        return "板端推理输入优先来自 REMOTE_USRP_RX_DIR 下的 USRP 接收结果。"
+    return "板端推理输入继续来自 REMOTE_INPUT_DIR 指向的预录 latent 目录。"
+
+
+def current_remote_usrp_rx_dir(env_values: dict[str, str]) -> str:
+    return first_non_empty(env_values, REMOTE_USRP_RX_DIR_KEYS)
 
 
 def sanitize_env_values(values: dict[str, str]) -> dict[str, str]:
@@ -358,6 +408,23 @@ def discover_pytorch_reference_expected_sha(env_values: dict[str, str]) -> str:
         except (OSError, json.JSONDecodeError):
             continue
         generator_sha = valid_sha256_text(payload.get("generator_ckpt_sha256", ""))
+        if generator_sha:
+            return generator_sha
+
+    for raw_ckpt_path in PYTORCH_REFERENCE_GENERATOR_CKPT_CANDIDATES:
+        ckpt_path = resolve_local_path(raw_ckpt_path)
+        if not ckpt_path.exists() or not ckpt_path.is_file():
+            continue
+        try:
+            import hashlib
+
+            digest = hashlib.sha256()
+            with ckpt_path.open("rb") as handle:
+                for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                    digest.update(chunk)
+        except OSError:
+            continue
+        generator_sha = valid_sha256_text(digest.hexdigest())
         if generator_sha:
             return generator_sha
     return ""
@@ -574,9 +641,17 @@ class BoardAccessConfig:
 
     def missing_inference_fields(self, variant: str) -> list[str]:
         missing = self.missing_connection_fields()
-        for key in INFERENCE_SHARED_REQUIRED_KEYS + INFERENCE_VARIANT_REQUIRED_KEYS.get(variant, ()):
+        env_values = self.build_env()
+        shared_required_keys = list(INFERENCE_SHARED_REQUIRED_KEYS)
+        if variant == "current" and current_input_source_mode(env_values) == "usrp":
+            shared_required_keys = [key for key in shared_required_keys if key != "REMOTE_INPUT_DIR"]
+        for key in tuple(shared_required_keys) + INFERENCE_VARIANT_REQUIRED_KEYS.get(variant, ()):
             if not str(self.env_values.get(key, "")).strip():
                 missing.append(key)
+        if variant == "current":
+            input_source_mode = current_input_source_mode(env_values)
+            if input_source_mode == "usrp" and not current_remote_usrp_rx_dir(env_values):
+                missing.append("REMOTE_USRP_RX_DIR")
         return missing
 
     def build_env(self) -> dict[str, str]:
@@ -630,7 +705,9 @@ class BoardAccessConfig:
     def to_public_dict(self) -> dict[str, Any]:
         missing_current = self.missing_inference_fields("current")
         missing_baseline = self.missing_inference_fields("baseline")
-        transport_mode = current_transport_mode(self.build_env())
+        env_values = self.build_env()
+        transport_mode = current_transport_mode(env_values)
+        input_source_mode = current_input_source_mode(env_values)
         return {
             "configured": self.configured,
             "connection_ready": self.connection_ready,
@@ -655,6 +732,18 @@ class BoardAccessConfig:
             "transport_label": transport_mode_label(transport_mode),
             "transport_tone": transport_mode_tone(transport_mode),
             "transport_summary": transport_mode_summary(transport_mode),
+            "input_source_mode": input_source_mode,
+            "input_source_label": input_source_mode_label(input_source_mode),
+            "input_source_tone": input_source_mode_tone(input_source_mode),
+            "input_source_summary": input_source_mode_summary(input_source_mode),
+            "remote_usrp_rx_dir": current_remote_usrp_rx_dir(env_values),
+            "local_usrp_input_dir": first_non_empty(
+                env_values,
+                ("OPENAMP_DEMO_LOCAL_LATENT_DIR", "MLKEM_USRP_SOURCE_LATENT_DIR", "USRP_SOURCE_LATENT_DIR"),
+            ),
+            "local_usrp_image_dir": first_non_empty(env_values, ("OPENAMP_DEMO_LOCAL_IMAGE_DIR", "USRP_SOURCE_IMAGE_DIR")),
+            "remote_prerecorded_input_dir": first_non_empty(env_values, ("REMOTE_INPUT_DIR",)),
+            "remote_reconstruction_output_base": first_non_empty(env_values, ("REMOTE_OUTPUT_BASE",)),
             "source_summary": self.source_summary,
             "field_sources": self.field_sources,
             "preloaded_defaults": {

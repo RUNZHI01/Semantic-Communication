@@ -115,6 +115,13 @@ class DemoBoardAccessDefaultsTest(unittest.TestCase):
 
         self.assertEqual(discovered, "85d701db0021c26412c3e5e08a4ca043470aaa01fb2d6792cb3b3b29e93bf849")
 
+    def test_discover_pytorch_reference_expected_sha_falls_back_to_local_generator_checkpoint(self) -> None:
+        access = build_demo_default_board_access(None)
+
+        discovered = access.build_env().get("INFERENCE_BASELINE_EXPECTED_SHA256", "")
+
+        self.assertEqual(discovered, "3afcebc7471695a23bba9448dbc96bf4c07eee84d2ddf5f808501cb583e87763")
+
     def test_discover_trusted_current_local_artifact_source_uses_matching_sha_lineage(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_root = Path(temp_dir)

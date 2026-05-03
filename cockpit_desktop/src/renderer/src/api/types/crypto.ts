@@ -19,6 +19,16 @@ export type BatchBenchmark = {
   decrypt_ms?: BenchmarkMetric | null
   inference_ms?: BenchmarkMetric | null
   total_ms?: BenchmarkMetric | null
+  radio_airtime_ms?: BenchmarkMetric | null
+  decode_ms?: BenchmarkMetric | null
+  merge_ms?: BenchmarkMetric | null
+  other_wall_ms?: BenchmarkMetric | null
+}
+
+export type BatchStageProgress = {
+  completed?: number
+  total?: number
+  status?: string
 }
 
 export type ServiceModeSnapshot = {
@@ -120,6 +130,10 @@ export type CryptoStatusResponse = {
   control_status_stale?: boolean
   /** Batch inference benchmark results (populated after batch completes) */
   batch_benchmark?: BatchBenchmark | null
+  /** USRP transport/decode benchmark, separated from inference reconstruction time */
+  batch_transport_benchmark?: BatchBenchmark | null
+  /** Pure board-side TVM/MNN reconstruction benchmark */
+  batch_inference_benchmark?: BatchBenchmark | null
   /** Batch inference run status: 'running' | 'done' | null */
   batch_status?: string | null
   /** Number of completed images in current/last batch */
@@ -158,6 +172,16 @@ export type BatchStateResponse = {
   started_at?: number
   finished_at?: number | null
   benchmark?: BatchBenchmark | null
+  transport_benchmark?: BatchBenchmark | null
+  inference_benchmark?: BatchBenchmark | null
+  host_preprocess_progress?: BatchStageProgress | null
+  transport_progress?: BatchStageProgress | null
+  inference_progress?: BatchStageProgress | null
+  message?: string
+  status_category?: string
+  execution_mode?: string
+  source_label?: string
+  diagnostics?: Record<string, unknown>
   /** Service mode active during this batch (FULL_FRAME / ROI_ONLY / ALERT_ONLY) */
   service_mode?: string
 }
