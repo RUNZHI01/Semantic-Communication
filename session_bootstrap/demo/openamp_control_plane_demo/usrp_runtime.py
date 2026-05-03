@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import os
@@ -13,6 +14,7 @@ import tarfile
 import threading
 import time
 import traceback
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 from typing import Any, Callable
 
@@ -92,6 +94,9 @@ LOCAL_IMAGE_TO_LATENT_DEVICE_KEYS = ("OPENAMP_DEMO_IMAGE_TO_LATENT_DEVICE", "USR
 LOCAL_IMAGE_TO_LATENT_CONFIG_KEYS = ("OPENAMP_DEMO_IMAGE_TO_LATENT_CONFIG", "USRP_IMAGE_TO_LATENT_CONFIG")
 LOCAL_IMAGE_TO_LATENT_SNR_KEYS = ("OPENAMP_DEMO_IMAGE_TO_LATENT_SNR", "USRP_IMAGE_TO_LATENT_SNR")
 PAYLOAD_CODEC_KEYS = ("OPENAMP_DEMO_USRP_PAYLOAD_CODEC", "USRP_PAYLOAD_CODEC")
+WIRE_PREPARE_WORKERS_KEYS = ("USRP_WIRE_PREPARE_WORKERS", "OPENAMP_DEMO_USRP_WIRE_PREPARE_WORKERS")
+WIRE_CACHE_ENABLED_KEYS = ("USRP_WIRE_CACHE_ENABLED", "OPENAMP_DEMO_USRP_WIRE_CACHE_ENABLED")
+WIRE_CACHE_DIR_KEYS = ("USRP_WIRE_CACHE_DIR", "OPENAMP_DEMO_USRP_WIRE_CACHE_DIR")
 REMOTE_USRP_RX_ROOT_KEYS = ("REMOTE_USRP_RX_DIR",)
 RX_CONTROL_HOST_KEYS = ("RX_CONTROL_HOST", "USRP_RX_CONTROL_HOST")
 RX_CONTROL_PORT_KEYS = ("RX_CONTROL_PORT", "USRP_RX_CONTROL_PORT")
@@ -129,6 +134,8 @@ DEFAULT_TX_GAIN = "25"
 DEFAULT_RX_GAIN = "15"
 DEFAULT_RX_ANT = "RX2"
 DEFAULT_BIND_ADDR = "0.0.0.0"
+DEFAULT_WIRE_PREPARE_WORKERS = 2
+WIRE_CACHE_VERSION = 1
 CONTROL_PING_TIMEOUT_SEC = 2.0
 CONTROL_START_TIMEOUT_SEC = 15.0
 CONTROL_SHUTDOWN_TIMEOUT_SEC = 5.0
@@ -634,7 +641,11 @@ def _split_local_latent_patterns(pattern: str) -> list[str]:
 def _collect_local_latent_files(input_dir: Path, pattern: str) -> list[Path]:
     files: list[Path] = []
     for item in _split_local_latent_patterns(pattern):
-        files.extend(path for path in input_dir.rglob(item) if path.is_file())
+        files.extend(
+            path
+            for path in input_dir.rglob(item)
+            if path.is_file() and ".usrp_wire_cache" not in path.parts
+        )
     files = list({path.resolve(): path for path in files}.values())
     files.sort(key=lambda path: path.relative_to(input_dir).as_posix())
     return files
@@ -657,6 +668,151 @@ def _default_image_to_latent_output_dir() -> Path:
     return REPO_ROOT / "host_pic_to_latent" / "encoder_outputs_airfield300"
 
 
+def _safe_cache_codec_name(payload_codec: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", str(payload_codec or "default"))
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _wire_cache_paths(source_dir: Path, source_path: Path, cache_dir: Path, payload_codec: str) -> tuple[Path, Path]:
+    rel = source_path.relative_to(source_dir)
+    cache_rel = rel.with_name(f"{rel.name}.{_safe_cache_codec_name(payload_codec)}.wire.bin")
+    cache_blob = cache_dir / cache_rel
+    return cache_blob, cache_blob.with_suffix(cache_blob.suffix + ".json")
+
+
+def _wire_cache_signature(source_path: Path) -> dict[str, int]:
+    stat = source_path.stat()
+    return {
+        "source_size": int(stat.st_size),
+        "source_mtime_ns": int(stat.st_mtime_ns),
+    }
+
+
+def _wire_cache_valid(cache_blob: Path, cache_meta: Path, source_path: Path, payload_codec: str, job_id: str) -> dict[str, Any] | None:
+    if not cache_blob.is_file() or not cache_meta.is_file():
+        return None
+    try:
+        metadata = json.loads(cache_meta.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, ValueError):
+        return None
+
+    signature = _wire_cache_signature(source_path)
+    if int(metadata.get("cache_version") or 0) != WIRE_CACHE_VERSION:
+        return None
+    if str(metadata.get("payload_codec") or "") != str(payload_codec):
+        return None
+    if str(metadata.get("job_id") or "") != str(job_id):
+        return None
+    if int(metadata.get("source_size") or -1) != signature["source_size"]:
+        return None
+    if int(metadata.get("source_mtime_ns") or -1) != signature["source_mtime_ns"]:
+        return None
+    source_sha256 = _sha256_file(source_path)
+    if str(metadata.get("source_sha256") or "") != source_sha256:
+        return None
+    return metadata
+
+
+def _install_wire_blob(blob_path: Path, target: Path) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if target.exists():
+        target.unlink()
+    try:
+        os.link(blob_path, target)
+    except OSError:
+        shutil.copy2(blob_path, target)
+
+
+def _atomic_write_bytes(target: Path, payload: bytes) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_name(f"{target.name}.tmp.{os.getpid()}")
+    tmp.write_bytes(payload)
+    os.replace(tmp, target)
+
+
+def _atomic_write_json(target: Path, payload: dict[str, Any]) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_name(f"{target.name}.tmp.{os.getpid()}")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    os.replace(tmp, target)
+
+
+def _prepare_single_wire_input(task: dict[str, Any]) -> dict[str, Any]:
+    source_dir = Path(str(task["source_dir"]))
+    source_path = Path(str(task["source_path"]))
+    target = Path(str(task["target"]))
+    payload_codec = str(task["payload_codec"])
+    job_id = str(task["job_id"])
+    cache_dir_text = str(task.get("cache_dir") or "")
+    cache_dir = Path(cache_dir_text) if cache_dir_text else None
+
+    cache_hit = False
+    cache_blob: Path | None = None
+    cache_metadata: dict[str, Any] | None = None
+    if cache_dir is not None:
+        cache_blob, cache_meta = _wire_cache_paths(source_dir, source_path, cache_dir, payload_codec)
+        cache_metadata = _wire_cache_valid(cache_blob, cache_meta, source_path, payload_codec, job_id)
+        if cache_metadata is not None:
+            _install_wire_blob(cache_blob, target)
+            cache_hit = True
+
+    if cache_hit and cache_metadata is not None:
+        payload_bytes = int(cache_metadata.get("payload_bytes") or 0)
+        blob_bytes = int(cache_metadata.get("blob_bytes") or target.stat().st_size)
+        source_sha256 = str(cache_metadata.get("source_sha256") or _sha256_file(source_path))
+        original_filename = str(cache_metadata.get("original_filename") or "")
+    else:
+        blob, meta, stats = build_transport_blob(
+            str(source_path),
+            job_id=job_id,
+            payload_codec=payload_codec,
+        )
+        payload_bytes = int(stats.get("payload_bytes") or len(blob))
+        blob_bytes = len(blob)
+        source_sha256 = _sha256_file(source_path)
+        original_filename = str(meta.get("original_filename") or stats.get("original_filename") or "")
+        if cache_blob is not None:
+            _atomic_write_bytes(cache_blob, blob)
+            cache_metadata = {
+                "cache_version": WIRE_CACHE_VERSION,
+                "source": str(source_path),
+                "source_rel": source_path.relative_to(source_dir).as_posix(),
+                "source_sha256": source_sha256,
+                "original_filename": original_filename,
+                "job_id": str(meta.get("job_id") or job_id),
+                "payload_codec": str(stats.get("payload_codec") or payload_codec),
+                "payload_bytes": payload_bytes,
+                "blob_bytes": blob_bytes,
+                **_wire_cache_signature(source_path),
+            }
+            _atomic_write_json(cache_blob.with_suffix(cache_blob.suffix + ".json"), cache_metadata)
+            _install_wire_blob(cache_blob, target)
+        else:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(blob)
+
+    return {
+        "source": str(source_path),
+        "source_rel": source_path.relative_to(source_dir).as_posix(),
+        "source_sha256": source_sha256,
+        "source_image": original_filename,
+        "original_filename": original_filename,
+        "target": str(target),
+        "job_id": job_id,
+        "payload_codec": payload_codec,
+        "payload_bytes": payload_bytes,
+        "blob_bytes": blob_bytes,
+        "cache_hit": cache_hit,
+    }
+
+
 def _prepare_wire_input_dir(
     *,
     source_dir: Path,
@@ -664,6 +820,8 @@ def _prepare_wire_input_dir(
     payload_codec: str,
     pattern: str,
     max_files: int | None = None,
+    cache_dir: Path | None = None,
+    prepare_workers: int = 1,
 ) -> dict[str, Any]:
     files = _collect_local_latent_files(source_dir, pattern)
     if not files:
@@ -673,28 +831,28 @@ def _prepare_wire_input_dir(
     if max_files is not None and max_files > 0:
         files = files[:max_files]
 
-    prepared_files: list[dict[str, Any]] = []
     output_dir.mkdir(parents=True, exist_ok=True)
+    tasks: list[dict[str, Any]] = []
     for path in files:
         rel = path.relative_to(source_dir)
         target = output_dir / rel.with_suffix(rel.suffix + ".bin")
-        target.parent.mkdir(parents=True, exist_ok=True)
-        blob, meta, stats = build_transport_blob(
-            str(path),
-            job_id=path.stem,
-            payload_codec=payload_codec,
-        )
-        target.write_bytes(blob)
-        prepared_files.append(
+        tasks.append(
             {
-                "source": str(path),
+                "source_dir": str(source_dir),
+                "source_path": str(path),
                 "target": str(target),
-                "job_id": str(meta.get("job_id") or path.stem),
-                "payload_codec": str(stats.get("payload_codec") or payload_codec),
-                "payload_bytes": int(stats.get("payload_bytes") or len(blob)),
-                "blob_bytes": len(blob),
+                "job_id": path.stem,
+                "payload_codec": payload_codec,
+                "cache_dir": str(cache_dir) if cache_dir is not None else "",
             }
         )
+
+    workers = max(1, min(int(prepare_workers or 1), len(tasks)))
+    if workers > 1:
+        with ProcessPoolExecutor(max_workers=workers) as pool:
+            prepared_files = list(pool.map(_prepare_single_wire_input, tasks))
+    else:
+        prepared_files = [_prepare_single_wire_input(task) for task in tasks]
 
     manifest = {
         "source_dir": str(source_dir),
@@ -703,6 +861,10 @@ def _prepare_wire_input_dir(
         "available_count": available_count,
         "count": len(prepared_files),
         "selected_count": len(prepared_files),
+        "prepare_workers": workers,
+        "cache_enabled": cache_dir is not None,
+        "cache_dir": str(cache_dir) if cache_dir is not None else "",
+        "cache_hit_count": sum(1 for item in prepared_files if item.get("cache_hit")),
         "files": prepared_files,
     }
     (output_dir / "usrp_input_manifest.json").write_text(
@@ -1173,6 +1335,19 @@ class UsrpBatchSpoolJob:
             payload_codec = _first_value(env_values, PAYLOAD_CODEC_KEYS, "webp-lossless")
             pattern = _first_value(env_values, LOCAL_LATENT_PATTERN_KEYS, "*.npz,*.pt")
             prepared_dir = self._run_dir / "prepared_usrp_inputs"
+            wire_cache_enabled = _parse_bool(_first_value(env_values, WIRE_CACHE_ENABLED_KEYS, "1"), True)
+            wire_cache_dir = _resolve_optional_path(_first_value(env_values, WIRE_CACHE_DIR_KEYS))
+            if wire_cache_dir is None:
+                wire_cache_dir = local_latent_dir / ".usrp_wire_cache"
+            if not wire_cache_enabled:
+                wire_cache_dir = None
+            wire_prepare_workers = max(
+                1,
+                _parse_int(
+                    _first_value(env_values, WIRE_PREPARE_WORKERS_KEYS),
+                    DEFAULT_WIRE_PREPARE_WORKERS,
+                ),
+            )
             try:
                 with self._lock:
                     self._phase = "wire_prepare"
@@ -1182,6 +1357,8 @@ class UsrpBatchSpoolJob:
                     payload_codec=payload_codec,
                     pattern=pattern,
                     max_files=self._expected_outputs,
+                    cache_dir=wire_cache_dir,
+                    prepare_workers=wire_prepare_workers,
                 )
             except Exception as exc:
                 self._final_snapshot = self._build_terminal_snapshot(

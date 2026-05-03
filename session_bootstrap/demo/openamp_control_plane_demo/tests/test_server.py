@@ -2666,6 +2666,8 @@ class ServerMainTest(unittest.TestCase):
                 "OPENAMP_DEMO_INPUT_SOURCE_MODE": "usrp",
                 "OPENAMP_DEMO_LOCAL_LATENT_DIR": "/tmp/latents",
                 "CHUNK_BYTES": "4096",
+                "USRP_WIRE_PREPARE_WORKERS": "2",
+                "USRP_WIRE_CACHE_ENABLED": "1",
             },
             clear=False,
         ):
@@ -2675,6 +2677,8 @@ class ServerMainTest(unittest.TestCase):
         self.assertEqual(overrides["OPENAMP_DEMO_INPUT_SOURCE_MODE"], "usrp")
         self.assertEqual(overrides["OPENAMP_DEMO_LOCAL_LATENT_DIR"], "/tmp/latents")
         self.assertEqual(overrides["CHUNK_BYTES"], "4096")
+        self.assertEqual(overrides["USRP_WIRE_PREPARE_WORKERS"], "2")
+        self.assertEqual(overrides["USRP_WIRE_CACHE_ENABLED"], "1")
 
     def test_usrp_job_default_timeout_scales_with_batch_count(self) -> None:
         self.assertEqual(
@@ -2702,8 +2706,8 @@ class ServerMainTest(unittest.TestCase):
             def fake_build_transport_blob(path: str, *, job_id: str, payload_codec: str):
                 return (
                     f"blob-{job_id}".encode("utf-8"),
-                    {"job_id": job_id},
-                    {"payload_codec": payload_codec, "payload_bytes": 1},
+                    {"job_id": job_id, "original_filename": f"{job_id}.png"},
+                    {"payload_codec": payload_codec, "payload_bytes": 1, "original_filename": f"{job_id}.png"},
                 )
 
             with patch.object(usrp_runtime, "build_transport_blob", side_effect=fake_build_transport_blob) as build_blob:
@@ -2713,6 +2717,7 @@ class ServerMainTest(unittest.TestCase):
                     payload_codec="webp-lossless",
                     pattern="*.pt",
                     max_files=2,
+                    prepare_workers=1,
                 )
 
         self.assertEqual(build_blob.call_count, 2)
@@ -2720,6 +2725,146 @@ class ServerMainTest(unittest.TestCase):
         self.assertEqual(manifest["selected_count"], 2)
         self.assertEqual(manifest["count"], 2)
         self.assertEqual([Path(item["source"]).name for item in manifest["files"]], ["000.pt", "001.pt"])
+        self.assertEqual(manifest["files"][0]["source_image"], "000.png")
+        self.assertRegex(manifest["files"][0]["source_sha256"], r"^[0-9a-f]{64}$")
+
+    def test_usrp_wire_prepare_reuses_cached_wire_blobs(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir_name:
+            temp_dir = Path(temp_dir_name)
+            source_dir = temp_dir / "latents"
+            first_output = temp_dir / "prepared1"
+            second_output = temp_dir / "prepared2"
+            cache_dir = temp_dir / "cache"
+            source_dir.mkdir()
+            (source_dir / "000.pt").write_bytes(b"latent")
+
+            def fake_build_transport_blob(path: str, *, job_id: str, payload_codec: str):
+                return (
+                    f"blob-{job_id}".encode("utf-8"),
+                    {"job_id": job_id, "original_filename": f"{job_id}.png"},
+                    {"payload_codec": payload_codec, "payload_bytes": 1, "original_filename": f"{job_id}.png"},
+                )
+
+            with patch.object(usrp_runtime, "build_transport_blob", side_effect=fake_build_transport_blob) as build_blob:
+                first_manifest = usrp_runtime._prepare_wire_input_dir(
+                    source_dir=source_dir,
+                    output_dir=first_output,
+                    payload_codec="webp-lossless",
+                    pattern="*.pt",
+                    max_files=1,
+                    cache_dir=cache_dir,
+                    prepare_workers=1,
+                )
+                second_manifest = usrp_runtime._prepare_wire_input_dir(
+                    source_dir=source_dir,
+                    output_dir=second_output,
+                    payload_codec="webp-lossless",
+                    pattern="*.pt",
+                    max_files=1,
+                    cache_dir=cache_dir,
+                    prepare_workers=1,
+                )
+            second_bytes = (second_output / "000.pt.bin").read_bytes()
+
+        self.assertEqual(build_blob.call_count, 1)
+        self.assertEqual(first_manifest["cache_hit_count"], 0)
+        self.assertEqual(second_manifest["cache_hit_count"], 1)
+        self.assertEqual(second_manifest["files"][0]["source_image"], "000.png")
+        self.assertEqual(second_bytes, b"blob-000")
+
+    def test_usrp_wire_prepare_rejects_cache_when_source_hash_changes(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir_name:
+            temp_dir = Path(temp_dir_name)
+            source_dir = temp_dir / "latents"
+            first_output = temp_dir / "prepared1"
+            second_output = temp_dir / "prepared2"
+            cache_dir = temp_dir / "cache"
+            source_dir.mkdir()
+            source_path = source_dir / "000.pt"
+            source_path.write_bytes(b"latent-a")
+
+            def fake_build_transport_blob(path: str, *, job_id: str, payload_codec: str):
+                payload = Path(path).read_bytes()
+                return (
+                    b"blob-" + payload,
+                    {"job_id": job_id},
+                    {"payload_codec": payload_codec, "payload_bytes": len(payload)},
+                )
+
+            with patch.object(usrp_runtime, "build_transport_blob", side_effect=fake_build_transport_blob) as build_blob:
+                first_manifest = usrp_runtime._prepare_wire_input_dir(
+                    source_dir=source_dir,
+                    output_dir=first_output,
+                    payload_codec="webp-lossless",
+                    pattern="*.pt",
+                    max_files=1,
+                    cache_dir=cache_dir,
+                    prepare_workers=1,
+                )
+                original_stat = source_path.stat()
+                source_path.write_bytes(b"latent-b")
+                os.utime(source_path, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+                second_manifest = usrp_runtime._prepare_wire_input_dir(
+                    source_dir=source_dir,
+                    output_dir=second_output,
+                    payload_codec="webp-lossless",
+                    pattern="*.pt",
+                    max_files=1,
+                    cache_dir=cache_dir,
+                    prepare_workers=1,
+                )
+            second_bytes = (second_output / "000.pt.bin").read_bytes()
+
+        self.assertEqual(build_blob.call_count, 2)
+        self.assertEqual(first_manifest["cache_hit_count"], 0)
+        self.assertEqual(second_manifest["cache_hit_count"], 0)
+        self.assertNotEqual(first_manifest["files"][0]["source_sha256"], second_manifest["files"][0]["source_sha256"])
+        self.assertEqual(second_bytes, b"blob-latent-b")
+
+    def test_usrp_wire_prepare_parallel_path_can_use_cache(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir_name:
+            temp_dir = Path(temp_dir_name)
+            source_dir = temp_dir / "latents"
+            first_output = temp_dir / "prepared1"
+            second_output = temp_dir / "prepared2"
+            cache_dir = temp_dir / "cache"
+            source_dir.mkdir()
+            for idx in range(2):
+                (source_dir / f"{idx:03d}.pt").write_bytes(b"latent")
+
+            def fake_build_transport_blob(path: str, *, job_id: str, payload_codec: str):
+                return (
+                    f"blob-{job_id}".encode("utf-8"),
+                    {"job_id": job_id},
+                    {"payload_codec": payload_codec, "payload_bytes": 1},
+                )
+
+            with patch.object(usrp_runtime, "build_transport_blob", side_effect=fake_build_transport_blob):
+                usrp_runtime._prepare_wire_input_dir(
+                    source_dir=source_dir,
+                    output_dir=first_output,
+                    payload_codec="webp-lossless",
+                    pattern="*.pt",
+                    max_files=2,
+                    cache_dir=cache_dir,
+                    prepare_workers=1,
+                )
+            second_manifest = usrp_runtime._prepare_wire_input_dir(
+                source_dir=source_dir,
+                output_dir=second_output,
+                payload_codec="webp-lossless",
+                pattern="*.pt",
+                max_files=2,
+                cache_dir=cache_dir,
+                prepare_workers=2,
+            )
+            second_0 = (second_output / "000.pt.bin").read_bytes()
+            second_1 = (second_output / "001.pt.bin").read_bytes()
+
+        self.assertEqual(second_manifest["prepare_workers"], 2)
+        self.assertEqual(second_manifest["cache_hit_count"], 2)
+        self.assertEqual(second_0, b"blob-000")
+        self.assertEqual(second_1, b"blob-001")
 
     def test_usrp_summary_recovers_progress_from_log_after_timeout(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir_name:
