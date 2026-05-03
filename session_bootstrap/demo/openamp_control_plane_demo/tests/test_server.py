@@ -2728,6 +2728,131 @@ class ServerMainTest(unittest.TestCase):
         self.assertEqual(manifest["files"][0]["source_image"], "000.png")
         self.assertRegex(manifest["files"][0]["source_sha256"], r"^[0-9a-f]{64}$")
 
+    def test_host_image_latent_manifest_rejects_changed_image(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir_name:
+            temp_dir = Path(temp_dir_name)
+            image_dir = temp_dir / "images"
+            output_dir = temp_dir / "latents"
+            image_dir.mkdir()
+            output_dir.mkdir()
+            image_path = image_dir / "000.png"
+            image_path.write_bytes(b"image-a")
+            records, available_count = usrp_runtime._host_image_records(image_dir, output_dir, 1)
+            latent_path = Path(records[0]["latent"])
+            latent_path.write_bytes(b"latent-a")
+            manifest = usrp_runtime._write_host_image_latent_manifest(
+                output_dir=output_dir,
+                image_dir=image_dir,
+                files=records,
+                config_str="6_6_6_6_6_6_6",
+                snr="10",
+                device="cpu",
+                elapsed_sec=0.1,
+                available_image_count=available_count,
+            )
+
+            valid = usrp_runtime._host_image_latent_cache_valid(
+                image_dir=image_dir,
+                output_dir=output_dir,
+                expected_count=1,
+                config_str="6_6_6_6_6_6_6",
+                snr="10",
+                device="cpu",
+            )
+            original_stat = image_path.stat()
+            image_path.write_bytes(b"image-b")
+            os.utime(image_path, ns=(original_stat.st_atime_ns, original_stat.st_mtime_ns))
+            invalid = usrp_runtime._host_image_latent_cache_valid(
+                image_dir=image_dir,
+                output_dir=output_dir,
+                expected_count=1,
+                config_str="6_6_6_6_6_6_6",
+                snr="10",
+                device="cpu",
+            )
+
+        self.assertIsNotNone(valid)
+        self.assertEqual(valid[1][0], latent_path)
+        self.assertEqual(manifest["files"][0]["source_image_rel"], "000.png")
+        self.assertRegex(manifest["files"][0]["source_image_sha256"], r"^[0-9a-f]{64}$")
+        self.assertIsNone(invalid)
+
+    def test_usrp_wire_prepare_can_use_explicit_source_files(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir_name:
+            temp_dir = Path(temp_dir_name)
+            source_dir = temp_dir / "latents"
+            output_dir = temp_dir / "prepared"
+            source_dir.mkdir()
+            first = source_dir / "000.pt"
+            second = source_dir / "001.pt"
+            first.write_bytes(b"first")
+            second.write_bytes(b"second")
+
+            def fake_build_transport_blob(path: str, *, job_id: str, payload_codec: str):
+                return (
+                    Path(path).read_bytes(),
+                    {"job_id": job_id},
+                    {"payload_codec": payload_codec, "payload_bytes": 1},
+                )
+
+            with patch.object(usrp_runtime, "build_transport_blob", side_effect=fake_build_transport_blob) as build_blob:
+                manifest = usrp_runtime._prepare_wire_input_dir(
+                    source_dir=source_dir,
+                    output_dir=output_dir,
+                    payload_codec="webp-lossless",
+                    pattern="*.pt",
+                    max_files=1,
+                    prepare_workers=1,
+                    source_files=[second],
+                )
+            prepared_bytes = (output_dir / "001.pt.bin").read_bytes()
+
+        self.assertEqual(build_blob.call_count, 1)
+        self.assertEqual(manifest["selected_count"], 1)
+        self.assertEqual(Path(manifest["files"][0]["source"]).name, "001.pt")
+        self.assertEqual(prepared_bytes, b"second")
+
+    def test_usrp_wire_manifest_records_source_image_hash(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir_name:
+            temp_dir = Path(temp_dir_name)
+            latent_path = temp_dir / "000.pt"
+            manifest_path = temp_dir / "prepared" / "usrp_input_manifest.json"
+            manifest_path.parent.mkdir()
+            latent_path.write_bytes(b"latent")
+            manifest = {
+                "files": [
+                    {
+                        "source": str(latent_path),
+                        "target": str(temp_dir / "prepared" / "000.pt.bin"),
+                    }
+                ]
+            }
+            host_manifest = {
+                "files": [
+                    {
+                        "latent": str(latent_path),
+                        "source_image": str(temp_dir / "images" / "000.png"),
+                        "source_image_rel": "000.png",
+                        "source_image_sha256": "a" * 64,
+                        "source_image_size": 7,
+                        "source_image_mtime_ns": 123,
+                        "original_filename": "000",
+                    }
+                ]
+            }
+
+            enriched = usrp_runtime._enrich_wire_manifest_with_host_images(
+                manifest,
+                host_manifest,
+                manifest_path,
+            )
+            saved = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(enriched["files"][0]["source_image"], "000")
+        self.assertEqual(enriched["files"][0]["source_image_rel"], "000.png")
+        self.assertEqual(enriched["files"][0]["source_image_sha256"], "a" * 64)
+        self.assertEqual(saved["files"][0]["source_image_sha256"], "a" * 64)
+
     def test_usrp_wire_prepare_reuses_cached_wire_blobs(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir_name:
             temp_dir = Path(temp_dir_name)

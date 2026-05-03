@@ -136,6 +136,8 @@ DEFAULT_RX_ANT = "RX2"
 DEFAULT_BIND_ADDR = "0.0.0.0"
 DEFAULT_WIRE_PREPARE_WORKERS = 2
 WIRE_CACHE_VERSION = 1
+HOST_IMAGE_LATENT_MANIFEST = "host_image_to_latent_manifest.json"
+HOST_IMAGE_LATENT_MANIFEST_VERSION = 1
 CONTROL_PING_TIMEOUT_SEC = 2.0
 CONTROL_START_TIMEOUT_SEC = 15.0
 CONTROL_SHUTDOWN_TIMEOUT_SEC = 5.0
@@ -660,6 +662,185 @@ def _collect_local_image_files(input_dir: Path) -> list[Path]:
     return files
 
 
+def _host_image_latent_manifest_path(output_dir: Path) -> Path:
+    return output_dir / HOST_IMAGE_LATENT_MANIFEST
+
+
+def _host_latent_name_for_image(image_path: Path) -> str:
+    return f"{hashlib.sha256(image_path.stem.encode()).hexdigest()}_latent.pt"
+
+
+def _host_image_record(image_dir: Path, output_dir: Path, image_path: Path) -> dict[str, Any]:
+    image_stat = image_path.stat()
+    latent_path = output_dir / _host_latent_name_for_image(image_path)
+    return {
+        "source_image": str(image_path),
+        "source_image_rel": image_path.relative_to(image_dir).as_posix(),
+        "source_image_sha256": _sha256_file(image_path),
+        "source_image_size": int(image_stat.st_size),
+        "source_image_mtime_ns": int(image_stat.st_mtime_ns),
+        "original_filename": image_path.stem,
+        "latent": str(latent_path),
+        "latent_rel": latent_path.relative_to(output_dir).as_posix(),
+    }
+
+
+def _host_image_records(image_dir: Path, output_dir: Path, count: int) -> tuple[list[dict[str, Any]], int]:
+    images = _collect_local_image_files(image_dir)
+    records = [_host_image_record(image_dir, output_dir, image_path) for image_path in images[:count]]
+    return records, len(images)
+
+
+def _write_host_image_latent_manifest(
+    *,
+    output_dir: Path,
+    image_dir: Path,
+    files: list[dict[str, Any]],
+    config_str: str,
+    snr: str,
+    device: str,
+    elapsed_sec: float,
+    available_image_count: int | None = None,
+    command: list[str] | None = None,
+    log_path: Path | None = None,
+    status: str = "encoded",
+) -> dict[str, Any]:
+    for item in files:
+        latent_path = Path(str(item.get("latent") or ""))
+        if not latent_path.is_file():
+            continue
+        latent_stat = latent_path.stat()
+        item["latent_sha256"] = _sha256_file(latent_path)
+        item["latent_size"] = int(latent_stat.st_size)
+        item["latent_mtime_ns"] = int(latent_stat.st_mtime_ns)
+
+    manifest = {
+        "version": HOST_IMAGE_LATENT_MANIFEST_VERSION,
+        "status": status,
+        "source": "image_dir",
+        "image_dir": str(image_dir),
+        "latent_dir": str(output_dir),
+        "count": len(files),
+        "used_count": len(files),
+        "available_image_count": int(available_image_count if available_image_count is not None else len(files)),
+        "config_str": str(config_str),
+        "snr": str(snr),
+        "device": str(device),
+        "elapsed_sec": round(elapsed_sec, 3),
+        "files": files,
+    }
+    if command is not None:
+        manifest["command"] = command
+    if log_path is not None:
+        manifest["log_path"] = str(log_path)
+    _atomic_write_json(_host_image_latent_manifest_path(output_dir), manifest)
+    return manifest
+
+
+def _host_image_latent_cache_valid(
+    *,
+    image_dir: Path,
+    output_dir: Path,
+    expected_count: int,
+    config_str: str,
+    snr: str,
+    device: str,
+) -> tuple[dict[str, Any], list[Path]] | None:
+    manifest_path = _host_image_latent_manifest_path(output_dir)
+    if not manifest_path.is_file():
+        return None
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, ValueError):
+        return None
+    if int(manifest.get("version") or 0) != HOST_IMAGE_LATENT_MANIFEST_VERSION:
+        return None
+    if Path(str(manifest.get("image_dir") or "")).resolve() != image_dir.resolve():
+        return None
+    if Path(str(manifest.get("latent_dir") or "")).resolve() != output_dir.resolve():
+        return None
+    if str(manifest.get("config_str") or "") != str(config_str):
+        return None
+    if str(manifest.get("snr") or "") != str(snr):
+        return None
+    if str(manifest.get("device") or "") != str(device):
+        return None
+
+    files = list(manifest.get("files") or [])
+    if len(files) < expected_count:
+        return None
+    current_records, available_count = _host_image_records(image_dir, output_dir, expected_count)
+    if available_count < expected_count:
+        return None
+
+    latent_files: list[Path] = []
+    for saved, current in zip(files[:expected_count], current_records, strict=False):
+        for key in (
+            "source_image_rel",
+            "source_image_sha256",
+            "source_image_size",
+            "source_image_mtime_ns",
+            "latent_rel",
+        ):
+            if saved.get(key) != current.get(key):
+                return None
+        latent_path = Path(str(saved.get("latent") or ""))
+        if not latent_path.is_file():
+            return None
+        if saved.get("latent_size") is not None and int(saved.get("latent_size") or -1) != latent_path.stat().st_size:
+            return None
+        if saved.get("latent_sha256") and str(saved.get("latent_sha256") or "") != _sha256_file(latent_path):
+            return None
+        latent_files.append(latent_path)
+
+    manifest["status"] = "cache_hit"
+    manifest["source"] = "image_manifest"
+    manifest["used_count"] = expected_count
+    manifest["available_image_count"] = available_count
+    manifest["manifest_path"] = str(manifest_path)
+    return manifest, latent_files
+
+
+def _enrich_wire_manifest_with_host_images(
+    manifest: dict[str, Any],
+    host_manifest: dict[str, Any] | None,
+    manifest_path: Path,
+) -> dict[str, Any]:
+    if not host_manifest:
+        return manifest
+    host_files = list(host_manifest.get("files") or [])
+    if not host_files:
+        return manifest
+
+    by_latent: dict[str, dict[str, Any]] = {}
+    for item in host_files:
+        try:
+            latent_key = str(Path(str(item.get("latent") or "")).resolve())
+        except OSError:
+            continue
+        by_latent[latent_key] = item
+
+    changed = False
+    for item in list(manifest.get("files") or []):
+        try:
+            source_key = str(Path(str(item.get("source") or "")).resolve())
+        except OSError:
+            continue
+        host_item = by_latent.get(source_key)
+        if not host_item:
+            continue
+        item["source_image_path"] = str(host_item.get("source_image") or "")
+        item["source_image_rel"] = str(host_item.get("source_image_rel") or "")
+        item["source_image_sha256"] = str(host_item.get("source_image_sha256") or "")
+        item["source_image_size"] = int(host_item.get("source_image_size") or 0)
+        item["source_image_mtime_ns"] = int(host_item.get("source_image_mtime_ns") or 0)
+        item["source_image"] = str(host_item.get("original_filename") or item.get("source_image") or "")
+        changed = True
+    if changed:
+        _atomic_write_json(manifest_path, manifest)
+    return manifest
+
+
 def _default_image_to_latent_script() -> Path:
     return REPO_ROOT / "host_pic_to_latent" / "encode_latent.py"
 
@@ -822,18 +1003,21 @@ def _prepare_wire_input_dir(
     max_files: int | None = None,
     cache_dir: Path | None = None,
     prepare_workers: int = 1,
+    source_files: list[Path] | None = None,
 ) -> dict[str, Any]:
-    files = _collect_local_latent_files(source_dir, pattern)
+    files = list(source_files) if source_files is not None else _collect_local_latent_files(source_dir, pattern)
     if not files:
         patterns = ",".join(_split_local_latent_patterns(pattern))
         raise RuntimeError(f"未找到待发送 latent 文件: dir={source_dir} pattern={patterns}")
-    available_count = len(files)
-    if max_files is not None and max_files > 0:
+    available_count = len(_collect_local_latent_files(source_dir, pattern)) if source_files is not None else len(files)
+    if source_files is None and max_files is not None and max_files > 0:
         files = files[:max_files]
 
     output_dir.mkdir(parents=True, exist_ok=True)
     tasks: list[dict[str, Any]] = []
     for path in files:
+        if not path.is_file():
+            raise RuntimeError(f"待发送 latent 文件不存在: {path}")
         rel = path.relative_to(source_dir)
         target = output_dir / rel.with_suffix(rel.suffix + ".bin")
         tasks.append(
@@ -1272,6 +1456,7 @@ class UsrpBatchSpoolJob:
         self._host_preprocess_total = self._expected_outputs
         self._host_preprocess_state = "pending"
         self._host_preprocess_manifest: dict[str, Any] | None = None
+        self._host_latent_files: list[Path] | None = None
         self._transport_completed = 0
         self._transport_total = self._expected_outputs
         self._inference_completed = 0
@@ -1359,6 +1544,12 @@ class UsrpBatchSpoolJob:
                     max_files=self._expected_outputs,
                     cache_dir=wire_cache_dir,
                     prepare_workers=wire_prepare_workers,
+                    source_files=self._host_latent_files,
+                )
+                self._prepared_input_manifest = _enrich_wire_manifest_with_host_images(
+                    self._prepared_input_manifest,
+                    self._host_preprocess_manifest,
+                    prepared_dir / "usrp_input_manifest.json",
                 )
             except Exception as exc:
                 self._final_snapshot = self._build_terminal_snapshot(
@@ -1547,7 +1738,31 @@ class UsrpBatchSpoolJob:
         enabled = _parse_bool(_first_value(env_values, LOCAL_IMAGE_TO_LATENT_ENABLED_KEYS, "1"), True)
         pattern = _first_value(env_values, LOCAL_LATENT_PATTERN_KEYS, "*.npz,*.pt")
         existing = _collect_local_latent_files(local_latent_dir, pattern) if local_latent_dir.is_dir() else []
-        if len(existing) >= self._expected_outputs:
+        output_dir = _resolve_optional_path(_first_value(env_values, LOCAL_IMAGE_TO_LATENT_OUTPUT_DIR_KEYS)) or local_latent_dir
+        output_dir.mkdir(parents=True, exist_ok=True)
+        image_dir = _resolve_optional_path(_first_value(env_values, LOCAL_IMAGE_DIR_KEYS))
+        device = _first_value(env_values, LOCAL_IMAGE_TO_LATENT_DEVICE_KEYS, "cpu")
+        config_str = _first_value(env_values, LOCAL_IMAGE_TO_LATENT_CONFIG_KEYS, "6_6_6_6_6_6_6")
+        snr = _first_value(env_values, LOCAL_IMAGE_TO_LATENT_SNR_KEYS, "10")
+
+        if image_dir is not None and image_dir.is_dir():
+            cache = _host_image_latent_cache_valid(
+                image_dir=image_dir,
+                output_dir=output_dir,
+                expected_count=self._expected_outputs,
+                config_str=config_str,
+                snr=snr,
+                device=device,
+            )
+            if cache is not None:
+                manifest, latent_files = cache
+                self._host_latent_files = latent_files
+                self._set_host_preprocess_progress(self._expected_outputs, self._expected_outputs, "completed")
+                self._host_preprocess_manifest = manifest
+                return output_dir
+
+        if len(existing) >= self._expected_outputs and (image_dir is None or not image_dir.is_dir() or not enabled):
+            self._host_latent_files = existing[: self._expected_outputs]
             self._set_host_preprocess_progress(self._expected_outputs, self._expected_outputs, "completed")
             self._host_preprocess_manifest = {
                 "status": "cache_hit",
@@ -1563,7 +1778,6 @@ class UsrpBatchSpoolJob:
             self._set_host_preprocess_progress(len(existing), self._expected_outputs, "fallback")
             raise RuntimeError(f"本地 latent 缓存不足: dir={local_latent_dir} count={len(existing)} required={self._expected_outputs}")
 
-        image_dir = _resolve_optional_path(_first_value(env_values, LOCAL_IMAGE_DIR_KEYS))
         if image_dir is None or not image_dir.is_dir():
             self._set_host_preprocess_progress(len(existing), self._expected_outputs, "fallback")
             raise RuntimeError(
@@ -1582,8 +1796,7 @@ class UsrpBatchSpoolJob:
             self._set_host_preprocess_progress(len(existing), self._expected_outputs, "fallback")
             raise RuntimeError(f"图片到 latent 编码脚本不存在: {script}")
 
-        output_dir = _resolve_optional_path(_first_value(env_values, LOCAL_IMAGE_TO_LATENT_OUTPUT_DIR_KEYS)) or local_latent_dir
-        output_dir.mkdir(parents=True, exist_ok=True)
+        expected_records, available_image_count = _host_image_records(image_dir, output_dir, self._expected_outputs)
         command = [
             sys.executable,
             str(script),
@@ -1594,11 +1807,11 @@ class UsrpBatchSpoolJob:
             "--test_num",
             str(self._expected_outputs),
             "--device",
-            _first_value(env_values, LOCAL_IMAGE_TO_LATENT_DEVICE_KEYS, "cpu"),
+            device,
             "--config_str",
-            _first_value(env_values, LOCAL_IMAGE_TO_LATENT_CONFIG_KEYS, "6_6_6_6_6_6_6"),
+            config_str,
             "--snr",
-            _first_value(env_values, LOCAL_IMAGE_TO_LATENT_SNR_KEYS, "10"),
+            snr,
             "--progress_jsonl",
         ]
         self._set_host_preprocess_progress(0, self._expected_outputs, "running")
@@ -1637,24 +1850,26 @@ class UsrpBatchSpoolJob:
                     last_error = str(event.get("error") or "")
         rc = proc.wait()
         elapsed = time.monotonic() - started
-        final_files = _collect_local_latent_files(output_dir, pattern)
+        final_files = [Path(str(record["latent"])) for record in expected_records if Path(str(record["latent"])).is_file()]
         if rc != 0 or len(final_files) < self._expected_outputs:
             self._set_host_preprocess_progress(len(final_files), self._expected_outputs, "fallback")
             detail = last_error or f"encoder rc={rc}, latent_count={len(final_files)}"
             raise RuntimeError(f"图片到 latent 编码失败: {detail}")
 
+        self._host_latent_files = final_files[: self._expected_outputs]
         self._set_host_preprocess_progress(self._expected_outputs, self._expected_outputs, "completed")
-        self._host_preprocess_manifest = {
-            "status": "encoded",
-            "source": "image_dir",
-            "image_dir": str(image_dir),
-            "latent_dir": str(output_dir),
-            "count": len(final_files),
-            "used_count": self._expected_outputs,
-            "elapsed_sec": round(elapsed, 3),
-            "command": command,
-            "log_path": str(encode_log),
-        }
+        self._host_preprocess_manifest = _write_host_image_latent_manifest(
+            output_dir=output_dir,
+            image_dir=image_dir,
+            files=expected_records,
+            config_str=config_str,
+            snr=snr,
+            device=device,
+            elapsed_sec=elapsed,
+            available_image_count=available_image_count,
+            command=command,
+            log_path=encode_log,
+        )
         return output_dir
 
     def _set_inference_progress(self, completed: int, total: int) -> None:
