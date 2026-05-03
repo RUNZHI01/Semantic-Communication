@@ -11,6 +11,7 @@ from typing import Any
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+REPO_ROOT = PROJECT_ROOT.parent
 REPORTS_ROOT = PROJECT_ROOT / "session_bootstrap" / "reports"
 PACKAGE_ROOT = REPORTS_ROOT / "openamp_control_plane_evidence_package_20260315"
 SCRIPTS_ROOT = PROJECT_ROOT / "session_bootstrap" / "scripts"
@@ -105,18 +106,25 @@ PRERECORDED_SAMPLE_FIXTURES = (
         "title": "Places365 预置样例 208",
         "note": "使用仓库内已归档的参考图、current 重建图和 PyTorch 参考基线图，适合现场稳定演示。",
         "relative_path": "Places365_val_00000208_recon.png",
-        "original_path": PROJECT_ROOT / "session_bootstrap" / "tmp" / "quality_samples_20260311" / "current" / "test_208.png",
-        "current_path": PROJECT_ROOT
-        / "session_bootstrap"
-        / "tmp"
-        / "quality_samples_20260311"
-        / "current"
+        "original_path": REPO_ROOT
+        / "finalWork"
+        / "服务端"
+        / "jscc-test"
+        / "test1"
+        / "reconstructions"
         / "Places365_val_00000208_recon.png",
-        "baseline_path": PROJECT_ROOT
-        / "session_bootstrap"
-        / "tmp"
-        / "quality_metrics_inputs_20260312"
-        / "reference"
+        "current_path": REPO_ROOT
+        / "finalWork"
+        / "服务端"
+        / "jscc-test"
+        / "test1"
+        / "reconstructions"
+        / "Places365_val_00000208_recon.png",
+        "baseline_path": REPO_ROOT
+        / "finalWork"
+        / "客户端"
+        / "jscc-test"
+        / "test1"
         / "reconstructions"
         / "Places365_val_00000208_recon.png",
     },

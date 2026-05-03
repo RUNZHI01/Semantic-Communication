@@ -322,6 +322,7 @@ export type RunInferenceResponse = {
   artifact_sha?: string
   timings?: InferenceTimings
   quality?: InferenceQuality
+  inference_engine?: string
   sample?: InferenceSample
   live_progress?: InferenceProgressInfo
   live_attempt?: JsonObject

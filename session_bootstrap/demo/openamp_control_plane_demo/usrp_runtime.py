@@ -2031,6 +2031,10 @@ class UsrpBatchSpoolJob:
         if self._inference_summary:
             wrapper_summary["inference_engine"] = self._inference_engine
             wrapper_summary["inference_summary"] = self._inference_summary
+            if self._inference_engine == INFERENCE_ENGINE_MNN:
+                runner_summary["inference_engine"] = INFERENCE_ENGINE_MNN
+            elif self._inference_engine == INFERENCE_ENGINE_TVM:
+                runner_summary["inference_engine"] = INFERENCE_ENGINE_TVM
         progress = self._build_progress_payload(
             state="completed" if status == "success" else "fallback",
             label="USRP + 推理完成" if status == "success" else "USRP / 推理失败",

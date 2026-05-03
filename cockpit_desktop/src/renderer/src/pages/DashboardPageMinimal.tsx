@@ -391,7 +391,7 @@ export function DashboardPageMinimal() {
     .filter((item): item is ComparisonResult => Boolean(item))
   const maxComparisonMs = Math.max(...comparisonRows.map((item) => item.reconstructionMs), 1)
   const pytorchReferenceMs = pytorchComparison?.reconstructionMs
-  const resultQuality = tvmComparison?.quality
+  const resultQuality = tvmComparison?.quality ?? mnnComparison?.quality
   const hasPositiveSpeedup = comparisonRows.some((row) => (
     row.engine !== 'pytorch'
     && pytorchReferenceMs != null

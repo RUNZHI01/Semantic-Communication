@@ -1,6 +1,7 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect } from 'react'
 import type { BatchStateResponse } from '../api/types/crypto'
+import type { InferenceQuality } from '../api/types'
 import { getBatchState, getSystemStatus } from '../api/client'
 import { useAppStore } from '../stores/appStore'
 import { buildBatchCompletionToken, shouldHydrateRecentCurrentForBatch, shouldRefreshCompletedBatch } from './inferenceStateMachine'
@@ -10,6 +11,7 @@ import { recordComparisonResult } from './useInferenceProgress'
 function recordCompletedBatchComparison(
   payload: BatchStateResponse,
   setComparisonResult: ReturnType<typeof useAppStore.getState>['setComparisonResult'],
+  quality?: InferenceQuality,
 ) {
   if (payload.status !== 'done') {
     return
@@ -30,6 +32,7 @@ function recordCompletedBatchComparison(
     reconstructionMs,
     runMs: inferenceMetric?.median_ms ?? inferenceMetric?.mean_ms,
     sampleCount: totalMetric?.n ?? inferenceMetric?.n ?? payload.completed,
+    quality,
     updatedAt: Date.now(),
   })
 }
@@ -60,7 +63,7 @@ export function useBatchStatePoll() {
         completedBatchJobId && (!pendingBatchJobId || pendingBatchJobId === completedBatchJobId),
       )
       if (isCurrentSessionBatch) {
-        recordCompletedBatchComparison(query.data, setComparisonResult)
+        recordCompletedBatchComparison(query.data, setComparisonResult, query.data.quality)
         if (shouldHydrateRecentCurrentForBatch(query.data)) {
           void qc.fetchQuery({
             queryKey: ['system-status'],
@@ -70,6 +73,10 @@ export function useBatchStatePoll() {
             if (current?.execution_mode === 'live' && current?.status === 'success') {
               setLastCompletedInference(current)
               recordComparisonResult(current, setComparisonResult)
+              const quality = current.quality ?? query.data?.quality
+              if (query.data) {
+                recordCompletedBatchComparison(query.data, setComparisonResult, quality)
+              }
             }
           }).catch(() => undefined)
         }

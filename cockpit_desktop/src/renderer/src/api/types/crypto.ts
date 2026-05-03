@@ -178,6 +178,10 @@ export type BatchStateResponse = {
   transport_progress?: BatchStageProgress | null
   inference_progress?: BatchStageProgress | null
   message?: string
+  quality?: {
+    psnr_db?: number
+    ssim?: number
+  }
   status_category?: string
   execution_mode?: string
   source_label?: string

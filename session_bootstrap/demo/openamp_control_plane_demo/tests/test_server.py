@@ -482,6 +482,123 @@ class DashboardStateTest(unittest.TestCase):
         self.assertEqual(system_payload["recent_results"]["current"]["timings"]["payload_ms"], 239.2)
         self.assertEqual(system_payload["recent_results"]["current"]["timings"]["total_ms"], 251.7)
 
+    def test_start_batch_inference_usrp_tvm_hydrates_recent_current_quality(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        state._board_access = state._board_access.with_env_overrides({"MLKEM_TRANSPORT_MODE": "usrp"})
+        progress_calls: dict[str, int] = {}
+
+        def fake_run_demo_inference(
+            *,
+            variant: str,
+            image_index: int,
+            allow_preflight_degraded: bool = False,
+            max_inputs: int = server.DEFAULT_MAX_INPUTS,
+        ) -> dict[str, object]:
+            del allow_preflight_degraded
+            self.assertEqual(variant, "current")
+            self.assertEqual(image_index, 0)
+            self.assertEqual(max_inputs, 5)
+            return {
+                "status": "running",
+                "execution_mode": "live",
+                "request_state": "running",
+                "job_id": "usrp-tvm-live-001",
+                "live_progress": {"completed_count": 0, "expected_count": 5},
+                "live_attempt": {
+                    "stage_progress": {
+                        "host_preprocess": {"completed_count": 0, "expected_count": 5, "state": "running"},
+                        "transport": {"completed_count": 0, "expected_count": 5, "state": "pending"},
+                        "inference": {"completed_count": 0, "expected_count": 5, "state": "pending"},
+                    }
+                },
+            }
+
+        def fake_peek_inference_progress(job_id: str) -> dict[str, object]:
+            calls = progress_calls.get(job_id, 0)
+            progress_calls[job_id] = calls + 1
+            if calls == 0:
+                return {
+                    "status": "running",
+                    "execution_mode": "live",
+                    "request_state": "running",
+                    "job_id": job_id,
+                    "live_progress": {"completed_count": 0, "expected_count": 5},
+                    "live_attempt": {
+                        "stage_progress": {
+                            "host_preprocess": {"completed_count": 5, "expected_count": 5, "state": "completed"},
+                            "transport": {"completed_count": 5, "expected_count": 5, "state": "completed"},
+                            "inference": {"completed_count": 2, "expected_count": 5, "state": "running"},
+                        }
+                    },
+                }
+            return {
+                "status": "success",
+                "execution_mode": "live",
+                "request_state": "completed",
+                "job_id": job_id,
+                "source_label": "USRP 混合链路在线推进 + 归档样例图",
+                "message": "USRP TVM completed.",
+                "artifact_sha": "sha-usrp-tvm",
+                "sample": {"label": "airfield"},
+                "quality": {"psnr_db": 37.0, "ssim": 0.97},
+                "live_progress": {"completed_count": 5, "expected_count": 5},
+                "timings": {"payload_ms": 121.0, "total_ms": 130.0},
+                "wrapper_summary": {
+                    "inference_engine": "tvm",
+                    "inference_summary": {
+                        "status": "ok",
+                        "processed_count": 5,
+                        "selected_input_count": 5,
+                        "run_samples_ms": [120.0, 121.0, 122.0, 123.0, 124.0],
+                        "run_median_ms": 122.0,
+                        "run_mean_ms": 122.0,
+                    },
+                },
+                "live_attempt": {
+                    "wrapper_summary": {
+                        "inference_engine": "tvm",
+                        "inference_summary": {
+                            "status": "ok",
+                            "processed_count": 5,
+                            "selected_input_count": 5,
+                            "run_samples_ms": [120.0, 121.0, 122.0, 123.0, 124.0],
+                            "run_median_ms": 122.0,
+                            "run_mean_ms": 122.0,
+                        },
+                    },
+                    "stage_progress": {
+                        "host_preprocess": {"completed_count": 5, "expected_count": 5, "state": "completed"},
+                        "transport": {"completed_count": 5, "expected_count": 5, "state": "completed"},
+                        "inference": {"completed_count": 5, "expected_count": 5, "state": "completed"},
+                    },
+                },
+            }
+
+        with (
+            patch.object(state, "run_demo_inference", side_effect=fake_run_demo_inference),
+            patch.object(state, "_peek_inference_progress", side_effect=fake_peek_inference_progress),
+        ):
+            payload = state.start_batch_inference(count=5)
+            self.assertEqual(payload["status"], "started")
+            deadline = time.monotonic() + 2.0
+            while time.monotonic() < deadline:
+                current = state.get_batch_state()
+                if current.get("status") == "done":
+                    break
+                time.sleep(0.02)
+            else:
+                self.fail(f"usrp tvm batch did not finish: {state.get_batch_state()}")
+
+            status, _, system_payload = request_json(state, "GET", "/api/system-status")
+
+        final_state = state.get_batch_state()
+        self.assertEqual(final_state["engine"], "tvm")
+        self.assertEqual(final_state["quality"]["psnr_db"], server.build_prerecorded_inference_result(0, "current")["quality"]["psnr_db"])
+        self.assertEqual(status, 200)
+        self.assertEqual(system_payload["recent_results"]["current"]["execution_mode"], "live")
+        self.assertEqual(system_payload["recent_results"]["current"]["quality"]["psnr_db"], 37.0)
+        self.assertEqual(system_payload["recent_results"]["current"]["wrapper_summary"]["inference_engine"], "tvm")
+
     def test_start_batch_inference_marks_done_when_worker_raises(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
 
@@ -792,6 +909,92 @@ class DashboardStateTest(unittest.TestCase):
         self.assertEqual(final_state["benchmark"]["inference_ms"]["mean_ms"], 163.2)
         self.assertEqual(final_state["benchmark"]["total_ms"]["mean_ms"], 331.0)
 
+    def test_start_mnn_usrp_batch_hydrates_recent_current_result(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        state._board_access = state._board_access.with_env_overrides({"MLKEM_TRANSPORT_MODE": "usrp"})
+        progress_calls: dict[str, int] = {}
+
+        def fake_register_live_job(*, live_job, variant: str, image_index: int, security_context=None):
+            del security_context
+            record = {"job": live_job, "job_id": live_job.job_id, "variant": variant, "image_index": image_index}
+            return record, {"job_id": live_job.job_id}
+
+        def fake_peek_inference_progress(job_id: str) -> dict[str, object]:
+            calls = progress_calls.get(job_id, 0)
+            progress_calls[job_id] = calls + 1
+            if calls == 0:
+                return {
+                    "status": "running",
+                    "execution_mode": "live",
+                    "request_state": "running",
+                    "job_id": job_id,
+                    "live_progress": {"completed_count": 0, "expected_count": 5},
+                    "live_attempt": {
+                        "stage_progress": {
+                            "host_preprocess": {"completed_count": 5, "expected_count": 5, "state": "completed"},
+                            "transport": {"completed_count": 5, "expected_count": 5, "state": "completed"},
+                            "inference": {"completed_count": 2, "expected_count": 5, "state": "running"},
+                        }
+                    },
+                }
+            return {
+                "status": "success",
+                "execution_mode": "live",
+                "request_state": "completed",
+                "job_id": job_id,
+                "message": "USRP MNN completed.",
+                "live_progress": {"completed_count": 5, "expected_count": 5},
+                "live_attempt": {
+                    "wrapper_summary": {
+                        "inference_engine": "mnn",
+                        "inference_summary": {
+                            "status": "ok",
+                            "processed_count": 5,
+                            "selected_input_count": 5,
+                            "sample_stats": {
+                                "run_ms": {"count": 5, "mean_ms": 163.2, "median_ms": 161.9},
+                                "total_ms": {"count": 5, "mean_ms": 331.0, "median_ms": 329.6},
+                            },
+                        },
+                    },
+                    "artifacts": {"remote_rx_dir": "/home/user/cockpit_usrp_rx/cockpit_usrp_usrp-001_rx"},
+                    "stage_progress": {
+                        "host_preprocess": {"completed_count": 5, "expected_count": 5, "state": "completed"},
+                        "transport": {"completed_count": 5, "expected_count": 5, "state": "completed"},
+                        "inference": {"completed_count": 5, "expected_count": 5, "state": "completed"},
+                    },
+                },
+            }
+
+        fake_live_job = Mock(job_id="usrp-mnn-live-001")
+        with (
+            patch.object(state, "_arm_mlkem_security_context", return_value=(None, None)),
+            patch("server.launch_local_usrp_reconstruction_job", return_value=fake_live_job),
+            patch.object(state, "_register_live_job", side_effect=fake_register_live_job),
+            patch.object(state, "_peek_inference_progress", side_effect=fake_peek_inference_progress),
+        ):
+            payload = state.start_mnn_batch_inference(count=5)
+            self.assertEqual(payload["status"], "started")
+            deadline = time.monotonic() + 2.0
+            while time.monotonic() < deadline:
+                current = state.get_batch_state()
+                if current.get("status") == "done":
+                    break
+                time.sleep(0.02)
+            else:
+                self.fail(f"usrp mnn batch did not finish: {state.get_batch_state()}")
+
+            status, _, system_payload = request_json(state, "GET", "/api/system-status")
+
+        final_state = state.get_batch_state()
+        self.assertEqual(final_state["engine"], "mnn")
+        self.assertEqual(final_state["benchmark"]["total_ms"]["median_ms"], 329.6)
+        self.assertEqual(final_state["quality"]["psnr_db"], server.build_prerecorded_inference_result(0, "current")["quality"]["psnr_db"])
+        self.assertEqual(status, 200)
+        self.assertEqual(system_payload["recent_results"]["current"]["execution_mode"], "live")
+        self.assertEqual(system_payload["recent_results"]["current"]["wrapper_summary"]["inference_engine"], "mnn")
+        self.assertEqual(system_payload["recent_results"]["current"]["quality"]["ssim"], server.build_prerecorded_inference_result(0, "current")["quality"]["ssim"])
+
     def test_start_mnn_batch_inference_updates_progress_while_running(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
         progress_seen = threading.Event()
@@ -950,6 +1153,48 @@ class DashboardStateTest(unittest.TestCase):
         self.assertEqual(payload["status"], "ok")
         self.assertEqual(captured_env["OPENAMP_DEMO_INPUT_SOURCE_MODE"], "usrp")
         self.assertEqual(captured_env["REMOTE_USRP_RX_DIR"], "/home/user/cockpit_usrp_rx")
+
+    def test_usrp_stage_access_uses_run_specific_tvm_output_prefix(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        base_access = state._board_access.with_env_overrides(
+            {
+                "REMOTE_USRP_RX_DIR": "/home/user/cockpit_usrp_rx",
+                "REMOTE_OUTPUT_BASE": "/home/user/Downloads/jscc-test/jscc/infer_outputs",
+                "INFERENCE_REAL_OUTPUT_PREFIX": "openamp3_handwritten_mean4_v7_direct",
+            }
+        )
+
+        access = state._usrp_stage_access(
+            base_access,
+            {"remote_dir": "/home/user/cockpit_usrp_rx/cockpit_usrp_usrp-123_rx"},
+        )
+        env = access.build_env()
+
+        self.assertEqual(env["OPENAMP_DEMO_INPUT_SOURCE_MODE"], "usrp")
+        self.assertEqual(env["REMOTE_INPUT_SOURCE_MODE"], "usrp")
+        self.assertEqual(env["REMOTE_USRP_RX_DIR"], "/home/user/cockpit_usrp_rx/cockpit_usrp_usrp-123_rx")
+        self.assertEqual(env["REMOTE_OUTPUT_BASE"], "/home/user/Downloads/jscc-test-usrp/tvm")
+        self.assertEqual(env["INFERENCE_REAL_OUTPUT_PREFIX"], "openamp3_usrp_123")
+
+    def test_usrp_stage_access_uses_separate_mnn_output_base(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        base_access = state._board_access.with_env_overrides(
+            {
+                "REMOTE_USRP_RX_DIR": "/home/user/cockpit_usrp_rx",
+                "REMOTE_OUTPUT_BASE": "/home/user/Downloads/jscc-test/mnn_benchmark_outputs",
+            }
+        )
+
+        access = state._usrp_stage_access(
+            base_access,
+            {"remote_dir": "/home/user/cockpit_usrp_rx/cockpit_usrp_usrp-456_rx"},
+            engine=server.INFERENCE_ENGINE_MNN,
+        )
+        env = access.build_env()
+
+        self.assertEqual(env["REMOTE_USRP_RX_DIR"], "/home/user/cockpit_usrp_rx/cockpit_usrp_usrp-456_rx")
+        self.assertEqual(env["REMOTE_OUTPUT_BASE"], "/home/user/Downloads/jscc-test-usrp/mnn")
+        self.assertEqual(env["INFERENCE_REAL_OUTPUT_PREFIX"], "openamp3_usrp_456")
 
     def test_post_run_mnn_batch_uses_dashboard_state_entrypoint(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)
@@ -2383,6 +2628,60 @@ class DashboardStateTest(unittest.TestCase):
         self.assertEqual(payload["message"], "rpmsg bridge unavailable")
         self.assertEqual(state._last_control_probe_error["status_source"], "probe_error")
         self.assertEqual(state._last_control_probe_error["message"], "rpmsg bridge unavailable")
+
+    def test_get_crypto_status_does_not_auto_probe_control_when_status_endpoint_fails(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        state._crypto_enabled = True
+        state._board_access = server.build_board_access_config(
+            {
+                "host": "100.121.87.73",
+                "user": "demo-user",
+                "password": "demo-pass",
+                "port": "22",
+            },
+            fallback=state._board_access.with_env_overrides({"MLKEM_STATUS_PORT": "18080"}),
+        )
+
+        with (
+            patch("server.fetch_json_direct", side_effect=server.URLError("[Errno 111] Connection refused")),
+            patch.object(state, "_refresh_control_plane_status") as refresh_mock,
+        ):
+            payload = state.get_crypto_status()
+
+        refresh_mock.assert_not_called()
+        self.assertEqual(payload["control_guard_state"], "NOT_PROBED")
+        self.assertEqual(payload["control_last_fault_code"], "NOT_PROBED")
+        self.assertEqual(payload["status_source"], "not_probed")
+        self.assertEqual(payload["channel_state"], "idle")
+        self.assertTrue(payload["board_configured"])
+
+    def test_get_crypto_status_ignores_control_probe_error_until_explicit_probe(self) -> None:
+        state = DashboardState(None, 30.0, probe_cache_path=None)
+        state._crypto_enabled = True
+        state._board_access = server.build_board_access_config(
+            {
+                "host": "100.121.87.73",
+                "user": "demo-user",
+                "password": "demo-pass",
+                "port": "22",
+            },
+            fallback=state._board_access,
+        )
+        state._last_control_probe_error = {
+            "status": "error",
+            "status_source": "probe_error",
+            "message": "rpmsg unavailable",
+            "guard_state": "PROBE_ERROR",
+            "last_fault_code": "PROBE_ERROR",
+        }
+
+        with patch("server.fetch_json_direct", side_effect=server.URLError("[Errno 111] Connection refused")):
+            payload = state.get_crypto_status()
+
+        self.assertEqual(payload["control_guard_state"], "PROBE_ERROR")
+        self.assertEqual(payload["control_last_fault_code"], "PROBE_ERROR")
+        self.assertEqual(payload["status_source"], "probe_error")
+        self.assertEqual(payload["status_note"], "rpmsg unavailable")
 
     def test_run_crypto_test_updates_status_cache_from_subprocess_metrics(self) -> None:
         state = DashboardState(None, 30.0, probe_cache_path=None)

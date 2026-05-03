@@ -12,18 +12,6 @@ const STATE_LABEL: Record<string, { label: string; tone: string }> = {
   disabled: { label: '未启用', tone: 'off' },
 }
 
-function controlPlaneDisplay(rawValue: string | undefined): string {
-  const value = String(rawValue || '').trim()
-  const normalized = value.toUpperCase()
-  if (!normalized || normalized === 'UNKNOWN' || normalized === 'NOT_PROBED') {
-    return '未探测'
-  }
-  if (normalized === 'NONE') {
-    return 'NONE'
-  }
-  return value
-}
-
 type MetricTone = 'default' | 'mono' | 'muted' | 'ok' | 'fail'
 
 type MetricItem = {
@@ -193,7 +181,6 @@ export function CryptoStatusPanel() {
 
   // 5) Toggle ON — normal display
   const st = STATE_LABEL[data.channel_state] ?? { label: data.channel_state, tone: 'neutral' }
-  const controlSnapshotStale = Boolean(data.control_status_stale) || data.status_source === 'stale_control'
   const settingsItems: MetricItem[] = [
     { label: 'KEM 后端', value: data.kem_backend, tone: 'mono' },
     { label: '密码套件', value: data.cipher_suite, tone: 'mono' },
@@ -238,45 +225,6 @@ export function CryptoStatusPanel() {
       tone: 'mono',
     })
   }
-  if (data.control_guard_state || data.control_last_fault_code) {
-    runtimeItems.push({
-      label: controlSnapshotStale ? '控制面(缓存)' : '控制面',
-      value: `${controlPlaneDisplay(data.control_guard_state)} / ${controlPlaneDisplay(data.control_last_fault_code)}`,
-      tone: 'mono',
-    })
-  }
-  if (data.control_heartbeat_ok != null || data.control_total_fault_count != null) {
-    runtimeItems.push({
-      label: 'HB / 故障',
-      value: `${data.control_heartbeat_ok ?? 0} / ${data.control_total_fault_count ?? 0}`,
-      tone: 'mono',
-    })
-  }
-  if (
-    data.control_job_req_count != null
-    || data.control_job_admit_count != null
-    || data.control_job_reject_count != null
-  ) {
-    runtimeItems.push({
-      label: 'JOB',
-      value: `REQ=${data.control_job_req_count ?? 0} ALLOW=${data.control_job_admit_count ?? 0} DENY=${data.control_job_reject_count ?? 0}`,
-      tone: 'mono',
-      wide: true,
-    })
-  }
-  if (
-    data.control_heartbeat_event_count != null
-    || data.control_heartbeat_lost_count != null
-    || data.control_safe_stop_triggered_count != null
-    || data.control_safe_stop_cleared_count != null
-  ) {
-    runtimeItems.push({
-      label: '事件',
-      value: `HB=${data.control_heartbeat_event_count ?? 0}(lost=${data.control_heartbeat_lost_count ?? 0}) STOP=${data.control_safe_stop_triggered_count ?? 0}→${data.control_safe_stop_cleared_count ?? 0}`,
-      tone: 'mono',
-      wide: true,
-    })
-  }
   if (data.last_sha256_match != null) {
     runtimeItems.push({
       label: 'SHA256',
@@ -297,28 +245,6 @@ export function CryptoStatusPanel() {
   }
 
   const infoItems: MetricItem[] = []
-  if (data.control_recover_attempted && data.control_recover_note) {
-    infoItems.push({
-      label: '恢复说明',
-      value: data.control_recover_note,
-      tone: 'muted',
-      wide: true,
-    })
-  }
-  if (data.status_note) {
-    const infoLabel = data.status_source === 'probe_error'
-      ? '控制面探测'
-      : data.status_source === 'stale_control'
-        ? '控制面缓存'
-        : '控制面说明'
-    const infoTone = data.status_source === 'probe_error' ? 'fail' : 'muted'
-    infoItems.push({
-      label: infoLabel,
-      value: data.status_note,
-      tone: infoTone,
-      wide: true,
-    })
-  }
   if (testResult) {
     infoItems.push({
       label: testResult.ok ? '本次操作' : '测试结果',

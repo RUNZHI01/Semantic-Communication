@@ -46,8 +46,8 @@ test('batch completion token is stable for the same settled batch', () => {
   assert.equal(shouldRefreshCompletedBatch(token, batch), false)
 })
 
-test('mnn batch completion should not hydrate stale tvm current result', () => {
-  assert.equal(shouldHydrateRecentCurrentForBatch({ status: 'done', engine: 'mnn' }), false)
+test('tvm and mnn batch completion should hydrate recent current result', () => {
+  assert.equal(shouldHydrateRecentCurrentForBatch({ status: 'done', engine: 'mnn' }), true)
   assert.equal(shouldHydrateRecentCurrentForBatch({ status: 'done', engine: 'tvm' }), true)
   assert.equal(shouldHydrateRecentCurrentForBatch({ status: 'done' }), false)
 })

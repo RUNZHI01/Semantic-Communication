@@ -116,6 +116,8 @@ STATIC_ROOT = Path(__file__).resolve().parent / "static"
 DEFAULT_MNN_BATCH_ENV_FILE = REPO_ROOT / "session_bootstrap" / "config" / "mnn_benchmark.phytium_pi.example.env"
 REMOTE_MNN_RECONSTRUCTION_SCRIPT = REPO_ROOT / "session_bootstrap" / "scripts" / "run_remote_mnn_reconstruction.sh"
 REMOTE_TVM_RECONSTRUCTION_SCRIPT = REPO_ROOT / "session_bootstrap" / "scripts" / "run_remote_current_real_reconstruction.sh"
+DEFAULT_USRP_REMOTE_OUTPUT_ROOT = "/home/user/Downloads/jscc-test-usrp"
+USRP_REMOTE_OUTPUT_ROOT_KEYS = ("OPENAMP_DEMO_USRP_OUTPUT_ROOT", "USRP_REMOTE_OUTPUT_ROOT")
 DEFAULT_LOCAL_USRP_LATENT_DIR_CANDIDATES = (
     REPO_ROOT.parent / "host_pic_to_latent" / "encoder_outputs_airfield300",
     REPO_ROOT.parent / "host_pic_to_latent" / "encoder_outputs",
@@ -2039,6 +2041,19 @@ def _compute_tvm_benchmark(summary: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _benchmark_metric_value(metric: dict[str, Any] | None) -> float | None:
+    if not isinstance(metric, dict):
+        return None
+    for key in ("median_ms", "mean_ms", "min_ms", "max_ms"):
+        try:
+            value = metric.get(key)
+            if value is not None:
+                return round(float(value), 3)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
 class DashboardState:
     def __init__(
         self,
@@ -2063,6 +2078,9 @@ class DashboardState:
         )
         self._last_control_status: dict[str, Any] | None = None
         self._last_control_probe_error: dict[str, Any] | None = None
+        self._auto_control_probe_triggered: bool = False
+        self._auto_control_probe_inflight: bool = False
+        self._auto_control_probe_last_attempt_ts: float = 0.0
         self._last_inference_result: dict[str, Any] | None = None
         self._recent_inference_results: dict[str, dict[str, Any]] = {}
         self._last_fault_result: dict[str, Any] | None = None
@@ -2326,6 +2344,9 @@ class DashboardState:
             self._aircraft_position_upstream_probe_cache = None
             self._aircraft_position_upstream_probe_cache_ts = 0.0
             self._last_control_probe_error = None
+            self._auto_control_probe_triggered = False
+            self._auto_control_probe_inflight = False
+            self._auto_control_probe_last_attempt_ts = 0.0
             self._last_crypto_test_result = None
             crypto_enabled = self._crypto_enabled
         if mgr_to_close is not None:
@@ -3607,7 +3628,10 @@ class DashboardState:
     def _control_plane_summary(self) -> dict[str, Any]:
         with self._lock:
             control_status = dict(self._last_control_status or {})
+            probe_error = dict(self._last_control_probe_error or {})
             soft_recover = dict(self._last_soft_recover_result or {})
+            auto_probe_triggered = self._auto_control_probe_triggered
+            auto_probe_inflight = self._auto_control_probe_inflight
         event_summary = self._event_spine.summary(limit=1)
         aggregate = event_summary.get("aggregate") if isinstance(event_summary, dict) else {}
         event_counters = aggregate.get("event_counters") if isinstance(aggregate, dict) else {}
@@ -3618,9 +3642,34 @@ class DashboardState:
         heartbeat_lost_events = self._safe_int(event_counters.get("HEARTBEAT_LOST"), default=0)
         safe_stop_triggered_events = self._safe_int(event_counters.get("SAFE_STOP_TRIGGERED"), default=0)
         safe_stop_cleared_events = self._safe_int(event_counters.get("SAFE_STOP_CLEARED"), default=0)
+        if control_status.get("status") == "success":
+            status_source = "live_control"
+            status_note = "已缓存最近一次 RPMsg 控制面读数。"
+            guard_state = str(control_status.get("guard_state") or "UNKNOWN")
+            last_fault_code = str(control_status.get("last_fault_code") or "UNKNOWN")
+        elif probe_error:
+            status_source = str(probe_error.get("status_source") or "probe_error")
+            status_note = str(probe_error.get("message") or "控制面探测失败。")
+            guard_state = str(probe_error.get("guard_state") or "PROBE_ERROR")
+            last_fault_code = str(probe_error.get("last_fault_code") or "PROBE_ERROR")
+        elif auto_probe_inflight:
+            status_source = "probe_running"
+            status_note = "控制面探测正在后台执行。"
+            guard_state = "PROBING"
+            last_fault_code = "PROBING"
+        elif auto_probe_triggered:
+            status_source = "probe_pending"
+            status_note = "控制面探测已触发，等待状态回填。"
+            guard_state = "PROBING"
+            last_fault_code = "PROBING"
+        else:
+            status_source = "not_probed"
+            status_note = "控制面尚未探测。"
+            guard_state = "NOT_PROBED"
+            last_fault_code = "NOT_PROBED"
         return {
-            "control_guard_state": str(control_status.get("guard_state") or "UNKNOWN"),
-            "control_last_fault_code": str(control_status.get("last_fault_code") or "UNKNOWN"),
+            "control_guard_state": guard_state,
+            "control_last_fault_code": last_fault_code,
             "control_heartbeat_ok": self._safe_int(control_status.get("heartbeat_ok"), default=0),
             "control_total_fault_count": self._safe_int(control_status.get("total_fault_count"), default=0),
             "control_job_req_count": self._safe_int(event_counters.get("JOB_SUBMITTED"), default=0),
@@ -3632,6 +3681,8 @@ class DashboardState:
             "control_safe_stop_cleared_count": safe_stop_cleared_events,
             "control_recover_attempted": bool(soft_recover),
             "control_recover_note": str(soft_recover.get("note") or ""),
+            "status_source": status_source,
+            "status_note": status_note,
         }
 
     def _refresh_control_plane_status(
@@ -3654,8 +3705,8 @@ class DashboardState:
                 "status": "error",
                 "message": str(exc),
                 "status_source": "probe_error",
-                "guard_state": "NOT_PROBED",
-                "last_fault_code": "NOT_PROBED",
+                "guard_state": "PROBE_ERROR",
+                "last_fault_code": "PROBE_ERROR",
             }
             with self._lock:
                 self._last_control_probe_error = error_payload
@@ -3671,12 +3722,46 @@ class DashboardState:
                 "status": str(status_probe.get("status") or "error"),
                 "message": str(status_probe.get("message") or "控制面探测失败。"),
                 "status_source": "probe_error",
-                "guard_state": str(status_probe.get("guard_state") or "NOT_PROBED"),
-                "last_fault_code": str(status_probe.get("last_fault_code") or "NOT_PROBED"),
+                "guard_state": str(status_probe.get("guard_state") or "PROBE_ERROR"),
+                "last_fault_code": str(status_probe.get("last_fault_code") or "PROBE_ERROR"),
             }
             with self._lock:
                 self._last_control_probe_error = error_payload
         return status_probe
+
+    def _trigger_auto_control_probe(self, board_access: 'BoardAccessConfig') -> None:
+        """后台自动触发一次控制面探测。"""
+        if not board_access.connection_ready:
+            return
+        with self._lock:
+            if self._last_control_status or self._auto_control_probe_inflight:
+                return
+            now = time.monotonic()
+            if self._last_control_probe_error and now - self._auto_control_probe_last_attempt_ts < 10.0:
+                return
+            self._auto_control_probe_triggered = True
+            self._auto_control_probe_inflight = True
+            self._auto_control_probe_last_attempt_ts = now
+
+        def _probe() -> None:
+            try:
+                self._refresh_control_plane_status(
+                    board_access, variant="current", source="auto_probe",
+                )
+            except Exception as exc:
+                with self._lock:
+                    self._last_control_probe_error = {
+                        "status": "error",
+                        "message": str(exc),
+                        "status_source": "probe_error",
+                        "guard_state": "PROBE_ERROR",
+                        "last_fault_code": "PROBE_ERROR",
+                    }
+            finally:
+                with self._lock:
+                    self._auto_control_probe_inflight = False
+
+        threading.Thread(target=_probe, daemon=True, name="auto-control-probe").start()
 
     def _maybe_soft_recover_control_plane(
         self,
@@ -5127,6 +5212,78 @@ class DashboardState:
             return pipeline_summary
         return summary
 
+    def _build_live_payload_from_batch_summary(
+        self,
+        *,
+        engine: str,
+        job_id: str,
+        count: int,
+        summary: dict[str, Any],
+        message: str = "",
+        source_label: str = "",
+    ) -> dict[str, Any]:
+        payload = self._build_prerecorded_payload_safe(image_index=0, variant="current")
+        engine_key = "mnn" if str(engine).lower() == "mnn" else "tvm"
+        engine_label = "MNN" if engine_key == "mnn" else "TVM"
+        processed = self._status_int(summary.get("processed_count")) or 0
+        selected = self._status_int(
+            summary.get("selected_input_count") or summary.get("input_count") or summary.get("max_inputs"),
+        ) or count
+        total = max(processed, selected, 1)
+        benchmark = _compute_mnn_benchmark(summary) if engine_key == "mnn" else _compute_tvm_benchmark(summary)
+        total_metric = benchmark.get("total_ms") if isinstance(benchmark, dict) else None
+        inference_metric = benchmark.get("inference_ms") if isinstance(benchmark, dict) else None
+        total_ms = _benchmark_metric_value(total_metric) or _benchmark_metric_value(inference_metric)
+        run_ms = _benchmark_metric_value(inference_metric) or total_ms
+        payload.update(
+            {
+                "status": "success",
+                "execution_mode": "live",
+                "request_state": "completed",
+                "status_category": "success",
+                "variant": "current",
+                "job_id": job_id,
+                "source_label": source_label or f"USRP 混合链路在线推进 + {engine_label} 板端推理 + 归档样例图",
+                "message": message or f"USRP 模式已完成 {engine_label} 板端推理；图像质量指标沿用当前归档样例口径。",
+                "timings": {
+                    "payload_ms": run_ms,
+                    "prepare_ms": None,
+                    "total_ms": total_ms,
+                    "stages": [
+                        {
+                            "label": f"{engine_label} 板端推理",
+                            "value_ms": run_ms,
+                            "emphasis": "total",
+                        }
+                    ] if run_ms is not None else [],
+                },
+                "runner_summary": summary,
+                "wrapper_summary": {
+                    "inference_engine": engine_key,
+                    "inference_summary": summary,
+                    "inference_benchmark": benchmark,
+                    "per_image_ms": total_ms,
+                },
+                "live_progress": {
+                    "state": "completed",
+                    "label": f"USRP + {engine_label} 推理完成",
+                    "tone": "online",
+                    "percent": 100,
+                    "phase_percent": 100,
+                    "completed_count": processed or total,
+                    "expected_count": total,
+                    "remaining_count": 0,
+                    "completion_ratio": 1.0,
+                    "count_source": "usrp_batch",
+                    "count_label": f"{processed or total} / {total}",
+                    "current_stage": f"{engine_label} 板端推理完成",
+                    "stages": [],
+                    "event_log": [],
+                },
+            }
+        )
+        return payload
+
     def refresh_live_probe(self) -> dict[str, Any]:
         with self._lock:
             board_access = self._board_access
@@ -5285,6 +5442,16 @@ class DashboardState:
                 if board_payload_ms_raw is not None
                 else None
             )
+            inference_engine = str(wrapper_summary.get("inference_engine") or "").strip().lower()
+            if not inference_engine and usrp_mode:
+                inference_summary = wrapper_summary.get("inference_summary")
+                if isinstance(inference_summary, dict):
+                    if isinstance(inference_summary.get("sample_stats"), dict):
+                        inference_engine = "mnn"
+                    else:
+                        inference_engine = "tvm"
+            if inference_engine:
+                payload["inference_engine"] = inference_engine
             if pipeline_summary_used and board_endpoint_ms_raw is not None:
                 live_stages.append(
                     {
@@ -5389,6 +5556,7 @@ class DashboardState:
                     "artifact_sha": board_summary.get("artifact_sha256") or summary.get("artifact_sha256") or payload["artifact_sha"],
                     "runner_summary": summary,
                     "wrapper_summary": wrapper_summary,
+                    "quality": payload["quality"],
                     "live_attempt": live_attempt_payload,
                 }
             )
@@ -5947,15 +6115,35 @@ class DashboardState:
             payload["errors"] = [((stderr_text or "").strip() or stdout_text.strip() or f"returncode={proc.returncode}")]
         return payload
 
-    def _usrp_stage_access(self, base_access: BoardAccessConfig, remote_stage_manifest: dict[str, Any]) -> BoardAccessConfig:
+    def _usrp_stage_access(
+        self,
+        base_access: BoardAccessConfig,
+        remote_stage_manifest: dict[str, Any],
+        *,
+        engine: str = INFERENCE_ENGINE_TVM,
+    ) -> BoardAccessConfig:
+        base_env = base_access.build_env()
         remote_dir = str(remote_stage_manifest.get("remote_dir") or "").strip()
         if not remote_dir:
-            remote_dir = str(base_access.build_env().get("REMOTE_USRP_RX_DIR") or "").strip()
+            remote_dir = str(base_env.get("REMOTE_USRP_RX_DIR") or "").strip()
+        remote_run_name = Path(remote_dir.rstrip("/")).name or f"usrp-{int(time.time())}"
+        run_token = remote_run_name.removeprefix("cockpit_usrp_").removesuffix("_rx").removeprefix("usrp-")
+        safe_run_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", run_token).strip("_.-") or str(int(time.time()))
+        usrp_output_prefix = f"openamp3_usrp_{safe_run_name}"
+        output_root = first_config_value(
+            base_env,
+            keys=USRP_REMOTE_OUTPUT_ROOT_KEYS,
+            default=DEFAULT_USRP_REMOTE_OUTPUT_ROOT,
+        )
+        output_engine = "mnn" if str(engine).lower() == INFERENCE_ENGINE_MNN else "tvm"
+        usrp_output_base = f"{output_root.rstrip('/')}/{output_engine}"
         return base_access.with_env_overrides(
             {
                 "OPENAMP_DEMO_INPUT_SOURCE_MODE": "usrp",
                 "REMOTE_INPUT_SOURCE_MODE": "usrp",
                 "REMOTE_USRP_RX_DIR": remote_dir,
+                "REMOTE_OUTPUT_BASE": usrp_output_base,
+                "INFERENCE_REAL_OUTPUT_PREFIX": usrp_output_prefix,
             }
         )
 
@@ -5967,7 +6155,7 @@ class DashboardState:
         progress_callback: Any = None,
     ) -> Any:
         def _callback(remote_stage_manifest: dict[str, Any], progress: Any) -> dict[str, Any]:
-            access = self._usrp_stage_access(base_access, remote_stage_manifest)
+            access = self._usrp_stage_access(base_access, remote_stage_manifest, engine=INFERENCE_ENGINE_TVM)
             progress_callback_to_use = progress_callback or progress
             progress_callback_to_use(0, max(1, count))
             result = self._run_tvm_batch_with_access(
@@ -6001,7 +6189,7 @@ class DashboardState:
         progress_callback: Any = None,
     ) -> Any:
         def _callback(remote_stage_manifest: dict[str, Any], progress: Any) -> dict[str, Any]:
-            access = self._usrp_stage_access(base_access, remote_stage_manifest)
+            access = self._usrp_stage_access(base_access, remote_stage_manifest, engine=INFERENCE_ENGINE_MNN)
             return self._run_mnn_batch_with_access(
                 access,
                 count=max(1, count),
@@ -6172,8 +6360,19 @@ class DashboardState:
                         state["transport_benchmark"] = transport_benchmark
                         state["engine"] = "mnn"
                         state["runner_summary"] = inference_summary
+                        if succeeded:
+                            state["quality"] = self._build_prerecorded_payload_safe(image_index=0, variant="current").get("quality")
                         state["message"] = str(last_result.get("message") or worker_error or "")
                         state["status_category"] = str(last_result.get("status_category") or ("success" if succeeded else "error"))
+                        if succeeded:
+                            current_payload = self._build_live_payload_from_batch_summary(
+                                engine="mnn",
+                                job_id=live_job_id,
+                                count=max(1, count),
+                                summary=inference_summary,
+                                message=state["message"],
+                            )
+                            self._update_last_inference_summary(current_payload, "current")
                         if worker_error and not succeeded:
                             state["error"] = worker_error
 
@@ -6693,6 +6892,8 @@ class DashboardState:
                         state["inference_benchmark"] = inference_benchmark
                         state["transport_benchmark"] = transport_benchmark
                         state["runner_summary"] = inference_summary or runner_summary
+                        if is_live:
+                            state["quality"] = self._build_prerecorded_payload_safe(image_index=0, variant="current").get("quality")
                     if (
                         last_result.get("request_state") == "completed"
                         and isinstance(last_result.get("sample"), dict)
@@ -6702,6 +6903,16 @@ class DashboardState:
                         and "artifact_sha" in last_result
                     ):
                         self._update_last_inference_summary(last_result, "current")
+                    elif is_live and is_usrp_batch and inference_summary:
+                        current_payload = self._build_live_payload_from_batch_summary(
+                            engine="tvm",
+                            job_id=live_job_id,
+                            count=effective_count,
+                            summary=inference_summary,
+                            message=str(last_result.get("message") or ""),
+                            source_label=str(last_result.get("source_label") or ""),
+                        )
+                        self._update_last_inference_summary(current_payload, "current")
             except Exception as exc:
                 worker_error = f"{type(exc).__name__}: {exc}"
 

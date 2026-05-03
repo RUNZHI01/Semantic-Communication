@@ -1,7 +1,7 @@
 import type { RunInferenceResponse } from '../api/types'
 import type { ComparisonEngineKey, ComparisonResult } from '../stores/appStore'
 
-type ComparisonEngine = Extract<ComparisonEngineKey, 'pytorch' | 'tvm'>
+type ComparisonEngine = ComparisonEngineKey
 
 function numericValue(value: unknown): number | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) return value
@@ -32,7 +32,15 @@ function normalizedExecutionMode(payload: RunInferenceResponse): string {
 
 function comparisonEngine(payload: RunInferenceResponse): ComparisonEngine | null {
   if (payload.variant === 'baseline') return 'pytorch'
-  if (payload.variant === 'current') return 'tvm'
+  if (payload.variant === 'current') {
+    const directEngine = String(payload.inference_engine || '').trim().toLowerCase()
+    const wrapperSummary = objectValue(payload.wrapper_summary)
+    const wrapperEngine = String(wrapperSummary?.inference_engine || '').trim().toLowerCase()
+    const runnerSummary = objectValue(payload.runner_summary)
+    const runnerEngine = String(runnerSummary?.inference_engine || '').trim().toLowerCase()
+    const engine = directEngine || wrapperEngine || runnerEngine
+    return engine === 'mnn' ? 'mnn' : 'tvm'
+  }
   return null
 }
 
@@ -70,10 +78,17 @@ function totalWallMsPerImage(summary: Record<string, unknown> | undefined): numb
 
 function summaryCandidates(payload: RunInferenceResponse): Array<Record<string, unknown> | undefined> {
   const rootSummary = objectValue(payload.runner_summary)
+  const wrapperSummary = objectValue(payload.wrapper_summary)
+  const wrapperInferenceSummary = objectValue(wrapperSummary?.inference_summary)
   const pipelineSummary = objectValue(rootSummary?.pipeline)
   const pipelineBenchmark = objectValue(pipelineSummary?.benchmark)
   const rootBenchmark = objectValue(rootSummary?.benchmark)
-  return [pipelineSummary, rootSummary, pipelineBenchmark, rootBenchmark]
+  return [pipelineSummary, rootSummary, wrapperInferenceSummary, pipelineBenchmark, rootBenchmark]
+}
+
+function sampleStat(summary: Record<string, unknown> | undefined, key: string): Record<string, unknown> | undefined {
+  const sampleStats = objectValue(summary?.sample_stats)
+  return objectValue(sampleStats?.[key])
 }
 
 function pickReconstructionMs(payload: RunInferenceResponse): number | undefined {
@@ -84,6 +99,8 @@ function pickReconstructionMs(payload: RunInferenceResponse): number | undefined
     payload.timings?.payload_ms,
     wrapperSummary?.per_image_ms,
     ...candidates.flatMap((summary) => [
+      sampleStat(summary, 'total_ms')?.median_ms,
+      sampleStat(summary, 'total_ms')?.mean_ms,
       summary?.ms_per_image,
       summary?.run_median_ms,
       summary?.run_mean_ms,
@@ -97,6 +114,8 @@ function pickRunMs(payload: RunInferenceResponse): number | undefined {
   const candidates = summaryCandidates(payload)
   return firstNumeric(
     ...candidates.flatMap((summary) => [
+      sampleStat(summary, 'run_ms')?.median_ms,
+      sampleStat(summary, 'run_ms')?.mean_ms,
       summary?.run_median_ms,
       summary?.run_mean_ms,
       summary?.ms_per_image,
@@ -115,6 +134,8 @@ function pickSampleCount(payload: RunInferenceResponse): number | undefined {
       summary?.input_count,
       summary?.selected_input_count,
       summary?.max_inputs,
+      sampleStat(summary, 'total_ms')?.count,
+      sampleStat(summary, 'run_ms')?.count,
     ]),
     payload.live_progress?.completed_count,
     payload.live_progress?.expected_count,
@@ -139,7 +160,7 @@ export function comparisonResultFromInferencePayload(
 
   return {
     engine,
-    label: engine === 'pytorch' ? 'PyTorch参考' : 'TVM重建',
+    label: engine === 'pytorch' ? 'PyTorch参考' : (engine === 'mnn' ? 'MNN重建' : 'TVM重建'),
     reconstructionMs,
     runMs: pickRunMs(payload),
     sampleCount: pickSampleCount(payload),

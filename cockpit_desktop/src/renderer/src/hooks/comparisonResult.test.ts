@@ -76,6 +76,45 @@ test('current live result preserves quality metrics for display', () => {
   })
 })
 
+test('current live mnn result is recorded as mnn comparison', () => {
+  const result = comparisonResultFromInferencePayload({
+    status: 'success',
+    execution_mode: 'live',
+    variant: 'current',
+    inference_engine: 'mnn',
+    runner_summary: {
+      sample_stats: {
+        total_ms: {
+          count: 5,
+          median_ms: 329.6,
+          mean_ms: 331.0,
+        },
+        run_ms: {
+          count: 5,
+          median_ms: 161.9,
+          mean_ms: 163.2,
+        },
+      },
+    },
+    quality: {
+      psnr_db: 37.0445,
+      ssim: 0.9749,
+    },
+  })
+
+  assert.deepEqual(result, {
+    engine: 'mnn',
+    label: 'MNN重建',
+    reconstructionMs: 329.6,
+    runMs: 161.9,
+    sampleCount: undefined,
+    quality: {
+      psnr_db: 37.0445,
+      ssim: 0.9749,
+    },
+  })
+})
+
 test('current prerecorded result is ignored for comparison', () => {
   const result = comparisonResultFromInferencePayload({
     status: 'success',

@@ -42,5 +42,5 @@ export function shouldHydrateRecentCurrentForBatch(payload: BatchStateResponse |
   if (!payload || payload.status !== 'done') {
     return false
   }
-  return payload.engine === 'tvm'
+  return payload.engine === 'tvm' || payload.engine === 'mnn'
 }
