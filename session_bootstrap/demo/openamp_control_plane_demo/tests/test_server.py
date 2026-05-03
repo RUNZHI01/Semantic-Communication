@@ -2690,6 +2690,37 @@ class ServerMainTest(unittest.TestCase):
             1800.0,
         )
 
+    def test_usrp_wire_prepare_limits_to_requested_count(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir_name:
+            temp_dir = Path(temp_dir_name)
+            source_dir = temp_dir / "latents"
+            output_dir = temp_dir / "prepared"
+            source_dir.mkdir()
+            for idx in range(5):
+                (source_dir / f"{idx:03d}.pt").write_bytes(b"latent")
+
+            def fake_build_transport_blob(path: str, *, job_id: str, payload_codec: str):
+                return (
+                    f"blob-{job_id}".encode("utf-8"),
+                    {"job_id": job_id},
+                    {"payload_codec": payload_codec, "payload_bytes": 1},
+                )
+
+            with patch.object(usrp_runtime, "build_transport_blob", side_effect=fake_build_transport_blob) as build_blob:
+                manifest = usrp_runtime._prepare_wire_input_dir(
+                    source_dir=source_dir,
+                    output_dir=output_dir,
+                    payload_codec="webp-lossless",
+                    pattern="*.pt",
+                    max_files=2,
+                )
+
+        self.assertEqual(build_blob.call_count, 2)
+        self.assertEqual(manifest["available_count"], 5)
+        self.assertEqual(manifest["selected_count"], 2)
+        self.assertEqual(manifest["count"], 2)
+        self.assertEqual([Path(item["source"]).name for item in manifest["files"]], ["000.pt", "001.pt"])
+
     def test_usrp_summary_recovers_progress_from_log_after_timeout(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir_name:
             log_path = Path(temp_dir_name) / "cockpit_usrp.log"

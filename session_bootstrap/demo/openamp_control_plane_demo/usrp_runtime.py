@@ -663,11 +663,15 @@ def _prepare_wire_input_dir(
     output_dir: Path,
     payload_codec: str,
     pattern: str,
+    max_files: int | None = None,
 ) -> dict[str, Any]:
     files = _collect_local_latent_files(source_dir, pattern)
     if not files:
         patterns = ",".join(_split_local_latent_patterns(pattern))
         raise RuntimeError(f"未找到待发送 latent 文件: dir={source_dir} pattern={patterns}")
+    available_count = len(files)
+    if max_files is not None and max_files > 0:
+        files = files[:max_files]
 
     prepared_files: list[dict[str, Any]] = []
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -696,7 +700,9 @@ def _prepare_wire_input_dir(
         "source_dir": str(source_dir),
         "pattern": pattern,
         "payload_codec": payload_codec,
+        "available_count": available_count,
         "count": len(prepared_files),
+        "selected_count": len(prepared_files),
         "files": prepared_files,
     }
     (output_dir / "usrp_input_manifest.json").write_text(
@@ -1175,6 +1181,7 @@ class UsrpBatchSpoolJob:
                     output_dir=prepared_dir,
                     payload_codec=payload_codec,
                     pattern=pattern,
+                    max_files=self._expected_outputs,
                 )
             except Exception as exc:
                 self._final_snapshot = self._build_terminal_snapshot(
