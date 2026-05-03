@@ -377,12 +377,14 @@ export function DashboardPageMinimal() {
   const currentResult = currentResultFromStore ?? recentResults?.current
   const baselineResultFromStore = lastCompletedInference?.variant === 'baseline' ? lastCompletedInference : undefined
   const baselineResult = baselineResultFromStore ?? recentResults?.baseline
+  const currentComparisonFromPayload = comparisonResultFromInferencePayload(currentResult)
+  const baselineComparisonFromPayload = comparisonResultFromInferencePayload(baselineResult)
   const pytorchComparison =
-    comparisonResults.pytorch
-    ?? comparisonResultFromInferencePayload(baselineResult)
+    baselineComparisonFromPayload
+    ?? comparisonResults.pytorch
   const tvmComparison =
-    comparisonResults.tvm
-    ?? comparisonResultFromInferencePayload(currentResult)
+    currentComparisonFromPayload
+    ?? comparisonResults.tvm
   const mnnComparison =
     comparisonResults.mnn
   const comparisonRows = [pytorchComparison, tvmComparison, mnnComparison]

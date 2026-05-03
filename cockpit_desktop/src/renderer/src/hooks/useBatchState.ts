@@ -5,6 +5,7 @@ import { getBatchState, getSystemStatus } from '../api/client'
 import { useAppStore } from '../stores/appStore'
 import { buildBatchCompletionToken, shouldHydrateRecentCurrentForBatch, shouldRefreshCompletedBatch } from './inferenceStateMachine'
 import { getBatchStateRefetchInterval } from './pollingPolicy'
+import { recordComparisonResult } from './useInferenceProgress'
 
 function recordCompletedBatchComparison(
   payload: BatchStateResponse,
@@ -68,6 +69,7 @@ export function useBatchStatePoll() {
             const current = payload?.recent_results?.current
             if (current?.execution_mode === 'live' && current?.status === 'success') {
               setLastCompletedInference(current)
+              recordComparisonResult(current, setComparisonResult)
             }
           }).catch(() => undefined)
         }

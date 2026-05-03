@@ -48,6 +48,34 @@ test('current live result falls back to nested pipeline summary when timings are
   })
 })
 
+test('current live result preserves quality metrics for display', () => {
+  const result = comparisonResultFromInferencePayload({
+    status: 'success',
+    execution_mode: 'live',
+    variant: 'current',
+    timings: {
+      total_ms: 251.4,
+      payload_ms: 239.8,
+    },
+    quality: {
+      psnr_db: 37.0445,
+      ssim: 0.9749,
+    },
+  })
+
+  assert.deepEqual(result, {
+    engine: 'tvm',
+    label: 'TVM重建',
+    reconstructionMs: 251.4,
+    runMs: 239.8,
+    sampleCount: undefined,
+    quality: {
+      psnr_db: 37.0445,
+      ssim: 0.9749,
+    },
+  })
+})
+
 test('current prerecorded result is ignored for comparison', () => {
   const result = comparisonResultFromInferencePayload({
     status: 'success',
