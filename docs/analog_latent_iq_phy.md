@@ -2,6 +2,12 @@
 
 本文档说明 `jscc_tran` 分支新增的 analog latent-IQ 主链路。目标是把 LGJSCC Encoder 输出的连续 latent 直接映射成 USRP I/Q 波形，让真实无线信道作用在语义 latent 上，而不是把 latent 当作可靠文件做 QPSK/CRC/ARQ 传输。
 
+完整 0-16 Pro 方案见：
+
+```text
+docs/analog_latent_iq_phy_full_proposal.md
+```
+
 ## 数据链路
 
 主链路：

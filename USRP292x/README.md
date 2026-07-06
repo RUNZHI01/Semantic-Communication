@@ -102,5 +102,6 @@ QPSK/CRC/ARQ 只作为 reliable baseline。
 完整说明见：
 
 ```text
+docs/analog_latent_iq_phy_full_proposal.md
 docs/analog_latent_iq_phy.md
 ```
