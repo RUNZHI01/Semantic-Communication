@@ -129,6 +129,22 @@ python3 USRP292x/AnalogLatentLink.py decode \
   --summary-json decode_summary.json
 ```
 
+离线注入 CFO/AWGN/相位/DC，用于没有设备时先验证同步和恢复算法：
+
+```bash
+python3 USRP292x/AnalogLatentLink.py simulate-channel \
+  --tx-sc16 tx_analog.sc16 \
+  --manifest manifest.json \
+  --out-sc16 batch_rx.sc16 \
+  --cfo-hz 3000 \
+  --snr-db 20 \
+  --gain 0.85 \
+  --phase-deg 25 \
+  --dc-real 0.015 \
+  --dc-imag -0.010 \
+  --summary-json simulate_channel_summary.json
+```
+
 输入支持：
 
 ```text
@@ -140,6 +156,57 @@ python3 USRP292x/AnalogLatentLink.py decode \
 ```
 
 默认 `rx_post_quantize=true`，可以用 `--no-rx-post-quantize` 对比纯 raw latent 输入 Generator 的效果。
+
+## 已实现的离线增强
+
+当前版本已经补上三件可以无设备验证的功能：
+
+```text
+1. key-derived permutation/sign scrambling
+2. mid-pilot linear phase tracking
+3. software CFO/AWGN/phase/DC loopback
+```
+
+置乱只作用在 complex latent symbols 上：
+
+```text
+symbols_tx = sign * symbols[perm]
+```
+
+解码时用同一个 key 反置乱。manifest 只记录 key fingerprint 和派生 seed hash，不保存明文 key：
+
+```bash
+python3 USRP292x/AnalogLatentLink.py make \
+  --input latent.npz \
+  --out-sc16 tx_analog.sc16 \
+  --manifest manifest.json \
+  --scramble-key "$SESSION_KEY"
+
+python3 USRP292x/AnalogLatentLink.py decode \
+  --rx-sc16 batch_rx.sc16 \
+  --manifest manifest.json \
+  --out-npz received_latent.npz \
+  --out-wire merged_round0.bin \
+  --scramble-key "$SESSION_KEY"
+```
+
+如果实际控制面拿到的是 ML-KEM 派生出的 bytes，可以用十六进制传入：
+
+```bash
+--scramble-key-hex 001122...
+```
+
+这不是 AES-GCM/SM4-GCM analog payload 加密。它只是让数据面的 latent symbol 顺序和符号由会话材料派生，仍然保留 analog noisy latent 的连续信道特性。
+
+mid-pilot 现在不只是更新下一块的常量增益。对两个 pilot 之间的数据块，decode 会按复数增益的幅度和相位做线性插值补偿，summary 里记录：
+
+```text
+phase_tracking_mode
+phase_corrections
+pilot_gains
+```
+
+对 2922 这种两台设备本振未锁定的场景，CFO 估计使用已知 repeated CFO pilot 的相位斜率，避免只用整段重复相关时在 1024 symbols 下对 kHz 级 CFO 发生模糊。默认仍保留 `cfo_pilot_symbols=1024 repeated twice` 的帧结构。
 
 ## Batch Runner
 
@@ -167,6 +234,31 @@ python3 USRP292x/RunAnalogLatentBatch.py \
   --run-root USRP292x/analog_latent_runs \
   --run-id smoke \
   --dry-run
+```
+
+dry-run 加 CFO/AWGN/相位/DC：
+
+```bash
+python3 USRP292x/RunAnalogLatentBatch.py \
+  --input latent.npz \
+  --count 1 \
+  --run-root USRP292x/analog_latent_runs \
+  --run-id sim_cfo_3k_snr20 \
+  --dry-run \
+  --sim-cfo-hz 3000 \
+  --sim-snr-db 20 \
+  --sim-gain 0.85 \
+  --sim-phase-deg 25 \
+  --sim-dc-real 0.015 \
+  --sim-dc-imag -0.010
+```
+
+输出会多出：
+
+```text
+image_0000/simulate_channel_summary.json
+batch_spool_summary.json: simulated_channel
+decode_summary.json: estimated_cfo_hz, evm_rms, estimated_snr_db, latent_mse_vs_tx
 ```
 
 真实 USRP：
@@ -204,6 +296,8 @@ capture_margin_samples: 20000
 rx_post_quantize: true
 payload_is_bit_exact: false
 ```
+
+这些参数符合 NI-USRP-2922 的保守使用方式：`5 MS/s` 低于 25 MS/s 最大 I/Q 采样率，`sc16` 对应 16-bit I/Q 样本，短帧 airtime 通常是几十毫秒量级。`sc16_amplitude=3000` 是数字幅度，不等于 RF 输出功率；真实线缆测试仍必须从低 TX/RX gain 开始并加衰减。
 
 ## TVM / Generator 信道模式
 
@@ -260,7 +354,24 @@ python3 USRP292x/RunAnalogLatentBatch.py --input latent.npz --count 1 --dry-run
 
 2. 软件 CFO/AWGN：
 
-在 `batch_rx.sc16` 上注入频偏和噪声，检查 `estimated_cfo_hz`、`sync_metric`、重建图像质量随 SNR 平滑下降。
+使用 `simulate-channel` 或 batch runner 的 `--sim-*` 参数注入频偏和噪声：
+
+```bash
+for cfo in 500 1000 3000; do
+  for snr in 20 15 10 5; do
+    python3 USRP292x/RunAnalogLatentBatch.py \
+      --input latent.npz \
+      --count 1 \
+      --run-root USRP292x/analog_latent_runs \
+      --run-id "sim_cfo${cfo}_snr${snr}" \
+      --dry-run \
+      --sim-cfo-hz "$cfo" \
+      --sim-snr-db "$snr"
+  done
+done
+```
+
+检查 `estimated_cfo_hz`、`sync_metric`、`evm_rms`、`estimated_snr_db`、`latent_mse_vs_tx`，再接 Generator 看图像质量是否随 SNR 平滑下降。
 
 3. 线缆加衰减器：
 

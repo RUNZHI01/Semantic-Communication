@@ -105,6 +105,61 @@ USRP292x/analog_latent_runs/smoke/batch_spool_summary.json
 
 `merged_round0.bin` 保持和原 `usrp_runtime.py` 后续 decode 扫描逻辑兼容。
 
+## 无设备 CFO/AWGN 验证
+
+当前分支已经内置软件信道模拟，不需要 NI-USRP-2922 也能先验证这条链路：
+
+```bash
+python3 USRP292x/RunAnalogLatentBatch.py \
+  --input latent.npz \
+  --count 1 \
+  --run-root USRP292x/analog_latent_runs \
+  --run-id sim_cfo_3k_snr20 \
+  --dry-run \
+  --sim-cfo-hz 3000 \
+  --sim-snr-db 20 \
+  --sim-gain 0.85 \
+  --sim-phase-deg 25
+```
+
+重点看：
+
+```text
+image_0000/simulate_channel_summary.json
+image_0000/decode_summary.json
+batch_spool_summary.json
+```
+
+`decode_summary.json` 会记录：
+
+```text
+estimated_cfo_hz
+sync_metric
+evm_rms
+estimated_snr_db
+latent_mse_vs_tx
+phase_tracking_mode
+phase_corrections
+```
+
+这一步只能说明 TX/RX waveform、同步、CFO、mid-pilot 相位跟踪、latent pack/unpack 路径能跑通。线缆、空口、USRP 增益和 clipping 仍必须上设备实测。
+
+## 可选数据面置乱
+
+如果要测试控制面会话材料派生的数据面置乱，用：
+
+```bash
+--scramble-key "$SESSION_KEY"
+```
+
+或：
+
+```bash
+--scramble-key-hex 001122...
+```
+
+置乱方式是 `keyed-permutation-sign-v1`，只作用在 latent complex symbols 上。manifest 记录 key fingerprint 和 seed hash，不记录明文 key。不要把这个说成 AES-GCM/SM4-GCM 加密 analog payload。
+
 ## 真实 USRP 测试入口
 
 先启动原有 C++ persistent TX/RX server，然后：

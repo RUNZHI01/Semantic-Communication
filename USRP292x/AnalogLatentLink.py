@@ -47,6 +47,7 @@ DEFAULT_MID_PILOT_SYMBOLS = 128
 DEFAULT_CAPTURE_MARGIN_SAMPLES = 20_000
 SAMPLE_BYTES = 4
 EPS = 1.0e-12
+SCRAMBLING_MODE = "keyed-permutation-sign-v1"
 
 
 def sha256_bytes(payload: bytes) -> str:
@@ -217,6 +218,16 @@ def waveform_to_sc16(wave: np.ndarray, amplitude: int) -> tuple[np.ndarray, floa
     return interleaved, peak, clipping_ratio
 
 
+def normalized_complex_to_sc16(wave: np.ndarray, amplitude: int) -> tuple[np.ndarray, float]:
+    i = np.clip(np.real(wave) * float(amplitude), -32767, 32767).astype(np.int16)
+    q = np.clip(np.imag(wave) * float(amplitude), -32767, 32767).astype(np.int16)
+    interleaved = np.empty(i.size * 2, dtype=np.int16)
+    interleaved[0::2] = i
+    interleaved[1::2] = q
+    clipping_ratio = float(np.mean((np.abs(i) >= 32767) | (np.abs(q) >= 32767))) if i.size else 0.0
+    return interleaved, clipping_ratio
+
+
 def write_sc16(path: Path, interleaved: np.ndarray) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     interleaved.astype(np.int16, copy=False).tofile(path)
@@ -287,6 +298,35 @@ def correct_cfo(rx: np.ndarray, cfo_hz: float, rate: float) -> np.ndarray:
     return (rx * rot.astype(np.complex64)).astype(np.complex64)
 
 
+def estimate_cfo_from_known_pilot(
+    sym_stream: np.ndarray,
+    sync_start: int,
+    cfo_len: int,
+    rate: float,
+    sps: int,
+    cfo_seed: int,
+) -> tuple[float, str]:
+    if cfo_len <= 0 or sync_start < 2 * cfo_len:
+        return 0.0, "none"
+    rx_pilot = sym_stream[sync_start - 2 * cfo_len:sync_start]
+    if rx_pilot.size != 2 * cfo_len:
+        return 0.0, "none"
+
+    cfo = make_pilot_symbols(cfo_len, cfo_seed)
+    tx_pilot = np.concatenate([cfo, cfo]).astype(np.complex64)
+    derotated = rx_pilot * np.conj(tx_pilot)
+    valid = np.abs(derotated) > EPS
+    if int(np.count_nonzero(valid)) < 4:
+        fallback = estimate_cfo_from_repeated_pilot(sym_stream, sync_start, cfo_len, rate, sps)
+        return fallback, "repeated-pilot"
+
+    n = np.arange(derotated.size, dtype=np.float64)[valid]
+    phase = np.unwrap(np.angle(derotated[valid]).astype(np.float64))
+    slope, _intercept = np.polyfit(n, phase, 1)
+    symbol_rate = float(rate) / float(sps)
+    return float(slope * symbol_rate / (2.0 * math.pi)), "known-pilot-phase-slope"
+
+
 def estimate_channel_gain(tx: np.ndarray, rx: np.ndarray) -> complex:
     if tx.size == 0 or rx.size < tx.size:
         return complex(1.0, 0.0)
@@ -298,6 +338,21 @@ def estimate_channel_gain(tx: np.ndarray, rx: np.ndarray) -> complex:
     if abs(gain) <= EPS:
         return complex(1.0, 0.0)
     return complex(gain)
+
+
+def interpolate_complex_gain(start_gain: complex, end_gain: complex, count: int) -> np.ndarray:
+    if count <= 0:
+        return np.zeros(0, dtype=np.complex64)
+    if abs(start_gain) <= EPS or abs(end_gain) <= EPS:
+        return np.full(count, start_gain if abs(start_gain) > EPS else complex(1.0, 0.0), dtype=np.complex64)
+    alpha = (np.arange(count, dtype=np.float32) + np.float32(1.0)) / np.float32(count + 1)
+    start_abs = float(abs(start_gain))
+    end_abs = float(abs(end_gain))
+    start_phase = float(np.angle(start_gain))
+    phase_delta = float(np.angle(end_gain / start_gain))
+    amp = (np.float32(1.0) - alpha) * np.float32(start_abs) + alpha * np.float32(end_abs)
+    phase = np.float32(start_phase) + alpha * np.float32(phase_delta)
+    return (amp * np.exp(1j * phase)).astype(np.complex64)
 
 
 def recover_payload_symbols(sym_stream: np.ndarray, sync_start: int, manifest: dict[str, Any]) -> tuple[np.ndarray, dict[str, Any]]:
@@ -319,6 +374,7 @@ def recover_payload_symbols(sym_stream: np.ndarray, sync_start: int, manifest: d
     else:
         current_gain = estimate_channel_gain(sync, sync_rx)
     gains = [current_gain]
+    phase_corrections: list[dict[str, Any]] = []
     payload_blocks: list[np.ndarray] = []
     cursor = sync_start + sync_len
 
@@ -326,16 +382,41 @@ def recover_payload_symbols(sym_stream: np.ndarray, sync_start: int, manifest: d
         block_rx = sym_stream[cursor:cursor + block_len]
         if block_rx.size < block_len:
             raise RuntimeError(f"payload block {block_idx} extends beyond symbol stream")
-        payload_blocks.append((block_rx / np.complex64(current_gain)).astype(np.complex64))
-        cursor += block_len
-        if block_idx != len(block_lengths) - 1 and mid_len > 0:
-            mid_rx = sym_stream[cursor:cursor + mid_len]
+
+        has_next_mid = block_idx != len(block_lengths) - 1 and mid_len > 0
+        next_gain = current_gain
+        if has_next_mid:
+            mid_cursor = cursor + block_len
+            mid_rx = sym_stream[mid_cursor:mid_cursor + mid_len]
             if mid_rx.size < mid_len:
                 raise RuntimeError(f"mid pilot {block_idx} extends beyond symbol stream")
             next_gain = estimate_channel_gain(mid, mid_rx)
-            current_gain = next_gain if abs(next_gain) > EPS else current_gain
+            if abs(next_gain) <= EPS:
+                next_gain = current_gain
+            gain_track = interpolate_complex_gain(current_gain, next_gain, block_len)
+            payload_blocks.append((block_rx / gain_track).astype(np.complex64))
+            phase_corrections.append({
+                "block": int(block_idx),
+                "mode": "linear-mid-pilot",
+                "start_phase_deg": float(np.degrees(np.angle(current_gain))),
+                "end_phase_deg": float(np.degrees(np.angle(next_gain))),
+                "start_abs": float(abs(current_gain)),
+                "end_abs": float(abs(next_gain)),
+            })
+            current_gain = next_gain
             gains.append(current_gain)
-            cursor += mid_len
+            cursor = mid_cursor + mid_len
+        else:
+            payload_blocks.append((block_rx / np.complex64(current_gain)).astype(np.complex64))
+            phase_corrections.append({
+                "block": int(block_idx),
+                "mode": "constant-pilot-gain",
+                "start_phase_deg": float(np.degrees(np.angle(current_gain))),
+                "end_phase_deg": float(np.degrees(np.angle(current_gain))),
+                "start_abs": float(abs(current_gain)),
+                "end_abs": float(abs(current_gain)),
+            })
+            cursor += block_len
 
     payload = np.concatenate(payload_blocks).astype(np.complex64) if payload_blocks else np.zeros(0, dtype=np.complex64)
     metrics = {
@@ -348,8 +429,101 @@ def recover_payload_symbols(sym_stream: np.ndarray, sync_start: int, manifest: d
             {"real": float(np.real(gain)), "imag": float(np.imag(gain)), "abs": float(abs(gain))}
             for gain in gains
         ],
+        "phase_tracking_mode": "linear-mid-pilot" if len(gains) > 1 and mid_len > 0 else "constant-pilot-gain",
+        "phase_corrections": phase_corrections,
     }
     return payload, metrics
+
+
+def parse_scramble_key(args: argparse.Namespace) -> bytes:
+    key = str(getattr(args, "scramble_key", "") or "")
+    key_hex = str(getattr(args, "scramble_key_hex", "") or "")
+    if key and key_hex:
+        raise RuntimeError("use only one of --scramble-key or --scramble-key-hex")
+    if key_hex:
+        try:
+            return bytes.fromhex("".join(key_hex.split()))
+        except ValueError as exc:
+            raise RuntimeError("--scramble-key-hex is not valid hex") from exc
+    if key:
+        return key.encode("utf-8")
+    return b""
+
+
+def scramble_key_fingerprint(key_bytes: bytes) -> str:
+    return hashlib.sha256(key_bytes).hexdigest()
+
+
+def scramble_seed_digest(key_bytes: bytes, job_id: str, context: str, n_symbols: int) -> bytes:
+    h = hashlib.sha512()
+    h.update(b"analog-latent-iq-scramble-v1\x00")
+    h.update(str(job_id).encode("utf-8"))
+    h.update(b"\x00")
+    h.update(str(context).encode("utf-8"))
+    h.update(b"\x00")
+    h.update(str(int(n_symbols)).encode("ascii"))
+    h.update(b"\x00")
+    h.update(key_bytes)
+    return h.digest()
+
+
+def make_scrambler(n_symbols: int, key_bytes: bytes, job_id: str, context: str) -> tuple[np.ndarray, np.ndarray, str]:
+    digest = scramble_seed_digest(key_bytes, job_id, context, n_symbols)
+    entropy = np.frombuffer(digest[:32], dtype=np.uint32).astype(np.uint32).tolist()
+    rng = np.random.default_rng(np.random.SeedSequence(entropy))
+    perm = rng.permutation(int(n_symbols)).astype(np.int64)
+    sign = rng.choice(np.asarray([-1.0, 1.0], dtype=np.float32), size=int(n_symbols)).astype(np.float32)
+    return perm, sign, hashlib.sha256(digest).hexdigest()
+
+
+def apply_symbol_scrambling(symbols: np.ndarray, key_bytes: bytes, job_id: str, context: str) -> tuple[np.ndarray, dict[str, Any]]:
+    perm, sign, seed_sha = make_scrambler(len(symbols), key_bytes, job_id, context)
+    scrambled = (sign.astype(np.complex64) * symbols[perm]).astype(np.complex64)
+    meta = {
+        "scrambling_enabled": True,
+        "scrambling_mode": SCRAMBLING_MODE,
+        "scrambling_context": context,
+        "scrambling_key_sha256": scramble_key_fingerprint(key_bytes),
+        "scrambling_seed_sha256": seed_sha,
+    }
+    return scrambled, meta
+
+
+def maybe_unscramble_symbols(symbols: np.ndarray, manifest: dict[str, Any], args: argparse.Namespace) -> tuple[np.ndarray, dict[str, Any]]:
+    enabled = bool(manifest.get("scrambling_enabled", False))
+    if not enabled:
+        return symbols.astype(np.complex64, copy=False), {
+            "scrambling_enabled": False,
+            "scrambling_mode": "none",
+        }
+    if manifest.get("scrambling_mode") != SCRAMBLING_MODE:
+        raise RuntimeError(f"unsupported scrambling mode: {manifest.get('scrambling_mode')}")
+    key_bytes = parse_scramble_key(args)
+    if not key_bytes:
+        raise RuntimeError("manifest requires a scramble key; pass --scramble-key or --scramble-key-hex")
+    expected_fingerprint = str(manifest.get("scrambling_key_sha256") or "")
+    actual_fingerprint = scramble_key_fingerprint(key_bytes)
+    if expected_fingerprint and actual_fingerprint != expected_fingerprint:
+        raise RuntimeError("scramble key fingerprint does not match manifest")
+    context = str(getattr(args, "scramble_context", "") or manifest.get("scrambling_context") or "")
+    perm, sign, seed_sha = make_scrambler(
+        int(manifest["n_complex"]),
+        key_bytes,
+        str(manifest.get("job_id") or "analog_latent"),
+        context,
+    )
+    expected_seed_sha = str(manifest.get("scrambling_seed_sha256") or "")
+    if expected_seed_sha and seed_sha != expected_seed_sha:
+        raise RuntimeError("scramble key/context does not match manifest")
+    usable = np.asarray(symbols[: int(manifest["n_complex"])], dtype=np.complex64)
+    restored = np.empty_like(usable)
+    restored[perm] = sign.astype(np.complex64) * usable
+    return restored.astype(np.complex64), {
+        "scrambling_enabled": True,
+        "scrambling_mode": SCRAMBLING_MODE,
+        "scrambling_context": context,
+        "scrambling_seed_sha256": seed_sha,
+    }
 
 
 def quantize_dequantize(latent: np.ndarray) -> tuple[np.ndarray, dict[str, Any]]:
@@ -393,6 +567,55 @@ def pack_received_wire_blob(latent: np.ndarray, manifest: dict[str, Any], summar
     return pack_transport_frame(meta, payload_bytes)
 
 
+def reference_symbols_from_manifest(manifest: dict[str, Any]) -> tuple[np.ndarray | None, np.ndarray | None]:
+    source_path = str(manifest.get("source_path") or "")
+    if not source_path:
+        return None, None
+    path = Path(source_path)
+    if not path.is_file():
+        return None, None
+    try:
+        latent, _info = load_latent(path)
+        symbols, _latent_info = latent_to_complex_symbols(latent)
+        return latent, symbols
+    except Exception:
+        return None, None
+
+
+def symbol_quality_metrics(reference: np.ndarray | None, recovered: np.ndarray) -> dict[str, Any]:
+    if reference is None or reference.size == 0 or recovered.size == 0:
+        return {
+            "evm_rms": None,
+            "estimated_snr_db": None,
+        }
+    usable = min(reference.size, recovered.size)
+    ref = np.asarray(reference[:usable], dtype=np.complex64)
+    got = np.asarray(recovered[:usable], dtype=np.complex64)
+    ref_power = float(np.mean(np.square(np.abs(ref), dtype=np.float64)))
+    err_power = float(np.mean(np.square(np.abs(got - ref), dtype=np.float64)))
+    if ref_power <= EPS:
+        return {
+            "evm_rms": None,
+            "estimated_snr_db": None,
+        }
+    evm = math.sqrt(max(err_power, 0.0) / ref_power)
+    snr_db = 99.0 if err_power <= EPS else 10.0 * math.log10(ref_power / err_power)
+    return {
+        "evm_rms": float(evm),
+        "estimated_snr_db": float(snr_db),
+        "reference_symbol_power": ref_power,
+        "error_symbol_power": err_power,
+    }
+
+
+def latent_mse_metric(reference: np.ndarray | None, recovered: np.ndarray) -> dict[str, Any]:
+    if reference is None or tuple(reference.shape) != tuple(recovered.shape):
+        return {"latent_mse_vs_tx": None}
+    return {
+        "latent_mse_vs_tx": float(np.mean(np.square(np.asarray(recovered, dtype=np.float32) - np.asarray(reference, dtype=np.float32))))
+    }
+
+
 def make_waveform(args: argparse.Namespace) -> dict[str, Any]:
     input_path = Path(args.input)
     out_sc16 = Path(args.out_sc16)
@@ -400,6 +623,17 @@ def make_waveform(args: argparse.Namespace) -> dict[str, Any]:
     latent, source_info = load_latent(input_path)
     data_symbols, latent_info = latent_to_complex_symbols(latent)
     job_id = args.job_id or input_path.stem
+    scramble_key = parse_scramble_key(args)
+    scramble_context = str(getattr(args, "scramble_context", "") or "")
+    scramble_meta: dict[str, Any]
+    if scramble_key:
+        data_symbols, scramble_meta = apply_symbol_scrambling(data_symbols, scramble_key, job_id, scramble_context)
+    else:
+        scramble_meta = {
+            "scrambling_enabled": False,
+            "scrambling_mode": "none",
+            "scrambling_context": scramble_context,
+        }
     manifest: dict[str, Any] = {
         "version": 1,
         "phy": "analog-latent-iq",
@@ -428,6 +662,7 @@ def make_waveform(args: argparse.Namespace) -> dict[str, Any]:
         "tx_latent_sha256": sha256_bytes(latent.astype(np.float32, copy=False).tobytes()),
         "payload_symbol_rms": float(np.sqrt(np.mean(np.square(np.abs(data_symbols), dtype=np.float64)))),
         **latent_info,
+        **scramble_meta,
     }
 
     frame_symbols = build_frame_symbols(data_symbols, manifest)
@@ -484,12 +719,13 @@ def decode_waveform(args: argparse.Namespace) -> dict[str, Any]:
 
     mf0 = matched_filter(rx_dc, taps)
     sync0 = find_sync(mf0, sync, sps)
-    estimated_cfo_hz = estimate_cfo_from_repeated_pilot(
+    estimated_cfo_hz, cfo_method = estimate_cfo_from_known_pilot(
         sync0["sym_stream"],
         int(sync0["sync_start"]),
         cfo_len,
         rate,
         sps,
+        int(manifest["cfo_seed"]),
     )
     if abs(estimated_cfo_hz) < 5.0:
         estimated_cfo_hz = 0.0
@@ -512,6 +748,8 @@ def decode_waveform(args: argparse.Namespace) -> dict[str, Any]:
         symbol_rms_gain = expected_symbol_rms / recovered_symbol_rms
         payload_symbols = (payload_symbols * np.float32(symbol_rms_gain)).astype(np.complex64)
 
+    payload_symbols, scrambling_metrics = maybe_unscramble_symbols(payload_symbols[:n_complex], manifest, args)
+    reference_latent, reference_symbols = reference_symbols_from_manifest(manifest)
     latent_hat = complex_symbols_to_latent(payload_symbols[:n_complex], manifest)
     rx_post_quantize = bool(manifest.get("rx_post_quantize", True))
     npz_items: dict[str, Any]
@@ -540,6 +778,7 @@ def decode_waveform(args: argparse.Namespace) -> dict[str, Any]:
         "sync_metric": float(sync_final["sync_metric"]),
         "initial_sync_metric": float(sync0["sync_metric"]),
         "estimated_cfo_hz": float(estimated_cfo_hz),
+        "cfo_estimator": cfo_method,
         "dc_real": float(np.real(dc)),
         "dc_imag": float(np.imag(dc)),
         "rx_clipping_ratio": rx_clipping_ratio,
@@ -555,12 +794,76 @@ def decode_waveform(args: argparse.Namespace) -> dict[str, Any]:
         "detected_airtime_ms": float(1000.0 * int(manifest["tx_waveform_samples"]) / rate),
     }
     summary.update(payload_metrics)
+    summary.update(scrambling_metrics)
+    summary.update(symbol_quality_metrics(reference_symbols, payload_symbols[:n_complex]))
+    summary.update(latent_mse_metric(reference_latent, latent_out))
 
     if out_wire is not None:
         out_wire.parent.mkdir(parents=True, exist_ok=True)
         out_wire.write_bytes(pack_received_wire_blob(latent_out, manifest, summary))
     if summary_path is not None:
         write_json(summary_path, summary)
+    return summary
+
+
+def simulate_channel(args: argparse.Namespace) -> dict[str, Any]:
+    manifest = read_json(Path(args.manifest))
+    rate = float(manifest["sample_rate"])
+    amp = int(manifest["sc16_amplitude"])
+    tx, tx_clipping_ratio = sc16_to_complex(Path(args.tx_sc16), amp)
+    n = np.arange(tx.size, dtype=np.float64)
+    phase_rad = math.radians(float(args.phase_deg))
+    drift_rad = math.radians(float(args.phase_drift_deg))
+    drift = drift_rad * (n / max(float(max(tx.size - 1, 1)), 1.0))
+    rot = np.exp(1j * (phase_rad + drift + 2.0 * math.pi * float(args.cfo_hz) * n / rate)).astype(np.complex64)
+    rx = (np.asarray(tx, dtype=np.complex64) * np.complex64(float(args.gain)) * rot).astype(np.complex64)
+
+    snr_db = args.snr_db
+    signal_power = 0.0
+    noise_power = 0.0
+    if snr_db is not None:
+        zero_guard = int(manifest.get("zero_guard_samples") or 0)
+        tail_guard = int(manifest.get("tail_guard_samples") or 0)
+        active_end = max(zero_guard, tx.size - tail_guard)
+        active = rx[zero_guard:active_end] if active_end > zero_guard else rx
+        signal_power = float(np.mean(np.square(np.abs(active), dtype=np.float64))) if active.size else 0.0
+        noise_power = signal_power * 10.0 ** (-float(snr_db) / 10.0)
+        if noise_power > 0.0:
+            rng = np.random.default_rng(int(args.seed))
+            noise = (
+                rng.standard_normal(rx.size).astype(np.float32)
+                + 1j * rng.standard_normal(rx.size).astype(np.float32)
+            ) * np.float32(math.sqrt(noise_power / 2.0))
+            rx = (rx + noise.astype(np.complex64)).astype(np.complex64)
+
+    rx = (rx + np.complex64(complex(float(args.dc_real), float(args.dc_imag)))).astype(np.complex64)
+    interleaved, rx_clipping_ratio = normalized_complex_to_sc16(rx, amp)
+    out_sc16 = Path(args.out_sc16)
+    write_sc16(out_sc16, interleaved)
+
+    summary = {
+        "status": "ok",
+        "phy": "analog-latent-iq",
+        "tx_sc16": str(args.tx_sc16),
+        "out_sc16": str(out_sc16),
+        "sample_rate": rate,
+        "sc16_amplitude": amp,
+        "simulated_cfo_hz": float(args.cfo_hz),
+        "simulated_snr_db": None if snr_db is None else float(snr_db),
+        "simulated_gain": float(args.gain),
+        "simulated_phase_deg": float(args.phase_deg),
+        "simulated_phase_drift_deg": float(args.phase_drift_deg),
+        "simulated_dc_real": float(args.dc_real),
+        "simulated_dc_imag": float(args.dc_imag),
+        "seed": int(args.seed),
+        "signal_power": signal_power,
+        "noise_power": noise_power,
+        "tx_clipping_ratio": tx_clipping_ratio,
+        "rx_clipping_ratio": rx_clipping_ratio,
+        "payload_is_bit_exact": False,
+    }
+    if args.summary_json:
+        write_json(Path(args.summary_json), summary)
     return summary
 
 
@@ -584,6 +887,12 @@ def add_common_phy_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--no-rx-post-quantize", dest="rx_post_quantize", action="store_false")
 
 
+def add_scrambling_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--scramble-key", default=os.environ.get("ANALOG_SCRAMBLE_KEY", ""))
+    parser.add_argument("--scramble-key-hex", default=os.environ.get("ANALOG_SCRAMBLE_KEY_HEX", ""))
+    parser.add_argument("--scramble-context", default=os.environ.get("ANALOG_SCRAMBLE_CONTEXT", ""))
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Analog latent-IQ PHY for USRP292x sc16 files.")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -594,6 +903,7 @@ def parse_args() -> argparse.Namespace:
     make.add_argument("--manifest", required=True)
     make.add_argument("--job-id", default="")
     add_common_phy_args(make)
+    add_scrambling_args(make)
 
     decode = sub.add_parser("decode")
     decode.add_argument("--rx-sc16", required=True)
@@ -601,6 +911,21 @@ def parse_args() -> argparse.Namespace:
     decode.add_argument("--out-npz", required=True)
     decode.add_argument("--out-wire", default="")
     decode.add_argument("--summary-json", default="")
+    add_scrambling_args(decode)
+
+    simulate = sub.add_parser("simulate-channel")
+    simulate.add_argument("--tx-sc16", required=True)
+    simulate.add_argument("--manifest", required=True)
+    simulate.add_argument("--out-sc16", required=True)
+    simulate.add_argument("--cfo-hz", type=float, default=0.0)
+    simulate.add_argument("--snr-db", type=float, default=None)
+    simulate.add_argument("--gain", type=float, default=1.0)
+    simulate.add_argument("--phase-deg", type=float, default=0.0)
+    simulate.add_argument("--phase-drift-deg", type=float, default=0.0)
+    simulate.add_argument("--dc-real", type=float, default=0.0)
+    simulate.add_argument("--dc-imag", type=float, default=0.0)
+    simulate.add_argument("--seed", type=int, default=1)
+    simulate.add_argument("--summary-json", default="")
 
     return parser.parse_args()
 
@@ -624,6 +949,15 @@ def main() -> int:
             "summary_json": args.summary_json,
             "sync_metric": summary["sync_metric"],
             "estimated_cfo_hz": summary["estimated_cfo_hz"],
+        }, ensure_ascii=False))
+        return 0
+    if args.cmd == "simulate-channel":
+        summary = simulate_channel(args)
+        print(json.dumps({
+            "status": "ok",
+            "out_sc16": args.out_sc16,
+            "simulated_cfo_hz": summary["simulated_cfo_hz"],
+            "simulated_snr_db": summary["simulated_snr_db"],
         }, ensure_ascii=False))
         return 0
     raise RuntimeError(f"unknown command: {args.cmd}")

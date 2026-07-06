@@ -62,6 +62,11 @@ def env_float(name: str, default: float) -> float:
     return default if raw is None or str(raw).strip() == "" else float(raw)
 
 
+def env_optional_float(name: str) -> float | None:
+    raw = os.environ.get(name)
+    return None if raw is None or str(raw).strip() == "" else float(raw)
+
+
 def env_int(name: str, default: int) -> int:
     raw = os.environ.get(name)
     return default if raw is None or str(raw).strip() == "" else int(raw)
@@ -117,6 +122,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--capture-margin-samples", type=int, default=env_int("ANALOG_CAPTURE_MARGIN_SAMPLES", 20_000))
     parser.add_argument("--rx-post-quantize", dest="rx_post_quantize", action="store_true", default=os.environ.get("ANALOG_RX_POST_QUANTIZE", "1") != "0")
     parser.add_argument("--no-rx-post-quantize", dest="rx_post_quantize", action="store_false")
+    parser.add_argument("--scramble-key", default=os.environ.get("ANALOG_SCRAMBLE_KEY", ""))
+    parser.add_argument("--scramble-key-hex", default=os.environ.get("ANALOG_SCRAMBLE_KEY_HEX", ""))
+    parser.add_argument("--scramble-context", default=os.environ.get("ANALOG_SCRAMBLE_CONTEXT", ""))
+
+    parser.add_argument("--sim-cfo-hz", type=float, default=env_float("ANALOG_SIM_CFO_HZ", 0.0))
+    parser.add_argument("--sim-snr-db", type=float, default=env_optional_float("ANALOG_SIM_SNR_DB"))
+    parser.add_argument("--sim-gain", type=float, default=env_float("ANALOG_SIM_GAIN", 1.0))
+    parser.add_argument("--sim-phase-deg", type=float, default=env_float("ANALOG_SIM_PHASE_DEG", 0.0))
+    parser.add_argument("--sim-phase-drift-deg", type=float, default=env_float("ANALOG_SIM_PHASE_DRIFT_DEG", 0.0))
+    parser.add_argument("--sim-dc-real", type=float, default=env_float("ANALOG_SIM_DC_REAL", 0.0))
+    parser.add_argument("--sim-dc-imag", type=float, default=env_float("ANALOG_SIM_DC_IMAG", 0.0))
+    parser.add_argument("--sim-seed", type=int, default=env_int("ANALOG_SIM_SEED", 1))
     args = parser.parse_args()
     if args.count < 1:
         raise RuntimeError("--count must be positive")
@@ -202,7 +219,7 @@ def run_control(host: str, port: int, line: str, log_path: Path, timeout: float)
 
 
 def analog_make_args(args: argparse.Namespace, image: ImageRecord, tx_sc16: Path, manifest: Path) -> list[str]:
-    return [
+    cmd = [
         sys.executable,
         str(ANALOG_LINK),
         "make",
@@ -240,10 +257,17 @@ def analog_make_args(args: argparse.Namespace, image: ImageRecord, tx_sc16: Path
         str(args.capture_margin_samples),
         "--rx-post-quantize" if args.rx_post_quantize else "--no-rx-post-quantize",
     ]
+    if args.scramble_key:
+        cmd.extend(["--scramble-key", str(args.scramble_key)])
+    if args.scramble_key_hex:
+        cmd.extend(["--scramble-key-hex", str(args.scramble_key_hex)])
+    if args.scramble_context:
+        cmd.extend(["--scramble-context", str(args.scramble_context)])
+    return cmd
 
 
-def analog_decode_args(batch_rx: Path, manifest: Path, out_npz: Path, out_wire: Path, summary: Path) -> list[str]:
-    return [
+def analog_decode_args(args: argparse.Namespace, batch_rx: Path, manifest: Path, out_npz: Path, out_wire: Path, summary: Path) -> list[str]:
+    cmd = [
         sys.executable,
         str(ANALOG_LINK),
         "decode",
@@ -258,6 +282,58 @@ def analog_decode_args(batch_rx: Path, manifest: Path, out_npz: Path, out_wire: 
         "--summary-json",
         str(summary),
     ]
+    if args.scramble_key:
+        cmd.extend(["--scramble-key", str(args.scramble_key)])
+    if args.scramble_key_hex:
+        cmd.extend(["--scramble-key-hex", str(args.scramble_key_hex)])
+    if args.scramble_context:
+        cmd.extend(["--scramble-context", str(args.scramble_context)])
+    return cmd
+
+
+def simulated_channel_enabled(args: argparse.Namespace) -> bool:
+    return (
+        abs(float(args.sim_cfo_hz)) > 0.0
+        or args.sim_snr_db is not None
+        or abs(float(args.sim_gain) - 1.0) > 0.0
+        or abs(float(args.sim_phase_deg)) > 0.0
+        or abs(float(args.sim_phase_drift_deg)) > 0.0
+        or abs(float(args.sim_dc_real)) > 0.0
+        or abs(float(args.sim_dc_imag)) > 0.0
+    )
+
+
+def analog_simulate_args(args: argparse.Namespace, tx_sc16: Path, manifest: Path, batch_rx: Path, summary: Path) -> list[str]:
+    cmd = [
+        sys.executable,
+        str(ANALOG_LINK),
+        "simulate-channel",
+        "--tx-sc16",
+        str(tx_sc16),
+        "--manifest",
+        str(manifest),
+        "--out-sc16",
+        str(batch_rx),
+        "--cfo-hz",
+        str(args.sim_cfo_hz),
+        "--gain",
+        str(args.sim_gain),
+        "--phase-deg",
+        str(args.sim_phase_deg),
+        "--phase-drift-deg",
+        str(args.sim_phase_drift_deg),
+        "--dc-real",
+        str(args.sim_dc_real),
+        "--dc-imag",
+        str(args.sim_dc_imag),
+        "--seed",
+        str(args.sim_seed),
+        "--summary-json",
+        str(summary),
+    ]
+    if args.sim_snr_db is not None:
+        cmd.extend(["--snr-db", str(args.sim_snr_db)])
+    return cmd
 
 
 def process_image(args: argparse.Namespace, image: ImageRecord) -> ImageRecord:
@@ -277,7 +353,13 @@ def process_image(args: argparse.Namespace, image: ImageRecord) -> ImageRecord:
         manifest = read_json(manifest_path)
 
         if args.dry_run:
-            shutil.copy2(tx_sc16, batch_rx)
+            if simulated_channel_enabled(args):
+                run_command(
+                    analog_simulate_args(args, tx_sc16, manifest_path, batch_rx, image.image_dir / "simulate_channel_summary.json"),
+                    image.image_dir / "simulate_channel.log",
+                )
+            else:
+                shutil.copy2(tx_sc16, batch_rx)
             rx_capture_wall_sec = 0.0
             tx_wall_sec = 0.0
         else:
@@ -317,7 +399,7 @@ def process_image(args: argparse.Namespace, image: ImageRecord) -> ImageRecord:
 
         decode_started = time.monotonic()
         proc = run_command(
-            analog_decode_args(batch_rx, manifest_path, out_npz, out_wire, decode_summary),
+            analog_decode_args(args, batch_rx, manifest_path, out_npz, out_wire, decode_summary),
             image.image_dir / "decode.log",
             check=False,
         )
@@ -341,7 +423,11 @@ def process_image(args: argparse.Namespace, image: ImageRecord) -> ImageRecord:
             "sync_success": summary_data.get("sync_success"),
             "sync_metric": summary_data.get("sync_metric"),
             "estimated_cfo_hz": summary_data.get("estimated_cfo_hz"),
+            "evm_rms": summary_data.get("evm_rms"),
+            "estimated_snr_db": summary_data.get("estimated_snr_db"),
             "rx_clipping_ratio": summary_data.get("rx_clipping_ratio"),
+            "simulated_cfo_hz": float(args.sim_cfo_hz) if args.dry_run and simulated_channel_enabled(args) else None,
+            "simulated_snr_db": float(args.sim_snr_db) if args.dry_run and simulated_channel_enabled(args) and args.sim_snr_db is not None else None,
             "make_wall_sec": make_wall_sec,
             "tx_wall_sec": tx_wall_sec,
             "rx_capture_wall_sec": rx_capture_wall_sec,
@@ -398,6 +484,18 @@ def main() -> int:
         "rate": float(args.rate),
         "sps": int(args.sps),
         "rx_post_quantize": bool(args.rx_post_quantize),
+        "scrambling_enabled": bool(args.scramble_key or args.scramble_key_hex),
+        "simulated_channel": {
+            "enabled": bool(args.dry_run and simulated_channel_enabled(args)),
+            "cfo_hz": float(args.sim_cfo_hz),
+            "snr_db": None if args.sim_snr_db is None else float(args.sim_snr_db),
+            "gain": float(args.sim_gain),
+            "phase_deg": float(args.sim_phase_deg),
+            "phase_drift_deg": float(args.sim_phase_drift_deg),
+            "dc_real": float(args.sim_dc_real),
+            "dc_imag": float(args.sim_dc_imag),
+            "seed": int(args.sim_seed),
+        },
         "wall_sec": time.monotonic() - started,
         "images": [
             {

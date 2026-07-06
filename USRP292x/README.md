@@ -52,6 +52,7 @@ AnalogLatentLink.py
   latent <-> analog sc16 waveform 的核心实现。
   make:  raw float latent -> tx_analog.sc16 + manifest.json
   decode: batch_rx.sc16 + manifest.json -> received_latent.npz + merged_round0.bin
+  simulate-channel: 无设备时给 tx_analog.sc16 注入 CFO/AWGN/相位/DC，生成 batch_rx.sc16
 
 RunAnalogLatentBatch.py
   批处理 runner。
@@ -73,6 +74,33 @@ python3 USRP292x/RunAnalogLatentBatch.py \
   --dry-run
 ```
 
+## 软件 CFO/AWGN loopback
+
+没有 NI-USRP-2922 时，可以先跑带信道扰动的 dry-run：
+
+```bash
+python3 USRP292x/RunAnalogLatentBatch.py \
+  --input latent.npz \
+  --count 1 \
+  --run-root USRP292x/analog_latent_runs \
+  --run-id sim_cfo_3k_snr20 \
+  --dry-run \
+  --sim-cfo-hz 3000 \
+  --sim-snr-db 20 \
+  --sim-gain 0.85 \
+  --sim-phase-deg 25
+```
+
+看这些文件：
+
+```text
+image_0000/simulate_channel_summary.json
+image_0000/decode_summary.json
+batch_spool_summary.json
+```
+
+`decode_summary.json` 里会记录 `estimated_cfo_hz`、`sync_metric`、`evm_rms`、`estimated_snr_db`、`latent_mse_vs_tx`。这些指标只能证明数字链路和算法能跑通，不能代替线缆/空口实测。
+
 ## 单文件 make/decode
 
 ```bash
@@ -89,6 +117,27 @@ python3 USRP292x/AnalogLatentLink.py decode \
   --summary-json decode_summary.json
 ```
 
+## 可选 key-derived scrambling
+
+控制面仍用 ML-KEM + AEAD 保护 manifest/metadata。analog payload 不做 GCM。需要数据面置乱时，只对 latent complex symbols 做 permutation/sign：
+
+```bash
+python3 USRP292x/AnalogLatentLink.py make \
+  --input latent.npz \
+  --out-sc16 tx_analog.sc16 \
+  --manifest manifest.json \
+  --scramble-key "$SESSION_KEY"
+
+python3 USRP292x/AnalogLatentLink.py decode \
+  --rx-sc16 batch_rx.sc16 \
+  --manifest manifest.json \
+  --out-npz received_latent.npz \
+  --out-wire merged_round0.bin \
+  --scramble-key "$SESSION_KEY"
+```
+
+也可以用 `--scramble-key-hex` 传 ML-KEM 会话材料的十六进制形式。manifest 只保存 fingerprint，不保存明文 key。
+
 ## 关键约束
 
 ```text
@@ -97,6 +146,8 @@ python3 USRP292x/AnalogLatentLink.py decode \
 不要对 analog payload 做 AES-GCM/SM4-GCM。
 不要用原始 latent SHA 判断 analog payload 是否成功。
 QPSK/CRC/ARQ 只作为 reliable baseline。
+NI-USRP-2922 第一版固定 5 MS/s、sps=4、sc16 amplitude=3000，从低 TX/RX gain 和衰减器开始。
+模型侧第一版固定 global RMS，不做 per-channel normalization。
 ```
 
 完整说明见：
