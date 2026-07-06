@@ -134,6 +134,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sim-dc-real", type=float, default=env_float("ANALOG_SIM_DC_REAL", 0.0))
     parser.add_argument("--sim-dc-imag", type=float, default=env_float("ANALOG_SIM_DC_IMAG", 0.0))
     parser.add_argument("--sim-seed", type=int, default=env_int("ANALOG_SIM_SEED", 1))
+    parser.add_argument("--sync-candidates", type=int, default=env_int("ANALOG_SYNC_CANDIDATES", 12))
+    parser.add_argument("--min-sync-metric", type=float, default=env_float("ANALOG_MIN_SYNC_METRIC", 0.25))
+    parser.add_argument("--robust-sync", dest="robust_sync", action="store_true", default=os.environ.get("ANALOG_ROBUST_SYNC", "1") != "0")
+    parser.add_argument("--no-robust-sync", dest="robust_sync", action="store_false")
+    parser.add_argument("--robust-cfo-max-hz", type=float, default=env_float("ANALOG_ROBUST_CFO_MAX_HZ", 8000.0))
+    parser.add_argument("--robust-cfo-step-hz", type=float, default=env_float("ANALOG_ROBUST_CFO_STEP_HZ", 500.0))
     args = parser.parse_args()
     if args.count < 1:
         raise RuntimeError("--count must be positive")
@@ -281,7 +287,16 @@ def analog_decode_args(args: argparse.Namespace, batch_rx: Path, manifest: Path,
         str(out_wire),
         "--summary-json",
         str(summary),
+        "--sync-candidates",
+        str(args.sync_candidates),
+        "--min-sync-metric",
+        str(args.min_sync_metric),
+        "--robust-cfo-max-hz",
+        str(args.robust_cfo_max_hz),
+        "--robust-cfo-step-hz",
+        str(args.robust_cfo_step_hz),
     ]
+    cmd.append("--robust-sync" if args.robust_sync else "--no-robust-sync")
     if args.scramble_key:
         cmd.extend(["--scramble-key", str(args.scramble_key)])
     if args.scramble_key_hex:
@@ -421,6 +436,7 @@ def process_image(args: argparse.Namespace, image: ImageRecord) -> ImageRecord:
             "capture_nsamps": int(manifest.get("capture_nsamps") or 0),
             "detected_airtime_ms": summary_data.get("detected_airtime_ms"),
             "sync_success": summary_data.get("sync_success"),
+            "sync_search_mode": summary_data.get("sync_search_mode"),
             "sync_metric": summary_data.get("sync_metric"),
             "estimated_cfo_hz": summary_data.get("estimated_cfo_hz"),
             "evm_rms": summary_data.get("evm_rms"),
@@ -484,6 +500,11 @@ def main() -> int:
         "rate": float(args.rate),
         "sps": int(args.sps),
         "rx_post_quantize": bool(args.rx_post_quantize),
+        "robust_sync": bool(args.robust_sync),
+        "sync_candidates": int(args.sync_candidates),
+        "min_sync_metric": float(args.min_sync_metric),
+        "robust_cfo_max_hz": float(args.robust_cfo_max_hz),
+        "robust_cfo_step_hz": float(args.robust_cfo_step_hz),
         "scrambling_enabled": bool(args.scramble_key or args.scramble_key_hex),
         "simulated_channel": {
             "enabled": bool(args.dry_run and simulated_channel_enabled(args)),

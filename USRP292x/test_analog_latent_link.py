@@ -443,6 +443,208 @@ def test_simulated_cfo_awgn_loopback_estimates_cfo_and_records_quality(tmp_path)
     assert recovered.shape == latent.shape
 
 
+def test_robust_sync_recovers_3khz_cfo_at_15db_for_full_latent(tmp_path):
+    rng = np.random.default_rng(2026)
+    latent = rng.standard_normal((1, 32, 32, 32)).astype(np.float32)
+    input_path = tmp_path / "latent.npz"
+    tx_sc16 = tmp_path / "tx_analog.sc16"
+    rx_sc16 = tmp_path / "rx_impair.sc16"
+    manifest = tmp_path / "manifest.json"
+    decode_summary = tmp_path / "decode_summary.json"
+    out_npz = tmp_path / "received_latent.npz"
+    np.savez(input_path, latent=latent)
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(ANALOG_LINK),
+            "make",
+            "--input",
+            str(input_path),
+            "--out-sc16",
+            str(tx_sc16),
+            "--manifest",
+            str(manifest),
+            "--rate",
+            "5000000",
+            "--sps",
+            "4",
+            "--amp",
+            "3000",
+            "--cfo-pilot-symbols",
+            "1024",
+            "--sync-pilot-symbols",
+            "1024",
+            "--data-block-symbols",
+            "4096",
+            "--mid-pilot-symbols",
+            "128",
+            "--zero-guard-samples",
+            "4096",
+            "--tail-guard-samples",
+            "4096",
+            "--no-rx-post-quantize",
+        ],
+        check=True,
+        cwd=PROJECT_ROOT,
+    )
+    subprocess.run(
+        [
+            sys.executable,
+            str(ANALOG_LINK),
+            "simulate-channel",
+            "--tx-sc16",
+            str(tx_sc16),
+            "--manifest",
+            str(manifest),
+            "--out-sc16",
+            str(rx_sc16),
+            "--cfo-hz",
+            "3000",
+            "--snr-db",
+            "15",
+            "--gain",
+            "0.85",
+            "--phase-deg",
+            "25",
+            "--dc-real",
+            "0.015",
+            "--dc-imag",
+            "-0.010",
+            "--seed",
+            "42",
+        ],
+        check=True,
+        cwd=PROJECT_ROOT,
+    )
+    subprocess.run(
+        [
+            sys.executable,
+            str(ANALOG_LINK),
+            "decode",
+            "--rx-sc16",
+            str(rx_sc16),
+            "--manifest",
+            str(manifest),
+            "--out-npz",
+            str(out_npz),
+            "--summary-json",
+            str(decode_summary),
+        ],
+        check=True,
+        cwd=PROJECT_ROOT,
+    )
+
+    summary = json.loads(decode_summary.read_text(encoding="utf-8"))
+    with np.load(out_npz) as payload:
+        recovered = payload["latent"]
+
+    assert summary["sync_success"] is True
+    assert summary["sync_search_mode"] in {"robust-cfo-grid", "normal"}
+    assert abs(summary["estimated_cfo_hz"] - 3000.0) < 250.0
+    assert summary["evm_rms"] < 0.15
+    assert recovered.shape == latent.shape
+
+
+def test_robust_sync_rejects_false_peak_then_recovers_3khz_cfo_at_5db(tmp_path):
+    rng = np.random.default_rng(2026)
+    latent = rng.standard_normal((1, 32, 32, 32)).astype(np.float32)
+    input_path = tmp_path / "latent.npz"
+    tx_sc16 = tmp_path / "tx_analog.sc16"
+    rx_sc16 = tmp_path / "rx_impair.sc16"
+    manifest = tmp_path / "manifest.json"
+    np.savez(input_path, latent=latent)
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(ANALOG_LINK),
+            "make",
+            "--input",
+            str(input_path),
+            "--out-sc16",
+            str(tx_sc16),
+            "--manifest",
+            str(manifest),
+            "--rate",
+            "5000000",
+            "--sps",
+            "4",
+            "--amp",
+            "3000",
+            "--cfo-pilot-symbols",
+            "1024",
+            "--sync-pilot-symbols",
+            "1024",
+            "--data-block-symbols",
+            "4096",
+            "--mid-pilot-symbols",
+            "128",
+            "--zero-guard-samples",
+            "4096",
+            "--tail-guard-samples",
+            "4096",
+            "--no-rx-post-quantize",
+        ],
+        check=True,
+        cwd=PROJECT_ROOT,
+    )
+    subprocess.run(
+        [
+            sys.executable,
+            str(ANALOG_LINK),
+            "simulate-channel",
+            "--tx-sc16",
+            str(tx_sc16),
+            "--manifest",
+            str(manifest),
+            "--out-sc16",
+            str(rx_sc16),
+            "--cfo-hz",
+            "3000",
+            "--snr-db",
+            "5",
+            "--gain",
+            "0.85",
+            "--phase-deg",
+            "25",
+            "--dc-real",
+            "0.015",
+            "--dc-imag",
+            "-0.010",
+            "--seed",
+            "42",
+        ],
+        check=True,
+        cwd=PROJECT_ROOT,
+    )
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(ANALOG_LINK),
+            "decode",
+            "--rx-sc16",
+            str(rx_sc16),
+            "--manifest",
+            str(manifest),
+            "--out-npz",
+            str(tmp_path / "received_latent.npz"),
+            "--summary-json",
+            str(tmp_path / "decode_summary.json"),
+        ],
+        check=True,
+        cwd=PROJECT_ROOT,
+    )
+
+    summary = json.loads((tmp_path / "decode_summary.json").read_text(encoding="utf-8"))
+    assert summary["sync_search_mode"] == "robust-cfo-grid"
+    assert "sync metric" in summary["normal_sync_error"].lower()
+    assert summary["sync_metric"] > 0.90
+    assert abs(summary["estimated_cfo_hz"] - 3000.0) < 250.0
+    assert summary["evm_rms"] < 0.30
+
+
 def test_mid_pilot_linear_phase_tracking_recovers_symbol_block():
     cfo_len = 8
     sync_len = 8

@@ -165,6 +165,7 @@ python3 USRP292x/AnalogLatentLink.py simulate-channel \
 1. key-derived permutation/sign scrambling
 2. mid-pilot linear phase tracking
 3. software CFO/AWGN/phase/DC loopback
+4. robust CFO-aware sync fallback
 ```
 
 置乱只作用在 complex latent symbols 上：
@@ -207,6 +208,27 @@ pilot_gains
 ```
 
 对 2922 这种两台设备本振未锁定的场景，CFO 估计使用已知 repeated CFO pilot 的相位斜率，避免只用整段重复相关时在 1024 symbols 下对 kHz 级 CFO 发生模糊。默认仍保留 `cfo_pilot_symbols=1024 repeated twice` 的帧结构。
+
+robust sync 默认开启。普通路径会先做一次快速同步和 CFO 估计；如果 sync candidate 不满足完整 frame 长度，或者 `sync_metric` 低于门限，会自动进入 CFO grid fallback：
+
+```text
+--sync-candidates 12
+--min-sync-metric 0.25
+--robust-cfo-max-hz 8000
+--robust-cfo-step-hz 500
+```
+
+这主要是为 NI-USRP-2922 两台设备未共享参考时的 kHz 级频偏准备的。summary 会记录：
+
+```text
+sync_search_mode: normal 或 robust-cfo-grid
+normal_sync_error
+robust_coarse_cfo_hz
+robust_residual_cfo_hz
+robust_probe_sync_metric
+```
+
+离线验证中，在 `3 kHz CFO + 15/10/5 dB SNR` 下已经可以同步并恢复 latent；`5 dB` 会走 `robust-cfo-grid`，EVM 约 0.26，latent MSE 约 0.07。真实空口仍需要设备验证。
 
 ## Batch Runner
 

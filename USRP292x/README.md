@@ -101,6 +101,17 @@ batch_spool_summary.json
 
 `decode_summary.json` 里会记录 `estimated_cfo_hz`、`sync_metric`、`evm_rms`、`estimated_snr_db`、`latent_mse_vs_tx`。这些指标只能证明数字链路和算法能跑通，不能代替线缆/空口实测。
 
+decode 默认开启 robust sync fallback：
+
+```text
+--sync-candidates 12
+--min-sync-metric 0.25
+--robust-cfo-max-hz 8000
+--robust-cfo-step-hz 500
+```
+
+普通路径失败时会在 CFO grid 内重试同步。离线验证里，`3 kHz CFO + 5 dB SNR` 可以走 `robust-cfo-grid` 恢复；summary 里会记录 `normal_sync_error`、`robust_coarse_cfo_hz`、`robust_residual_cfo_hz`。
+
 ## 单文件 make/decode
 
 ```bash

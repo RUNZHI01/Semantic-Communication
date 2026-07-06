@@ -144,6 +144,17 @@ phase_corrections
 
 这一步只能说明 TX/RX waveform、同步、CFO、mid-pilot 相位跟踪、latent pack/unpack 路径能跑通。线缆、空口、USRP 增益和 clipping 仍必须上设备实测。
 
+decode 默认开启 robust sync fallback：
+
+```text
+--sync-candidates 12
+--min-sync-metric 0.25
+--robust-cfo-max-hz 8000
+--robust-cfo-step-hz 500
+```
+
+普通同步失败或 sync metric 太低时，会在 CFO grid 内重试。当前离线验证里 `3 kHz CFO + 5 dB SNR` 可以通过 `robust-cfo-grid` 恢复，EVM 约 0.26，latent MSE 约 0.07。
+
 ## 可选数据面置乱
 
 如果要测试控制面会话材料派生的数据面置乱，用：

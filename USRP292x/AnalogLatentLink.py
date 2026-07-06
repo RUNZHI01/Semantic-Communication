@@ -45,6 +45,10 @@ DEFAULT_SYNC_PILOT_SYMBOLS = 1024
 DEFAULT_DATA_BLOCK_SYMBOLS = 4096
 DEFAULT_MID_PILOT_SYMBOLS = 128
 DEFAULT_CAPTURE_MARGIN_SAMPLES = 20_000
+DEFAULT_SYNC_CANDIDATES = 12
+DEFAULT_ROBUST_CFO_MAX_HZ = 8000.0
+DEFAULT_ROBUST_CFO_STEP_HZ = 500.0
+DEFAULT_MIN_SYNC_METRIC = 0.25
 SAMPLE_BYTES = 4
 EPS = 1.0e-12
 SCRAMBLING_MODE = "keyed-permutation-sign-v1"
@@ -246,8 +250,43 @@ def matched_filter(rx: np.ndarray, taps: np.ndarray) -> np.ndarray:
     return np.convolve(rx, np.conj(taps[::-1]), mode="same").astype(np.complex64)
 
 
-def find_sync(mf: np.ndarray, sync: np.ndarray, sps: int) -> dict[str, Any]:
-    best: dict[str, Any] | None = None
+def expected_symbols_after_sync(manifest: dict[str, Any]) -> int:
+    sync_len = int(manifest["sync_pilot_symbols"])
+    mid_len = int(manifest["mid_pilot_symbols"])
+    block_lengths = [int(v) for v in manifest.get("data_block_lengths", [])]
+    if not block_lengths:
+        n_complex = int(manifest.get("n_complex", 0))
+        block = max(int(manifest.get("data_block_symbols", 1)), 1)
+        block_lengths = [min(block, n_complex - pos) for pos in range(0, n_complex, block)]
+    return int(sync_len + sum(block_lengths) + max(0, len(block_lengths) - 1) * mid_len)
+
+
+def sync_candidate_has_complete_frame(candidate: dict[str, Any], manifest: dict[str, Any]) -> bool:
+    cfo_len = int(manifest["cfo_pilot_symbols"])
+    start = int(candidate["sync_start"])
+    if start < 2 * cfo_len:
+        return False
+    return start + expected_symbols_after_sync(manifest) <= int(candidate["sym_stream"].size)
+
+
+def annotate_sync_candidate(candidate: dict[str, Any], manifest: dict[str, Any] | None) -> dict[str, Any]:
+    if manifest is None:
+        candidate["frame_complete"] = True
+        return candidate
+    candidate["frame_complete"] = bool(sync_candidate_has_complete_frame(candidate, manifest))
+    candidate["expected_symbols_after_sync"] = int(expected_symbols_after_sync(manifest))
+    return candidate
+
+
+def find_sync_candidates(
+    mf: np.ndarray,
+    sync: np.ndarray,
+    sps: int,
+    *,
+    max_candidates: int = DEFAULT_SYNC_CANDIDATES,
+    manifest: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
     sync_energy = float(np.vdot(sync, sync).real)
     if sync_energy <= 0.0:
         raise ValueError("sync pilot has zero energy")
@@ -259,23 +298,41 @@ def find_sync(mf: np.ndarray, sync: np.ndarray, sps: int) -> dict[str, Any]:
         corr = np.abs(np.correlate(stream, sync, mode="valid"))
         if corr.size == 0:
             continue
-        idx = int(np.argmax(corr))
-        window = stream[idx:idx + sync.size]
-        rx_energy = float(np.vdot(window, window).real)
-        metric = float(corr[idx] / math.sqrt(max(rx_energy * sync_energy, EPS)))
-        candidate = {
-            "phase": phase,
-            "sync_start": idx,
-            "sync_metric": metric,
-            "sync_corr": float(corr[idx]),
-            "sym_stream": stream,
-        }
-        if best is None or metric > float(best["sync_metric"]):
-            best = candidate
+        take = min(max(1, int(max_candidates)), int(corr.size))
+        if take == corr.size:
+            top_indices = np.arange(corr.size)
+        else:
+            top_indices = np.argpartition(corr, -take)[-take:]
+        for raw_idx in top_indices:
+            idx = int(raw_idx)
+            window = stream[idx:idx + sync.size]
+            rx_energy = float(np.vdot(window, window).real)
+            metric = float(corr[idx] / math.sqrt(max(rx_energy * sync_energy, EPS)))
+            candidate = {
+                "phase": int(phase),
+                "sync_start": idx,
+                "sync_metric": metric,
+                "sync_corr": float(corr[idx]),
+                "sym_stream": stream,
+            }
+            candidates.append(annotate_sync_candidate(candidate, manifest))
 
-    if best is None:
+    candidates.sort(
+        key=lambda item: (
+            bool(item.get("frame_complete", True)),
+            float(item["sync_metric"]),
+            -int(item["sync_start"]),
+        ),
+        reverse=True,
+    )
+    return candidates[: max(1, int(max_candidates))]
+
+
+def find_sync(mf: np.ndarray, sync: np.ndarray, sps: int, manifest: dict[str, Any] | None = None) -> dict[str, Any]:
+    candidates = find_sync_candidates(mf, sync, sps, max_candidates=1, manifest=manifest)
+    if not candidates:
         raise RuntimeError("sync search failed: capture shorter than sync pilot")
-    return best
+    return candidates[0]
 
 
 def estimate_cfo_from_repeated_pilot(sym_stream: np.ndarray, sync_start: int, cfo_len: int, rate: float, sps: int) -> float:
@@ -717,8 +774,20 @@ def decode_waveform(args: argparse.Namespace) -> dict[str, Any]:
     dc = complex(np.mean(dc_window))
     rx_dc = (rx - np.complex64(dc)).astype(np.complex64)
 
+    max_candidates = int(getattr(args, "sync_candidates", DEFAULT_SYNC_CANDIDATES))
+    min_sync_metric = float(getattr(args, "min_sync_metric", DEFAULT_MIN_SYNC_METRIC))
+    robust_enabled = bool(getattr(args, "robust_sync", True))
     mf0 = matched_filter(rx_dc, taps)
-    sync0 = find_sync(mf0, sync, sps)
+    initial_candidates = find_sync_candidates(
+        mf0,
+        sync,
+        sps,
+        max_candidates=max_candidates,
+        manifest=manifest,
+    )
+    if not initial_candidates:
+        raise RuntimeError("initial sync search failed")
+    sync0 = initial_candidates[0]
     estimated_cfo_hz, cfo_method = estimate_cfo_from_known_pilot(
         sync0["sym_stream"],
         int(sync0["sync_start"]),
@@ -729,15 +798,41 @@ def decode_waveform(args: argparse.Namespace) -> dict[str, Any]:
     )
     if abs(estimated_cfo_hz) < 5.0:
         estimated_cfo_hz = 0.0
-    rx_corr = correct_cfo(rx_dc, estimated_cfo_hz, rate)
-    mf = matched_filter(rx_corr, taps)
-    sync_final = find_sync(mf, sync, sps)
 
-    payload_symbols, payload_metrics = recover_payload_symbols(
-        sync_final["sym_stream"],
-        int(sync_final["sync_start"]),
-        manifest,
-    )
+    sync_search_mode = "normal"
+    sync_debug: dict[str, Any] = {
+        "sync_search_mode": sync_search_mode,
+        "initial_sync_candidate_count": int(len(initial_candidates)),
+    }
+    try:
+        payload_symbols, payload_metrics, sync_final = recover_payload_with_fixed_cfo(
+            rx_dc,
+            taps,
+            sync,
+            manifest,
+            cfo_hz=estimated_cfo_hz,
+            rate=rate,
+            sps=sps,
+            max_candidates=max_candidates,
+            min_sync_metric=min_sync_metric,
+        )
+    except RuntimeError as normal_exc:
+        if not robust_enabled:
+            raise
+        payload_symbols, payload_metrics, sync_final, estimated_cfo_hz, cfo_method, sync_debug = robust_cfo_grid_recover(
+            rx_dc,
+            taps,
+            sync,
+            manifest,
+            rate=rate,
+            sps=sps,
+            max_candidates=max_candidates,
+            min_sync_metric=min_sync_metric,
+            cfo_max_hz=float(getattr(args, "robust_cfo_max_hz", DEFAULT_ROBUST_CFO_MAX_HZ)),
+            cfo_step_hz=float(getattr(args, "robust_cfo_step_hz", DEFAULT_ROBUST_CFO_STEP_HZ)),
+        )
+        sync_debug["normal_sync_error"] = str(normal_exc)
+        sync_search_mode = str(sync_debug["sync_search_mode"])
     n_complex = int(manifest["n_complex"])
     if payload_symbols.size < n_complex:
         raise RuntimeError(f"recovered {payload_symbols.size} symbols, expected {n_complex}")
@@ -779,6 +874,9 @@ def decode_waveform(args: argparse.Namespace) -> dict[str, Any]:
         "initial_sync_metric": float(sync0["sync_metric"]),
         "estimated_cfo_hz": float(estimated_cfo_hz),
         "cfo_estimator": cfo_method,
+        "sync_search_mode": sync_search_mode,
+        "initial_frame_complete": bool(sync0.get("frame_complete", True)),
+        "min_sync_metric": float(min_sync_metric),
         "dc_real": float(np.real(dc)),
         "dc_imag": float(np.imag(dc)),
         "rx_clipping_ratio": rx_clipping_ratio,
@@ -793,6 +891,7 @@ def decode_waveform(args: argparse.Namespace) -> dict[str, Any]:
         "latent_shape": list(latent_out.shape),
         "detected_airtime_ms": float(1000.0 * int(manifest["tx_waveform_samples"]) / rate),
     }
+    summary.update(sync_debug)
     summary.update(payload_metrics)
     summary.update(scrambling_metrics)
     summary.update(symbol_quality_metrics(reference_symbols, payload_symbols[:n_complex]))
@@ -867,6 +966,157 @@ def simulate_channel(args: argparse.Namespace) -> dict[str, Any]:
     return summary
 
 
+def recover_payload_with_fixed_cfo(
+    rx_dc: np.ndarray,
+    taps: np.ndarray,
+    sync: np.ndarray,
+    manifest: dict[str, Any],
+    *,
+    cfo_hz: float,
+    rate: float,
+    sps: int,
+    max_candidates: int,
+    min_sync_metric: float,
+) -> tuple[np.ndarray, dict[str, Any], dict[str, Any]]:
+    rx_corr = correct_cfo(rx_dc, cfo_hz, rate)
+    mf = matched_filter(rx_corr, taps)
+    candidates = find_sync_candidates(
+        mf,
+        sync,
+        sps,
+        max_candidates=max_candidates,
+        manifest=manifest,
+    )
+    if not candidates:
+        raise RuntimeError("sync search failed after CFO correction")
+
+    errors: list[str] = []
+    attempted = 0
+    for candidate in candidates:
+        if not bool(candidate.get("frame_complete", True)):
+            continue
+        if float(candidate["sync_metric"]) < float(min_sync_metric):
+            errors.append(
+                f"phase={candidate['phase']} start={candidate['sync_start']}: "
+                f"sync metric {float(candidate['sync_metric']):.6f} below threshold {float(min_sync_metric):.6f}"
+            )
+            continue
+        attempted += 1
+        try:
+            payload_symbols, payload_metrics = recover_payload_symbols(
+                candidate["sym_stream"],
+                int(candidate["sync_start"]),
+                manifest,
+            )
+            payload_metrics.update({
+                "sync_candidate_count": int(len(candidates)),
+                "sync_candidates_attempted": int(attempted),
+                "frame_complete": True,
+            })
+            return payload_symbols, payload_metrics, candidate
+        except RuntimeError as exc:
+            errors.append(f"phase={candidate['phase']} start={candidate['sync_start']}: {exc}")
+
+    if not errors:
+        errors.append("no sync candidate had a complete frame")
+    raise RuntimeError("; ".join(errors[:4]))
+
+
+def cfo_grid_values(max_abs_hz: float, step_hz: float) -> list[float]:
+    max_abs = abs(float(max_abs_hz))
+    step = abs(float(step_hz))
+    if max_abs <= 0.0 or step <= 0.0:
+        return [0.0]
+    values = np.arange(-max_abs, max_abs + 0.5 * step, step, dtype=np.float64)
+    return [float(v) for v in sorted(values.tolist(), key=lambda item: (abs(item), item))]
+
+
+def robust_cfo_grid_recover(
+    rx_dc: np.ndarray,
+    taps: np.ndarray,
+    sync: np.ndarray,
+    manifest: dict[str, Any],
+    *,
+    rate: float,
+    sps: int,
+    max_candidates: int,
+    min_sync_metric: float,
+    cfo_max_hz: float,
+    cfo_step_hz: float,
+) -> tuple[np.ndarray, dict[str, Any], dict[str, Any], float, str, dict[str, Any]]:
+    cfo_len = int(manifest["cfo_pilot_symbols"])
+    cfo_seed = int(manifest["cfo_seed"])
+    probes: list[dict[str, Any]] = []
+
+    for coarse_hz in cfo_grid_values(cfo_max_hz, cfo_step_hz):
+        rx_coarse = correct_cfo(rx_dc, coarse_hz, rate)
+        mf = matched_filter(rx_coarse, taps)
+        candidates = find_sync_candidates(
+            mf,
+            sync,
+            sps,
+            max_candidates=max(2, min(max_candidates, 4)),
+            manifest=manifest,
+        )
+        for candidate in candidates:
+            if not bool(candidate.get("frame_complete", True)):
+                continue
+            if float(candidate["sync_metric"]) < float(min_sync_metric):
+                continue
+            residual_hz, estimator = estimate_cfo_from_known_pilot(
+                candidate["sym_stream"],
+                int(candidate["sync_start"]),
+                cfo_len,
+                rate,
+                sps,
+                cfo_seed,
+            )
+            probes.append({
+                "coarse_cfo_hz": float(coarse_hz),
+                "residual_cfo_hz": float(residual_hz),
+                "total_cfo_hz": float(coarse_hz + residual_hz),
+                "sync_metric": float(candidate["sync_metric"]),
+                "sync_start": int(candidate["sync_start"]),
+                "phase": int(candidate["phase"]),
+                "estimator": estimator,
+            })
+
+    probes.sort(key=lambda item: float(item["sync_metric"]), reverse=True)
+    errors: list[str] = []
+    for probe in probes[: max(1, int(max_candidates))]:
+        total_cfo = float(probe["total_cfo_hz"])
+        try:
+            payload_symbols, payload_metrics, sync_final = recover_payload_with_fixed_cfo(
+                rx_dc,
+                taps,
+                sync,
+                manifest,
+                cfo_hz=total_cfo,
+                rate=rate,
+                sps=sps,
+                max_candidates=max_candidates,
+                min_sync_metric=min_sync_metric,
+            )
+            payload_metrics.update({
+                "robust_probe_count": int(len(probes)),
+                "robust_coarse_cfo_hz": float(probe["coarse_cfo_hz"]),
+                "robust_residual_cfo_hz": float(probe["residual_cfo_hz"]),
+                "robust_probe_sync_metric": float(probe["sync_metric"]),
+            })
+            debug = {
+                "sync_search_mode": "robust-cfo-grid",
+                "robust_cfo_max_hz": float(cfo_max_hz),
+                "robust_cfo_step_hz": float(cfo_step_hz),
+                "robust_probe_count": int(len(probes)),
+                "robust_errors": errors[:4],
+            }
+            return payload_symbols, payload_metrics, sync_final, total_cfo, str(probe["estimator"]), debug
+        except RuntimeError as exc:
+            errors.append(f"cfo={total_cfo:.3f}: {exc}")
+
+    raise RuntimeError("robust CFO sync failed: " + "; ".join(errors[:4]))
+
+
 def add_common_phy_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--rate", type=float, default=DEFAULT_RATE)
     parser.add_argument("--sps", type=int, default=DEFAULT_SPS)
@@ -911,6 +1161,12 @@ def parse_args() -> argparse.Namespace:
     decode.add_argument("--out-npz", required=True)
     decode.add_argument("--out-wire", default="")
     decode.add_argument("--summary-json", default="")
+    decode.add_argument("--sync-candidates", type=int, default=DEFAULT_SYNC_CANDIDATES)
+    decode.add_argument("--min-sync-metric", type=float, default=DEFAULT_MIN_SYNC_METRIC)
+    decode.add_argument("--robust-sync", dest="robust_sync", action="store_true", default=True)
+    decode.add_argument("--no-robust-sync", dest="robust_sync", action="store_false")
+    decode.add_argument("--robust-cfo-max-hz", type=float, default=DEFAULT_ROBUST_CFO_MAX_HZ)
+    decode.add_argument("--robust-cfo-step-hz", type=float, default=DEFAULT_ROBUST_CFO_STEP_HZ)
     add_scrambling_args(decode)
 
     simulate = sub.add_parser("simulate-channel")
